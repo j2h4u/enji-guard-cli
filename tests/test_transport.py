@@ -60,7 +60,9 @@ def test_httpx_enji_http_client_logs_sanitized_request_metadata(capsys: pytest.C
 
     run_async(run)
 
-    payload = cast(object, json.loads(capsys.readouterr().err))
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    payload = cast(object, json.loads(captured.err))
     assert isinstance(payload, dict)
     assert payload["message"] == "enji_http_response"
     assert payload["operation"] == "access"
