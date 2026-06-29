@@ -111,6 +111,8 @@ docker exec -i enji-guard-cli enji-guard status j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard audit start j2h4u/enji-guard-cli --all
 docker exec -i enji-guard-cli enji-guard wait j2h4u/enji-guard-cli security
 docker exec -i enji-guard-cli enji-guard report read j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard --project Pets schedule list
+docker exec -i enji-guard-cli enji-guard --project Pets schedule set --enabled off
 docker exec -i enji-guard-cli enji-guard --project Pets email set --auto off
 docker exec -i enji-guard-cli enji-guard auth refresh
 ```
@@ -119,6 +121,11 @@ Pass `--json` when a command output is consumed by automation.
 
 Use the global `--project NAME_OR_ID` filter when a command must be scoped to
 one Enji project.
+
+`schedule` controls automatic report-audit runs. It shows one row per
+repo/report audit and can batch update all report audits for one repo or one
+project. Account-wide schedule writes are intentionally rejected; pass `REPO` or
+`--project`.
 
 ## MCP
 

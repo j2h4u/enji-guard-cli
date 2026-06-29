@@ -66,9 +66,8 @@ enji-guard report list [--selector SELECTOR]
 enji-guard report read REPO [AUDIT...] [--all] [--json]
 enji-guard report show REPO AUDIT [--json]
 
-enji-guard schedule list REPO
-enji-guard schedule set REPO AUDIT --freq FREQ [--day DAY...] [--at auto|HH:MM|HH:MM@TZ]
-enji-guard schedule disable REPO AUDIT
+enji-guard schedule list [REPO]
+enji-guard schedule set [REPO] --enabled on|off|keep [--freq FREQ]
 
 enji-guard email list [REPO]
 enji-guard email set [REPO] [--manual on|off|keep] [--auto on|off|keep]
@@ -92,6 +91,9 @@ the raw machine contract.
 - Read commands may omit `--project`; they show all projects or all matching
   repos.
 - Write commands may omit `--project` only when the target repo is unambiguous.
+- `schedule set` without `REPO` is an explicit batch write over every repo in
+  the current project filter. It requires `--project`; use a `REPO` argument for
+  a single repository.
 - `email set` without `REPO` is an explicit batch write over every repo in the
   current project filter; without `--project`, it spans all projects.
 - Ambiguous targets fail with `BAD_SELECTOR` and include candidates.
@@ -122,3 +124,9 @@ Public commands should expose scenario state such as `ready`, `running`,
 drift. Repo list and status payloads include Enji scores by default as raw
 `scores`, simple `score_grades`, and a compact `score_summary`; there is no
 separate score flag.
+
+`schedule` is the public noun for automatic report audit runs. It exposes
+domain settings (`enabled`, `frequency`, days, time) and hides Enji's
+`improvement-jobs` payload shape. `schedule set` applies to all report audits in
+the selected repo/project scope; per-audit schedule controls are intentionally
+not part of the default workflow.

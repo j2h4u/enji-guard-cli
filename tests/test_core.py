@@ -1,3 +1,5 @@
+from typing import cast
+
 import pytest
 from pytest import MonkeyPatch
 
@@ -15,6 +17,7 @@ from enji_guard_cli.core import (
     OPERATION_SPECS,
     EmailPreferenceUpdate,
     OperationName,
+    ScheduleSettingsUpdate,
     operation_catalog,
     resolve_operation,
     resolve_operation_spec,
@@ -1097,53 +1100,26 @@ def test_set_email_preferences_rejects_empty_patch() -> None:
         core.set_email_preferences("j2h4u/enji-guard-cli", None, EmailPreferenceUpdate(None, None))
 
 
-def test_disable_schedule_for_repo_builds_disabled_default_when_job_is_missing(monkeypatch: MonkeyPatch) -> None:
-    captured: dict[str, object] = {}
+def test_list_schedule_settings_fans_out_over_project_repos_and_report_audits(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(
         core,
-        "_resolve_single_repo_target",
-        lambda repo, project: {
-            "project_id": "project_1",
-            "project_name": "Pets",
-            "repo_id": "repo_1",
-            "github_repo": "j2h4u/enji-guard-cli",
-        },
+        "run_projects",
+        lambda: {"projects": [{"id": "project_1", "name": "Pets"}]},
     )
-    monkeypatch.setattr(core, "list_schedules", lambda repo_id: {"jobs": []})
-
-    def fake_set_schedule(repo_id: str, audit: AuditAlias, payload: object) -> dict[str, object]:
-        captured["repo_id"] = repo_id
-        captured["audit"] = audit.value
-        captured["payload"] = payload
-        return {"job": payload}
-
-    monkeypatch.setattr(core, "set_schedule", fake_set_schedule)
-
-    payload = core.disable_schedule_for_repo("j2h4u/enji-guard-cli", AuditAlias.SECURITY, "Pets")
-
-    assert payload["job"] == {
-        "enabled": False,
-        "autoFix": False,
-        "autofixVariantKey": "default",
-        "frequency": "weekly",
-        "daysOfWeek": ["mon", "tue", "wed", "thu", "fri"],
-        "scheduleTimeSource": "auto",
-        "timezone": "UTC",
-    }
-    assert captured["repo_id"] == "repo_1"
-    assert captured["audit"] == "security"
-
-
-def test_disable_schedule_for_repo_preserves_existing_full_schedule(monkeypatch: MonkeyPatch) -> None:
-    captured: dict[str, object] = {}
     monkeypatch.setattr(
         core,
-        "_resolve_single_repo_target",
-        lambda repo, project: {
-            "project_id": "project_1",
-            "project_name": "Pets",
-            "repo_id": "repo_1",
-            "github_repo": "j2h4u/enji-guard-cli",
+        "run_project_detail",
+        lambda project_id: {
+            "project": {"id": project_id, "name": "Pets"},
+            "repos": [
+                {
+                    "id": "repo_1",
+                    "githubOwner": "j2h4u",
+                    "githubName": "enji-guard-cli",
+                    "connected": True,
+                    "reconDone": True,
+                }
+            ],
         },
     )
     monkeypatch.setattr(
@@ -1166,28 +1142,181 @@ def test_disable_schedule_for_repo_preserves_existing_full_schedule(monkeypatch:
         },
     )
 
-    def fake_set_schedule(repo_id: str, audit: AuditAlias, payload: object) -> dict[str, object]:
-        captured["repo_id"] = repo_id
-        captured["audit"] = audit.value
-        captured["payload"] = payload
+    payload = core.list_schedule_settings(None, "Pets")
+
+    schedules = cast(list[dict[str, object]], payload["schedules"])
+    assert payload["summary"] == {
+        "repo_count": 1,
+        "audit_count": 7,
+        "enabled_count": 1,
+        "changed_count": 0,
+        "unchanged_count": 0,
+    }
+    assert schedules[0] == {
+        "project_id": "project_1",
+        "project_name": "Pets",
+        "repo_id": "repo_1",
+        "github_repo": "j2h4u/enji-guard-cli",
+        "audit": "security",
+        "job_kind": "vuln-audit",
+        "configured": True,
+        "enabled": True,
+        "frequency": "weekly-2x",
+        "days_of_week": ["mon", "thu"],
+        "schedule_time": "09:30",
+        "schedule_time_source": "user",
+        "timezone": "Asia/Almaty",
+        "auto_fix": True,
+    }
+    assert schedules[1]["audit"] == "ai-readiness"
+    assert schedules[1]["configured"] is False
+
+
+def test_set_schedule_settings_updates_project_repos_and_report_audits(monkeypatch: MonkeyPatch) -> None:
+    captured: list[tuple[str, str, object]] = []
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1", "name": "Pets"}]})
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda project_id: {
+            "project": {"id": project_id, "name": "Pets"},
+            "repos": [
+                {
+                    "id": "repo_1",
+                    "githubOwner": "j2h4u",
+                    "githubName": "enji-guard-cli",
+                    "connected": True,
+                    "reconDone": True,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(core, "list_schedules", lambda repo_id: {"jobs": []})
+
+    def fake_put(repo_id: str, job_kind: str, payload: object) -> dict[str, object]:
+        captured.append((repo_id, job_kind, payload))
         return {"job": payload}
 
-    monkeypatch.setattr(core, "set_schedule", fake_set_schedule)
+    monkeypatch.setattr(core, "run_put_improvement_job", fake_put)
 
-    payload = core.disable_schedule_for_repo("j2h4u/enji-guard-cli", AuditAlias.SECURITY, "Pets")
+    payload = core.set_schedule_settings(
+        None,
+        "Pets",
+        ScheduleSettingsUpdate(
+            enabled=True,
+            frequency="weekly-2x",
+            days_of_week=["mon", "thu"],
+            schedule_time="09:30",
+            timezone="Asia/Almaty",
+        ),
+    )
 
-    assert payload["job"] == {
-        "kind": "vuln-audit",
-        "enabled": False,
-        "autoFix": True,
-        "autofixVariantKey": "strict",
-        "frequency": "weekly-2x",
-        "daysOfWeek": ["mon", "thu"],
-        "scheduleTimeSource": "user",
-        "scheduleTime": "09:30",
-        "timezone": "Asia/Almaty",
+    assert payload["summary"] == {
+        "repo_count": 1,
+        "audit_count": 7,
+        "enabled_count": 7,
+        "changed_count": 7,
+        "unchanged_count": 0,
     }
-    assert captured["payload"] == payload["job"]
+    assert len(captured) == 7
+    assert captured[0] == (
+        "repo_1",
+        "vuln-audit",
+        {
+            "enabled": True,
+            "autoFix": False,
+            "autofixVariantKey": "default",
+            "frequency": "weekly-2x",
+            "daysOfWeek": ["mon", "thu"],
+            "scheduleTimeSource": "user",
+            "timezone": "Asia/Almaty",
+            "scheduleTime": "09:30",
+        },
+    )
+
+
+def test_set_schedule_settings_skips_unchanged_existing_jobs(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        core,
+        "_selected_repo_targets",
+        lambda repo, project: [
+            {
+                "project_id": "project_1",
+                "project_name": "Pets",
+                "repo_id": "repo_1",
+                "github_owner": "j2h4u",
+                "github_name": "enji-guard-cli",
+                "github_repo": "j2h4u/enji-guard-cli",
+                "connected": True,
+                "recon_done": True,
+                "scores": {},
+                "score_grades": {},
+                "score_summary": {
+                    "overall_score": None,
+                    "overall_grade": None,
+                    "weakest_axis": None,
+                    "weakest_score": None,
+                    "weakest_grade": None,
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        core,
+        "list_schedules",
+        lambda repo_id: {
+            "jobs": [
+                {
+                    "kind": "vuln-audit",
+                    "enabled": False,
+                    "autoFix": False,
+                    "autofixVariantKey": "default",
+                    "frequency": "weekly",
+                    "daysOfWeek": ["mon"],
+                    "scheduleTimeSource": "auto",
+                    "timezone": "UTC",
+                }
+            ]
+        },
+    )
+
+    def fail_put(repo_id: str, job_kind: str, payload: object) -> object:
+        raise AssertionError("unchanged schedule should not be written")
+
+    monkeypatch.setattr(core, "run_put_improvement_job", fail_put)
+
+    payload = core.set_schedule_settings(
+        "j2h4u/enji-guard-cli",
+        None,
+        ScheduleSettingsUpdate(
+            enabled=False,
+            frequency=None,
+            days_of_week=None,
+            schedule_time=None,
+            timezone=None,
+        ),
+    )
+
+    schedules = cast(list[dict[str, object]], payload["schedules"])
+    summary = cast(dict[str, object], payload["summary"])
+    assert summary["changed_count"] == 0
+    assert summary["unchanged_count"] == 7
+    assert schedules[0]["status"] == "unchanged"
+
+
+def test_set_schedule_settings_requires_project_for_repo_omitted_write() -> None:
+    with pytest.raises(ValueError, match="schedule set without REPO requires --project"):
+        core.set_schedule_settings(
+            None,
+            None,
+            ScheduleSettingsUpdate(
+                enabled=False,
+                frequency=None,
+                days_of_week=None,
+                schedule_time=None,
+                timezone=None,
+            ),
+        )
 
 
 def test_wait_for_audit_completion_ignores_unrelated_active_runs(monkeypatch: MonkeyPatch) -> None:

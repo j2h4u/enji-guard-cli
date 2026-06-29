@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 from enji_guard_cli import cli
 from enji_guard_cli.audits import AuditAlias
 from enji_guard_cli.cli import app
-from enji_guard_cli.core import EmailPreferenceUpdate
+from enji_guard_cli.core import EmailPreferenceUpdate, ScheduleSettingsUpdate
 from enji_guard_cli.enji_api import EnjiApiError
 
 
@@ -678,34 +678,79 @@ def test_report_read_can_emit_json_for_all_reports(monkeypatch: MonkeyPatch) -> 
     }
 
 
-def test_schedule_list_resolves_repo_selector(monkeypatch: MonkeyPatch) -> None:
+def test_schedule_list_defaults_to_text_table(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, str | None] = {}
 
-    def fake_list(repo: str, project: str | None) -> dict[str, object]:
+    def fake_list(repo: str | None, project: str | None) -> dict[str, object]:
         captured["repo"] = repo
         captured["project"] = project
-        return {"jobs": []}
+        return {
+            "schedules": [
+                {
+                    "project_name": "Pets",
+                    "github_repo": "j2h4u/enji-guard-cli",
+                    "audit": "security",
+                    "enabled": True,
+                    "frequency": "weekly",
+                    "days_of_week": ["mon"],
+                    "schedule_time_source": "auto",
+                    "schedule_time": None,
+                    "timezone": "UTC",
+                }
+            ],
+            "summary": {"repo_count": 1, "audit_count": 1},
+        }
 
-    monkeypatch.setattr(cli, "list_schedules_for_repo", fake_list)
+    monkeypatch.setattr(cli, "list_schedule_settings", fake_list)
 
-    result = CliRunner().invoke(app, ["--project", "Pets", "schedule", "list", "j2h4u/enji-guard-cli", "--json"])
+    result = CliRunner().invoke(app, ["--project", "Pets", "schedule", "list", "j2h4u/enji-guard-cli"])
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"jobs": []}
+    assert "project  repo" in result.output
+    assert "Pets     j2h4u/enji-guard-cli" in result.output
+    assert "security" in result.output
+    assert "weekly" in result.output
+    assert "auto" in result.output
     assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets"}
 
 
-def test_schedule_set_builds_typed_full_payload(monkeypatch: MonkeyPatch) -> None:
+def test_schedule_list_can_emit_json(monkeypatch: MonkeyPatch) -> None:
+    payload = {"schedules": [], "summary": {"repo_count": 0, "audit_count": 0}}
+    monkeypatch.setattr(cli, "list_schedule_settings", lambda repo, project: payload)
+
+    result = CliRunner().invoke(app, ["schedule", "list", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == payload
+
+
+def test_schedule_set_routes_batch_update(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_set(repo: str, audit: AuditAlias, project: str | None, payload: object) -> dict[str, object]:
+    def fake_set(repo: str | None, project: str | None, update: ScheduleSettingsUpdate) -> dict[str, object]:
         captured["repo"] = repo
-        captured["audit"] = audit.value
         captured["project"] = project
-        captured["payload"] = payload
-        return {"job": {"enabled": True}}
+        captured["enabled"] = update.enabled
+        captured["frequency"] = update.frequency
+        return {
+            "schedules": [
+                {
+                    "project_name": "Pets",
+                    "github_repo": "j2h4u/enji-guard-cli",
+                    "audit": "security",
+                    "enabled": True,
+                    "frequency": "weekly-2x",
+                    "days_of_week": ["mon", "thu"],
+                    "schedule_time_source": "user",
+                    "schedule_time": "09:30",
+                    "timezone": "Asia/Almaty",
+                    "status": "changed",
+                }
+            ],
+            "summary": {"repo_count": 1, "audit_count": 1, "changed_count": 1},
+        }
 
-    monkeypatch.setattr(cli, "set_schedule_for_repo", fake_set)
+    monkeypatch.setattr(cli, "set_schedule_settings", fake_set)
 
     result = CliRunner().invoke(
         app,
@@ -715,55 +760,43 @@ def test_schedule_set_builds_typed_full_payload(monkeypatch: MonkeyPatch) -> Non
             "schedule",
             "set",
             "j2h4u/enji-guard-cli",
-            "security",
+            "--enabled",
+            "on",
             "--freq",
-            "weekly",
-            "--day",
-            "mon",
-            "--at",
-            "09:30@Asia/Almaty",
-            "--json",
+            "weekly-2x",
         ],
     )
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"job": {"enabled": True}}
+    assert "status" in result.output
+    assert "changed" in result.output
     assert captured == {
         "repo": "j2h4u/enji-guard-cli",
-        "audit": "security",
         "project": "Pets",
-        "payload": {
-            "enabled": True,
-            "autoFix": False,
-            "autofixVariantKey": "default",
-            "frequency": "weekly",
-            "daysOfWeek": ["mon"],
-            "scheduleTimeSource": "user",
-            "scheduleTime": "09:30",
-            "timezone": "Asia/Almaty",
-        },
+        "enabled": True,
+        "frequency": "weekly-2x",
     }
 
 
-def test_schedule_disable_resolves_repo_selector(monkeypatch: MonkeyPatch) -> None:
+def test_schedule_set_can_emit_json(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_disable(repo: str, audit: AuditAlias, project: str | None) -> dict[str, object]:
+    def fake_set(repo: str | None, project: str | None, update: ScheduleSettingsUpdate) -> dict[str, object]:
         captured["repo"] = repo
-        captured["audit"] = audit.value
         captured["project"] = project
-        return {"job": {"enabled": False}}
+        captured["enabled"] = update.enabled
+        return {"schedules": [], "summary": {"repo_count": 1, "audit_count": 7}}
 
-    monkeypatch.setattr(cli, "disable_schedule_for_repo", fake_disable)
+    monkeypatch.setattr(cli, "set_schedule_settings", fake_set)
 
     result = CliRunner().invoke(
         app,
-        ["--project", "Pets", "schedule", "disable", "j2h4u/enji-guard-cli", "security", "--json"],
+        ["--project", "Pets", "schedule", "set", "--enabled", "off", "--json"],
     )
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"job": {"enabled": False}}
-    assert captured == {"repo": "j2h4u/enji-guard-cli", "audit": "security", "project": "Pets"}
+    assert json.loads(result.output) == {"schedules": [], "summary": {"repo_count": 1, "audit_count": 7}}
+    assert captured == {"repo": None, "project": "Pets", "enabled": False}
 
 
 def test_email_list_defaults_to_text_table(monkeypatch: MonkeyPatch) -> None:
