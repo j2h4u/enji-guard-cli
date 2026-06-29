@@ -1,0 +1,39 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.basedpyright/
+.import_linter_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Coverage and QA reports
+reports/*.tmp.json
+
+# Logs and local output
+*.log
+logs/
+.adversarial-review-context.md
+.adversarial-reviews/
+
+# Local planning/research caches
+.planning/graphs/
+.planning/research/.cache/
+graphify-out/

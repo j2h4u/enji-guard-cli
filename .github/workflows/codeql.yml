@@ -1,0 +1,45 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "27 7 * * 1"
+
+jobs:
+  analyze:
+    name: Analyze Python
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Detect code scanning availability
+        id: code-scanning
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/code-scanning/alerts" >/dev/null 2>&1; then
+            echo "upload=always" >> "$GITHUB_OUTPUT"
+          else
+            echo "upload=never" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4.36.2
+        with:
+          languages: python
+          queries: security-extended
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4.36.2
+        with:
+          category: "/language:python"
+          upload: ${{ steps.code-scanning.outputs.upload }}

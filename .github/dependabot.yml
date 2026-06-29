@@ -1,0 +1,54 @@
+# Dependabot configuration for version and security update PRs.
+#
+# Repository settings still need to enable:
+# - Dependency graph
+# - Dependabot alerts
+# - Dependabot security updates
+# - Malware alerts, where GitHub supports them for the ecosystem
+#
+# This file controls scheduling and grouping. Security alert generation itself
+# is a repository/organization setting, not a dependabot.yml toggle.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Asia/Almaty"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    groups:
+      python-minor-patch:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      python-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Asia/Almaty"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      github-actions:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+      github-actions-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
