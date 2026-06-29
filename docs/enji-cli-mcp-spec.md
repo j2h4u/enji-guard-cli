@@ -56,11 +56,11 @@ Canonical report audits:
 enji-guard project list
 
 enji-guard repo current
-enji-guard repo list
+enji-guard repo list [--sort default|name|weakest|overall]
 enji-guard repo resolve [REPO]
 enji-guard repo connect OWNER/NAME
 
-enji-guard status [REPO]
+enji-guard status [REPO] [--sort default|name|weakest|overall]
 
 enji-guard recon start REPO
 enji-guard audit start REPO AUDIT...
@@ -92,6 +92,7 @@ enji-guard --project Pets audit start j2h4u/enji-guard-cli --all
 - Write commands can omit project only when the repo target is unique.
 - Ambiguous targets return `BAD_SELECTOR` with candidates.
 - No default project and no fuzzy matching.
+- Repo list/status can sort by `weakest` or `overall`; lower scores come first.
 
 ## Long-Running Work
 
@@ -106,6 +107,7 @@ ready; it reads all currently ready reports unless explicit audit aliases or
 - project and repo identifiers;
 - `connected`;
 - `recon_done`;
+- repo scores: raw `scores`, simple `score_grades`, and `score_summary`;
 - active runs;
 - repo/report revision: current HEAD, last audited HEAD, out-of-date flag;
 - report states: `ready`, `running`, `missing`;

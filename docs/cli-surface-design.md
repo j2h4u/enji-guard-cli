@@ -42,11 +42,11 @@ diagnostic phase.
 enji-guard project list
 
 enji-guard repo current
-enji-guard repo list
+enji-guard repo list [--sort default|name|weakest|overall]
 enji-guard repo resolve [REPO]
 enji-guard repo connect OWNER/NAME
 
-enji-guard status [REPO]
+enji-guard status [REPO] [--sort default|name|weakest|overall]
 
 enji-guard recon start REPO
 enji-guard audit start REPO AUDIT...
@@ -82,6 +82,8 @@ enji-guard --project NAME_OR_ID audit start OWNER/NAME --all
 - No fuzzy matching in write commands.
 - `report list` is compact inventory; `report read` returns report content.
 - `report read REPO` defaults to all currently ready reports for that repo.
+- Repo inventory/status sorting is optional. `weakest` and `overall` sort lower
+  scores first and leave repos without scores last.
 
 ## Hidden Details
 
@@ -97,4 +99,6 @@ These concepts belong in core or debug tooling, not the public CLI:
 
 Public commands should expose scenario state such as `ready`, `running`,
 `missing`, `connected`, `recon_done`, `active_run_count`, and report revision
-drift.
+drift. Repo list and status payloads include Enji scores by default as raw
+`scores`, simple `score_grades`, and a compact `score_summary`; there is no
+separate score flag.

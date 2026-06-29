@@ -8,6 +8,7 @@ import typer
 
 from enji_guard_cli.auth import AuthError, AuthStatusPayload, import_bearer_token, import_cookie, refresh_auth
 from enji_guard_cli.core import (
+    DEFAULT_REPO_SORT,
     REPORTS_LIST_DEFAULT_SELECTOR,
     AuditAlias,
     OperationName,
@@ -172,9 +173,13 @@ def serve(
 @app.command()
 def status(
     repo: Annotated[str | None, typer.Argument(help="Repo id or owner/name. Defaults to all repos.")] = None,
+    sort: Annotated[
+        Literal["default", "name", "weakest", "overall"],
+        typer.Option("--sort", help="Sort repos by default order, name, weakest score, or overall score."),
+    ] = DEFAULT_REPO_SORT,
     pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
 ) -> None:
-    _run_json_command(lambda: runtime_status(repo, _selected_project()), pretty)
+    _run_json_command(lambda: runtime_status(repo, _selected_project(), sort), pretty)
 
 
 @app.command()
@@ -274,9 +279,13 @@ def repo_current(
 
 @repo_app.command("list")
 def repo_list(
+    sort: Annotated[
+        Literal["default", "name", "weakest", "overall"],
+        typer.Option("--sort", help="Sort repos by default order, name, weakest score, or overall score."),
+    ] = DEFAULT_REPO_SORT,
     pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
 ) -> None:
-    _run_json_command(lambda: list_project_inventory(_selected_project()), pretty)
+    _run_json_command(lambda: list_project_inventory(_selected_project(), sort), pretty)
 
 
 @repo_app.command("resolve")
