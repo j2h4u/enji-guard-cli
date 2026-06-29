@@ -298,17 +298,18 @@ def test_project_list_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
 def test_repo_list_uses_global_project_filter(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_inventory(project: str | None) -> dict[str, object]:
+    def fake_inventory(project: str | None, sort: str = "default") -> dict[str, object]:
         captured["project"] = project
+        captured["sort"] = sort
         return {"projects": []}
 
     monkeypatch.setattr(cli, "list_project_inventory", fake_inventory)
 
-    result = CliRunner().invoke(app, ["--project", "Pets", "repo", "list"])
+    result = CliRunner().invoke(app, ["--project", "Pets", "repo", "list", "--sort", "weakest"])
 
     assert result.exit_code == 0
     assert json.loads(result.output) == {"projects": []}
-    assert captured == {"project": "Pets"}
+    assert captured == {"project": "Pets", "sort": "weakest"}
 
 
 def test_repo_resolve_defaults_to_current_repo_selector(monkeypatch: MonkeyPatch) -> None:
@@ -348,19 +349,23 @@ def test_repo_connect_uses_global_project_filter(monkeypatch: MonkeyPatch) -> No
 def test_status_routes_to_runtime_snapshot(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, str | None] = {}
 
-    def fake_status(repo: str | None, project: str | None) -> dict[str, object]:
+    def fake_status(repo: str | None, project: str | None, sort: str = "default") -> dict[str, object]:
         captured["repo"] = repo
         captured["project"] = project
+        captured["sort"] = sort
         return {"summary": {"repo_count": 1}, "projects": []}
 
     monkeypatch.setattr(cli, "runtime_status", fake_status)
 
-    result = CliRunner().invoke(app, ["--project", "Pets", "status", "j2h4u/enji-guard-cli", "--pretty"])
+    result = CliRunner().invoke(
+        app,
+        ["--project", "Pets", "status", "j2h4u/enji-guard-cli", "--sort", "overall", "--pretty"],
+    )
 
     assert result.exit_code == 0
     assert result.output.startswith("{\n  ")
     assert json.loads(result.output) == {"summary": {"repo_count": 1}, "projects": []}
-    assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets"}
+    assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets", "sort": "overall"}
 
 
 def test_recon_start_routes_to_workflow_facade(monkeypatch: MonkeyPatch) -> None:

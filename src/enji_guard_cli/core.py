@@ -48,6 +48,7 @@ from enji_guard_cli.errors import EnjiApiError
 
 type OperationResult = object | Awaitable[object]
 type OperationExecutor = Callable[..., OperationResult]
+type RepoSort = Literal["default", "name", "weakest", "overall"]
 
 GITHUB_HOST = "github.com"
 REMOTE_ORIGIN_SECTION = 'remote "origin"'
@@ -57,12 +58,17 @@ RECON_REPORT_SCHEMA = "upfront.recon.report"
 AUDIT_REPORT_SCHEMA = "upfront.audit.report"
 DEFAULT_EXECUTION_FLOW = "single"
 DEFAULT_FLOW_CONFIG: JsonObjectPayload = {}
+DEFAULT_REPO_SORT: RepoSort = "default"
 TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "canceled", "cancelled", "skipped"})
 WORKDAY_SCHEDULE_DAYS = ("mon", "tue", "wed", "thu", "fri")
 ALL_SCHEDULE_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 SCHEDULE_TIME_PARTS = 2
 MAX_SCHEDULE_HOUR = 23
 MAX_SCHEDULE_MINUTE = 59
+SCORE_POOR_THRESHOLD = 40.0
+SCORE_FAIR_THRESHOLD = 60.0
+SCORE_GOOD_THRESHOLD = 75.0
+SCORE_EXCELLENT_THRESHOLD = 90.0
 
 
 class AuditAlias(StrEnum):
@@ -129,6 +135,17 @@ class AuditRunSkippedPayload(TypedDict):
     active_runs: list[JsonValue]
 
 
+type ScoreGrade = Literal["critical", "poor", "fair", "good", "excellent"]
+
+
+class ScoreSummaryPayload(TypedDict):
+    overall_score: float | None
+    overall_grade: ScoreGrade | None
+    weakest_axis: str | None
+    weakest_score: float | None
+    weakest_grade: ScoreGrade | None
+
+
 class RepoTargetPayload(TypedDict):
     project_id: str
     project_name: str | None
@@ -138,6 +155,9 @@ class RepoTargetPayload(TypedDict):
     github_repo: str | None
     connected: bool | None
     recon_done: bool | None
+    scores: JsonObjectPayload
+    score_grades: dict[str, ScoreGrade]
+    score_summary: ScoreSummaryPayload
 
 
 class RepoResolvePayload(TypedDict):
@@ -212,6 +232,9 @@ class RepoRuntimeStatusPayload(TypedDict):
     github_repo: str | None
     connected: bool | None
     recon_done: bool | None
+    scores: JsonObjectPayload
+    score_grades: dict[str, ScoreGrade]
+    score_summary: ScoreSummaryPayload
     active_run_count: int
     active_runs: list[JsonValue]
     current_head_sha: str | None
@@ -473,9 +496,10 @@ def list_projects() -> JsonObjectPayload:
     return run_projects()
 
 
-def list_project_inventory(project: str | None) -> RepoStatusAllPayload:
+def list_project_inventory(project: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:
     project_ids = _selected_project_ids(project)
     projects = [_project_inventory_status(project_id) for project_id in project_ids]
+    _sort_project_repos(projects, sort)
     return _repo_status_all_payload(projects)
 
 
@@ -540,20 +564,22 @@ def repo_status(repo_id: str) -> RepoStatusPayload:
     }
 
 
-def repo_status_all(project_id: str | None) -> RepoStatusAllPayload:
+def repo_status_all(project_id: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:
     projects = [
         _project_runtime_status(selected_project_id) for selected_project_id in _selected_project_ids(project_id)
     ]
+    _sort_project_repos(projects, sort)
     return _repo_status_all_payload(projects)
 
 
-def runtime_status(repo: str | None, project: str | None) -> RepoStatusAllPayload:
+def runtime_status(repo: str | None, project: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:
     if repo is None:
-        return repo_status_all(project)
+        return repo_status_all(project, sort)
 
     projects = _project_statuses_for_repo(repo, project)
     if not any(project_status["repos"] for project_status in projects):
         _raise_bad_selector(f"repo selector matched no repos: {repo}")
+    _sort_project_repos(projects, sort)
     return _repo_status_all_payload(projects)
 
 
@@ -1086,6 +1112,91 @@ def _json_dict(value: JsonValue | None) -> dict[str, JsonValue]:
     return value if isinstance(value, dict) else {}
 
 
+def _score_grade(score: float) -> ScoreGrade:
+    if score < SCORE_POOR_THRESHOLD:
+        return "critical"
+    if score < SCORE_FAIR_THRESHOLD:
+        return "poor"
+    if score < SCORE_GOOD_THRESHOLD:
+        return "fair"
+    if score < SCORE_EXCELLENT_THRESHOLD:
+        return "good"
+    return "excellent"
+
+
+def _score_number(value: JsonValue) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
+def _numeric_scores(scores: JsonObjectPayload) -> list[tuple[str, float]]:
+    numeric_scores: list[tuple[str, float]] = []
+    for axis, value in scores.items():
+        score = _score_number(value)
+        if score is not None:
+            numeric_scores.append((axis, score))
+    return numeric_scores
+
+
+def _score_grades(scores: JsonObjectPayload) -> dict[str, ScoreGrade]:
+    return {axis: _score_grade(score) for axis, score in _numeric_scores(scores)}
+
+
+def _score_summary(scores: JsonObjectPayload) -> ScoreSummaryPayload:
+    numeric_scores = _numeric_scores(scores)
+    if not numeric_scores:
+        return {
+            "overall_score": None,
+            "overall_grade": None,
+            "weakest_axis": None,
+            "weakest_score": None,
+            "weakest_grade": None,
+        }
+
+    weakest_axis, weakest_score = min(numeric_scores, key=lambda item: item[1])
+    overall_score = round(sum(score for _, score in numeric_scores) / len(numeric_scores), 1)
+    return {
+        "overall_score": overall_score,
+        "overall_grade": _score_grade(overall_score),
+        "weakest_axis": weakest_axis,
+        "weakest_score": weakest_score,
+        "weakest_grade": _score_grade(weakest_score),
+    }
+
+
+def _sort_project_repos(projects: list[ProjectRuntimeStatusPayload], sort: RepoSort) -> None:
+    if sort == "default":
+        return
+    for project in projects:
+        if sort == "name":
+            project["repos"].sort(key=_repo_name_sort_key)
+        elif sort == "weakest":
+            project["repos"].sort(key=_repo_weakest_sort_key)
+        elif sort == "overall":
+            project["repos"].sort(key=_repo_overall_sort_key)
+        else:
+            raise ValueError(f"unknown repo sort: {sort}")
+
+
+def _repo_name_sort_key(repo: RepoRuntimeStatusPayload) -> str:
+    return (repo["github_repo"] or repo["repo_id"]).lower()
+
+
+def _repo_weakest_sort_key(repo: RepoRuntimeStatusPayload) -> tuple[float, str]:
+    return (_missing_last_score(repo["score_summary"]["weakest_score"]), _repo_name_sort_key(repo))
+
+
+def _repo_overall_sort_key(repo: RepoRuntimeStatusPayload) -> tuple[float, str]:
+    return (_missing_last_score(repo["score_summary"]["overall_score"]), _repo_name_sort_key(repo))
+
+
+def _missing_last_score(score: float | None) -> float:
+    return score if score is not None else float("inf")
+
+
 def _selected_project_ids(project: str | None) -> list[str]:
     if project is not None:
         return [_resolve_single_project_id(project)]
@@ -1196,6 +1307,7 @@ def _repo_target(
     repo_id = _required_str(repo, "id", "repo is missing id")
     owner = _json_str(repo.get("githubOwner"))
     name = _json_str(repo.get("githubName"))
+    scores = _json_dict(repo.get("scores"))
     return {
         "project_id": project_id,
         "project_name": project_name,
@@ -1205,6 +1317,9 @@ def _repo_target(
         "github_repo": f"{owner}/{name}" if owner is not None and name is not None else None,
         "connected": _json_bool(repo.get("connected")),
         "recon_done": _json_bool(repo.get("reconDone")),
+        "scores": scores,
+        "score_grades": _score_grades(scores),
+        "score_summary": _score_summary(scores),
     }
 
 
@@ -1282,6 +1397,9 @@ def _repo_runtime_status_from_target(target: RepoTargetPayload) -> RepoRuntimeSt
         "github_repo": target["github_repo"],
         "connected": target["connected"],
         "recon_done": target["recon_done"],
+        "scores": target["scores"],
+        "score_grades": target["score_grades"],
+        "score_summary": target["score_summary"],
         "active_run_count": len(active_runs),
         "active_runs": active_runs,
         "current_head_sha": current_head_sha,
@@ -1304,6 +1422,9 @@ def _repo_inventory_status(
         "github_repo": target["github_repo"],
         "connected": target["connected"],
         "recon_done": target["recon_done"],
+        "scores": target["scores"],
+        "score_grades": target["score_grades"],
+        "score_summary": target["score_summary"],
         "active_run_count": 0,
         "active_runs": [],
         "current_head_sha": None,

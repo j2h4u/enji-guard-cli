@@ -326,6 +326,7 @@ def test_repo_status_all_summarizes_projects_repos_runs_and_reports(monkeypatch:
                     "githubName": "enji-guard-cli",
                     "connected": True,
                     "reconDone": False,
+                    "scores": {"tech-health": 49, "dead-code": 90, "metadata": {"source": "fixture"}},
                 },
                 {
                     "id": "repo_2",
@@ -333,6 +334,7 @@ def test_repo_status_all_summarizes_projects_repos_runs_and_reports(monkeypatch:
                     "githubName": "watchdirs",
                     "connected": True,
                     "reconDone": True,
+                    "scores": {"tests": 76, "flag": True},
                 },
             ],
         },
@@ -383,7 +385,69 @@ def test_repo_status_all_summarizes_projects_repos_runs_and_reports(monkeypatch:
     assert payload["projects"][0]["repos"][0]["github_repo"] == "j2h4u/enji-guard-cli"
     assert payload["projects"][0]["repos"][0]["active_run_count"] == 1
     assert payload["projects"][0]["repos"][0]["current_head_sha"] == "repo_1_head"
+    assert payload["projects"][0]["repos"][0]["scores"] == {
+        "tech-health": 49,
+        "dead-code": 90,
+        "metadata": {"source": "fixture"},
+    }
+    assert payload["projects"][0]["repos"][0]["score_grades"] == {
+        "tech-health": "poor",
+        "dead-code": "excellent",
+    }
+    assert payload["projects"][0]["repos"][0]["score_summary"] == {
+        "overall_score": 69.5,
+        "overall_grade": "fair",
+        "weakest_axis": "tech-health",
+        "weakest_score": 49.0,
+        "weakest_grade": "poor",
+    }
     assert payload["projects"][0]["repos"][1]["reports"]["complete"] is False
+    assert payload["projects"][0]["repos"][1]["score_grades"] == {"tests": "good"}
+
+
+def test_list_project_inventory_can_sort_repos_by_weakest_score(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1"}]})
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda project_id: {
+            "project": {"id": project_id, "name": "Pets"},
+            "repos": [
+                {
+                    "id": "repo_good",
+                    "githubOwner": "j2h4u",
+                    "githubName": "good",
+                    "connected": True,
+                    "reconDone": True,
+                    "scores": {"tests": 92, "vulns": 88},
+                },
+                {
+                    "id": "repo_bad",
+                    "githubOwner": "j2h4u",
+                    "githubName": "bad",
+                    "connected": True,
+                    "reconDone": True,
+                    "scores": {"tests": 75, "tech-health": 28},
+                },
+                {
+                    "id": "repo_unknown",
+                    "githubOwner": "j2h4u",
+                    "githubName": "unknown",
+                    "connected": True,
+                    "reconDone": True,
+                    "scores": {},
+                },
+            ],
+        },
+    )
+
+    payload = core.list_project_inventory(None, sort="weakest")
+
+    assert [repo["repo_id"] for repo in payload["projects"][0]["repos"]] == [
+        "repo_bad",
+        "repo_good",
+        "repo_unknown",
+    ]
 
 
 def test_resolve_repo_accepts_project_name_and_owner_repo_selector(monkeypatch: MonkeyPatch) -> None:
@@ -521,6 +585,7 @@ def test_runtime_status_can_filter_one_repo_by_selector(monkeypatch: MonkeyPatch
                     "githubName": "watchdirs",
                     "connected": True,
                     "reconDone": False,
+                    "scores": {"vulns": 88, "tech-health": 49},
                 },
             ],
         },
@@ -538,6 +603,13 @@ def test_runtime_status_can_filter_one_repo_by_selector(monkeypatch: MonkeyPatch
     assert payload["summary"]["repo_count"] == 1
     assert payload["projects"][0]["repos"][0]["repo_id"] == "repo_2"
     assert payload["projects"][0]["repos"][0]["current_head_sha"] == "watchdirs_head"
+    assert payload["projects"][0]["repos"][0]["score_summary"] == {
+        "overall_score": 68.5,
+        "overall_grade": "fair",
+        "weakest_axis": "tech-health",
+        "weakest_score": 49.0,
+        "weakest_grade": "poor",
+    }
 
 
 def test_start_recon_resolves_repo_and_project(monkeypatch: MonkeyPatch) -> None:
