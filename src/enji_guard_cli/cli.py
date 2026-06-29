@@ -11,6 +11,7 @@ from enji_guard_cli.core import (
     DEFAULT_REPO_SORT,
     REPORTS_LIST_DEFAULT_SELECTOR,
     AuditAlias,
+    EmailPreferenceUpdate,
     OperationName,
     OperationResult,
     ReportAuditAlias,
@@ -18,6 +19,7 @@ from enji_guard_cli.core import (
     connect_repo,
     current_repo,
     disable_schedule_for_repo,
+    list_email_preferences,
     list_project_inventory,
     list_projects,
     list_schedules_for_repo,
@@ -28,6 +30,7 @@ from enji_guard_cli.core import (
     resolve_repo,
     runtime_status,
     schedule_payload,
+    set_email_preferences,
     set_schedule_for_repo,
     show_report_for_repo,
     start_recon,
@@ -48,6 +51,7 @@ recon_app = typer.Typer(help="Preliminary repository diagnostics.")
 audit_app = typer.Typer(help="Report audit commands.")
 report_app = typer.Typer(help="Enji Guard report surfaces.")
 schedule_app = typer.Typer(help="Audit schedule commands.")
+email_app = typer.Typer(help="Report email preference commands.")
 app.add_typer(catalog_app, name="catalog", hidden=True)
 app.add_typer(auth_app, name="auth")
 app.add_typer(project_app, name="project")
@@ -56,6 +60,7 @@ app.add_typer(recon_app, name="recon")
 app.add_typer(audit_app, name="audit")
 app.add_typer(report_app, name="report")
 app.add_typer(schedule_app, name="schedule")
+app.add_typer(email_app, name="email")
 
 CATALOG_AUDITS_OPERATION = resolve_operation_spec(OperationName.CATALOG_AUDITS)
 CATALOG_AUDIT_OPERATION = resolve_operation_spec(OperationName.CATALOG_AUDIT)
@@ -156,6 +161,21 @@ def _echo_repo_resolve_table(payload: object) -> None:
 def _echo_report_inventory_table(payload: object) -> None:
     headers = ("project", "id", "repos", "recon", "score_axes")
     _echo_table(headers, [_project_row(project) for project in _payload_projects(payload)], "No projects.")
+
+
+def _echo_email_preferences_table(payload: object) -> None:
+    headers = ("project", "repo", "audit", "manual", "auto")
+    rows = [
+        (
+            _text_cell(row.get("project_name"), fallback=_text_cell(row.get("project_id"))),
+            _text_cell(row.get("github_repo"), fallback=_text_cell(row.get("repo_id"))),
+            _text_cell(row.get("audit")),
+            _text_cell(row.get("manual_run_completion")),
+            _text_cell(row.get("scheduled_run_completion")),
+        )
+        for row in (_object_dict(item) for item in _object_list(_object_dict(payload).get("preferences")))
+    ]
+    _echo_table(headers, rows, "No email preferences.")
 
 
 def _echo_auth_status(payload: object) -> None:
@@ -709,6 +729,51 @@ def schedule_disable(
     )
 
 
+@email_app.command("list")
+def email_list(
+    repo: Annotated[
+        str | None,
+        typer.Argument(help="Optional repo id or owner/name. Defaults to every repo in scope."),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    _run_human_or_json_command(
+        lambda: list_email_preferences(repo, _selected_project()),
+        _json_output(json_output),
+        _echo_email_preferences_table,
+    )
+
+
+@email_app.command("set")
+def email_set(
+    repo: Annotated[
+        str | None,
+        typer.Argument(help="Optional repo id or owner/name. Defaults to every repo in scope."),
+    ] = None,
+    manual: Annotated[
+        Literal["on", "off", "keep"],
+        typer.Option("--manual", help="Email after manual checks."),
+    ] = "keep",
+    auto: Annotated[
+        Literal["on", "off", "keep"],
+        typer.Option("--auto", help="Email after automatic scheduled checks."),
+    ] = "keep",
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    _run_human_or_json_command(
+        lambda: set_email_preferences(
+            repo,
+            _selected_project(),
+            EmailPreferenceUpdate(
+                manual_run_completion=_preference_switch(manual),
+                scheduled_run_completion=_preference_switch(auto),
+            ),
+        ),
+        _json_output(json_output),
+        _echo_email_preferences_table,
+    )
+
+
 @catalog_app.command("audits", help=CATALOG_AUDITS_OPERATION.summary)
 def catalog_audits(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
@@ -907,6 +972,14 @@ def _schedule_set_target(values: list[str]) -> tuple[str, AuditAlias]:
     except ValueError:
         valid = ", ".join(audit.value for audit in ReportAuditAlias)
         raise ValueError(f"unknown report audit {audit_value!r}; expected one of: {valid}") from None
+
+
+def _preference_switch(value: Literal["on", "off", "keep"]) -> bool | None:
+    if value == "on":
+        return True
+    if value == "off":
+        return False
+    return None
 
 
 def _selected_project() -> str | None:

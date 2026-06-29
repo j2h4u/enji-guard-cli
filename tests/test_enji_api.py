@@ -16,6 +16,7 @@ from enji_guard_cli.enji_api import (
     EnjiApiError,
     _get_json_object,
     access,
+    audit_email_preferences,
     audit_summary_snapshot,
     catalog,
     connect_project_repo,
@@ -25,6 +26,7 @@ from enji_guard_cli.enji_api import (
     load_api_session,
     project_active_runs,
     project_detail,
+    put_audit_email_preferences,
     put_improvement_job,
     repo_active_runs,
     repo_audit_history,
@@ -281,6 +283,34 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
     assert audit_body["fleetTaskBody"] == {"title": "Run recon"}
     assert isinstance(audit_body["clientRequestId"], str)
     assert client.requests[15].json_body == {"enabled": True}
+
+
+def test_audit_email_preferences_use_expected_requests(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_bearer_token("token-123", auth_file)
+    client = FakeEnjiHttpClient(
+        [
+            json_response({"resolved": {"manualRunCompletion": True, "scheduledRunCompletion": False}}),
+            json_response({"resolved": {"manualRunCompletion": False, "scheduledRunCompletion": False}}),
+        ]
+    )
+
+    read_payload = audit_email_preferences("repo_1", "audit.security", auth_file, client)
+    write_payload = put_audit_email_preferences(
+        "repo_1",
+        "audit.security",
+        {"manualRunCompletion": False, "scheduledRunCompletion": False},
+        auth_file,
+        client,
+    )
+
+    assert read_payload == {"resolved": {"manualRunCompletion": True, "scheduledRunCompletion": False}}
+    assert write_payload == {"resolved": {"manualRunCompletion": False, "scheduledRunCompletion": False}}
+    assert [(request.method, request.url) for request in client.requests] == [
+        ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/audits/audit.security/email-preferences"),
+        ("PUT", "https://fleet.enji.ai/api/ux/repos/repo_1/audits/audit.security/email-preferences"),
+    ]
+    assert client.requests[1].json_body == {"manualRunCompletion": False, "scheduledRunCompletion": False}
 
 
 def test_reports_list_rejects_unsupported_filters(tmp_path: Path) -> None:

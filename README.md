@@ -48,6 +48,7 @@ uv run enji-guard status
 uv run enji-guard audit start j2h4u/enji-guard-cli --all
 uv run enji-guard wait j2h4u/enji-guard-cli security
 uv run enji-guard report read j2h4u/enji-guard-cli
+uv run enji-guard --project Pets email set --auto off
 uv run enji-guard auth refresh
 ```
 

@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from enji_guard_cli import cli
 from enji_guard_cli.cli import app
-from enji_guard_cli.core import AuditAlias
+from enji_guard_cli.core import AuditAlias, EmailPreferenceUpdate
 from enji_guard_cli.enji_api import EnjiApiError
 
 
@@ -737,6 +737,64 @@ def test_schedule_disable_resolves_repo_selector(monkeypatch: MonkeyPatch) -> No
     assert result.exit_code == 0
     assert json.loads(result.output) == {"job": {"enabled": False}}
     assert captured == {"repo": "j2h4u/enji-guard-cli", "audit": "security", "project": "Pets"}
+
+
+def test_email_list_defaults_to_text_table(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "list_email_preferences",
+        lambda repo, project: {
+            "preferences": [
+                {
+                    "project_name": "Pets",
+                    "github_repo": "j2h4u/enji-guard-cli",
+                    "audit": "security",
+                    "manual_run_completion": True,
+                    "scheduled_run_completion": False,
+                }
+            ],
+            "summary": {"repo_count": 1, "audit_count": 1},
+        },
+    )
+
+    result = CliRunner().invoke(app, ["email", "list"])
+
+    assert result.exit_code == 0
+    assert "project  repo" in result.output
+    assert "Pets     j2h4u/enji-guard-cli" in result.output
+    assert "security" in result.output
+    assert "yes" in result.output
+    assert "no" in result.output
+
+
+def test_email_set_routes_batch_update(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_set(repo: str | None, project: str | None, update: EmailPreferenceUpdate) -> dict[str, object]:
+        captured["repo"] = repo
+        captured["project"] = project
+        captured["manual"] = update.manual_run_completion
+        captured["auto"] = update.scheduled_run_completion
+        return {
+            "preferences": [
+                {
+                    "project_name": "Pets",
+                    "github_repo": "j2h4u/enji-guard-cli",
+                    "audit": "security",
+                    "manual_run_completion": True,
+                    "scheduled_run_completion": False,
+                }
+            ],
+            "summary": {"repo_count": 1, "audit_count": 1},
+        }
+
+    monkeypatch.setattr(cli, "set_email_preferences", fake_set)
+
+    result = CliRunner().invoke(app, ["--project", "Pets", "email", "set", "--auto", "off", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["summary"] == {"repo_count": 1, "audit_count": 1}
+    assert captured == {"repo": None, "project": "Pets", "manual": None, "auto": False}
 
 
 def test_auth_status_reports_text_and_zero_exit_code(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
