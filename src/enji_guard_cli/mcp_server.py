@@ -5,11 +5,10 @@ from typing import Literal, TypedDict, cast
 
 from mcp.server.fastmcp import FastMCP
 
+from enji_guard_cli.audits import AuditAlias, AuditPayload
 from enji_guard_cli.auth import AuthStatusPayload, auth_status_async
 from enji_guard_cli.core import (
     REPORTS_LIST_DEFAULT_SELECTOR,
-    AuditAlias,
-    AuditPayload,
     OperationName,
     OperationResult,
     access_async_operation,

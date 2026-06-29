@@ -34,7 +34,7 @@ frontend endpoint. CLI и MCP не содержат Enji/auth/business logic.
 - `repo`: local/current repo, repo listing, selector resolution, connection.
 - `status`: runtime snapshot across projects/repos/tasks.
 - `recon`: preliminary diagnostics, separate from report audits.
-- `audit`: the six report-producing checks.
+- `audit`: report-producing checks.
 - `report`: generated report content.
 - `wait`: polling for long-running work.
 - `schedule`: recurring audit settings.
@@ -47,6 +47,7 @@ Canonical report audits:
 - `tests`
 - `tech-health`
 - `deps`
+- `cognitive-debt`
 - `dead-code`
 
 `recon` is intentionally separate and must not be offered as a report audit.
@@ -57,11 +58,11 @@ Canonical report audits:
 enji-guard project list
 
 enji-guard repo current
-enji-guard repo list [--sort default|name|weakest|overall]
+enji-guard repo list [--sort default|name|weakest|overall|latest-report]
 enji-guard repo resolve [REPO]
 enji-guard repo connect OWNER/NAME
 
-enji-guard status [REPO] [--sort default|name|weakest|overall]
+enji-guard status [REPO] [--sort default|name|weakest|overall|latest-report]
 
 enji-guard recon start REPO
 enji-guard audit start REPO AUDIT...
@@ -102,14 +103,15 @@ automation.
   project filter; without `--project`, it spans all projects.
 - Ambiguous targets return `BAD_SELECTOR` with candidates.
 - No default project and no fuzzy matching.
-- Repo list/status can sort by `weakest` or `overall`; lower scores come first.
+- Repo list/status can sort by `weakest`, `overall`, or `latest-report`; lower
+  scores come first, newer report activity comes first.
 
 ## Email Preferences
 
 Email preferences are separate from schedules. `manualRunCompletion` controls
 mail after manual report runs; `scheduledRunCompletion` controls mail after
 scheduled automatic runs. CLI exposes those as `--manual` and `--auto` and
-applies them to all six report audits for each selected repo.
+applies them to all report audits for each selected repo.
 
 ## Long-Running Work
 
@@ -127,6 +129,7 @@ ready; it reads all currently ready reports unless explicit audit aliases or
 - repo scores: raw `scores`, simple `score_grades`, and `score_summary`;
 - active runs;
 - repo/report revision: current HEAD, last audited HEAD, out-of-date flag;
+- last observed report activity timestamp;
 - report states: `ready`, `running`, `missing`;
 - summary counts.
 

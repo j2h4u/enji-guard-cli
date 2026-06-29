@@ -6,15 +6,14 @@ from typing import Annotated, Literal, TypeGuard, cast
 
 import typer
 
+from enji_guard_cli.audits import AuditAlias, ReportAuditAlias
 from enji_guard_cli.auth import AuthError, AuthStatusPayload, import_bearer_token, import_cookie, refresh_auth
 from enji_guard_cli.core import (
     DEFAULT_REPO_SORT,
     REPORTS_LIST_DEFAULT_SELECTOR,
-    AuditAlias,
     EmailPreferenceUpdate,
     OperationName,
     OperationResult,
-    ReportAuditAlias,
     ScheduleUpdate,
     connect_repo,
     current_repo,
@@ -120,6 +119,7 @@ def _echo_repo_score_table(payload: object) -> None:
         "project",
         "repo",
         "state",
+        "last_report",
         "overall",
         "grade",
         "weakest",
@@ -128,6 +128,7 @@ def _echo_repo_score_table(payload: object) -> None:
         "tests",
         "tech",
         "deps",
+        "cog",
         "dead",
     )
     _echo_table(
@@ -138,7 +139,18 @@ def _echo_repo_score_table(payload: object) -> None:
 
 
 def _echo_repo_status_table(payload: object) -> None:
-    headers = ("project", "repo", "state", "overall", "weakest", "reports", "active", "current", "audited")
+    headers = (
+        "project",
+        "repo",
+        "state",
+        "overall",
+        "weakest",
+        "reports",
+        "active",
+        "last_report",
+        "current",
+        "audited",
+    )
     _echo_table(
         headers,
         [_repo_status_row(project, repo) for project, repo in _payload_repos(payload)],
@@ -262,6 +274,7 @@ def _repo_score_row(project: dict[str, object], repo: dict[str, object]) -> tupl
         _project_label(project),
         _repo_label(repo),
         _repo_state(repo),
+        _date_cell(repo.get("last_report_at")),
         _score_cell(score_summary.get("overall_score")),
         _text_cell(score_summary.get("overall_grade")),
         _weakest_cell(score_summary),
@@ -270,6 +283,7 @@ def _repo_score_row(project: dict[str, object], repo: dict[str, object]) -> tupl
         _score_cell(scores.get("tests")),
         _score_cell(scores.get("tech-health")),
         _score_cell(scores.get("dependency-hygiene")),
+        _score_cell(scores.get("cognitive-debt")),
         _score_cell(scores.get("dead-code")),
     )
 
@@ -285,6 +299,7 @@ def _repo_status_row(project: dict[str, object], repo: dict[str, object]) -> tup
         _weakest_cell(score_summary),
         _reports_cell(reports),
         _text_cell(repo.get("active_run_count")),
+        _date_cell(repo.get("last_report_at")),
         _sha_cell(repo.get("current_head_sha")),
         _sha_cell(_audited_head(reports)),
     )
@@ -367,6 +382,12 @@ def _sha_cell(value: object) -> str:
     if not isinstance(value, str) or not value:
         return "-"
     return value[:8]
+
+
+def _date_cell(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return "-"
+    return value[:10]
 
 
 def _score_cell(value: object) -> str:
@@ -499,8 +520,11 @@ def serve(
 def status(
     repo: Annotated[str | None, typer.Argument(help="Repo id or owner/name. Defaults to all repos.")] = None,
     sort: Annotated[
-        Literal["default", "name", "weakest", "overall"],
-        typer.Option("--sort", help="Sort repos by default order, name, weakest score, or overall score."),
+        Literal["default", "name", "weakest", "overall", "latest-report"],
+        typer.Option(
+            "--sort",
+            help="Sort repos by default order, name, weakest score, overall score, or latest report date.",
+        ),
     ] = DEFAULT_REPO_SORT,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
@@ -612,8 +636,11 @@ def repo_current(
 @repo_app.command("list")
 def repo_list(
     sort: Annotated[
-        Literal["default", "name", "weakest", "overall"],
-        typer.Option("--sort", help="Sort repos by default order, name, weakest score, or overall score."),
+        Literal["default", "name", "weakest", "overall", "latest-report"],
+        typer.Option(
+            "--sort",
+            help="Sort repos by default order, name, weakest score, overall score, or latest report date.",
+        ),
     ] = DEFAULT_REPO_SORT,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:

@@ -150,6 +150,7 @@ layers = [
     "enji_guard_cli.runtime",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.core",
+    "enji_guard_cli.audits",
     "enji_guard_cli.enji_api",
     "enji_guard_cli.auth",
     "enji_guard_cli.transport",
@@ -187,6 +188,7 @@ name = "Typer and MCP frameworks stay out of core, adapter, auth, and transport"
 type = "forbidden"
 source_modules = [
     "enji_guard_cli.auth",
+    "enji_guard_cli.audits",
     "enji_guard_cli.core",
     "enji_guard_cli.enji_api",
     "enji_guard_cli.errors",

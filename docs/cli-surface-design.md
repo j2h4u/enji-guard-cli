@@ -18,7 +18,7 @@ Primary nouns:
 - `project`: Enji workspace/project inventory.
 - `repo`: GitHub repository inventory, target resolution, and connection.
 - `recon`: preliminary repository diagnostics.
-- `audit`: the six report-producing checks.
+- `audit`: report-producing checks.
 - `report`: generated report content.
 - `schedule`: recurring audit settings.
 - `email`: report completion email preferences.
@@ -32,10 +32,10 @@ Canonical report audits:
 - `tests`
 - `tech-health`
 - `deps`
+- `cognitive-debt`
 - `dead-code`
 
-`recon` is not one of the six report audits. It is a separate preliminary
-diagnostic phase.
+`recon` is not a report audit. It is a separate preliminary diagnostic phase.
 
 ## Command Shape
 
@@ -43,11 +43,11 @@ diagnostic phase.
 enji-guard project list
 
 enji-guard repo current
-enji-guard repo list [--sort default|name|weakest|overall]
+enji-guard repo list [--sort default|name|weakest|overall|latest-report]
 enji-guard repo resolve [REPO]
 enji-guard repo connect OWNER/NAME
 
-enji-guard status [REPO] [--sort default|name|weakest|overall]
+enji-guard status [REPO] [--sort default|name|weakest|overall|latest-report]
 
 enji-guard recon start REPO
 enji-guard audit start REPO AUDIT...
@@ -92,10 +92,11 @@ the raw machine contract.
 - No fuzzy matching in write commands.
 - `report list` is compact inventory; `report read` returns report content.
 - `report read REPO` defaults to all currently ready reports for that repo.
-- `email` preferences apply to all six report audits. `--manual` controls mail
+- `email` preferences apply to all report audits. `--manual` controls mail
   after manual runs; `--auto` controls mail after scheduled automatic runs.
 - Repo inventory/status sorting is optional. `weakest` and `overall` sort lower
-  scores first and leave repos without scores last.
+  scores first; `latest-report` sorts newer report activity first. Repos
+  without the selected signal stay last.
 
 ## Hidden Details
 
