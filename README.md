@@ -31,8 +31,8 @@ Until API tokens are available, cookie auth is supported as a temporary
 compatibility path:
 
 ```bash
-pbpaste | uv run enji-guard auth import-cookie --stdin --pretty
-uv run enji-guard auth status --pretty
+pbpaste | uv run enji-guard auth import-cookie --stdin
+uv run enji-guard auth status
 ```
 
 Do not paste credentials directly into shell history. The auth file defaults to
@@ -41,15 +41,17 @@ Do not paste credentials directly into shell history. The auth file defaults to
 ## CLI
 
 ```bash
-uv run enji-guard access --pretty
-uv run enji-guard project list --pretty
-uv run enji-guard repo current --pretty
-uv run enji-guard status --pretty
-uv run enji-guard audit start j2h4u/enji-guard-cli --all --pretty
-uv run enji-guard wait j2h4u/enji-guard-cli security --pretty
+uv run enji-guard access
+uv run enji-guard project list
+uv run enji-guard repo current
+uv run enji-guard status
+uv run enji-guard audit start j2h4u/enji-guard-cli --all
+uv run enji-guard wait j2h4u/enji-guard-cli security
 uv run enji-guard report read j2h4u/enji-guard-cli
-uv run enji-guard auth refresh --pretty
+uv run enji-guard auth refresh
 ```
+
+Pass `--json` when a command output is consumed by automation.
 
 Use the global `--project NAME_OR_ID` filter when a command must be scoped to
 one Enji project.

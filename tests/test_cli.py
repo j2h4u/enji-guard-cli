@@ -171,7 +171,7 @@ def test_version_flag_reports_package_version() -> None:
 
 
 def test_catalog_audits_reports_canonical_identifier_map() -> None:
-    result = CliRunner().invoke(app, ["catalog", "audits"])
+    result = CliRunner().invoke(app, ["catalog", "audits", "--json"])
 
     assert result.exit_code == 0
     audits = cast(list[AuditPayload], json.loads(result.output))
@@ -194,7 +194,7 @@ def test_catalog_audits_reports_canonical_identifier_map() -> None:
 
 
 def test_catalog_audit_reports_single_alias() -> None:
-    result = CliRunner().invoke(app, ["catalog", "audit", "deps"])
+    result = CliRunner().invoke(app, ["catalog", "audit", "deps", "--json"])
 
     assert result.exit_code == 0
     audit = cast(AuditPayload, json.loads(result.output))
@@ -204,7 +204,7 @@ def test_catalog_audit_reports_single_alias() -> None:
     assert audit["action_key"] == "audit.dependency-hygiene"
 
 
-def test_access_reports_json_and_pretty_output(monkeypatch: MonkeyPatch) -> None:
+def test_access_defaults_to_text_and_can_emit_json(monkeypatch: MonkeyPatch) -> None:
     payload: AccessPayload = {
         "group": "pro",
         "full_access": True,
@@ -214,13 +214,14 @@ def test_access_reports_json_and_pretty_output(monkeypatch: MonkeyPatch) -> None
 
     monkeypatch.setattr(cli, "get_access", lambda: payload)
 
-    compact = CliRunner().invoke(app, ["access"])
-    pretty = CliRunner().invoke(app, ["access", "--pretty"])
+    text = CliRunner().invoke(app, ["access"])
+    json_result = CliRunner().invoke(app, ["access", "--json"])
 
-    assert compact.exit_code == 0
-    assert cast(AccessPayload, json.loads(compact.output)) == payload
-    assert pretty.exit_code == 0
-    assert pretty.output.startswith("{\n  ")
+    assert text.exit_code == 0
+    assert "group: pro" in text.output
+    assert "limits: 3 field(s)" in text.output
+    assert json_result.exit_code == 0
+    assert cast(AccessPayload, json.loads(json_result.output)) == payload
 
 
 def test_access_reports_auth_error_as_json_stderr(monkeypatch: MonkeyPatch) -> None:
@@ -232,10 +233,10 @@ def test_access_reports_auth_error_as_json_stderr(monkeypatch: MonkeyPatch) -> N
     result = CliRunner().invoke(app, ["access"])
 
     assert result.exit_code == 3
-    assert json.loads(result.stderr) == {"code": "AUTH_REQUIRED", "message": "auth file does not exist"}
+    assert result.stderr == "AUTH_REQUIRED: auth file does not exist\n"
 
 
-def test_report_list_passes_selector_and_pretty_output(monkeypatch: MonkeyPatch) -> None:
+def test_report_list_passes_selector_and_json_output(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object | None] = {}
     payload: ReportsListPayload = {
         "projects": [{"id": "project_1", "name": "Pets", "repo_ids": ["repo_1"], "scores": {}}],
@@ -249,11 +250,10 @@ def test_report_list_passes_selector_and_pretty_output(monkeypatch: MonkeyPatch)
 
     result = CliRunner().invoke(
         app,
-        ["report", "list", "--selector", "pets/*", "--pretty"],
+        ["report", "list", "--selector", "pets/*", "--json"],
     )
 
     assert result.exit_code == 0
-    assert result.output.startswith("{\n  ")
     assert cast(ReportsListPayload, json.loads(result.output)) == payload
     assert captured == {"selector": "pets/*"}
 
@@ -282,16 +282,15 @@ def test_report_list_reports_bad_selector_as_exit_code_four(monkeypatch: MonkeyP
     result = CliRunner().invoke(app, ["report", "list", "--selector", "unknown"])
 
     assert result.exit_code == 4
-    assert json.loads(result.stderr) == {"code": "BAD_SELECTOR", "message": "bad selector: unknown"}
+    assert result.stderr == "BAD_SELECTOR: bad selector: unknown\n"
 
 
 def test_project_list_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "list_projects", lambda: {"projects": [{"id": "project_1"}]})
 
-    result = CliRunner().invoke(app, ["project", "list", "--pretty"])
+    result = CliRunner().invoke(app, ["project", "list", "--json"])
 
     assert result.exit_code == 0
-    assert result.output.startswith("{\n  ")
     assert json.loads(result.output) == {"projects": [{"id": "project_1"}]}
 
 
@@ -301,15 +300,50 @@ def test_repo_list_uses_global_project_filter(monkeypatch: MonkeyPatch) -> None:
     def fake_inventory(project: str | None, sort: str = "default") -> dict[str, object]:
         captured["project"] = project
         captured["sort"] = sort
-        return {"projects": []}
+        return {
+            "projects": [
+                {
+                    "project_id": "project_1",
+                    "project_name": "Pets",
+                    "repos": [
+                        {
+                            "repo_id": "repo_1",
+                            "github_repo": "j2h4u/enji-guard-cli",
+                            "connected": True,
+                            "recon_done": True,
+                            "scores": {"vulns": 88, "tech-health": 49},
+                            "score_summary": {
+                                "overall_score": 68.5,
+                                "overall_grade": "fair",
+                                "weakest_axis": "tech-health",
+                                "weakest_score": 49,
+                                "weakest_grade": "poor",
+                            },
+                        }
+                    ],
+                }
+            ]
+        }
 
     monkeypatch.setattr(cli, "list_project_inventory", fake_inventory)
 
     result = CliRunner().invoke(app, ["--project", "Pets", "repo", "list", "--sort", "weakest"])
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"projects": []}
+    assert "project  repo" in result.output
+    assert "Pets     j2h4u/enji-guard-cli" in result.output
+    assert "tech-health=49" in result.output
     assert captured == {"project": "Pets", "sort": "weakest"}
+
+
+def test_repo_list_can_emit_json(monkeypatch: MonkeyPatch) -> None:
+    payload = {"projects": []}
+    monkeypatch.setattr(cli, "list_project_inventory", lambda project, sort="default": payload)
+
+    result = CliRunner().invoke(app, ["repo", "list", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == payload
 
 
 def test_repo_resolve_defaults_to_current_repo_selector(monkeypatch: MonkeyPatch) -> None:
@@ -322,7 +356,7 @@ def test_repo_resolve_defaults_to_current_repo_selector(monkeypatch: MonkeyPatch
 
     monkeypatch.setattr(cli, "resolve_repo", fake_resolve)
 
-    result = CliRunner().invoke(app, ["repo", "resolve"])
+    result = CliRunner().invoke(app, ["repo", "resolve", "--json"])
 
     assert result.exit_code == 0
     assert json.loads(result.output)["resolved"] is True
@@ -339,7 +373,7 @@ def test_repo_connect_uses_global_project_filter(monkeypatch: MonkeyPatch) -> No
 
     monkeypatch.setattr(cli, "connect_repo", fake_connect)
 
-    result = CliRunner().invoke(app, ["--project", "Pets", "repo", "connect", "j2h4u/enji-guard-cli"])
+    result = CliRunner().invoke(app, ["--project", "Pets", "repo", "connect", "j2h4u/enji-guard-cli", "--json"])
 
     assert result.exit_code == 0
     assert json.loads(result.output) == {"repo": {"id": "repo_1"}}
@@ -353,18 +387,46 @@ def test_status_routes_to_runtime_snapshot(monkeypatch: MonkeyPatch) -> None:
         captured["repo"] = repo
         captured["project"] = project
         captured["sort"] = sort
-        return {"summary": {"repo_count": 1}, "projects": []}
+        return {
+            "summary": {"repo_count": 1},
+            "projects": [
+                {
+                    "project_id": "project_1",
+                    "project_name": "Pets",
+                    "repos": [
+                        {
+                            "repo_id": "repo_1",
+                            "github_repo": "j2h4u/enji-guard-cli",
+                            "connected": True,
+                            "recon_done": True,
+                            "scores": {"tech-health": 49},
+                            "score_summary": {
+                                "overall_score": 49,
+                                "overall_grade": "poor",
+                                "weakest_axis": "tech-health",
+                                "weakest_score": 49,
+                                "weakest_grade": "poor",
+                            },
+                            "reports": {"ready": ["security"], "running": [], "missing": ["tests"], "reports": []},
+                            "active_run_count": 0,
+                            "current_head_sha": "0307f239c88a4c761cd2f96cb17b5eb8a4ae8487",
+                        }
+                    ],
+                }
+            ],
+        }
 
     monkeypatch.setattr(cli, "runtime_status", fake_status)
 
     result = CliRunner().invoke(
         app,
-        ["--project", "Pets", "status", "j2h4u/enji-guard-cli", "--sort", "overall", "--pretty"],
+        ["--project", "Pets", "status", "j2h4u/enji-guard-cli", "--sort", "overall"],
     )
 
     assert result.exit_code == 0
-    assert result.output.startswith("{\n  ")
-    assert json.loads(result.output) == {"summary": {"repo_count": 1}, "projects": []}
+    assert "project  repo" in result.output
+    assert "1 ready, 1 missing" in result.output
+    assert "0307f239" in result.output
     assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets", "sort": "overall"}
 
 
@@ -378,7 +440,7 @@ def test_recon_start_routes_to_workflow_facade(monkeypatch: MonkeyPatch) -> None
 
     monkeypatch.setattr(cli, "start_recon", fake_start)
 
-    result = CliRunner().invoke(app, ["--project", "Pets", "recon", "start", "j2h4u/enji-guard-cli"])
+    result = CliRunner().invoke(app, ["--project", "Pets", "recon", "start", "j2h4u/enji-guard-cli", "--json"])
 
     assert result.exit_code == 0
     assert json.loads(result.output) == {"task": {"id": "task_recon"}}
@@ -405,7 +467,7 @@ def test_audit_start_routes_positional_report_audits(monkeypatch: MonkeyPatch) -
 
     result = CliRunner().invoke(
         app,
-        ["--project", "Pets", "audit", "start", "j2h4u/enji-guard-cli", "security", "tests"],
+        ["--project", "Pets", "audit", "start", "j2h4u/enji-guard-cli", "security", "tests", "--json"],
     )
 
     assert result.exit_code == 0
@@ -435,7 +497,7 @@ def test_audit_start_routes_all_flag(monkeypatch: MonkeyPatch) -> None:
 
     monkeypatch.setattr(cli, "start_report_audits", fake_start)
 
-    result = CliRunner().invoke(app, ["audit", "start", "j2h4u/enji-guard-cli", "--all"])
+    result = CliRunner().invoke(app, ["audit", "start", "j2h4u/enji-guard-cli", "--all", "--json"])
 
     assert result.exit_code == 0
     assert captured == {
@@ -468,7 +530,7 @@ def test_wait_routes_to_top_level_workflow(monkeypatch: MonkeyPatch) -> None:
 
     result = CliRunner().invoke(
         app,
-        ["--project", "Pets", "wait", "j2h4u/enji-guard-cli", "recon", "--timeout-seconds", "30"],
+        ["--project", "Pets", "wait", "j2h4u/enji-guard-cli", "recon", "--timeout-seconds", "30", "--json"],
     )
 
     assert result.exit_code == 0
@@ -492,7 +554,7 @@ def test_wait_exits_two_when_timeout_payload_is_not_idle(monkeypatch: MonkeyPatc
         },
     )
 
-    result = CliRunner().invoke(app, ["wait", "repo_1", "security", "--timeout-seconds", "1"])
+    result = CliRunner().invoke(app, ["wait", "repo_1", "security", "--timeout-seconds", "1", "--json"])
 
     assert result.exit_code == 2
     assert json.loads(result.output)["idle"] is False
@@ -511,7 +573,7 @@ def test_report_show_resolves_repo_selector_and_can_emit_markdown(monkeypatch: M
 
     result = CliRunner().invoke(
         app,
-        ["--project", "Pets", "report", "show", "j2h4u/enji-guard-cli", "security", "--format", "markdown"],
+        ["--project", "Pets", "report", "show", "j2h4u/enji-guard-cli", "security"],
     )
 
     assert result.exit_code == 0
@@ -576,7 +638,7 @@ def test_report_read_can_emit_json_for_all_reports(monkeypatch: MonkeyPatch) -> 
 
     result = CliRunner().invoke(
         app,
-        ["report", "read", "j2h4u/enji-guard-cli", "--all", "--format", "json"],
+        ["report", "read", "j2h4u/enji-guard-cli", "--all", "--json"],
     )
 
     assert result.exit_code == 0
@@ -599,7 +661,7 @@ def test_schedule_list_resolves_repo_selector(monkeypatch: MonkeyPatch) -> None:
 
     monkeypatch.setattr(cli, "list_schedules_for_repo", fake_list)
 
-    result = CliRunner().invoke(app, ["--project", "Pets", "schedule", "list", "j2h4u/enji-guard-cli"])
+    result = CliRunner().invoke(app, ["--project", "Pets", "schedule", "list", "j2h4u/enji-guard-cli", "--json"])
 
     assert result.exit_code == 0
     assert json.loads(result.output) == {"jobs": []}
@@ -633,6 +695,7 @@ def test_schedule_set_builds_typed_full_payload(monkeypatch: MonkeyPatch) -> Non
             "mon",
             "--at",
             "09:30@Asia/Almaty",
+            "--json",
         ],
     )
 
@@ -666,14 +729,17 @@ def test_schedule_disable_resolves_repo_selector(monkeypatch: MonkeyPatch) -> No
 
     monkeypatch.setattr(cli, "disable_schedule_for_repo", fake_disable)
 
-    result = CliRunner().invoke(app, ["--project", "Pets", "schedule", "disable", "j2h4u/enji-guard-cli", "security"])
+    result = CliRunner().invoke(
+        app,
+        ["--project", "Pets", "schedule", "disable", "j2h4u/enji-guard-cli", "security", "--json"],
+    )
 
     assert result.exit_code == 0
     assert json.loads(result.output) == {"job": {"enabled": False}}
     assert captured == {"repo": "j2h4u/enji-guard-cli", "audit": "security", "project": "Pets"}
 
 
-def test_auth_status_reports_json_and_zero_exit_code(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+def test_auth_status_reports_text_and_zero_exit_code(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
 
     def fake_auth_status(path: Path | None) -> AuthStatusPayload:
@@ -694,10 +760,35 @@ def test_auth_status_reports_json_and_zero_exit_code(monkeypatch: MonkeyPatch, t
     result = CliRunner().invoke(app, ["auth", "status", "--auth-file", str(auth_file)])
 
     assert result.exit_code == 0
+    assert "authenticated: yes" in result.output
+    assert "credential_type: bearer_token" in result.output
+    assert "email: user@example.com" in result.output
+
+
+def test_auth_status_can_emit_json(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+
+    def fake_auth_status(path: Path | None) -> AuthStatusPayload:
+        assert path == auth_file
+        return {
+            "authenticated": True,
+            "code": None,
+            "message": None,
+            "auth_file": str(auth_file),
+            "credential_type": "bearer_token",
+            "email": "user@example.com",
+            "name": "User",
+            "user_id": "user_1",
+        }
+
+    monkeypatch.setattr(cli, "auth_status", fake_auth_status)
+
+    result = CliRunner().invoke(app, ["auth", "status", "--auth-file", str(auth_file), "--json"])
+
+    assert result.exit_code == 0
     payload = cast(AuthStatusPayload, json.loads(result.output))
     assert payload["authenticated"] is True
     assert payload["credential_type"] == "bearer_token"
-    assert payload["email"] == "user@example.com"
 
 
 def test_auth_status_reports_json_and_exit_code_three_when_unauthenticated(
@@ -723,9 +814,8 @@ def test_auth_status_reports_json_and_exit_code_three_when_unauthenticated(
     result = CliRunner().invoke(app, ["auth", "status", "--auth-file", str(auth_file)])
 
     assert result.exit_code == 3
-    payload = cast(AuthStatusPayload, json.loads(result.output))
-    assert payload["authenticated"] is False
-    assert payload["code"] == "AUTH_REQUIRED"
+    assert "authenticated: no" in result.output
+    assert "code: AUTH_REQUIRED" in result.output
 
 
 def test_auth_refresh_reports_json(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -744,14 +834,13 @@ def test_auth_refresh_reports_json(monkeypatch: MonkeyPatch, tmp_path: Path) -> 
 
     monkeypatch.setattr(cli, "refresh_auth", fake_refresh_auth)
 
-    result = CliRunner().invoke(app, ["auth", "refresh", "--auth-file", str(auth_file), "--pretty"])
+    result = CliRunner().invoke(app, ["auth", "refresh", "--auth-file", str(auth_file), "--json"])
 
     assert result.exit_code == 0
-    assert result.output.startswith("{\n  ")
     assert json.loads(result.output) == payload
 
 
-def test_auth_status_awaits_async_result_for_pretty_json(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+def test_auth_status_awaits_async_result_for_json(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
 
     async def fake_auth_status(path: Path | None) -> AuthStatusPayload:
@@ -769,10 +858,9 @@ def test_auth_status_awaits_async_result_for_pretty_json(monkeypatch: MonkeyPatc
 
     monkeypatch.setattr(cli, "auth_status", fake_auth_status)
 
-    result = CliRunner().invoke(app, ["auth", "status", "--auth-file", str(auth_file), "--pretty"])
+    result = CliRunner().invoke(app, ["auth", "status", "--auth-file", str(auth_file), "--json"])
 
     assert result.exit_code == 0
-    assert result.output.startswith("{\n  ")
     payload = cast(AuthStatusPayload, json.loads(result.output))
     assert payload["authenticated"] is True
     assert payload["credential_type"] == "cookie"

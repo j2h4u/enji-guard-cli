@@ -69,8 +69,8 @@ enji-guard audit start REPO --all
 enji-guard wait REPO AUDIT_OR_RECON
 
 enji-guard report list [--selector SELECTOR]
-enji-guard report read REPO [AUDIT...] [--all] [--format markdown|json]
-enji-guard report show REPO AUDIT --format json|markdown
+enji-guard report read REPO [AUDIT...] [--all] [--json]
+enji-guard report show REPO AUDIT [--json]
 
 enji-guard schedule list REPO
 enji-guard schedule set REPO AUDIT --freq FREQ [--day DAY...] [--at auto|HH:MM|HH:MM@TZ]
@@ -83,6 +83,9 @@ enji-guard schedule disable REPO AUDIT
 enji-guard --project Pets status
 enji-guard --project Pets audit start j2h4u/enji-guard-cli --all
 ```
+
+Default CLI output is human text/tables. `--json` is the only JSON switch for
+automation.
 
 ## Resolution Rules
 

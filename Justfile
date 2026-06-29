@@ -86,12 +86,12 @@ dev-up:
 
 # Force-refresh the mounted auth file from inside the running dev container.
 dev-refresh:
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T enji-guard-cli enji-guard auth refresh --pretty
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T enji-guard-cli enji-guard auth refresh
 
 # Reload bind-mounted source without rebuilding; refresh auth first.
 dev-reload: dev-refresh
     docker compose -f docker-compose.yml -f docker-compose.dev.yml restart enji-guard-cli
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T enji-guard-cli enji-guard auth status --pretty
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T enji-guard-cli enji-guard auth status
 
 # Full local gate for agents before claiming completion.
 verify: check crap-check unit docker-build
