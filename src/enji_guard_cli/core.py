@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from importlib.metadata import version
 from pathlib import Path
-from typing import Literal, Never, TypedDict
+from typing import Literal, Never, TypedDict, cast
 from urllib.parse import urlsplit
 
 from enji_guard_cli.auth import AuthStatusPayload
@@ -25,6 +25,7 @@ from enji_guard_cli.enji_api import (
 )
 from enji_guard_cli.enji_api import access as run_access
 from enji_guard_cli.enji_api import access_async as run_access_async
+from enji_guard_cli.enji_api import audit_email_preferences as run_audit_email_preferences
 from enji_guard_cli.enji_api import audit_summary_snapshot as run_audit_summary_snapshot
 from enji_guard_cli.enji_api import catalog as run_catalog
 from enji_guard_cli.enji_api import connect_project_repo as run_connect_project_repo
@@ -34,6 +35,7 @@ from enji_guard_cli.enji_api import improvement_jobs as run_improvement_jobs
 from enji_guard_cli.enji_api import project_active_runs as run_project_active_runs
 from enji_guard_cli.enji_api import project_detail as run_project_detail
 from enji_guard_cli.enji_api import projects as run_projects
+from enji_guard_cli.enji_api import put_audit_email_preferences as run_put_audit_email_preferences
 from enji_guard_cli.enji_api import put_improvement_job as run_put_improvement_job
 from enji_guard_cli.enji_api import repo_active_runs as run_repo_active_runs
 from enji_guard_cli.enji_api import repo_audit_history as run_repo_audit_history
@@ -310,6 +312,12 @@ class ScheduleUpdate:
     days_of_week: list[str]
     schedule_time: str
     timezone: str
+
+
+@dataclass(frozen=True, slots=True)
+class EmailPreferenceUpdate:
+    manual_run_completion: bool | None
+    scheduled_run_completion: bool | None
 
 
 AUDITS: tuple[AuditDefinition, ...] = (
@@ -743,6 +751,39 @@ def read_reports_for_repo(
     target = _resolve_single_repo_target(repo, project)
     selected_audits = _selected_reports_to_read(target["repo_id"], audits, all_reports=all_reports)
     return _targeted_run_payload(target, _read_reports_for_target(target["repo_id"], selected_audits))
+
+
+def list_email_preferences(repo: str | None, project: str | None) -> JsonObjectPayload:
+    return _email_preferences_payload(
+        [
+            _email_preference_row(target, audit, get_audit_email_preferences(target["repo_id"], audit["action_key"]))
+            for target in _selected_repo_targets(repo, project)
+            for audit in _REPORT_AUDITS
+        ]
+    )
+
+
+def get_audit_email_preferences(repo_id: str, action_key: str) -> JsonObjectPayload:
+    return run_audit_email_preferences(repo_id, action_key)
+
+
+def set_email_preferences(
+    repo: str | None,
+    project: str | None,
+    update: EmailPreferenceUpdate,
+) -> JsonObjectPayload:
+    patch = _email_preferences_patch(update)
+    return _email_preferences_payload(
+        [
+            _email_preference_row(
+                target,
+                audit,
+                run_put_audit_email_preferences(target["repo_id"], audit["action_key"], patch),
+            )
+            for target in _selected_repo_targets(repo, project)
+            for audit in _REPORT_AUDITS
+        ]
+    )
 
 
 def list_schedules(repo_id: str) -> JsonObjectPayload:
@@ -1262,16 +1303,27 @@ def _parse_github_repo(github_repo: str) -> tuple[str, str]:
     return owner, name
 
 
+def _selected_repo_targets(repo: str | None, project: str | None) -> list[RepoTargetPayload]:
+    if repo is not None:
+        return [_resolve_single_repo_target(repo, project)]
+    return [target for project_id in _selected_project_ids(project) for target in _project_repo_targets(project_id)]
+
+
+def _project_repo_targets(project_id: str) -> list[RepoTargetPayload]:
+    project = run_project_detail(project_id)
+    project_payload = _json_dict(project.get("project"))
+    project_name = _json_str(project_payload.get("name"))
+    return [
+        _repo_target(project_id, project_name, repo)
+        for repo in _json_object_list(project.get("repos"))
+        if _json_str(repo.get("id")) is not None
+    ]
+
+
 def _matching_repo_targets(selector: str, project_ids: list[str]) -> list[RepoTargetPayload]:
     matches: list[RepoTargetPayload] = []
     for project_id in project_ids:
-        project = run_project_detail(project_id)
-        project_payload = _json_dict(project.get("project"))
-        project_name = _json_str(project_payload.get("name"))
-        for repo in _json_object_list(project.get("repos")):
-            target = _repo_target(project_id, project_name, repo)
-            if _repo_target_matches(target, selector):
-                matches.append(target)
+        matches.extend(target for target in _project_repo_targets(project_id) if _repo_target_matches(target, selector))
     return matches
 
 
@@ -1550,6 +1602,50 @@ def _report_audit_definition(alias: AuditAlias) -> AuditDefinition:
     if audit is None or audit["route_slug"] is None:
         raise ValueError("recon is not a report audit")
     return audit
+
+
+def _email_preferences_patch(update: EmailPreferenceUpdate) -> JsonObjectPayload:
+    patch: JsonObjectPayload = {}
+    if update.manual_run_completion is not None:
+        patch["manualRunCompletion"] = update.manual_run_completion
+    if update.scheduled_run_completion is not None:
+        patch["scheduledRunCompletion"] = update.scheduled_run_completion
+    if not patch:
+        raise ValueError("pass --manual or --auto")
+    return patch
+
+
+def _email_preference_row(
+    target: RepoTargetPayload,
+    audit: AuditDefinition,
+    payload: JsonObjectPayload,
+) -> dict[str, JsonValue]:
+    resolved = _json_dict(payload.get("resolved"))
+    return {
+        "project_id": target["project_id"],
+        "project_name": target["project_name"],
+        "repo_id": target["repo_id"],
+        "github_repo": target["github_repo"],
+        "audit": audit["alias"].value,
+        "action_key": audit["action_key"],
+        "manual_run_completion": _json_bool(resolved.get("manualRunCompletion")),
+        "scheduled_run_completion": _json_bool(resolved.get("scheduledRunCompletion")),
+    }
+
+
+def _email_preferences_payload(rows: list[dict[str, JsonValue]]) -> JsonObjectPayload:
+    preferences = [cast(JsonValue, row) for row in rows]
+    return {
+        "preferences": preferences,
+        "summary": {
+            "repo_count": _email_preference_repo_count(rows),
+            "audit_count": len(rows),
+        },
+    }
+
+
+def _email_preference_repo_count(rows: list[dict[str, JsonValue]]) -> int:
+    return len({repo_id for row in rows if isinstance(repo_id := row.get("repo_id"), str)})
 
 
 def _schedule_payload(

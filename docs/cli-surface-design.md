@@ -6,7 +6,7 @@ frontend API.
 ## Goals
 
 - Keep commands close to agent tasks: inspect state, connect repos, start work,
-  wait, read reports, manage schedules.
+  wait, read reports, manage schedules and email preferences.
 - Hide frontend implementation details behind core use cases.
 - Accept project and repo names where they are unambiguous.
 - Keep read commands broad and safe; keep write commands explicit.
@@ -21,6 +21,7 @@ Primary nouns:
 - `audit`: the six report-producing checks.
 - `report`: generated report content.
 - `schedule`: recurring audit settings.
+- `email`: report completion email preferences.
 - `status`: runtime snapshot across projects/repos/tasks.
 - `wait`: polling for long-running work.
 
@@ -61,6 +62,9 @@ enji-guard report show REPO AUDIT [--json]
 enji-guard schedule list REPO
 enji-guard schedule set REPO AUDIT --freq FREQ [--day DAY...] [--at auto|HH:MM|HH:MM@TZ]
 enji-guard schedule disable REPO AUDIT
+
+enji-guard email list [REPO]
+enji-guard email set [REPO] [--manual on|off|keep] [--auto on|off|keep]
 ```
 
 Project filtering is a global option:
@@ -68,6 +72,7 @@ Project filtering is a global option:
 ```text
 enji-guard --project NAME_OR_ID status
 enji-guard --project NAME_OR_ID audit start OWNER/NAME --all
+enji-guard --project NAME_OR_ID email set --auto off
 ```
 
 CLI output is human-readable by default. Use `--json` only when automation needs
@@ -80,11 +85,15 @@ the raw machine contract.
 - Read commands may omit `--project`; they show all projects or all matching
   repos.
 - Write commands may omit `--project` only when the target repo is unambiguous.
+- `email set` without `REPO` is an explicit batch write over every repo in the
+  current project filter; without `--project`, it spans all projects.
 - Ambiguous targets fail with `BAD_SELECTOR` and include candidates.
 - There is no default project.
 - No fuzzy matching in write commands.
 - `report list` is compact inventory; `report read` returns report content.
 - `report read REPO` defaults to all currently ready reports for that repo.
+- `email` preferences apply to all six report audits. `--manual` controls mail
+  after manual runs; `--auto` controls mail after scheduled automatic runs.
 - Repo inventory/status sorting is optional. `weakest` and `overall` sort lower
   scores first and leave repos without scores last.
 

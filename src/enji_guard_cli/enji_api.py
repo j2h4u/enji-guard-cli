@@ -394,6 +394,40 @@ def audit_summary_snapshot(
     )
 
 
+def audit_email_preferences(
+    repo_id: str,
+    action_key: str,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> JsonObjectPayload:
+    return _run_api_get(
+        auth_file,
+        client,
+        path=f"/api/ux/repos/{_quote_path(repo_id)}/audits/{_quote_path(action_key)}/email-preferences",
+        operation="email list",
+    )
+
+
+def put_audit_email_preferences(
+    repo_id: str,
+    action_key: str,
+    patch: JsonObjectPayload,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> JsonObjectPayload:
+    return _run_api_request(
+        auth_file,
+        client,
+        ApiRequestSpec(
+            method="PUT",
+            path=f"/api/ux/repos/{_quote_path(repo_id)}/audits/{_quote_path(action_key)}/email-preferences",
+            operation="email set",
+            parser=_parse_json_object_payload,
+            json_body=cast(EnjiJsonValue, patch),
+        ),
+    )
+
+
 def improvement_jobs(
     repo_id: str,
     auth_file: Path | None = None,

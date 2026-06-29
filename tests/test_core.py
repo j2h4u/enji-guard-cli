@@ -8,6 +8,7 @@ from enji_guard_cli.core import (
     AUDITS,
     OPERATION_SPECS,
     AuditAlias,
+    EmailPreferenceUpdate,
     OperationName,
     audit_catalog,
     current_repo,
@@ -964,6 +965,64 @@ def test_read_reports_for_repo_can_read_all_report_audits(monkeypatch: MonkeyPat
         "dead-code",
     ]
     assert all(report.get("current_head_sha") == "head_2" for report in reports if isinstance(report, dict))
+
+
+def test_set_email_preferences_fans_out_over_project_repos_and_report_audits(monkeypatch: MonkeyPatch) -> None:
+    captured: list[tuple[str, str, object]] = []
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1", "name": "Pets"}]})
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda project_id: {
+            "project": {"id": project_id, "name": "Pets"},
+            "repos": [
+                {
+                    "id": "repo_1",
+                    "githubOwner": "j2h4u",
+                    "githubName": "enji-guard-cli",
+                    "connected": True,
+                    "reconDone": True,
+                },
+                {
+                    "id": "repo_2",
+                    "githubOwner": "j2h4u",
+                    "githubName": "watchdirs",
+                    "connected": True,
+                    "reconDone": True,
+                },
+            ],
+        },
+    )
+
+    def fake_put(repo_id: str, action_key: str, patch: object) -> dict[str, object]:
+        captured.append((repo_id, action_key, patch))
+        return {"resolved": {"manualRunCompletion": True, "scheduledRunCompletion": False}}
+
+    monkeypatch.setattr(core, "run_put_audit_email_preferences", fake_put)
+
+    payload = core.set_email_preferences(None, "Pets", EmailPreferenceUpdate(None, False))
+
+    preferences = payload["preferences"]
+    assert isinstance(preferences, list)
+    assert payload["summary"] == {"repo_count": 2, "audit_count": 12}
+    assert len(captured) == 12
+    assert captured[0] == ("repo_1", "audit.security", {"scheduledRunCompletion": False})
+    assert captured[-1] == ("repo_2", "audit.dead-code", {"scheduledRunCompletion": False})
+    assert preferences[0] == {
+        "project_id": "project_1",
+        "project_name": "Pets",
+        "repo_id": "repo_1",
+        "github_repo": "j2h4u/enji-guard-cli",
+        "audit": "security",
+        "action_key": "audit.security",
+        "manual_run_completion": True,
+        "scheduled_run_completion": False,
+    }
+
+
+def test_set_email_preferences_rejects_empty_patch() -> None:
+    with pytest.raises(ValueError, match="pass --manual or --auto"):
+        core.set_email_preferences("j2h4u/enji-guard-cli", None, EmailPreferenceUpdate(None, None))
 
 
 def test_disable_schedule_for_repo_builds_disabled_default_when_job_is_missing(monkeypatch: MonkeyPatch) -> None:
