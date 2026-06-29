@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 from pytest import MonkeyPatch
 
@@ -17,7 +15,6 @@ from enji_guard_cli.core import (
     OPERATION_SPECS,
     EmailPreferenceUpdate,
     OperationName,
-    current_repo,
     operation_catalog,
     resolve_operation,
     resolve_operation_spec,
@@ -107,22 +104,6 @@ def test_audit_catalog_is_derived_from_canonical_audit_definitions() -> None:
 
 def test_report_audit_alias_enum_matches_report_registry() -> None:
     assert tuple(AuditAlias(alias.value) for alias in ReportAuditAlias) == REPORT_AUDIT_ALIASES
-
-
-def test_current_repo_detects_github_origin(tmp_path: Path) -> None:
-    git_dir = tmp_path / ".git"
-    git_dir.mkdir()
-    (git_dir / "config").write_text(
-        '[remote "origin"]\n\turl = git@github.com:j2h4u/enji-guard-cli.git\n',
-        encoding="utf-8",
-    )
-
-    payload = current_repo(tmp_path)
-
-    assert payload["git_root"] == str(tmp_path)
-    assert payload["github_owner"] == "j2h4u"
-    assert payload["github_name"] == "enji-guard-cli"
-    assert payload["github_repo"] == "j2h4u/enji-guard-cli"
 
 
 def test_set_schedule_normalizes_json_payload(monkeypatch: MonkeyPatch) -> None:

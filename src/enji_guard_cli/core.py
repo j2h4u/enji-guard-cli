@@ -1,5 +1,4 @@
 import asyncio
-import configparser
 import inspect
 import time
 from collections.abc import Awaitable, Callable
@@ -9,7 +8,6 @@ from enum import StrEnum
 from importlib.metadata import version
 from pathlib import Path
 from typing import Literal, Never, TypedDict, cast
-from urllib.parse import urlsplit
 
 from enji_guard_cli.audits import REPORT_AUDITS, AuditAlias, AuditDefinition, AuditPayload
 from enji_guard_cli.audits import audit_catalog as registry_audit_catalog
@@ -58,9 +56,7 @@ type OperationResult = object | Awaitable[object]
 type OperationExecutor = Callable[..., OperationResult]
 type RepoSort = Literal["default", "name", "weakest", "overall", "latest-report"]
 
-GITHUB_HOST = "github.com"
-REMOTE_ORIGIN_SECTION = 'remote "origin"'
-MIN_GITHUB_SLUG_PARTS = 2
+OWNER_NAME_SLUG_PARTS = 2
 REPORT_ARTIFACT_SCHEMA = "upfront.audit.summary"
 RECON_REPORT_SCHEMA = "upfront.recon.report"
 AUDIT_REPORT_SCHEMA = "upfront.audit.report"
@@ -77,15 +73,6 @@ SCORE_POOR_THRESHOLD = 40.0
 SCORE_FAIR_THRESHOLD = 60.0
 SCORE_GOOD_THRESHOLD = 75.0
 SCORE_EXCELLENT_THRESHOLD = 90.0
-
-
-class CurrentRepoPayload(TypedDict):
-    path: str
-    git_root: str | None
-    remote_url: str | None
-    github_owner: str | None
-    github_name: str | None
-    github_repo: str | None
 
 
 class AuditRunBatchItem(TypedDict):
@@ -384,23 +371,6 @@ def resolve_operation_result[T](result: T | Awaitable[T]) -> T:
     return result
 
 
-def current_repo(path: Path | None = None) -> CurrentRepoPayload:
-    start_path = (path if path is not None else Path.cwd()).expanduser().resolve()
-    search_path = start_path.parent if start_path.is_file() else start_path
-    git_root, config_path = _find_git_config(search_path)
-    remote_url = _origin_remote_url(config_path) if config_path is not None else None
-    github_owner, github_name = _github_owner_name(remote_url)
-    github_repo = f"{github_owner}/{github_name}" if github_owner is not None and github_name is not None else None
-    return {
-        "path": str(start_path),
-        "git_root": str(git_root) if git_root is not None else None,
-        "remote_url": remote_url,
-        "github_owner": github_owner,
-        "github_name": github_name,
-        "github_repo": github_repo,
-    }
-
-
 def list_projects() -> JsonObjectPayload:
     return run_projects()
 
@@ -493,12 +463,11 @@ def runtime_status(repo: str | None, project: str | None, sort: RepoSort = DEFAU
     return _repo_status_all_payload(projects)
 
 
-def resolve_repo(repo: str | None, project: str | None) -> RepoResolvePayload:
-    selector = repo if repo is not None else _current_repo_selector()
-    matches = _matching_repo_targets(selector, _selected_project_ids(project))
+def resolve_repo(repo: str, project: str | None) -> RepoResolvePayload:
+    matches = _matching_repo_targets(repo, _selected_project_ids(project))
     if not matches:
-        _raise_bad_selector(f"repo selector matched no repos: {selector}")
-    return {"selector": selector, "resolved": len(matches) == 1, "matches": matches}
+        _raise_bad_selector(f"repo selector matched no repos: {repo}")
+    return {"selector": repo, "resolved": len(matches) == 1, "matches": matches}
 
 
 def wait_for_audit_completion(
@@ -774,65 +743,9 @@ def resolve_operation(name: OperationName) -> OperationPayload:
     return operation_payload(resolve_operation_spec(name))
 
 
-def _find_git_config(start_path: Path) -> tuple[Path | None, Path | None]:
-    for candidate in (start_path, *start_path.parents):
-        dot_git = candidate / ".git"
-        if dot_git.is_dir():
-            return candidate, dot_git / "config"
-        if dot_git.is_file():
-            return candidate, _config_from_gitdir_file(dot_git)
-    return None, None
-
-
-def _config_from_gitdir_file(dot_git: Path) -> Path | None:
-    raw_value = dot_git.read_text(encoding="utf-8").strip()
-    if not raw_value.startswith("gitdir:"):
-        return None
-    git_dir = Path(raw_value.split(":", 1)[1].strip())
-    if not git_dir.is_absolute():
-        git_dir = dot_git.parent / git_dir
-    common_dir = _common_git_dir(git_dir)
-    return common_dir / "config"
-
-
-def _common_git_dir(git_dir: Path) -> Path:
-    common_dir_file = git_dir / "commondir"
-    if not common_dir_file.exists():
-        return git_dir
-    raw_common_dir = common_dir_file.read_text(encoding="utf-8").strip()
-    common_dir = Path(raw_common_dir)
-    if common_dir.is_absolute():
-        return common_dir
-    return git_dir / common_dir
-
-
-def _origin_remote_url(config_path: Path | None) -> str | None:
-    if config_path is None or not config_path.exists():
-        return None
-    parser = configparser.ConfigParser()
-    parser.read(config_path, encoding="utf-8")
-    if not parser.has_section(REMOTE_ORIGIN_SECTION):
-        return None
-    remote_url = parser.get(REMOTE_ORIGIN_SECTION, "url", fallback=None)
-    return remote_url or None
-
-
-def _github_owner_name(remote_url: str | None) -> tuple[str | None, str | None]:
-    if remote_url is None:
-        return None, None
-    normalized = remote_url.removesuffix(".git")
-    if normalized.startswith(f"git@{GITHUB_HOST}:"):
-        return _owner_name_from_slug(normalized.split(":", 1)[1])
-
-    parsed = urlsplit(normalized)
-    if parsed.hostname != GITHUB_HOST:
-        return None, None
-    return _owner_name_from_slug(parsed.path.strip("/"))
-
-
 def _owner_name_from_slug(slug: str) -> tuple[str | None, str | None]:
     parts = slug.split("/")
-    if len(parts) < MIN_GITHUB_SLUG_PARTS:
+    if len(parts) < OWNER_NAME_SLUG_PARTS:
         return None, None
     owner = parts[0]
     name = parts[1]
@@ -1223,13 +1136,6 @@ def _project_candidate(project_ref: ProjectRef) -> str:
     if name is None:
         return str(project_ref["id"])
     return f"{name} ({project_ref['id']})"
-
-
-def _current_repo_selector() -> str:
-    github_repo = current_repo()["github_repo"]
-    if github_repo is None:
-        _raise_bad_selector("current directory is not a GitHub repository")
-    return github_repo
 
 
 def _parse_github_repo(github_repo: str) -> tuple[str, str]:

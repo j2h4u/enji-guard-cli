@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+
 import argparse
 import json
 from collections.abc import Callable, Sequence

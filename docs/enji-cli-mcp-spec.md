@@ -31,7 +31,7 @@ frontend endpoint. CLI и MCP не содержат Enji/auth/business logic.
 ## Основные Нouns
 
 - `project`: inventory Enji projects.
-- `repo`: local/current repo, repo listing, selector resolution, connection.
+- `repo`: GitHub repo listing, selector resolution, and connection.
 - `status`: runtime snapshot across projects/repos/tasks.
 - `recon`: preliminary diagnostics, separate from report audits.
 - `audit`: report-producing checks.
@@ -65,9 +65,8 @@ enji-guard auth import-token --stdin
 
 enji-guard project list
 
-enji-guard repo current
 enji-guard repo list [--sort default|name|weakest|overall|latest-report]
-enji-guard repo resolve [REPO]
+enji-guard repo resolve REPO
 enji-guard repo connect OWNER/NAME
 
 enji-guard status [REPO] [--sort default|name|weakest|overall|latest-report]
