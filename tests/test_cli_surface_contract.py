@@ -23,7 +23,6 @@ EXPECTED_VISIBLE_COMMANDS = {
     ("report", "read"),
     ("report", "show"),
     ("run",),
-    ("schedule", "disable"),
     ("schedule", "list"),
     ("schedule", "set"),
     ("status",),

@@ -14,22 +14,20 @@ from enji_guard_cli.core import (
     EmailPreferenceUpdate,
     OperationName,
     OperationResult,
-    ScheduleUpdate,
+    ScheduleSettingsUpdate,
     connect_repo,
-    disable_schedule_for_repo,
     list_email_preferences,
     list_project_inventory,
     list_projects,
-    list_schedules_for_repo,
+    list_schedule_settings,
     package_version,
     read_reports_for_repo,
     resolve_operation_result,
     resolve_operation_spec,
     resolve_repo,
     runtime_status,
-    schedule_payload,
     set_email_preferences,
-    set_schedule_for_repo,
+    set_schedule_settings,
     show_report_for_repo,
     start_recon,
     start_report_audits,
@@ -75,7 +73,6 @@ CATALOG_AUDIT_OPERATION = resolve_operation_spec(OperationName.CATALOG_AUDIT)
 ACCESS_OPERATION = resolve_operation_spec(OperationName.ACCESS)
 REPORTS_LIST_OPERATION = resolve_operation_spec(OperationName.REPORTS_LIST)
 AUTH_STATUS_OPERATION = resolve_operation_spec(OperationName.AUTH_STATUS)
-SCHEDULE_SET_TARGET_PARTS = 2
 
 get_access = ACCESS_OPERATION.execute
 get_reports_list = REPORTS_LIST_OPERATION.execute
@@ -197,6 +194,36 @@ def _echo_email_preferences_table(payload: object) -> None:
         for row in (_object_dict(item) for item in _object_list(_object_dict(payload).get("preferences")))
     ]
     _echo_table(headers, rows, "No email preferences.")
+
+
+def _echo_schedule_settings_table(payload: object) -> None:
+    schedule_rows = [_object_dict(item) for item in _object_list(_object_dict(payload).get("schedules"))]
+    headers = _schedule_settings_headers(schedule_rows)
+    rows = [_schedule_settings_row(row, include_status="status" in headers) for row in schedule_rows]
+    _echo_table(headers, rows, "No schedules.")
+
+
+def _schedule_settings_headers(rows: list[dict[str, object]]) -> tuple[str, ...]:
+    base = ("project", "repo", "audit", "enabled", "freq", "days", "at", "timezone")
+    if any("status" in row for row in rows):
+        return (*base, "status")
+    return base
+
+
+def _schedule_settings_row(row: dict[str, object], *, include_status: bool) -> tuple[str, ...]:
+    base = (
+        _text_cell(row.get("project_name"), fallback=_text_cell(row.get("project_id"))),
+        _text_cell(row.get("github_repo"), fallback=_text_cell(row.get("repo_id"))),
+        _text_cell(row.get("audit")),
+        _text_cell(row.get("enabled")),
+        _text_cell(row.get("frequency")),
+        _days_cell(row.get("days_of_week")),
+        _schedule_at_cell(row),
+        _text_cell(row.get("timezone")),
+    )
+    if include_status:
+        return (*base, _text_cell(row.get("status")))
+    return base
 
 
 def _echo_auth_status(payload: object) -> None:
@@ -397,6 +424,19 @@ def _date_cell(value: object) -> str:
     if not isinstance(value, str) or not value:
         return "-"
     return value[:10]
+
+
+def _days_cell(value: object) -> str:
+    days = [item for item in _object_list(value) if isinstance(item, str)]
+    if not days:
+        return "-"
+    return ",".join(days)
+
+
+def _schedule_at_cell(row: dict[str, object]) -> str:
+    if row.get("schedule_time_source") == "auto":
+        return "auto"
+    return _text_cell(row.get("schedule_time"))
 
 
 def _score_cell(value: object) -> str:
@@ -689,64 +729,51 @@ def audit_start(
     )
 
 
-@schedule_app.command("list", help="List report audit schedules for a repository.")
+@schedule_app.command("list", help="List automatic report audit schedules.")
 def schedule_list(
-    repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    _run_human_or_json_command(lambda: list_schedules_for_repo(repo, _selected_project()), _json_output(json_output))
-
-
-@schedule_app.command("set", help="Enable or update a report audit schedule.")
-def schedule_set(
-    repo_and_audit: Annotated[
-        list[str],
-        typer.Argument(help="Repo id or owner/name followed by canonical report audit alias."),
-    ],
-    frequency: Annotated[
-        Literal["daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"],
-        typer.Option("--freq", help="Schedule frequency."),
-    ],
-    days: Annotated[
-        list[str] | None,
-        typer.Option("--day", help="Repeatable day: mon,tue,wed,thu,fri,sat,sun."),
+    repo: Annotated[
+        str | None,
+        typer.Argument(help="Optional repo id or owner/name. Defaults to every repo in scope."),
     ] = None,
-    at: Annotated[str, typer.Option("--at", help="auto, HH:MM, or HH:MM@TZ.")] = "auto",
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    def action() -> OperationResult:
-        repo, audit = _schedule_set_target(repo_and_audit)
-        return set_schedule_for_repo(
-            repo,
-            audit,
-            _selected_project(),
-            schedule_payload(
-                ScheduleUpdate(
-                    enabled=True,
-                    auto_fix=False,
-                    frequency=frequency,
-                    days_of_week=_schedule_days(frequency, days),
-                    schedule_time=_schedule_time(at),
-                    timezone=_schedule_timezone(at),
-                )
-            ),
-        )
-
     _run_human_or_json_command(
-        action,
+        lambda: list_schedule_settings(repo, _selected_project()),
         _json_output(json_output),
+        _echo_schedule_settings_table,
     )
 
 
-@schedule_app.command("disable", help="Disable a report audit schedule.")
-def schedule_disable(
-    repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
-    audit: Annotated[ReportAuditAlias, typer.Argument(help="Canonical report audit alias.")],
+@schedule_app.command("set", help="Batch update automatic report audit schedules.")
+def schedule_set(
+    repo: Annotated[
+        str | None,
+        typer.Argument(help="Optional repo id or owner/name. Without REPO, pass --project to batch one project."),
+    ] = None,
+    enabled: Annotated[
+        Literal["on", "off", "keep"],
+        typer.Option("--enabled", help="Enable or disable automatic scheduled checks."),
+    ] = "keep",
+    frequency: Annotated[
+        Literal["daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"] | None,
+        typer.Option("--freq", help="Schedule frequency."),
+    ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     _run_human_or_json_command(
-        lambda: disable_schedule_for_repo(repo, _report_audit(audit), _selected_project()),
+        lambda: set_schedule_settings(
+            repo,
+            _selected_project(),
+            ScheduleSettingsUpdate(
+                enabled=_preference_switch(enabled),
+                frequency=frequency,
+                days_of_week=None,
+                schedule_time=None,
+                timezone=None,
+            ),
+        ),
         _json_output(json_output),
+        _echo_schedule_settings_table,
     )
 
 
@@ -963,36 +990,6 @@ def _report_item_markdown(item: object) -> str:
     if not isinstance(audit, str):
         raise ValueError("report item does not contain audit")
     return f"<!-- enji-report audit={audit} -->\n\n{_report_markdown(item).strip()}"
-
-
-def _schedule_days(frequency: str, days: list[str] | None) -> list[str]:
-    if days is not None:
-        return days
-    if frequency == "daily":
-        return ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-    return ["mon", "tue", "wed", "thu", "fri"]
-
-
-def _schedule_time(at: str) -> str:
-    return at.split("@", 1)[0]
-
-
-def _schedule_timezone(at: str) -> str:
-    parts = at.split("@", 1)
-    if len(parts) == 1:
-        return "UTC"
-    return parts[1]
-
-
-def _schedule_set_target(values: list[str]) -> tuple[str, AuditAlias]:
-    if len(values) != SCHEDULE_SET_TARGET_PARTS:
-        raise ValueError("schedule set expects REPO AUDIT")
-    repo, audit_value = values
-    try:
-        return repo, _report_audit(ReportAuditAlias(audit_value))
-    except ValueError:
-        valid = ", ".join(audit.value for audit in ReportAuditAlias)
-        raise ValueError(f"unknown report audit {audit_value!r}; expected one of: {valid}") from None
 
 
 def _preference_switch(value: Literal["on", "off", "keep"]) -> bool | None:

@@ -55,6 +55,7 @@ from enji_guard_cli.errors import EnjiApiError
 type OperationResult = object | Awaitable[object]
 type OperationExecutor = Callable[..., OperationResult]
 type RepoSort = Literal["default", "name", "weakest", "overall", "latest-report"]
+type ScheduleFrequency = Literal["daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"]
 
 OWNER_NAME_SLUG_PARTS = 2
 REPORT_ARTIFACT_SCHEMA = "upfront.audit.summary"
@@ -66,6 +67,14 @@ DEFAULT_REPO_SORT: RepoSort = "default"
 TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "canceled", "cancelled", "skipped"})
 WORKDAY_SCHEDULE_DAYS = ("mon", "tue", "wed", "thu", "fri")
 ALL_SCHEDULE_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+DEFAULT_SCHEDULE_DAYS_BY_FREQUENCY: dict[ScheduleFrequency, tuple[str, ...]] = {
+    "daily": ALL_SCHEDULE_DAYS,
+    "workdays": WORKDAY_SCHEDULE_DAYS,
+    "weekly-3x": ("mon", "wed", "fri"),
+    "weekly-2x": ("mon", "thu"),
+    "weekly": ("mon",),
+    "monthly": ("mon",),
+}
 SCHEDULE_TIME_PARTS = 2
 MAX_SCHEDULE_HOUR = 23
 MAX_SCHEDULE_MINUTE = 59
@@ -268,10 +277,19 @@ class OperationSpec:
 class ScheduleUpdate:
     enabled: bool
     auto_fix: bool
-    frequency: str
+    frequency: ScheduleFrequency
     days_of_week: list[str]
     schedule_time: str
     timezone: str
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleSettingsUpdate:
+    enabled: bool | None
+    frequency: ScheduleFrequency | None
+    days_of_week: list[str] | None
+    schedule_time: str | None
+    timezone: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -661,9 +679,14 @@ def list_schedules(repo_id: str) -> JsonObjectPayload:
     return run_improvement_jobs(repo_id)
 
 
-def list_schedules_for_repo(repo: str, project: str | None) -> dict[str, object]:
-    target = _resolve_single_repo_target(repo, project)
-    return _targeted_run_payload(target, list_schedules(target["repo_id"]))
+def list_schedule_settings(repo: str | None, project: str | None) -> JsonObjectPayload:
+    rows = [
+        _schedule_setting_row(target, audit, _schedule_job_by_kind(jobs, audit.job_kind))
+        for target in _selected_repo_targets(repo, project)
+        for jobs in (list_schedules(target["repo_id"]),)
+        for audit in REPORT_AUDITS
+    ]
+    return _schedule_settings_payload(rows)
 
 
 def set_schedule(
@@ -678,20 +701,19 @@ def set_schedule(
     return run_put_improvement_job(repo_id, job_kind, _json_object_payload(payload))
 
 
-def set_schedule_for_repo(
-    repo: str,
-    audit: AuditAlias,
+def set_schedule_settings(
+    repo: str | None,
     project: str | None,
-    payload: object,
-) -> dict[str, object]:
-    target = _resolve_single_repo_target(repo, project)
-    return _targeted_run_payload(target, set_schedule(target["repo_id"], audit, payload))
-
-
-def disable_schedule_for_repo(repo: str, audit: AuditAlias, project: str | None) -> dict[str, object]:
-    target = _resolve_single_repo_target(repo, project)
-    payload = _disabled_schedule_payload(target["repo_id"], audit)
-    return _targeted_run_payload(target, set_schedule(target["repo_id"], audit, payload))
+    update: ScheduleSettingsUpdate,
+) -> JsonObjectPayload:
+    _validate_schedule_settings_update(repo, project, update)
+    rows = [
+        _set_schedule_setting(target, audit, jobs, update)
+        for target in _selected_repo_targets(repo, project)
+        for jobs in (list_schedules(target["repo_id"]),)
+        for audit in REPORT_AUDITS
+    ]
+    return _schedule_settings_payload(rows)
 
 
 def wait_for_work(
@@ -1487,10 +1509,188 @@ def _email_preference_repo_count(rows: list[dict[str, JsonValue]]) -> int:
     return len({repo_id for row in rows if isinstance(repo_id := row.get("repo_id"), str)})
 
 
+def _validate_schedule_settings_update(
+    repo: str | None,
+    project: str | None,
+    update: ScheduleSettingsUpdate,
+) -> None:
+    if repo is None and project is None:
+        raise ValueError("schedule set without REPO requires --project")
+    if (
+        update.enabled is None
+        and update.frequency is None
+        and update.days_of_week is None
+        and update.schedule_time is None
+    ):
+        raise ValueError("pass --enabled or --freq")
+    if update.days_of_week is not None and update.frequency is None:
+        raise ValueError("pass --freq when overriding --day")
+    if update.timezone is not None and update.schedule_time is None:
+        raise ValueError("pass --at when setting timezone")
+
+
+def _set_schedule_setting(
+    target: RepoTargetPayload,
+    audit: AuditDefinition,
+    jobs: JsonObjectPayload,
+    update: ScheduleSettingsUpdate,
+) -> dict[str, JsonValue]:
+    existing = _schedule_job_by_kind(jobs, audit.job_kind)
+    desired = _schedule_settings_payload_for_job(existing, update)
+    if desired is None:
+        return _schedule_setting_row(target, audit, existing, changed=False, status="unchanged")
+    if existing is not None and _schedule_effective_state(existing) == _schedule_effective_state(desired):
+        return _schedule_setting_row(target, audit, existing, changed=False, status="unchanged")
+    response = set_schedule(target["repo_id"], audit.alias, desired)
+    job = _json_dict(response.get("job")) or desired
+    return _schedule_setting_row(target, audit, job, changed=True, status="changed")
+
+
+def _schedule_settings_payload_for_job(
+    existing: JsonObjectPayload | None,
+    update: ScheduleSettingsUpdate,
+) -> JsonObjectPayload | None:
+    if existing is None and update.enabled is not True:
+        return None
+    existing_frequency = _json_str(existing.get("frequency")) if existing is not None else None
+    frequency = _schedule_frequency(update.frequency or existing_frequency)
+    if frequency is None:
+        frequency = "weekly"
+    schedule_time = _selected_schedule_time(existing, update)
+    existing_timezone = _json_str(existing.get("timezone")) if existing is not None else None
+    timezone = update.timezone or existing_timezone
+    base = dict(existing) if existing is not None else {}
+    desired = {
+        **base,
+        **_schedule_payload(
+            ScheduleUpdate(
+                enabled=_schedule_enabled(existing, update),
+                auto_fix=_schedule_auto_fix(existing),
+                frequency=frequency,
+                days_of_week=_selected_schedule_days(existing, update, frequency),
+                schedule_time=schedule_time,
+                timezone=timezone or "UTC",
+            )
+        ),
+        "autofixVariantKey": _json_str(base.get("autofixVariantKey")) or "default",
+    }
+    if update.schedule_time == "auto":
+        desired.pop("scheduleTime", None)
+    return desired
+
+
+def _schedule_enabled(existing: JsonObjectPayload | None, update: ScheduleSettingsUpdate) -> bool:
+    if update.enabled is not None:
+        return update.enabled
+    if existing is None:
+        return False
+    return _json_bool(existing.get("enabled")) is True
+
+
+def _schedule_auto_fix(existing: JsonObjectPayload | None) -> bool:
+    if existing is None:
+        return False
+    return _json_bool(existing.get("autoFix")) is True
+
+
+def _selected_schedule_days(
+    existing: JsonObjectPayload | None,
+    update: ScheduleSettingsUpdate,
+    frequency: ScheduleFrequency,
+) -> list[str]:
+    if update.days_of_week is not None:
+        return update.days_of_week
+    if update.frequency is not None or existing is None:
+        return list(DEFAULT_SCHEDULE_DAYS_BY_FREQUENCY[frequency])
+    return _json_list_of_str(existing.get("daysOfWeek")) or list(DEFAULT_SCHEDULE_DAYS_BY_FREQUENCY[frequency])
+
+
+def _selected_schedule_time(existing: JsonObjectPayload | None, update: ScheduleSettingsUpdate) -> str:
+    if update.schedule_time is not None:
+        return update.schedule_time
+    if existing is not None and _json_str(existing.get("scheduleTimeSource")) == "user":
+        return _json_str(existing.get("scheduleTime")) or "auto"
+    return "auto"
+
+
+def _schedule_setting_row(
+    target: RepoTargetPayload,
+    audit: AuditDefinition,
+    job: JsonObjectPayload | None,
+    *,
+    changed: bool | None = None,
+    status: str | None = None,
+) -> dict[str, JsonValue]:
+    row: dict[str, JsonValue] = {
+        "project_id": target["project_id"],
+        "project_name": target["project_name"],
+        "repo_id": target["repo_id"],
+        "github_repo": target["github_repo"],
+        "audit": audit.alias.value,
+        "job_kind": audit.job_kind,
+        "configured": job is not None,
+        "enabled": False,
+        "frequency": None,
+        "days_of_week": [],
+        "schedule_time": None,
+        "schedule_time_source": None,
+        "timezone": None,
+        "auto_fix": False,
+    }
+    if job is not None:
+        row.update(_schedule_setting_fields(job))
+    if changed is not None:
+        row["changed"] = changed
+    if status is not None:
+        row["status"] = status
+    return row
+
+
+def _schedule_setting_fields(job: JsonObjectPayload) -> dict[str, JsonValue]:
+    schedule_time_source = _json_str(job.get("scheduleTimeSource"))
+    return {
+        "enabled": _json_bool(job.get("enabled")) is True,
+        "frequency": _schedule_frequency(_json_str(job.get("frequency"))),
+        "days_of_week": _json_str_values(_json_list_of_str(job.get("daysOfWeek"))),
+        "schedule_time": _json_str(job.get("scheduleTime")),
+        "schedule_time_source": schedule_time_source,
+        "timezone": _json_str(job.get("timezone")),
+        "auto_fix": _json_bool(job.get("autoFix")) is True,
+    }
+
+
+def _schedule_settings_payload(rows: list[dict[str, JsonValue]]) -> JsonObjectPayload:
+    schedules = [cast(JsonValue, row) for row in rows]
+    return {
+        "schedules": schedules,
+        "summary": {
+            "repo_count": _email_preference_repo_count(rows),
+            "audit_count": len(rows),
+            "enabled_count": sum(1 for row in rows if row.get("enabled") is True),
+            "changed_count": sum(1 for row in rows if row.get("changed") is True),
+            "unchanged_count": sum(1 for row in rows if row.get("changed") is False),
+        },
+    }
+
+
+def _schedule_effective_state(job: JsonObjectPayload) -> JsonObjectPayload:
+    return {
+        "enabled": _json_bool(job.get("enabled")) is True,
+        "autoFix": _json_bool(job.get("autoFix")) is True,
+        "autofixVariantKey": _json_str(job.get("autofixVariantKey")) or "default",
+        "frequency": _schedule_frequency(_json_str(job.get("frequency"))) or "weekly",
+        "daysOfWeek": _json_str_values(_json_list_of_str(job.get("daysOfWeek"))),
+        "scheduleTime": _json_str(job.get("scheduleTime")),
+        "scheduleTimeSource": _json_str(job.get("scheduleTimeSource")) or "auto",
+        "timezone": _json_str(job.get("timezone")) or "UTC",
+    }
+
+
 def _schedule_payload(
     update: ScheduleUpdate,
 ) -> JsonObjectPayload:
     _validate_days_of_week(update.days_of_week)
+    _validate_days_for_frequency(update.frequency, update.days_of_week)
     payload: JsonObjectPayload = {
         "enabled": update.enabled,
         "autoFix": update.auto_fix,
@@ -1503,37 +1703,6 @@ def _schedule_payload(
     if update.schedule_time != "auto":
         payload["scheduleTime"] = _validated_schedule_time(update.schedule_time)
     return payload
-
-
-def schedule_payload(update: ScheduleUpdate) -> JsonObjectPayload:
-    return _schedule_payload(update)
-
-
-def _disabled_schedule_payload(repo_id: str, audit: AuditAlias) -> JsonObjectPayload:
-    resolved = registry_resolve_audit(audit)
-    job_kind = resolved.job_kind
-    existing = _schedule_job_by_kind(list_schedules(repo_id), job_kind)
-    if existing is None:
-        return _schedule_payload(
-            ScheduleUpdate(
-                enabled=False,
-                auto_fix=False,
-                frequency="weekly",
-                days_of_week=list(WORKDAY_SCHEDULE_DAYS),
-                schedule_time="auto",
-                timezone="UTC",
-            )
-        )
-    return {
-        **existing,
-        "enabled": False,
-        "autoFix": bool(existing.get("autoFix")) if isinstance(existing.get("autoFix"), bool) else False,
-        "autofixVariantKey": _json_str(existing.get("autofixVariantKey")) or "default",
-        "frequency": _json_str(existing.get("frequency")) or "weekly",
-        "daysOfWeek": _json_str_values(_json_list_of_str(existing.get("daysOfWeek")) or list(WORKDAY_SCHEDULE_DAYS)),
-        "scheduleTimeSource": _json_str(existing.get("scheduleTimeSource")) or "auto",
-        "timezone": _json_str(existing.get("timezone")) or "UTC",
-    }
 
 
 def _schedule_job_by_kind(payload: JsonObjectPayload, job_kind: str | None) -> JsonObjectPayload | None:
@@ -1551,6 +1720,21 @@ def _validate_days_of_week(days_of_week: list[str]) -> None:
     invalid_days = [day for day in days_of_week if day not in ALL_SCHEDULE_DAYS]
     if invalid_days:
         raise ValueError(f"unknown day(s): {', '.join(invalid_days)}")
+    duplicate_days = sorted({day for day in days_of_week if days_of_week.count(day) > 1})
+    if duplicate_days:
+        raise ValueError(f"duplicate day(s): {', '.join(duplicate_days)}")
+
+
+def _validate_days_for_frequency(frequency: ScheduleFrequency, days_of_week: list[str]) -> None:
+    expected_count = len(DEFAULT_SCHEDULE_DAYS_BY_FREQUENCY[frequency])
+    if len(days_of_week) != expected_count:
+        raise ValueError(f"{frequency} expects {expected_count} day(s)")
+
+
+def _schedule_frequency(value: str | None) -> ScheduleFrequency | None:
+    if value in DEFAULT_SCHEDULE_DAYS_BY_FREQUENCY:
+        return cast(ScheduleFrequency, value)
+    return None
 
 
 def _validated_schedule_time(value: str) -> str:

@@ -81,9 +81,8 @@ enji-guard report list [--selector SELECTOR]
 enji-guard report read REPO [AUDIT...] [--all] [--json]
 enji-guard report show REPO AUDIT [--json]
 
-enji-guard schedule list REPO
-enji-guard schedule set REPO AUDIT --freq FREQ [--day DAY...] [--at auto|HH:MM|HH:MM@TZ]
-enji-guard schedule disable REPO AUDIT
+enji-guard schedule list [REPO]
+enji-guard schedule set [REPO] --enabled on|off|keep [--freq FREQ]
 
 enji-guard email list [REPO]
 enji-guard email set [REPO] [--manual on|off|keep] [--auto on|off|keep]
@@ -106,6 +105,8 @@ automation.
 - Repo selectors accept Enji repo id or GitHub `owner/name`.
 - Read commands can omit project and show all projects/repos.
 - Write commands can omit project only when the repo target is unique.
+- `schedule set` without `REPO` batches over the current `--project` only. It
+  refuses unscoped account-wide writes.
 - `email set` without `REPO` is a batch write over every repo in the current
   project filter; without `--project`, it spans all projects.
 - Ambiguous targets return `BAD_SELECTOR` with candidates.
@@ -119,6 +120,13 @@ Email preferences are separate from schedules. `manualRunCompletion` controls
 mail after manual report runs; `scheduledRunCompletion` controls mail after
 scheduled automatic runs. CLI exposes those as `--manual` and `--auto` and
 applies them to all report audits for each selected repo.
+
+## Automatic Schedules
+
+`schedule` controls automatic report-audit runs, not raw Enji
+`improvement-jobs`. `schedule list [REPO]` shows one table row per repo/report
+audit. `schedule set [REPO] --enabled on|off|keep [--freq FREQ]` updates all
+report audits in the selected repo/project scope. Recon is not schedulable here.
 
 ## Long-Running Work
 
