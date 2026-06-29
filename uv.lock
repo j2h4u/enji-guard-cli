@@ -255,7 +255,7 @@ requires-dist = [
     { name = "aiometer", specifier = ">=1,<2" },
     { name = "httpx", specifier = ">=0.28.1,<1" },
     { name = "httpx-retries", specifier = ">=0.4,<1" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1,<2" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.28.1,<2" },
     { name = "platformdirs", specifier = ">=4,<5" },
     { name = "typer", specifier = ">=0.26.7" },
 ]
