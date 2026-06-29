@@ -19,18 +19,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.3
-
-      - name: Detect code scanning availability
-        id: code-scanning
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh api "repos/${{ github.repository }}/code-scanning/alerts" >/dev/null 2>&1; then
-            echo "upload=always" >> "$GITHUB_OUTPUT"
-          else
-            echo "upload=never" >> "$GITHUB_OUTPUT"
-          fi
+        uses: actions/checkout@v7.0.0
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4.36.2
@@ -42,4 +31,4 @@ jobs:
         uses: github/codeql-action/analyze@v4.36.2
         with:
           category: "/language:python"
-          upload: ${{ steps.code-scanning.outputs.upload }}
+          upload: always
