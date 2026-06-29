@@ -14,20 +14,26 @@ from enji_guard_cli.auth import (
 from enji_guard_cli.enji_api import (
     AuditRunCreate,
     EnjiApiError,
+    RepoTransfer,
     _get_json_object,
     access,
     audit_email_preferences,
     audit_summary_snapshot,
     catalog,
     connect_project_repo,
+    create_project,
+    delete_project,
     github_installation_repos,
     github_installations,
     improvement_jobs,
     load_api_session,
+    move_repo,
+    preflight_repo_move,
     project_active_runs,
     project_detail,
     put_audit_email_preferences,
     put_improvement_job,
+    rename_project,
     repo_active_runs,
     repo_audit_history,
     repo_audit_rerun_state,
@@ -204,6 +210,51 @@ def test_reports_list_filters_project_selector(tmp_path: Path) -> None:
             "recon_pending": None,
         }
     ]
+
+
+def test_project_admin_and_repo_transfer_operations_use_expected_requests(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_bearer_token("token-123", auth_file)
+    client = FakeEnjiHttpClient(
+        [
+            json_response({"id": "project_1"}, status_code=201),
+            json_response({"project": {"id": "project_1", "name": "Pets"}}, status_code=201),
+            json_response({"project": {"id": "project_1", "name": "Friends"}}),
+            empty_response(status_code=204),
+            empty_response(status_code=204),
+            json_response({"ok": True, "scheduleReplacements": {}}),
+            json_response({"repo": {"id": "repo_1", "projectId": "project_2"}}),
+        ]
+    )
+
+    created = create_project("Pets", auth_file, client)
+    renamed = rename_project("project_1", "Friends", auth_file, client)
+    delete_project("project_1", auth_file, client)
+    preflight = preflight_repo_move("project_1", "repo_1", "project_2", auth_file, client)
+    moved = move_repo(RepoTransfer("project_1", "repo_1", "project_2"), auth_file, client)
+
+    assert created == {"project": {"id": "project_1", "name": "Pets"}}
+    assert renamed == {"project": {"id": "project_1", "name": "Friends"}}
+    assert preflight == {"ok": True, "scheduleReplacements": {}}
+    assert moved == {"repo": {"id": "repo_1", "projectId": "project_2"}}
+    assert [(request.method, request.url) for request in client.requests] == [
+        ("POST", "https://fleet.enji.ai/api/v1/projects"),
+        ("POST", "https://fleet.enji.ai/api/ux/projects"),
+        ("PATCH", "https://fleet.enji.ai/api/ux/projects/project_1"),
+        ("DELETE", "https://fleet.enji.ai/api/ux/projects/project_1"),
+        ("DELETE", "https://fleet.enji.ai/api/v1/projects/project_1"),
+        ("POST", "https://fleet.enji.ai/api/ux/projects/project_1/repos/repo_1/transfer/preflight"),
+        ("POST", "https://fleet.enji.ai/api/ux/projects/project_1/repos/repo_1/transfer"),
+    ]
+    assert client.requests[0].json_body == {"name": "Pets"}
+    ux_create_body = client.requests[1].json_body
+    assert isinstance(ux_create_body, dict)
+    assert ux_create_body["fleetProjectId"] == "project_1"
+    assert ux_create_body["name"] == "Pets"
+    assert isinstance(ux_create_body["createdAt"], str)
+    assert client.requests[2].json_body == {"name": "Friends"}
+    assert client.requests[5].json_body == {"targetProjectId": "project_2"}
+    assert client.requests[6].json_body == {"targetProjectId": "project_2"}
 
 
 def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_path: Path) -> None:
@@ -528,6 +579,10 @@ def json_response(
         content=json.dumps(payload).encode("utf-8"),
         set_cookie_headers=set_cookie_headers,
     )
+
+
+def empty_response(*, status_code: int = 204) -> EnjiHttpResponse:
+    return EnjiHttpResponse(status_code=status_code, headers={}, content=b"")
 
 
 @dataclass

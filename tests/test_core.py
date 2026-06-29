@@ -407,6 +407,124 @@ def test_repo_status_all_summarizes_projects_repos_runs_and_reports(monkeypatch:
     assert payload["projects"][0]["repos"][1]["score_grades"] == {"tests": "good"}
 
 
+def test_project_admin_operations_resolve_selectors_and_validate_names(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1", "name": "Pets"}]})
+
+    def fake_create(name: str) -> dict[str, object]:
+        captured["created_name"] = name
+        return {"project": {"id": "project_2", "name": name}}
+
+    def fake_rename(project_id: str, name: str) -> dict[str, object]:
+        captured["renamed_project_id"] = project_id
+        captured["renamed_name"] = name
+        return {"project": {"id": project_id, "name": name}}
+
+    def fake_delete(project_id: str) -> None:
+        captured["deleted_project_id"] = project_id
+
+    monkeypatch.setattr(core, "run_create_project", fake_create)
+    monkeypatch.setattr(core, "run_rename_project", fake_rename)
+    monkeypatch.setattr(core, "run_delete_project", fake_delete)
+
+    assert core.create_project(" Friends ") == {
+        "project_name": "Friends",
+        "response": {"project": {"id": "project_2", "name": "Friends"}},
+    }
+    assert core.rename_project("Pets", " Work ") == {
+        "project_id": "project_1",
+        "project_name": "Work",
+        "response": {"project": {"id": "project_1", "name": "Work"}},
+    }
+    assert core.delete_project("Pets") == {"project_id": "project_1", "deleted": True}
+    assert captured == {
+        "created_name": "Friends",
+        "renamed_project_id": "project_1",
+        "renamed_name": "Work",
+        "deleted_project_id": "project_1",
+    }
+
+    with pytest.raises(ValueError, match="project name must not be empty"):
+        core.create_project(" ")
+
+
+def test_move_repo_resolves_source_and_target_and_preflights_before_transfer(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        core,
+        "run_projects",
+        lambda: {
+            "projects": [
+                {"id": "project_1", "name": "Pets"},
+                {"id": "project_2", "name": "Work"},
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda project_id: {
+            "project": {"id": project_id, "name": "Pets" if project_id == "project_1" else "Work"},
+            "repos": [
+                {
+                    "id": "repo_1",
+                    "githubOwner": "j2h4u",
+                    "githubName": "enji-guard-cli",
+                    "connected": True,
+                    "reconDone": True,
+                }
+            ]
+            if project_id == "project_1"
+            else [],
+        },
+    )
+
+    def fake_preflight(source_project_id: str, repo_id: str, target_project_id: str) -> dict[str, object]:
+        captured["preflight"] = (source_project_id, repo_id, target_project_id)
+        return {"ok": True, "scheduleReplacements": {"security": {"scheduleId": "schedule_1"}}}
+
+    def fake_move(request: core.RepoTransfer) -> dict[str, object]:
+        captured["move"] = (request.source_project_id, request.repo_id, request.target_project_id)
+        captured["schedule_replacements"] = request.schedule_replacements
+        return {"repo": {"id": request.repo_id, "projectId": request.target_project_id}}
+
+    monkeypatch.setattr(core, "run_preflight_repo_move", fake_preflight)
+    monkeypatch.setattr(core, "run_move_repo", fake_move)
+
+    payload = core.move_repo("j2h4u/enji-guard-cli", "Pets", "Work")
+
+    assert payload["source_project_id"] == "project_1"
+    assert payload["target_project_id"] == "project_2"
+    assert payload["preflight"] == {"ok": True, "scheduleReplacements": {"security": {"scheduleId": "schedule_1"}}}
+    assert payload["response"] == {"repo": {"id": "repo_1", "projectId": "project_2"}}
+    assert captured == {
+        "preflight": ("project_1", "repo_1", "project_2"),
+        "move": ("project_1", "repo_1", "project_2"),
+        "schedule_replacements": {"security": {"scheduleId": "schedule_1"}},
+    }
+
+
+def test_move_repo_rejects_same_source_and_target_project(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1", "name": "Pets"}]})
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda project_id: {
+            "project": {"id": project_id, "name": "Pets"},
+            "repos": [
+                {
+                    "id": "repo_1",
+                    "githubOwner": "j2h4u",
+                    "githubName": "enji-guard-cli",
+                }
+            ],
+        },
+    )
+
+    with pytest.raises(ValueError, match="repo is already in target project"):
+        core.move_repo("j2h4u/enji-guard-cli", "Pets", "Pets")
+
+
 def test_list_project_inventory_can_sort_repos_by_weakest_score(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1"}]})
     monkeypatch.setattr(

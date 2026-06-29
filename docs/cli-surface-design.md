@@ -6,7 +6,8 @@ frontend API.
 ## Goals
 
 - Keep commands close to agent tasks: inspect state, connect repos, start work,
-  wait, read reports, manage schedules and email preferences.
+  manage projects, move repos, wait, read reports, manage schedules and email
+  preferences.
 - Hide frontend implementation details behind core use cases.
 - Accept project and repo names where they are unambiguous.
 - Keep read commands broad and safe; keep write commands explicit.
@@ -49,10 +50,14 @@ enji-guard auth import-cookie --stdin
 enji-guard auth import-token --stdin
 
 enji-guard project list
+enji-guard project create NAME
+enji-guard project rename PROJECT NAME
+enji-guard project delete PROJECT --yes
 
 enji-guard repo list [--sort default|name|weakest|overall|latest-report]
 enji-guard repo resolve REPO
 enji-guard repo connect OWNER/NAME
+enji-guard repo move REPO --to-project PROJECT
 
 enji-guard status [REPO] [--sort default|name|weakest|overall|latest-report]
 
@@ -88,9 +93,14 @@ the raw machine contract.
 
 - Global `--project` accepts an Enji project id or an exact project name.
 - Repo selectors accept an Enji repo id or `owner/name`.
+- `project create` takes a plain project name.
+- `project rename` and `project delete` accept an exact project selector.
+- `project delete` is destructive and requires `--yes`.
 - Read commands may omit `--project`; they show all projects or all matching
   repos.
 - Write commands may omit `--project` only when the target repo is unambiguous.
+- `repo move` uses global `--project` as source project or selector
+  disambiguation when needed. `--to-project` selects the destination project.
 - `schedule set` without `REPO` is an explicit batch write over every repo in
   the current project filter. It requires `--project`; use a `REPO` argument for
   a single repository.
