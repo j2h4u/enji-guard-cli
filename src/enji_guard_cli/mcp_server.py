@@ -6,12 +6,12 @@ from typing import Literal, TypedDict, cast
 from mcp.server.fastmcp import FastMCP
 
 from enji_guard_cli.audits import AuditAlias, AuditPayload
-from enji_guard_cli.auth import AuthStatusPayload, auth_status_async
 from enji_guard_cli.core import (
     REPORTS_LIST_DEFAULT_SELECTOR,
     OperationName,
     OperationResult,
     access_async_operation,
+    auth_status_async_operation,
     reports_list_async_operation,
     resolve_operation_result,
     resolve_operation_spec,
@@ -30,7 +30,7 @@ get_audit_catalog = CATALOG_AUDITS_OPERATION.execute
 get_resolve_audit = CATALOG_AUDIT_OPERATION.execute
 get_access = access_async_operation
 get_reports_list = reports_list_async_operation
-get_auth_status = auth_status_async
+get_auth_status = auth_status_async_operation
 
 
 class CatalogAuditsPayload(TypedDict):
@@ -122,7 +122,7 @@ def create_mcp_server(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
         description=AUTH_STATUS_OPERATION.summary,
         structured_output=True,
     )
-    async def auth_status(auth_file: str | None = None) -> AuthStatusPayload:
+    async def auth_status(auth_file: str | None = None) -> dict[str, object]:
         target = Path(auth_file).expanduser() if auth_file is not None else None
         return await _resolve_operation_result_async(get_auth_status(target))
 

@@ -101,3 +101,33 @@ AUDITS: tuple[AuditDefinition, ...] = (
 )
 
 REPORT_AUDITS: tuple[AuditDefinition, ...] = tuple(audit for audit in AUDITS if audit.route_slug is not None)
+REPORT_AUDIT_ALIASES: tuple[AuditAlias, ...] = tuple(audit.alias for audit in REPORT_AUDITS)
+_AUDIT_BY_ALIAS: dict[AuditAlias, AuditDefinition] = {audit.alias: audit for audit in AUDITS}
+
+
+def audit_payload(audit: AuditDefinition) -> AuditPayload:
+    return {
+        "alias": audit.alias.value,
+        "label": audit.label,
+        "route_slug": audit.route_slug,
+        "job_kind": audit.job_kind,
+        "action_key": audit.action_key,
+    }
+
+
+def audit_catalog() -> list[AuditPayload]:
+    return [audit_payload(audit) for audit in AUDITS]
+
+
+def resolve_audit(alias: AuditAlias) -> AuditDefinition:
+    audit = _AUDIT_BY_ALIAS.get(alias)
+    if audit is None:
+        raise ValueError(f"unknown audit alias: {alias}")
+    return audit
+
+
+def require_report_audit(alias: AuditAlias) -> AuditDefinition:
+    audit = resolve_audit(alias)
+    if audit.route_slug is None:
+        raise ValueError("recon is not a report audit")
+    return audit

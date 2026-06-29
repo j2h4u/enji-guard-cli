@@ -11,9 +11,14 @@ from pathlib import Path
 from typing import Literal, Never, TypedDict, cast
 from urllib.parse import urlsplit
 
-from enji_guard_cli.audits import AUDITS, REPORT_AUDITS, AuditAlias, AuditDefinition, AuditPayload
+from enji_guard_cli.audits import REPORT_AUDITS, AuditAlias, AuditDefinition, AuditPayload
+from enji_guard_cli.audits import audit_catalog as registry_audit_catalog
+from enji_guard_cli.audits import audit_payload as registry_audit_payload
+from enji_guard_cli.audits import require_report_audit as registry_require_report_audit
+from enji_guard_cli.audits import resolve_audit as registry_resolve_audit
 from enji_guard_cli.auth import AuthStatusPayload
 from enji_guard_cli.auth import auth_status as run_auth_status
+from enji_guard_cli.auth import auth_status_async as run_auth_status_async
 from enji_guard_cli.enji_api import (
     REPORTS_LIST_DEFAULT_MIN_SEVERITY,
     REPORTS_LIST_DEFAULT_SELECTOR,
@@ -289,11 +294,11 @@ class EmailPreferenceUpdate:
 
 
 def _catalog_audits_operation() -> list[AuditPayload]:
-    return audit_catalog()
+    return registry_audit_catalog()
 
 
 def _catalog_audit_operation(audit: AuditAlias) -> AuditPayload:
-    return resolve_audit(audit)
+    return registry_audit_payload(registry_resolve_audit(audit))
 
 
 def _access_operation() -> AccessPayload:
@@ -318,6 +323,10 @@ async def _reports_list_async_operation(
 
 def _auth_status_operation(auth_file: Path | None = None) -> AuthStatusPayload:
     return run_auth_status(auth_file)
+
+
+async def auth_status_async_operation(auth_file: Path | None = None) -> AuthStatusPayload:
+    return await run_auth_status_async(auth_file)
 
 
 OPERATION_SPECS: tuple[OperationSpec, ...] = (
@@ -358,7 +367,6 @@ OPERATION_SPECS: tuple[OperationSpec, ...] = (
     ),
 )
 
-_AUDIT_BY_ALIAS: dict[AuditAlias, AuditDefinition] = {audit.alias: audit for audit in AUDITS}
 _OPERATION_BY_NAME: dict[OperationName, OperationSpec] = {spec.name: spec for spec in OPERATION_SPECS}
 
 
@@ -374,27 +382,6 @@ def resolve_operation_result[T](result: T | Awaitable[T]) -> T:
     if inspect.isawaitable(result):
         return asyncio.run(_await_operation_result(result))
     return result
-
-
-def audit_payload(audit: AuditDefinition) -> AuditPayload:
-    return {
-        "alias": audit.alias.value,
-        "label": audit.label,
-        "route_slug": audit.route_slug,
-        "job_kind": audit.job_kind,
-        "action_key": audit.action_key,
-    }
-
-
-def audit_catalog() -> list[AuditPayload]:
-    return [audit_payload(audit) for audit in AUDITS]
-
-
-def resolve_audit(alias: AuditAlias) -> AuditPayload:
-    audit = _AUDIT_BY_ALIAS.get(alias)
-    if audit is None:
-        raise ValueError(f"unknown audit alias: {alias}")
-    return audit_payload(audit)
 
 
 def current_repo(path: Path | None = None) -> CurrentRepoPayload:
@@ -538,8 +525,8 @@ def start_audit(
     project_id: str,
     audit: AuditAlias,
 ) -> JsonObjectPayload | AuditRunSkippedPayload:
-    resolved = resolve_audit(audit)
-    action_key = resolved["action_key"]
+    resolved = registry_resolve_audit(audit)
+    action_key = resolved.action_key
     active_runs = _active_runs_for_action(_current_active_runs(list_repo_active_runs(repo_id)), action_key)
     if active_runs:
         return {
@@ -596,7 +583,7 @@ def _start_report_audits_for_target(
     project = run_project_detail(project_id)
     catalog = run_catalog()
     for alias in audits:
-        audit = _report_audit_definition(alias)
+        audit = registry_require_report_audit(alias)
         action_key = audit.action_key
         last_audited_head_sha = _last_audited_head_sha(rerun_state, action_key)
         matching_active_runs = _active_runs_for_action(active_runs, action_key)
@@ -644,8 +631,8 @@ def _start_report_audits_for_target(
 
 
 def show_report(repo_id: str, audit: AuditAlias) -> JsonObjectPayload:
-    resolved = resolve_audit(audit)
-    route_slug = resolved["route_slug"]
+    resolved = registry_resolve_audit(audit)
+    route_slug = resolved.route_slug
     if route_slug is None:
         raise ValueError("recon does not have an upfront.audit.summary report snapshot")
     return run_audit_summary_snapshot(repo_id, route_slug)
@@ -715,8 +702,8 @@ def set_schedule(
     audit: AuditAlias,
     payload: object,
 ) -> JsonObjectPayload:
-    resolved = resolve_audit(audit)
-    job_kind = resolved["job_kind"]
+    resolved = registry_resolve_audit(audit)
+    job_kind = resolved.job_kind
     if job_kind is None:
         raise ValueError("recon does not have a schedulable improvement job")
     return run_put_improvement_job(repo_id, job_kind, _json_object_payload(payload))
@@ -1020,7 +1007,7 @@ def _nested_action_key_matches(run: dict[str, JsonValue], action_key: str) -> bo
 def _action_key_for_optional_audit(audit: AuditAlias | None) -> str | None:
     if audit is None:
         return None
-    return resolve_audit(audit)["action_key"]
+    return registry_resolve_audit(audit).action_key
 
 
 def _audit_wait_payload(
@@ -1517,7 +1504,7 @@ def _selected_report_audits(audits: list[AuditAlias], *, all_reports: bool) -> l
     if not audits:
         raise ValueError("pass at least one report audit or --all")
     for audit in audits:
-        _report_audit_definition(audit)
+        registry_require_report_audit(audit)
     return audits
 
 
@@ -1539,7 +1526,7 @@ def _report_read_item(
     current_head_sha: str | None,
     rerun_state: JsonObjectPayload,
 ) -> ReportReadItemPayload:
-    action_key = resolve_audit(audit)["action_key"]
+    action_key = registry_resolve_audit(audit).action_key
     last_audited_head_sha = _last_audited_head_sha(rerun_state, action_key)
     return {
         "audit": audit.value,
@@ -1548,13 +1535,6 @@ def _report_read_item(
         "out_of_date": _out_of_date(current_head_sha, last_audited_head_sha),
         "snapshot": _json_dict(show_report(repo_id, audit).get("snapshot")),
     }
-
-
-def _report_audit_definition(alias: AuditAlias) -> AuditDefinition:
-    audit = _AUDIT_BY_ALIAS.get(alias)
-    if audit is None or audit.route_slug is None:
-        raise ValueError("recon is not a report audit")
-    return audit
 
 
 def _email_preferences_patch(update: EmailPreferenceUpdate) -> JsonObjectPayload:
@@ -1624,8 +1604,8 @@ def schedule_payload(update: ScheduleUpdate) -> JsonObjectPayload:
 
 
 def _disabled_schedule_payload(repo_id: str, audit: AuditAlias) -> JsonObjectPayload:
-    resolved = resolve_audit(audit)
-    job_kind = resolved["job_kind"]
+    resolved = registry_resolve_audit(audit)
+    job_kind = resolved.job_kind
     existing = _schedule_job_by_kind(list_schedules(repo_id), job_kind)
     if existing is None:
         return _schedule_payload(
