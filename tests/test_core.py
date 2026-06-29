@@ -4,10 +4,9 @@ import pytest
 from pytest import MonkeyPatch
 
 import enji_guard_cli.core as core
+from enji_guard_cli.audits import AUDITS, AuditAlias
 from enji_guard_cli.core import (
-    AUDITS,
     OPERATION_SPECS,
-    AuditAlias,
     EmailPreferenceUpdate,
     OperationName,
     audit_catalog,
@@ -182,7 +181,7 @@ def test_report_status_derives_ready_and_missing_reports_from_task_links(monkeyp
     assert payload["complete"] is False
     assert payload["ready"] == ["security"]
     assert payload["running"] == []
-    assert payload["missing"] == ["ai-readiness", "tests", "tech-health", "deps", "dead-code"]
+    assert payload["missing"] == ["ai-readiness", "tests", "tech-health", "deps", "cognitive-debt", "dead-code"]
     assert payload["reports"][0] == {
         "audit": "security",
         "label": "Security",
@@ -263,7 +262,7 @@ def test_report_status_marks_started_report_runs_as_running(monkeypatch: MonkeyP
     assert payload["complete"] is False
     assert payload["ready"] == []
     assert payload["running"] == ["security"]
-    assert payload["missing"] == ["ai-readiness", "tests", "tech-health", "deps", "dead-code"]
+    assert payload["missing"] == ["ai-readiness", "tests", "tech-health", "deps", "cognitive-debt", "dead-code"]
     assert payload["reports"][0] == {
         "audit": "security",
         "label": "Security",
@@ -309,7 +308,15 @@ def test_repo_status_combines_active_runs_rerun_state_and_report_status(monkeypa
             "actions": {"audit.security": {"lastAuditedHeadSha": "head_1"}},
         }
     }
-    assert payload["reports"]["missing"] == ["security", "ai-readiness", "tests", "tech-health", "deps", "dead-code"]
+    assert payload["reports"]["missing"] == [
+        "security",
+        "ai-readiness",
+        "tests",
+        "tech-health",
+        "deps",
+        "cognitive-debt",
+        "dead-code",
+    ]
     assert payload["reports"]["reports"][0]["out_of_date"] is True
 
 
@@ -449,6 +456,79 @@ def test_list_project_inventory_can_sort_repos_by_weakest_score(monkeypatch: Mon
         "repo_good",
         "repo_unknown",
     ]
+
+
+def test_list_project_inventory_can_sort_repos_by_latest_report(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1"}]})
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda project_id: {
+            "project": {"id": project_id, "name": "Pets"},
+            "repos": [
+                {
+                    "id": "repo_old",
+                    "githubOwner": "j2h4u",
+                    "githubName": "old",
+                    "connected": True,
+                    "reconDone": True,
+                    "scores": {},
+                },
+                {
+                    "id": "repo_new",
+                    "githubOwner": "j2h4u",
+                    "githubName": "new",
+                    "connected": True,
+                    "reconDone": True,
+                    "scores": {},
+                },
+                {
+                    "id": "repo_missing",
+                    "githubOwner": "j2h4u",
+                    "githubName": "missing",
+                    "connected": True,
+                    "reconDone": True,
+                    "scores": {},
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
+    monkeypatch.setattr(
+        core,
+        "run_repo_audit_rerun_state",
+        lambda repo_id: {"state": {"currentHeadSha": f"{repo_id}_head", "actions": {}}},
+    )
+    monkeypatch.setattr(
+        core,
+        "run_repo_task_links",
+        lambda repo_id: {
+            "links": {
+                "repo_new": [
+                    {
+                        "actionKey": "audit.security",
+                        "artifactSchemaName": "upfront.audit.summary",
+                        "completedAt": "2026-06-30T12:00:00Z",
+                    }
+                ],
+                "repo_old": [
+                    {
+                        "actionKey": "audit.security",
+                        "artifactSchemaName": "upfront.audit.summary",
+                        "createdAt": "2026-06-29T12:00:00Z",
+                    }
+                ],
+            }.get(repo_id, [])
+        },
+    )
+
+    payload = core.list_project_inventory(None, sort="latest-report")
+
+    repos = payload["projects"][0]["repos"]
+    assert [repo["repo_id"] for repo in repos] == ["repo_new", "repo_old", "repo_missing"]
+    assert repos[0]["last_report_at"] == "2026-06-30T12:00:00Z"
+    assert repos[1]["last_report_at"] == "2026-06-29T12:00:00Z"
+    assert repos[2]["last_report_at"] is None
 
 
 def test_resolve_repo_accepts_project_name_and_owner_repo_selector(monkeypatch: MonkeyPatch) -> None:
@@ -685,7 +765,7 @@ def test_start_report_audits_selects_all_report_audits(monkeypatch: MonkeyPatch)
     assert captured == {
         "repo_id": "repo_1",
         "project_id": "project_1",
-        "audits": ["security", "ai-readiness", "tests", "tech-health", "deps", "dead-code"],
+        "audits": ["security", "ai-readiness", "tests", "tech-health", "deps", "cognitive-debt", "dead-code"],
     }
 
 
@@ -962,6 +1042,7 @@ def test_read_reports_for_repo_can_read_all_report_audits(monkeypatch: MonkeyPat
         "tests",
         "tech-health",
         "deps",
+        "cognitive-debt",
         "dead-code",
     ]
     assert all(report.get("current_head_sha") == "head_2" for report in reports if isinstance(report, dict))
@@ -1004,8 +1085,8 @@ def test_set_email_preferences_fans_out_over_project_repos_and_report_audits(mon
 
     preferences = payload["preferences"]
     assert isinstance(preferences, list)
-    assert payload["summary"] == {"repo_count": 2, "audit_count": 12}
-    assert len(captured) == 12
+    assert payload["summary"] == {"repo_count": 2, "audit_count": 14}
+    assert len(captured) == 14
     assert captured[0] == ("repo_1", "audit.security", {"scheduledRunCompletion": False})
     assert captured[-1] == ("repo_2", "audit.dead-code", {"scheduledRunCompletion": False})
     assert preferences[0] == {

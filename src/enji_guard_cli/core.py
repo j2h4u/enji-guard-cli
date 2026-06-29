@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Literal, Never, TypedDict, cast
 from urllib.parse import urlsplit
 
+from enji_guard_cli.audits import AUDITS, REPORT_AUDITS, AuditAlias, AuditDefinition, AuditPayload
 from enji_guard_cli.auth import AuthStatusPayload
 from enji_guard_cli.auth import auth_status as run_auth_status
 from enji_guard_cli.enji_api import (
@@ -50,7 +51,7 @@ from enji_guard_cli.errors import EnjiApiError
 
 type OperationResult = object | Awaitable[object]
 type OperationExecutor = Callable[..., OperationResult]
-type RepoSort = Literal["default", "name", "weakest", "overall"]
+type RepoSort = Literal["default", "name", "weakest", "overall", "latest-report"]
 
 GITHUB_HOST = "github.com"
 REMOTE_ORIGIN_SECTION = 'remote "origin"'
@@ -71,33 +72,6 @@ SCORE_POOR_THRESHOLD = 40.0
 SCORE_FAIR_THRESHOLD = 60.0
 SCORE_GOOD_THRESHOLD = 75.0
 SCORE_EXCELLENT_THRESHOLD = 90.0
-
-
-class AuditAlias(StrEnum):
-    SECURITY = "security"
-    AI_READINESS = "ai-readiness"
-    TESTS = "tests"
-    TECH_HEALTH = "tech-health"
-    DEPS = "deps"
-    DEAD_CODE = "dead-code"
-    RECON = "recon"
-
-
-class ReportAuditAlias(StrEnum):
-    SECURITY = "security"
-    AI_READINESS = "ai-readiness"
-    TESTS = "tests"
-    TECH_HEALTH = "tech-health"
-    DEPS = "deps"
-    DEAD_CODE = "dead-code"
-
-
-class AuditPayload(TypedDict):
-    alias: str
-    label: str
-    route_slug: str | None
-    job_kind: str | None
-    action_key: str
 
 
 class CurrentRepoPayload(TypedDict):
@@ -197,6 +171,7 @@ class ReportAuditStatusPayload(TypedDict):
 class ReportStatusPayload(TypedDict):
     repo_id: str
     current_head_sha: str | None
+    last_report_at: str | None
     complete: bool
     ready: list[str]
     running: list[str]
@@ -240,6 +215,7 @@ class RepoRuntimeStatusPayload(TypedDict):
     active_run_count: int
     active_runs: list[JsonValue]
     current_head_sha: str | None
+    last_report_at: str | None
     reports: ReportStatusPayload
 
 
@@ -270,14 +246,6 @@ class AuditWaitPayload(TypedDict):
     idle: bool
     elapsed_seconds: int
     active_runs: list[JsonValue]
-
-
-class AuditDefinition(TypedDict):
-    alias: AuditAlias
-    label: str
-    route_slug: str | None
-    job_kind: str | None
-    action_key: str
 
 
 class OperationName(StrEnum):
@@ -318,59 +286,6 @@ class ScheduleUpdate:
 class EmailPreferenceUpdate:
     manual_run_completion: bool | None
     scheduled_run_completion: bool | None
-
-
-AUDITS: tuple[AuditDefinition, ...] = (
-    {
-        "alias": AuditAlias.SECURITY,
-        "label": "Security",
-        "route_slug": "vulns",
-        "job_kind": "vuln-audit",
-        "action_key": "audit.security",
-    },
-    {
-        "alias": AuditAlias.AI_READINESS,
-        "label": "AI readiness",
-        "route_slug": "ai-readiness",
-        "job_kind": "ai-maturity",
-        "action_key": "audit.ai-readiness",
-    },
-    {
-        "alias": AuditAlias.TESTS,
-        "label": "Tests",
-        "route_slug": "tests",
-        "job_kind": "test-audit",
-        "action_key": "audit.tests",
-    },
-    {
-        "alias": AuditAlias.TECH_HEALTH,
-        "label": "Codebase health",
-        "route_slug": "tech-health",
-        "job_kind": "tech-health",
-        "action_key": "audit.tech-health",
-    },
-    {
-        "alias": AuditAlias.DEPS,
-        "label": "Dependency hygiene",
-        "route_slug": "dependency-hygiene",
-        "job_kind": "dependency-hygiene",
-        "action_key": "audit.dependency-hygiene",
-    },
-    {
-        "alias": AuditAlias.DEAD_CODE,
-        "label": "Dead code",
-        "route_slug": "dead-code",
-        "job_kind": "dead-code",
-        "action_key": "audit.dead-code",
-    },
-    {
-        "alias": AuditAlias.RECON,
-        "label": "Recon",
-        "route_slug": None,
-        "job_kind": None,
-        "action_key": "audit.recon",
-    },
-)
 
 
 def _catalog_audits_operation() -> list[AuditPayload]:
@@ -443,9 +358,8 @@ OPERATION_SPECS: tuple[OperationSpec, ...] = (
     ),
 )
 
-_AUDIT_BY_ALIAS: dict[AuditAlias, AuditDefinition] = {audit["alias"]: audit for audit in AUDITS}
+_AUDIT_BY_ALIAS: dict[AuditAlias, AuditDefinition] = {audit.alias: audit for audit in AUDITS}
 _OPERATION_BY_NAME: dict[OperationName, OperationSpec] = {spec.name: spec for spec in OPERATION_SPECS}
-_REPORT_AUDITS: tuple[AuditDefinition, ...] = tuple(audit for audit in AUDITS if audit["route_slug"] is not None)
 
 
 def package_version() -> str:
@@ -464,11 +378,11 @@ def resolve_operation_result[T](result: T | Awaitable[T]) -> T:
 
 def audit_payload(audit: AuditDefinition) -> AuditPayload:
     return {
-        "alias": audit["alias"].value,
-        "label": audit["label"],
-        "route_slug": audit["route_slug"],
-        "job_kind": audit["job_kind"],
-        "action_key": audit["action_key"],
+        "alias": audit.alias.value,
+        "label": audit.label,
+        "route_slug": audit.route_slug,
+        "job_kind": audit.job_kind,
+        "action_key": audit.action_key,
     }
 
 
@@ -506,7 +420,8 @@ def list_projects() -> JsonObjectPayload:
 
 def list_project_inventory(project: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:
     project_ids = _selected_project_ids(project)
-    projects = [_project_inventory_status(project_id) for project_id in project_ids]
+    project_status = _project_runtime_status if sort == "latest-report" else _project_inventory_status
+    projects = [project_status(project_id) for project_id in project_ids]
     _sort_project_repos(projects, sort)
     return _repo_status_all_payload(projects)
 
@@ -665,7 +580,7 @@ def start_report_audits(
 
 
 def start_all_report_audits(repo_id: str, project_id: str) -> AuditRunBatchPayload:
-    return _start_report_audits_for_target(repo_id, project_id, [audit["alias"] for audit in _REPORT_AUDITS])
+    return _start_report_audits_for_target(repo_id, project_id, [audit.alias for audit in REPORT_AUDITS])
 
 
 def _start_report_audits_for_target(
@@ -682,13 +597,13 @@ def _start_report_audits_for_target(
     catalog = run_catalog()
     for alias in audits:
         audit = _report_audit_definition(alias)
-        action_key = audit["action_key"]
+        action_key = audit.action_key
         last_audited_head_sha = _last_audited_head_sha(rerun_state, action_key)
         matching_active_runs = _active_runs_for_action(active_runs, action_key)
         if matching_active_runs:
             skipped.append(
                 {
-                    "audit": audit["alias"].value,
+                    "audit": audit.alias.value,
                     "action_key": action_key,
                     "reason": "already_running",
                     "active_runs": matching_active_runs,
@@ -700,7 +615,7 @@ def _start_report_audits_for_target(
         if _out_of_date(current_head_sha, last_audited_head_sha) is False:
             skipped.append(
                 {
-                    "audit": audit["alias"].value,
+                    "audit": audit.alias.value,
                     "action_key": action_key,
                     "reason": "up_to_date",
                     "active_runs": [],
@@ -711,7 +626,7 @@ def _start_report_audits_for_target(
             continue
         runs.append(
             {
-                "audit": audit["alias"].value,
+                "audit": audit.alias.value,
                 "action_key": action_key,
                 "response": run_start_audit_run(
                     AuditRunCreate(
@@ -756,9 +671,9 @@ def read_reports_for_repo(
 def list_email_preferences(repo: str | None, project: str | None) -> JsonObjectPayload:
     return _email_preferences_payload(
         [
-            _email_preference_row(target, audit, get_audit_email_preferences(target["repo_id"], audit["action_key"]))
+            _email_preference_row(target, audit, get_audit_email_preferences(target["repo_id"], audit.action_key))
             for target in _selected_repo_targets(repo, project)
-            for audit in _REPORT_AUDITS
+            for audit in REPORT_AUDITS
         ]
     )
 
@@ -778,10 +693,10 @@ def set_email_preferences(
             _email_preference_row(
                 target,
                 audit,
-                run_put_audit_email_preferences(target["repo_id"], audit["action_key"], patch),
+                run_put_audit_email_preferences(target["repo_id"], audit.action_key, patch),
             )
             for target in _selected_repo_targets(repo, project)
-            for audit in _REPORT_AUDITS
+            for audit in REPORT_AUDITS
         ]
     )
 
@@ -971,14 +886,16 @@ def _report_status_from_task_links(
     current_head_sha = _current_head_sha(rerun_state)
     reports = [
         _report_audit_status(audit, links_by_action, active_runs_by_action, current_head_sha, rerun_state)
-        for audit in _REPORT_AUDITS
+        for audit in REPORT_AUDITS
     ]
+    last_report_at = _last_report_at(reports)
     ready = [report["audit"] for report in reports if report["ready"]]
     running = [report["audit"] for report in reports if report["running"]]
     missing = [report["audit"] for report in reports if report["state"] == "missing"]
     return {
         "repo_id": repo_id,
         "current_head_sha": current_head_sha,
+        "last_report_at": last_report_at,
         "complete": not running and not missing,
         "ready": ready,
         "running": running,
@@ -1004,17 +921,17 @@ def _report_audit_status(
     current_head_sha: str | None,
     rerun_state: JsonObjectPayload | None,
 ) -> ReportAuditStatusPayload:
-    action_key = audit["action_key"]
+    action_key = audit.action_key
     link = links_by_action.get(action_key)
     active_run = active_runs_by_action.get(action_key)
     state = _report_audit_state(link, active_run)
     last_audited_head_sha = _last_audited_head_sha(rerun_state, action_key)
-    route_slug = audit["route_slug"]
+    route_slug = audit.route_slug
     if route_slug is None:
         raise ValueError("report audit status cannot be built for recon")
     return {
-        "audit": audit["alias"].value,
-        "label": audit["label"],
+        "audit": audit.alias.value,
+        "label": audit.label,
         "action_key": action_key,
         "route_slug": route_slug,
         "state": state,
@@ -1022,9 +939,9 @@ def _report_audit_status(
         "running": state == "running",
         "fleet_task_id": _active_run_value(active_run, "fleetTaskId") or _link_value(link, "fleetTaskId"),
         "created_at": _active_run_value(active_run, "createdAt") or _link_value(link, "createdAt"),
-        "started_at": _active_run_value(active_run, "startedAt"),
-        "completed_at": _active_run_value(active_run, "completedAt"),
-        "run_status": _active_run_value(active_run, "status"),
+        "started_at": _active_run_value(active_run, "startedAt") or _link_value(link, "startedAt"),
+        "completed_at": _active_run_value(active_run, "completedAt") or _link_value(link, "completedAt"),
+        "run_status": _active_run_value(active_run, "status") or _link_value(link, "status"),
         "current_head_sha": current_head_sha,
         "last_audited_head_sha": last_audited_head_sha,
         "out_of_date": _out_of_date(current_head_sha, last_audited_head_sha),
@@ -1218,6 +1135,8 @@ def _sort_project_repos(projects: list[ProjectRuntimeStatusPayload], sort: RepoS
             project["repos"].sort(key=_repo_weakest_sort_key)
         elif sort == "overall":
             project["repos"].sort(key=_repo_overall_sort_key)
+        elif sort == "latest-report":
+            project["repos"].sort(key=_repo_latest_report_sort_key)
         else:
             raise ValueError(f"unknown repo sort: {sort}")
 
@@ -1234,8 +1153,38 @@ def _repo_overall_sort_key(repo: RepoRuntimeStatusPayload) -> tuple[float, str]:
     return (_missing_last_score(repo["score_summary"]["overall_score"]), _repo_name_sort_key(repo))
 
 
+def _repo_latest_report_sort_key(repo: RepoRuntimeStatusPayload) -> tuple[bool, float, str]:
+    timestamp = _report_timestamp(repo["last_report_at"])
+    return (timestamp is None, -(timestamp or 0.0), _repo_name_sort_key(repo))
+
+
 def _missing_last_score(score: float | None) -> float:
     return score if score is not None else float("inf")
+
+
+def _last_report_at(reports: list[ReportAuditStatusPayload]) -> str | None:
+    latest: tuple[float, str] | None = None
+    for report in reports:
+        for value in (report["completed_at"], report["started_at"], report["created_at"]):
+            if value is None:
+                continue
+            timestamp = _report_timestamp(value)
+            if timestamp is not None and (latest is None or timestamp > latest[0]):
+                latest = (timestamp, value)
+    return latest[1] if latest is not None else None
+
+
+def _report_timestamp(value: str | None) -> float | None:
+    if value is None:
+        return None
+    normalized = value.removesuffix("Z") + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
 
 
 def _selected_project_ids(project: str | None) -> list[str]:
@@ -1440,6 +1389,7 @@ def _repo_runtime_status_from_target(target: RepoTargetPayload) -> RepoRuntimeSt
     active_runs = _current_active_runs(list_repo_active_runs(repo_id))
     rerun_state = get_repo_rerun_state(repo_id)
     current_head_sha = _current_head_sha(rerun_state)
+    reports = _report_status_from_task_links(repo_id, list_repo_task_links(repo_id), active_runs, rerun_state)
     return {
         "project_id": target["project_id"],
         "project_name": target["project_name"],
@@ -1455,7 +1405,8 @@ def _repo_runtime_status_from_target(target: RepoTargetPayload) -> RepoRuntimeSt
         "active_run_count": len(active_runs),
         "active_runs": active_runs,
         "current_head_sha": current_head_sha,
-        "reports": _report_status_from_task_links(repo_id, list_repo_task_links(repo_id), active_runs, rerun_state),
+        "last_report_at": reports["last_report_at"],
+        "reports": reports,
     }
 
 
@@ -1480,15 +1431,17 @@ def _repo_inventory_status(
         "active_run_count": 0,
         "active_runs": [],
         "current_head_sha": None,
+        "last_report_at": None,
         "reports": _empty_report_status(target["repo_id"]),
     }
 
 
 def _empty_report_status(repo_id: str) -> ReportStatusPayload:
-    reports = [_empty_report_audit_status(audit) for audit in _REPORT_AUDITS]
+    reports = [_empty_report_audit_status(audit) for audit in REPORT_AUDITS]
     return {
         "repo_id": repo_id,
         "current_head_sha": None,
+        "last_report_at": None,
         "complete": False,
         "ready": [],
         "running": [],
@@ -1498,13 +1451,13 @@ def _empty_report_status(repo_id: str) -> ReportStatusPayload:
 
 
 def _empty_report_audit_status(audit: AuditDefinition) -> ReportAuditStatusPayload:
-    route_slug = audit["route_slug"]
+    route_slug = audit.route_slug
     if route_slug is None:
         raise ValueError("report audit status cannot be built for recon")
     return {
-        "audit": audit["alias"].value,
-        "label": audit["label"],
-        "action_key": audit["action_key"],
+        "audit": audit.alias.value,
+        "label": audit.label,
+        "action_key": audit.action_key,
         "route_slug": route_slug,
         "state": "missing",
         "ready": False,
@@ -1560,7 +1513,7 @@ def _selected_report_audits(audits: list[AuditAlias], *, all_reports: bool) -> l
     if all_reports:
         if audits:
             raise ValueError("pass report audits or --all, not both")
-        return [audit["alias"] for audit in _REPORT_AUDITS]
+        return [audit.alias for audit in REPORT_AUDITS]
     if not audits:
         raise ValueError("pass at least one report audit or --all")
     for audit in audits:
@@ -1599,7 +1552,7 @@ def _report_read_item(
 
 def _report_audit_definition(alias: AuditAlias) -> AuditDefinition:
     audit = _AUDIT_BY_ALIAS.get(alias)
-    if audit is None or audit["route_slug"] is None:
+    if audit is None or audit.route_slug is None:
         raise ValueError("recon is not a report audit")
     return audit
 
@@ -1626,8 +1579,8 @@ def _email_preference_row(
         "project_name": target["project_name"],
         "repo_id": target["repo_id"],
         "github_repo": target["github_repo"],
-        "audit": audit["alias"].value,
-        "action_key": audit["action_key"],
+        "audit": audit.alias.value,
+        "action_key": audit.action_key,
         "manual_run_completion": _json_bool(resolved.get("manualRunCompletion")),
         "scheduled_run_completion": _json_bool(resolved.get("scheduledRunCompletion")),
     }

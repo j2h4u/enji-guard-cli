@@ -6,8 +6,9 @@ from pytest import MonkeyPatch
 from typer.testing import CliRunner
 
 from enji_guard_cli import cli
+from enji_guard_cli.audits import AuditAlias
 from enji_guard_cli.cli import app
-from enji_guard_cli.core import AuditAlias, EmailPreferenceUpdate
+from enji_guard_cli.core import EmailPreferenceUpdate
 from enji_guard_cli.enji_api import EnjiApiError
 
 
@@ -188,6 +189,7 @@ def test_catalog_audits_reports_canonical_identifier_map() -> None:
         "tests",
         "tech-health",
         "deps",
+        "cognitive-debt",
         "dead-code",
         "recon",
     }
@@ -311,6 +313,7 @@ def test_repo_list_uses_global_project_filter(monkeypatch: MonkeyPatch) -> None:
                             "github_repo": "j2h4u/enji-guard-cli",
                             "connected": True,
                             "recon_done": True,
+                            "last_report_at": "2026-06-30T12:00:00Z",
                             "scores": {"vulns": 88, "tech-health": 49},
                             "score_summary": {
                                 "overall_score": 68.5,
@@ -327,13 +330,14 @@ def test_repo_list_uses_global_project_filter(monkeypatch: MonkeyPatch) -> None:
 
     monkeypatch.setattr(cli, "list_project_inventory", fake_inventory)
 
-    result = CliRunner().invoke(app, ["--project", "Pets", "repo", "list", "--sort", "weakest"])
+    result = CliRunner().invoke(app, ["--project", "Pets", "repo", "list", "--sort", "latest-report"])
 
     assert result.exit_code == 0
     assert "project  repo" in result.output
     assert "Pets     j2h4u/enji-guard-cli" in result.output
+    assert "2026-06-30" in result.output
     assert "tech-health=49" in result.output
-    assert captured == {"project": "Pets", "sort": "weakest"}
+    assert captured == {"project": "Pets", "sort": "latest-report"}
 
 
 def test_repo_list_can_emit_json(monkeypatch: MonkeyPatch) -> None:
@@ -409,6 +413,7 @@ def test_status_routes_to_runtime_snapshot(monkeypatch: MonkeyPatch) -> None:
                             },
                             "reports": {"ready": ["security"], "running": [], "missing": ["tests"], "reports": []},
                             "active_run_count": 0,
+                            "last_report_at": "2026-06-30T12:00:00Z",
                             "current_head_sha": "0307f239c88a4c761cd2f96cb17b5eb8a4ae8487",
                         }
                     ],
@@ -426,6 +431,7 @@ def test_status_routes_to_runtime_snapshot(monkeypatch: MonkeyPatch) -> None:
     assert result.exit_code == 0
     assert "project  repo" in result.output
     assert "1 ready, 1 missing" in result.output
+    assert "2026-06-30" in result.output
     assert "0307f239" in result.output
     assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets", "sort": "overall"}
 

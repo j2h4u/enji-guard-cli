@@ -2211,6 +2211,7 @@
           "test-audit",
           "tech-health",
           "dependency-hygiene",
+          "cognitive-debt",
           "dead-code"
         ]
       },
@@ -2222,6 +2223,7 @@
           "audit.tests",
           "audit.tech-health",
           "audit.dependency-hygiene",
+          "audit.cognitive-debt",
           "audit.dead-code"
         ]
       },
@@ -2423,6 +2425,7 @@
           "audit.tests",
           "audit.tech-health",
           "audit.dependency-hygiene",
+          "audit.cognitive-debt",
           "audit.dead-code",
           "audit.recon"
         ]
@@ -2487,6 +2490,7 @@
           "tests",
           "tech-health",
           "dependency-hygiene",
+          "cognitive-debt",
           "dead-code"
         ]
       },

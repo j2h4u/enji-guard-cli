@@ -10,8 +10,8 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import Tool
 
 import enji_guard_cli.mcp_server as mcp_server
+from enji_guard_cli.audits import AuditAlias, AuditPayload
 from enji_guard_cli.auth import AuthStatusPayload
-from enji_guard_cli.core import AuditAlias, AuditPayload
 from enji_guard_cli.mcp_server import create_mcp_server
 
 
@@ -64,6 +64,7 @@ def test_catalog_audit_tool_uses_audit_alias_enum_schema() -> None:
         "tests",
         "tech-health",
         "deps",
+        "cognitive-debt",
         "dead-code",
         "recon",
     ]
