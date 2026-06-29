@@ -41,13 +41,17 @@ typecheck-tests:
 dead-code:
     uv run vulture
 
+# Check declared dependencies against imported modules.
+dependency-lint:
+    uv run deptry .
+
 # Auto-fix Ruff findings with safe fixes only, then format.
 fix:
     uv run ruff check --preview --fix src scripts tests
     uv run ruff format --no-preview src scripts tests
 
 # Static quality gate.
-check: fmt-check lint typecheck typecheck-tests import-contracts actionlint openapi-contract compile dead-code
+check: fmt-check lint typecheck typecheck-tests import-contracts actionlint openapi-contract compile dead-code dependency-lint
 
 # Unit tests.
 unit:
@@ -75,6 +79,19 @@ docker-build:
 # Recreate the local Docker service.
 docker-up:
     docker compose up -d --force-recreate --remove-orphans --wait --wait-timeout 90
+
+# Recreate the Docker service in source bind-mount dev mode.
+dev-up:
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate --remove-orphans --wait --wait-timeout 90
+
+# Force-refresh the mounted auth file from inside the running dev container.
+dev-refresh:
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T enji-guard-cli enji-guard auth refresh --pretty
+
+# Reload bind-mounted source without rebuilding; refresh auth first.
+dev-reload: dev-refresh
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml restart enji-guard-cli
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T enji-guard-cli enji-guard auth status --pretty
 
 # Full local gate for agents before claiming completion.
 verify: check crap-check unit docker-build

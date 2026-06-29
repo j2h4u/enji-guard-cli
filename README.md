@@ -42,10 +42,17 @@ Do not paste credentials directly into shell history. The auth file defaults to
 
 ```bash
 uv run enji-guard access --pretty
-uv run enji-guard report list --pretty
-uv run enji-guard catalog audits --pretty
+uv run enji-guard project list --pretty
+uv run enji-guard repo current --pretty
+uv run enji-guard status --pretty
+uv run enji-guard audit start j2h4u/enji-guard-cli --all --pretty
+uv run enji-guard wait j2h4u/enji-guard-cli security --pretty
+uv run enji-guard report read j2h4u/enji-guard-cli
 uv run enji-guard auth refresh --pretty
 ```
+
+Use the global `--project NAME_OR_ID` filter when a command must be scoped to
+one Enji project.
 
 ## MCP
 
@@ -77,7 +84,8 @@ just verify
 ```
 
 The completion gate includes Ruff, basedpyright, import-linter, Vulture,
-OpenAPI contract validation, CRAP <= 30 per function, tests, and Docker build.
+deptry, OpenAPI contract validation, CRAP <= 30 per function, tests, and Docker
+build.
 
 ## Security Notes
 

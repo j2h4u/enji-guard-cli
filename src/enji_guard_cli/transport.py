@@ -19,6 +19,9 @@ DEFAULT_RETRYABLE_METHODS = ("GET", "HEAD", "OPTIONS")
 DEFAULT_RETRYABLE_STATUS_CODES = (429, 500, 502, 503, 504)
 _LOGGER = logging.getLogger(__name__)
 
+type EnjiJsonScalar = None | bool | int | float | str
+type EnjiJsonValue = EnjiJsonScalar | list[EnjiJsonValue] | dict[str, EnjiJsonValue]
+
 
 @dataclass(frozen=True, slots=True)
 class RetryConfig:
@@ -44,6 +47,7 @@ class EnjiHttpRequest:
     url: str
     operation: str
     headers: Mapping[str, str]
+    json_body: EnjiJsonValue | None = None
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
 
 
@@ -128,12 +132,21 @@ class HttpxEnjiHttpClient:
     async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
         started_at = time.perf_counter()
         try:
-            response = await self._client.request(
-                request.method,
-                request.url,
-                headers=dict(request.headers),
-                timeout=request.timeout_seconds,
-            )
+            if request.json_body is None:
+                response = await self._client.request(
+                    request.method,
+                    request.url,
+                    headers=dict(request.headers),
+                    timeout=request.timeout_seconds,
+                )
+            else:
+                response = await self._client.request(
+                    request.method,
+                    request.url,
+                    headers=dict(request.headers),
+                    json=request.json_body,
+                    timeout=request.timeout_seconds,
+                )
         except httpx.HTTPError as exc:
             _log_http_error(request, started_at, exc)
             raise EnjiTransportError(request.operation, exc) from exc

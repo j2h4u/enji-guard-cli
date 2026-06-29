@@ -1,22 +1,22 @@
 import asyncio
 import inspect
-from contextlib import suppress
 from pathlib import Path
 from typing import Literal, TypedDict, cast
 
 from mcp.server.fastmcp import FastMCP
 
-from enji_guard_cli.auth import AuthStatusPayload, auth_status_async, start_auto_refresh_task
+from enji_guard_cli.auth import AuthStatusPayload, auth_status_async
 from enji_guard_cli.core import (
     REPORTS_LIST_DEFAULT_SELECTOR,
     AuditAlias,
     AuditPayload,
     OperationName,
     OperationResult,
+    access_async_operation,
+    reports_list_async_operation,
     resolve_operation_result,
     resolve_operation_spec,
 )
-from enji_guard_cli.enji_api import access_async, reports_list_async
 
 type JsonCommandResult = OperationResult
 type McpTransport = Literal["stdio", "sse", "streamable-http"]
@@ -29,8 +29,8 @@ AUTH_STATUS_OPERATION = resolve_operation_spec(OperationName.AUTH_STATUS)
 
 get_audit_catalog = CATALOG_AUDITS_OPERATION.execute
 get_resolve_audit = CATALOG_AUDIT_OPERATION.execute
-get_access = access_async
-get_reports_list = reports_list_async
+get_access = access_async_operation
+get_reports_list = reports_list_async_operation
 get_auth_status = auth_status_async
 
 
@@ -54,18 +54,14 @@ async def run_mcp_server_async(
     transport: McpTransport = "stdio",
     mount_path: str | None = None,
 ) -> None:
-    auto_refresh_task = start_auto_refresh_task()
-    try:
-        if transport == "stdio":
-            await server.run_stdio_async()
-        elif transport == "sse":
-            await server.run_sse_async(mount_path)
-        elif transport == "streamable-http":
-            await server.run_streamable_http_async()
-        else:
-            raise ValueError(f"Unknown transport: {transport}")
-    finally:
-        await _cancel_auto_refresh_task(auto_refresh_task)
+    if transport == "stdio":
+        await server.run_stdio_async()
+    elif transport == "sse":
+        await server.run_sse_async(mount_path)
+    elif transport == "streamable-http":
+        await server.run_streamable_http_async()
+    else:
+        raise ValueError(f"Unknown transport: {transport}")
 
 
 def run_mcp_server(
@@ -75,14 +71,6 @@ def run_mcp_server(
     mount_path: str | None = None,
 ) -> None:
     asyncio.run(run_mcp_server_async(server, transport=transport, mount_path=mount_path))
-
-
-async def _cancel_auto_refresh_task(auto_refresh_task: asyncio.Task[None] | None) -> None:
-    if auto_refresh_task is None:
-        return
-    auto_refresh_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await auto_refresh_task
 
 
 def create_mcp_server(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:

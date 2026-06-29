@@ -35,52 +35,20 @@ def test_create_mcp_server_registers_expected_tools() -> None:
     }
 
 
-def test_run_mcp_server_async_starts_single_process_refresh_task_and_cancels(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_run_mcp_server_async_runs_streamable_http_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     server = create_mcp_server()
-    auto_refresh_starts = 0
-    auto_refresh_started = False
-    auto_refresh_cancelled = False
-    served_while_refresh_was_running = False
-    auto_refresh_tasks: list[asyncio.Task[None]] = []
-
-    async def fake_auto_refresh_loop() -> None:
-        nonlocal auto_refresh_cancelled, auto_refresh_started
-
-        auto_refresh_started = True
-        try:
-            await asyncio.Future[None]()
-        finally:
-            auto_refresh_cancelled = True
-
-    def fake_start_auto_refresh_task() -> asyncio.Task[None]:
-        nonlocal auto_refresh_starts
-
-        auto_refresh_starts += 1
-        auto_refresh_task = asyncio.create_task(fake_auto_refresh_loop())
-        auto_refresh_tasks.append(auto_refresh_task)
-        return auto_refresh_task
+    called = False
 
     async def fake_run_streamable_http_async() -> None:
-        nonlocal served_while_refresh_was_running
+        nonlocal called
 
-        await asyncio.sleep(0)
-        served_while_refresh_was_running = (
-            auto_refresh_started and len(auto_refresh_tasks) == 1 and not auto_refresh_tasks[0].done()
-        )
+        called = True
 
-    monkeypatch.setattr(mcp_server, "start_auto_refresh_task", fake_start_auto_refresh_task)
     monkeypatch.setattr(server, "run_streamable_http_async", fake_run_streamable_http_async)
 
     asyncio.run(mcp_server.run_mcp_server_async(server, transport="streamable-http"))
 
-    assert auto_refresh_starts == 1
-    assert auto_refresh_started is True
-    assert auto_refresh_cancelled is True
-    assert served_while_refresh_was_running is True
-    assert len(auto_refresh_tasks) == 1
-    assert auto_refresh_tasks[0].cancelled()
+    assert called is True
 
 
 def test_catalog_audit_tool_uses_audit_alias_enum_schema() -> None:
