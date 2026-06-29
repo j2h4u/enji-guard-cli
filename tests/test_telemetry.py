@@ -22,7 +22,9 @@ def test_json_logging_keeps_structured_safe_fields_and_drops_objects(capsys: pyt
         },
     )
 
-    payload = cast(object, json.loads(capsys.readouterr().err))
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    payload = cast(object, json.loads(captured.err))
     assert isinstance(payload, dict)
 
     assert payload == {
