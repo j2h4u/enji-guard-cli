@@ -55,8 +55,8 @@ enji-guard audit start REPO --all
 enji-guard wait REPO AUDIT_OR_RECON
 
 enji-guard report list [--selector SELECTOR]
-enji-guard report read REPO [AUDIT...] [--all] [--format markdown|json]
-enji-guard report show REPO AUDIT --format json|markdown
+enji-guard report read REPO [AUDIT...] [--all] [--json]
+enji-guard report show REPO AUDIT [--json]
 
 enji-guard schedule list REPO
 enji-guard schedule set REPO AUDIT --freq FREQ [--day DAY...] [--at auto|HH:MM|HH:MM@TZ]
@@ -69,6 +69,9 @@ Project filtering is a global option:
 enji-guard --project NAME_OR_ID status
 enji-guard --project NAME_OR_ID audit start OWNER/NAME --all
 ```
+
+CLI output is human-readable by default. Use `--json` only when automation needs
+the raw machine contract.
 
 ## Resolution Rules
 

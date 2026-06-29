@@ -475,7 +475,7 @@ def test_cli_import_token_reads_from_stdin(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     result = CliRunner().invoke(
         app,
-        ["auth", "import-token", "--stdin", "--auth-file", str(auth_file)],
+        ["auth", "import-token", "--stdin", "--auth-file", str(auth_file), "--json"],
         input="Bearer token-123\n",
     )
 
@@ -492,8 +492,7 @@ def test_cli_import_cookie_rejects_missing_stdin_flag(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert not auth_file.exists()
-    error = cast(dict[str, str], json.loads(result.stderr))
-    assert error["code"] == "VALIDATION"
+    assert result.stderr == "VALIDATION: use --stdin to avoid storing cookies in shell history\n"
 
 
 def run_auth_status(task_factory: Callable[[], Awaitable[AuthStatusPayload]]) -> AuthStatusPayload:

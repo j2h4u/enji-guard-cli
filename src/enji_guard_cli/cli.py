@@ -2,7 +2,7 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Literal, TypeGuard
+from typing import Annotated, Literal, TypeGuard, cast
 
 import typer
 
@@ -62,26 +62,329 @@ CATALOG_AUDIT_OPERATION = resolve_operation_spec(OperationName.CATALOG_AUDIT)
 ACCESS_OPERATION = resolve_operation_spec(OperationName.ACCESS)
 REPORTS_LIST_OPERATION = resolve_operation_spec(OperationName.REPORTS_LIST)
 AUTH_STATUS_OPERATION = resolve_operation_spec(OperationName.AUTH_STATUS)
+SCHEDULE_SET_TARGET_PARTS = 2
 
 get_access = ACCESS_OPERATION.execute
 get_reports_list = REPORTS_LIST_OPERATION.execute
 auth_status = AUTH_STATUS_OPERATION.execute
-_cli_state: dict[str, str | None] = {"project": None}
+_cli_state: dict[str, object] = {"project": None, "json": False}
 
 type JsonCommandAction = Callable[[], OperationResult]
 
 
-def _echo_json(payload: object, pretty: bool) -> None:
-    indent = 2 if pretty else None
-    typer.echo(json.dumps(payload, indent=indent, sort_keys=True))
+def _echo_json(payload: object) -> None:
+    typer.echo(json.dumps(payload, sort_keys=True))
 
 
 def _echo_error(code: str, message: str) -> None:
-    typer.echo(json.dumps({"code": code, "message": message}, sort_keys=True), err=True)
+    typer.echo(f"{code}: {message}", err=True)
 
 
-def _run_json_command(action: JsonCommandAction, pretty: bool) -> None:
-    _echo_json(_resolve_command_payload(action), pretty)
+def _run_human_or_json_command(
+    action: JsonCommandAction,
+    json_output: bool,
+    human_renderer: Callable[[object], None] | None = None,
+) -> None:
+    payload = _resolve_command_payload(action)
+    if json_output:
+        _echo_json(payload)
+        return
+    renderer = human_renderer if human_renderer is not None else _echo_generic_payload
+    renderer(payload)
+
+
+def _echo_table(headers: tuple[str, ...], rows: list[tuple[str, ...]], empty_message: str = "No rows.") -> None:
+    if not rows:
+        typer.echo(empty_message)
+        return
+    widths = [len(header) for header in headers]
+    for row in rows:
+        widths = [max(width, len(cell)) for width, cell in zip(widths, row, strict=True)]
+    typer.echo(_table_line(headers, widths))
+    typer.echo(_table_line(tuple("-" * width for width in widths), widths))
+    for row in rows:
+        typer.echo(_table_line(row, widths))
+
+
+def _table_line(cells: tuple[str, ...], widths: list[int]) -> str:
+    return "  ".join(cell.ljust(width) for cell, width in zip(cells, widths, strict=True))
+
+
+def _echo_repo_score_table(payload: object) -> None:
+    headers = (
+        "project",
+        "repo",
+        "state",
+        "overall",
+        "grade",
+        "weakest",
+        "vulns",
+        "ai",
+        "tests",
+        "tech",
+        "deps",
+        "dead",
+    )
+    _echo_table(
+        headers,
+        [_repo_score_row(project, repo) for project, repo in _payload_repos(payload)],
+        "No repositories.",
+    )
+
+
+def _echo_repo_status_table(payload: object) -> None:
+    headers = ("project", "repo", "state", "overall", "weakest", "reports", "active", "current", "audited")
+    _echo_table(
+        headers,
+        [_repo_status_row(project, repo) for project, repo in _payload_repos(payload)],
+        "No repositories.",
+    )
+
+
+def _echo_project_table(payload: object) -> None:
+    headers = ("project", "id", "repos", "recon", "score_axes")
+    _echo_table(headers, [_project_row(project) for project in _payload_projects(payload)], "No projects.")
+
+
+def _echo_repo_resolve_table(payload: object) -> None:
+    data = _object_dict(payload)
+    headers = ("selector", "resolved", "project", "repo", "repo_id", "state")
+    rows = [_repo_resolve_row(data, _object_dict(match)) for match in _object_list(data.get("matches"))]
+    _echo_table(headers, rows, "No repositories.")
+
+
+def _echo_report_inventory_table(payload: object) -> None:
+    headers = ("project", "id", "repos", "recon", "score_axes")
+    _echo_table(headers, [_project_row(project) for project in _payload_projects(payload)], "No projects.")
+
+
+def _echo_auth_status(payload: object) -> None:
+    data = _object_dict(payload)
+    authenticated = "yes" if data.get("authenticated") is True else "no"
+    typer.echo(f"authenticated: {authenticated}")
+    for key in ("credential_type", "email", "name", "user_id", "auth_file", "code", "message"):
+        value = _text_cell(data.get(key))
+        if value != "-":
+            typer.echo(f"{key}: {value}")
+
+
+def _echo_audit_catalog(payload: object) -> None:
+    headers = ("audit", "label", "job_kind", "route")
+    rows = [
+        (
+            _text_cell(audit.get("alias")),
+            _text_cell(audit.get("label")),
+            _text_cell(audit.get("job_kind")),
+            _text_cell(audit.get("route_slug")),
+        )
+        for audit in (_object_dict(item) for item in _object_list(payload))
+    ]
+    _echo_table(headers, rows, "No audits.")
+
+
+def _echo_wait_status(payload: object) -> None:
+    data = _object_dict(payload)
+    idle = "yes" if data.get("idle") is True else "no"
+    typer.echo(f"idle: {idle}")
+    for key in ("repo_id", "audit", "elapsed_seconds"):
+        typer.echo(f"{key}: {_text_cell(data.get(key))}")
+    typer.echo(f"active_runs: {len(_object_list(data.get('active_runs')))}")
+
+
+def _echo_generic_payload(payload: object) -> None:
+    _echo_key_values(_object_dict(payload))
+
+
+def _echo_key_values(payload: dict[str, object]) -> None:
+    if not payload:
+        typer.echo("No data.")
+        return
+    for key, value in payload.items():
+        typer.echo(f"{key}: {_value_cell(value)}")
+
+
+def _payload_projects(payload: object) -> list[dict[str, object]]:
+    return [_object_dict(project) for project in _object_list(_object_dict(payload).get("projects"))]
+
+
+def _payload_repos(payload: object) -> list[tuple[dict[str, object], dict[str, object]]]:
+    repos: list[tuple[dict[str, object], dict[str, object]]] = []
+    for project in _payload_projects(payload):
+        repos.extend((project, _object_dict(repo_value)) for repo_value in _object_list(project.get("repos")))
+    return repos
+
+
+def _project_row(project: dict[str, object]) -> tuple[str, ...]:
+    return (
+        _project_label(project),
+        _text_cell(project.get("id"), fallback=_text_cell(project.get("project_id"))),
+        str(_repo_count(project)),
+        _project_recon_cell(project),
+        str(len(_object_dict(project.get("scores")))),
+    )
+
+
+def _repo_resolve_row(data: dict[str, object], match: dict[str, object]) -> tuple[str, ...]:
+    return (
+        _text_cell(data.get("selector")),
+        _text_cell(data.get("resolved")),
+        _project_label(match),
+        _repo_label(match),
+        _text_cell(match.get("repo_id")),
+        _repo_state(match),
+    )
+
+
+def _repo_score_row(project: dict[str, object], repo: dict[str, object]) -> tuple[str, ...]:
+    scores = _object_dict(repo.get("scores"))
+    score_summary = _object_dict(repo.get("score_summary"))
+    return (
+        _project_label(project),
+        _repo_label(repo),
+        _repo_state(repo),
+        _score_cell(score_summary.get("overall_score")),
+        _text_cell(score_summary.get("overall_grade")),
+        _weakest_cell(score_summary),
+        _score_cell(scores.get("vulns")),
+        _score_cell(scores.get("ai-readiness")),
+        _score_cell(scores.get("tests")),
+        _score_cell(scores.get("tech-health")),
+        _score_cell(scores.get("dependency-hygiene")),
+        _score_cell(scores.get("dead-code")),
+    )
+
+
+def _repo_status_row(project: dict[str, object], repo: dict[str, object]) -> tuple[str, ...]:
+    score_summary = _object_dict(repo.get("score_summary"))
+    reports = _object_dict(repo.get("reports"))
+    return (
+        _project_label(project),
+        _repo_label(repo),
+        _repo_state(repo),
+        _score_cell(score_summary.get("overall_score")),
+        _weakest_cell(score_summary),
+        _reports_cell(reports),
+        _text_cell(repo.get("active_run_count")),
+        _sha_cell(repo.get("current_head_sha")),
+        _sha_cell(_audited_head(reports)),
+    )
+
+
+def _project_label(project: dict[str, object]) -> str:
+    return _text_cell(
+        project.get("project_name"),
+        fallback=_text_cell(project.get("name"), fallback=_text_cell(project.get("project_id"))),
+    )
+
+
+def _repo_label(repo: dict[str, object]) -> str:
+    return _text_cell(repo.get("github_repo"), fallback=_text_cell(repo.get("repo_id")))
+
+
+def _repo_state(repo: dict[str, object]) -> str:
+    if repo.get("connected") is not True:
+        return "disconnected"
+    if repo.get("recon_done") is not True:
+        return "uninitialized"
+    if not _object_dict(repo.get("scores")):
+        return "unscored"
+    return "scored"
+
+
+def _repo_count(project: dict[str, object]) -> int:
+    repo_ids = _object_list(project.get("repo_ids"))
+    if repo_ids:
+        return len(repo_ids)
+    camel_repo_ids = _object_list(project.get("repoIds"))
+    if camel_repo_ids:
+        return len(camel_repo_ids)
+    return len(_object_list(project.get("repos")))
+
+
+def _project_recon_cell(project: dict[str, object]) -> str:
+    value = project.get("recon_pending")
+    if value is None:
+        value = project.get("reconPending")
+    if value is True:
+        return "pending"
+    if value is False:
+        return "done"
+    return "-"
+
+
+def _weakest_cell(score_summary: dict[str, object]) -> str:
+    axis = score_summary.get("weakest_axis")
+    score = _score_cell(score_summary.get("weakest_score"))
+    if not isinstance(axis, str) or score == "-":
+        return "-"
+    return f"{axis}={score}"
+
+
+def _reports_cell(reports: dict[str, object]) -> str:
+    ready = len(_object_list(reports.get("ready")))
+    running = len(_object_list(reports.get("running")))
+    missing = len(_object_list(reports.get("missing")))
+    parts: list[str] = []
+    if ready:
+        parts.append(f"{ready} ready")
+    if running:
+        parts.append(f"{running} running")
+    if missing:
+        parts.append(f"{missing} missing")
+    return ", ".join(parts) if parts else "-"
+
+
+def _audited_head(reports: dict[str, object]) -> object | None:
+    for report_value in _object_list(reports.get("reports")):
+        report = _object_dict(report_value)
+        audited_head = report.get("last_audited_head_sha")
+        if isinstance(audited_head, str) and audited_head:
+            return audited_head
+    return None
+
+
+def _sha_cell(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return "-"
+    return value[:8]
+
+
+def _score_cell(value: object) -> str:
+    if isinstance(value, bool) or value is None:
+        return "-"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return f"{value:.1f}".removesuffix(".0")
+    return "-"
+
+
+def _text_cell(value: object, *, fallback: str = "-") -> str:
+    if isinstance(value, str) and value:
+        return value
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, int):
+        return str(value)
+    return fallback
+
+
+def _value_cell(value: object) -> str:
+    if isinstance(value, str | int | float) or value is None or isinstance(value, bool):
+        return _text_cell(value)
+    if isinstance(value, list):
+        return f"{len(value)} item(s)"
+    if isinstance(value, dict):
+        return f"{len(value)} field(s)"
+    return str(value)
+
+
+def _object_dict(value: object) -> dict[str, object]:
+    return cast(dict[str, object], value) if isinstance(value, dict) else {}
+
+
+def _object_list(value: object) -> list[object]:
+    return value if isinstance(value, list) else []
 
 
 def _resolve_command_payload(action: JsonCommandAction) -> object:
@@ -110,6 +413,7 @@ def main(
         str | None,
         typer.Option("--project", help="Global exact Enji project id or name filter."),
     ] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
     log_level: Annotated[
         str | None,
         typer.Option("--log-level", help="Project log level. Defaults to ENJI_GUARD_LOG_LEVEL or WARNING."),
@@ -120,6 +424,7 @@ def main(
     ] = None,
 ) -> None:
     _cli_state["project"] = project
+    _cli_state["json"] = json_output
     configure_logging(log_level, log_format)
     if version:
         typer.echo(package_version())
@@ -133,9 +438,9 @@ def health() -> None:
 
 @app.command(help=ACCESS_OPERATION.summary)
 def access(
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_json_command(get_access, pretty)
+    _run_human_or_json_command(get_access, _json_output(json_output))
 
 
 @app.command()
@@ -177,9 +482,13 @@ def status(
         Literal["default", "name", "weakest", "overall"],
         typer.Option("--sort", help="Sort repos by default order, name, weakest score, or overall score."),
     ] = DEFAULT_REPO_SORT,
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_json_command(lambda: runtime_status(repo, _selected_project(), sort), pretty)
+    _run_human_or_json_command(
+        lambda: runtime_status(repo, _selected_project(), sort),
+        _json_output(json_output),
+        _echo_repo_status_table,
+    )
 
 
 @app.command()
@@ -190,21 +499,24 @@ def wait(
         int,
         typer.Option("--timeout-seconds", min=1, help="Maximum wait time in seconds."),
     ] = 7200,
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     payload = _resolve_command_payload(
         lambda: wait_for_work(repo, audit, _selected_project(), poll_seconds=10, timeout_seconds=timeout_seconds)
     )
-    _echo_json(payload, pretty)
+    if _json_output(json_output):
+        _echo_json(payload)
+    else:
+        _echo_wait_status(payload)
     if isinstance(payload, dict) and payload.get("idle") is False:
         raise typer.Exit(2)
 
 
 @project_app.command("list")
 def project_list(
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_json_command(list_projects, pretty)
+    _run_human_or_json_command(list_projects, _json_output(json_output), _echo_project_table)
 
 
 @report_app.command("list", help=REPORTS_LIST_OPERATION.summary)
@@ -213,9 +525,13 @@ def report_list(
         str,
         typer.Option("--selector", help="Repository selector. Defaults to '*'."),
     ] = REPORTS_LIST_DEFAULT_SELECTOR,
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_json_command(lambda: get_reports_list(selector=selector), pretty)
+    _run_human_or_json_command(
+        lambda: get_reports_list(selector=selector),
+        _json_output(json_output),
+        _echo_report_inventory_table,
+    )
 
 
 @report_app.command("read")
@@ -226,17 +542,13 @@ def report_read(
         typer.Argument(help="Optional report audit aliases. Defaults to ready reports."),
     ] = None,
     all_reports: Annotated[bool, typer.Option("--all", help="Read every report audit.")] = False,
-    output_format: Annotated[
-        Literal["markdown", "json"],
-        typer.Option("--format", help="Output markdown reports or JSON snapshots."),
-    ] = "markdown",
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     payload = _resolve_command_payload(
         lambda: read_reports_for_repo(repo, _selected_project(), _report_audits(audits or []), all_reports=all_reports)
     )
-    if output_format == "json":
-        _echo_json(payload, pretty)
+    if _json_output(json_output):
+        _echo_json(payload)
         return
     try:
         typer.echo(_reports_markdown(payload))
@@ -249,15 +561,11 @@ def report_read(
 def report_show(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     audit: Annotated[ReportAuditAlias, typer.Argument(help="Canonical report audit alias.")],
-    output_format: Annotated[
-        Literal["json", "markdown"],
-        typer.Option("--format", help="Output JSON snapshot or markdown report."),
-    ] = "json",
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     payload = _resolve_command_payload(lambda: show_report_for_repo(repo, _report_audit(audit), _selected_project()))
-    if output_format == "json":
-        _echo_json(payload, pretty)
+    if _json_output(json_output):
+        _echo_json(payload)
         return
     try:
         typer.echo(_report_markdown(payload))
@@ -272,9 +580,13 @@ def repo_current(
         Path | None,
         typer.Option("--path", help="Path inside the local Git repository. Defaults to cwd."),
     ] = None,
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _echo_json(current_repo(path), pretty)
+    payload = current_repo(path)
+    if _json_output(json_output):
+        _echo_json(payload)
+        return
+    _echo_key_values(cast(dict[str, object], payload))
 
 
 @repo_app.command("list")
@@ -283,33 +595,41 @@ def repo_list(
         Literal["default", "name", "weakest", "overall"],
         typer.Option("--sort", help="Sort repos by default order, name, weakest score, or overall score."),
     ] = DEFAULT_REPO_SORT,
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_json_command(lambda: list_project_inventory(_selected_project(), sort), pretty)
+    _run_human_or_json_command(
+        lambda: list_project_inventory(_selected_project(), sort),
+        _json_output(json_output),
+        _echo_repo_score_table,
+    )
 
 
 @repo_app.command("resolve")
 def repo_resolve(
     repo: Annotated[str | None, typer.Argument(help="Repo id or owner/name. Defaults to current Git repo.")] = None,
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_json_command(lambda: resolve_repo(repo, _selected_project()), pretty)
+    _run_human_or_json_command(
+        lambda: resolve_repo(repo, _selected_project()),
+        _json_output(json_output),
+        _echo_repo_resolve_table,
+    )
 
 
 @repo_app.command("connect")
 def repo_connect(
     github_repo: Annotated[str, typer.Argument(help="GitHub owner/name repository slug.")],
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_json_command(lambda: connect_repo(github_repo, _selected_project()), pretty)
+    _run_human_or_json_command(lambda: connect_repo(github_repo, _selected_project()), _json_output(json_output))
 
 
 @recon_app.command("start")
 def recon_start(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_json_command(lambda: start_recon(repo, _selected_project()), pretty)
+    _run_human_or_json_command(lambda: start_recon(repo, _selected_project()), _json_output(json_output))
 
 
 @audit_app.command("start")
@@ -320,26 +640,28 @@ def audit_start(
         typer.Argument(help="One or more canonical report audit aliases. Use --all for all report audits."),
     ] = None,
     all_reports: Annotated[bool, typer.Option("--all", help="Start every report audit.")] = False,
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_json_command(
+    _run_human_or_json_command(
         lambda: start_report_audits(repo, _selected_project(), _report_audits(audits or []), all_reports=all_reports),
-        pretty,
+        _json_output(json_output),
     )
 
 
 @schedule_app.command("list")
 def schedule_list(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_json_command(lambda: list_schedules_for_repo(repo, _selected_project()), pretty)
+    _run_human_or_json_command(lambda: list_schedules_for_repo(repo, _selected_project()), _json_output(json_output))
 
 
 @schedule_app.command("set")
 def schedule_set(
-    repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
-    audit: Annotated[ReportAuditAlias, typer.Argument(help="Canonical report audit alias.")],
+    repo_and_audit: Annotated[
+        list[str],
+        typer.Argument(help="Repo id or owner/name followed by canonical report audit alias."),
+    ],
     frequency: Annotated[
         Literal["daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"],
         typer.Option("--freq", help="Schedule frequency."),
@@ -349,11 +671,13 @@ def schedule_set(
         typer.Option("--day", help="Repeatable day: mon,tue,wed,thu,fri,sat,sun."),
     ] = None,
     at: Annotated[str, typer.Option("--at", help="auto, HH:MM, or HH:MM@TZ.")] = "auto",
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_json_command(
-        lambda: set_schedule_for_repo(
+    def action() -> OperationResult:
+        repo, audit = _schedule_set_target(repo_and_audit)
+        return set_schedule_for_repo(
             repo,
-            _report_audit(audit),
+            audit,
             _selected_project(),
             schedule_payload(
                 ScheduleUpdate(
@@ -365,8 +689,11 @@ def schedule_set(
                     timezone=_schedule_timezone(at),
                 )
             ),
-        ),
-        False,
+        )
+
+    _run_human_or_json_command(
+        action,
+        _json_output(json_output),
     )
 
 
@@ -374,27 +701,35 @@ def schedule_set(
 def schedule_disable(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     audit: Annotated[ReportAuditAlias, typer.Argument(help="Canonical report audit alias.")],
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_json_command(
+    _run_human_or_json_command(
         lambda: disable_schedule_for_repo(repo, _report_audit(audit), _selected_project()),
-        pretty,
+        _json_output(json_output),
     )
 
 
 @catalog_app.command("audits", help=CATALOG_AUDITS_OPERATION.summary)
 def catalog_audits(
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _echo_json(resolve_operation_result(CATALOG_AUDITS_OPERATION.execute()), pretty)
+    payload = resolve_operation_result(CATALOG_AUDITS_OPERATION.execute())
+    if _json_output(json_output):
+        _echo_json(payload)
+        return
+    _echo_audit_catalog(payload)
 
 
 @catalog_app.command("audit", help=CATALOG_AUDIT_OPERATION.summary)
 def catalog_audit(
     audit: Annotated[AuditAlias, typer.Argument(help="Canonical audit alias.")],
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _echo_json(resolve_operation_result(CATALOG_AUDIT_OPERATION.execute(audit)), pretty)
+    payload = resolve_operation_result(CATALOG_AUDIT_OPERATION.execute(audit))
+    if _json_output(json_output):
+        _echo_json(payload)
+        return
+    _echo_key_values(_object_dict(payload))
 
 
 @auth_app.command("import-cookie")
@@ -404,7 +739,7 @@ def auth_import_cookie(
         Path | None,
         typer.Option("--auth-file", help="Auth file path. Defaults to ENJI_GUARD_AUTH_FILE or XDG config."),
     ] = None,
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     if not stdin:
         _echo_error("VALIDATION", "use --stdin to avoid storing cookies in shell history")
@@ -412,7 +747,11 @@ def auth_import_cookie(
 
     raw_cookie = sys.stdin.read()
     try:
-        _echo_json(import_cookie(raw_cookie, auth_file), pretty)
+        payload = import_cookie(raw_cookie, auth_file)
+        if _json_output(json_output):
+            _echo_json(payload)
+        else:
+            _echo_key_values(cast(dict[str, object], payload))
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
@@ -428,7 +767,7 @@ def auth_import_token(
         Path | None,
         typer.Option("--auth-file", help="Auth file path. Defaults to ENJI_GUARD_AUTH_FILE or XDG config."),
     ] = None,
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     if not stdin:
         _echo_error("VALIDATION", "use --stdin to avoid storing tokens in shell history")
@@ -436,7 +775,11 @@ def auth_import_token(
 
     raw_token = sys.stdin.read()
     try:
-        _echo_json(import_bearer_token(raw_token, auth_file), pretty)
+        payload = import_bearer_token(raw_token, auth_file)
+        if _json_output(json_output):
+            _echo_json(payload)
+        else:
+            _echo_key_values(cast(dict[str, object], payload))
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
@@ -451,10 +794,13 @@ def auth_status_command(
         Path | None,
         typer.Option("--auth-file", help="Auth file path. Defaults to ENJI_GUARD_AUTH_FILE or XDG config."),
     ] = None,
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     payload = cast_auth_status_payload(resolve_operation_result(auth_status(auth_file)))
-    _echo_json(payload, pretty)
+    if _json_output(json_output):
+        _echo_json(payload)
+    else:
+        _echo_auth_status(payload)
     if not payload["authenticated"]:
         raise typer.Exit(3)
 
@@ -465,10 +811,14 @@ def auth_refresh_command(
         Path | None,
         typer.Option("--auth-file", help="Auth file path. Defaults to ENJI_GUARD_AUTH_FILE or XDG config."),
     ] = None,
-    pretty: Annotated[bool, typer.Option("--pretty", help="Pretty-print JSON output.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     try:
-        _echo_json(refresh_auth(auth_file), pretty)
+        payload = refresh_auth(auth_file)
+        if _json_output(json_output):
+            _echo_json(payload)
+        else:
+            _echo_key_values(cast(dict[str, object], payload))
     except AuthError as exc:
         _echo_error(exc.code, exc.message)
         raise typer.Exit(_exit_code_for_error(exc.code)) from None
@@ -548,8 +898,24 @@ def _schedule_timezone(at: str) -> str:
     return parts[1]
 
 
+def _schedule_set_target(values: list[str]) -> tuple[str, AuditAlias]:
+    if len(values) != SCHEDULE_SET_TARGET_PARTS:
+        raise ValueError("schedule set expects REPO AUDIT")
+    repo, audit_value = values
+    try:
+        return repo, _report_audit(ReportAuditAlias(audit_value))
+    except ValueError:
+        valid = ", ".join(audit.value for audit in ReportAuditAlias)
+        raise ValueError(f"unknown report audit {audit_value!r}; expected one of: {valid}") from None
+
+
 def _selected_project() -> str | None:
-    return _cli_state["project"]
+    project = _cli_state["project"]
+    return project if isinstance(project, str) else None
+
+
+def _json_output(local_json_output: bool = False) -> bool:
+    return local_json_output or _cli_state["json"] is True
 
 
 def _report_audit(audit: ReportAuditAlias) -> AuditAlias:
