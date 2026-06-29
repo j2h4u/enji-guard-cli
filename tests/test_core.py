@@ -4,15 +4,21 @@ import pytest
 from pytest import MonkeyPatch
 
 import enji_guard_cli.core as core
-from enji_guard_cli.audits import AUDITS, AuditAlias
+from enji_guard_cli.audits import (
+    AUDITS,
+    REPORT_AUDIT_ALIASES,
+    AuditAlias,
+    ReportAuditAlias,
+    audit_catalog,
+    audit_payload,
+    resolve_audit,
+)
 from enji_guard_cli.core import (
     OPERATION_SPECS,
     EmailPreferenceUpdate,
     OperationName,
-    audit_catalog,
     current_repo,
     operation_catalog,
-    resolve_audit,
     resolve_operation,
     resolve_operation_spec,
 )
@@ -80,8 +86,8 @@ def test_resolve_operation_returns_new_access_and_reports_specs() -> None:
 
 def test_operation_specs_are_executable_bindings() -> None:
     assert resolve_operation_spec(OperationName.CATALOG_AUDITS).execute() == audit_catalog()
-    assert resolve_operation_spec(OperationName.CATALOG_AUDIT).execute(AuditAlias.DEPS) == resolve_audit(
-        AuditAlias.DEPS
+    assert resolve_operation_spec(OperationName.CATALOG_AUDIT).execute(AuditAlias.DEPS) == audit_payload(
+        resolve_audit(AuditAlias.DEPS)
     )
     assert callable(resolve_operation_spec(OperationName.ACCESS).execute)
     assert callable(resolve_operation_spec(OperationName.REPORTS_LIST).execute)
@@ -90,13 +96,17 @@ def test_operation_specs_are_executable_bindings() -> None:
 
 def test_audit_catalog_is_derived_from_canonical_audit_definitions() -> None:
     assert len(audit_catalog()) == len(AUDITS)
-    assert resolve_audit(AuditAlias.RECON) == {
+    assert audit_payload(resolve_audit(AuditAlias.RECON)) == {
         "alias": "recon",
         "label": "Recon",
         "route_slug": None,
         "job_kind": None,
         "action_key": "audit.recon",
     }
+
+
+def test_report_audit_alias_enum_matches_report_registry() -> None:
+    assert tuple(AuditAlias(alias.value) for alias in ReportAuditAlias) == REPORT_AUDIT_ALIASES
 
 
 def test_current_repo_detects_github_origin(tmp_path: Path) -> None:

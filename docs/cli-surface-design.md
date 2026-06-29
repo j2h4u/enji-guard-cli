@@ -40,6 +40,14 @@ Canonical report audits:
 ## Command Shape
 
 ```text
+enji-guard health
+enji-guard access
+enji-guard run
+enji-guard auth status
+enji-guard auth refresh
+enji-guard auth import-cookie --stdin
+enji-guard auth import-token --stdin
+
 enji-guard project list
 
 enji-guard repo current

@@ -167,6 +167,44 @@ forbidden_modules = ["enji_guard_cli.enji_api", "enji_guard_cli.transport", "htt
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
+id = "core-avoids-transport-internals"
+name = "Core uses Enji API adapter instead of transport internals"
+type = "forbidden"
+source_modules = ["enji_guard_cli.core"]
+forbidden_modules = ["enji_guard_cli.transport", "httpx", "httpx_retries"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "mcp-uses-core-for-auth"
+name = "MCP server uses core operations for auth status"
+type = "forbidden"
+source_modules = ["enji_guard_cli.mcp_server"]
+forbidden_modules = ["enji_guard_cli.auth"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "audit-registry-stays-domain-pure"
+name = "Audit registry stays pure domain metadata"
+type = "forbidden"
+source_modules = ["enji_guard_cli.audits"]
+forbidden_modules = [
+    "enji_guard_cli.auth",
+    "enji_guard_cli.cli",
+    "enji_guard_cli.core",
+    "enji_guard_cli.enji_api",
+    "enji_guard_cli.errors",
+    "enji_guard_cli.mcp_server",
+    "enji_guard_cli.runtime",
+    "enji_guard_cli.telemetry",
+    "enji_guard_cli.transport",
+    "httpx",
+    "httpx_retries",
+    "mcp",
+    "typer",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
 id = "httpx-stays-behind-transport"
 name = "HTTP client dependency stays behind transport"
 type = "forbidden"
