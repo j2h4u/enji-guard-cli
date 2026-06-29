@@ -16,7 +16,6 @@ from enji_guard_cli.core import (
     OperationResult,
     ScheduleUpdate,
     connect_repo,
-    current_repo,
     disable_schedule_for_repo,
     list_email_preferences,
     list_project_inventory,
@@ -41,16 +40,26 @@ from enji_guard_cli.mcp_server import create_mcp_server, run_mcp_server
 from enji_guard_cli.runtime import run_service
 from enji_guard_cli.telemetry import configure_logging
 
-app = typer.Typer(help="Enji Guard command-line tools.")
-catalog_app = typer.Typer(help="Local Enji Guard catalog metadata.")
-auth_app = typer.Typer(help="Authentication and session-cookie management.")
-project_app = typer.Typer(help="Project inventory commands.")
-repo_app = typer.Typer(help="Repository workflow commands.")
-recon_app = typer.Typer(help="Preliminary repository diagnostics.")
-audit_app = typer.Typer(help="Report audit commands.")
-report_app = typer.Typer(help="Enji Guard report surfaces.")
-schedule_app = typer.Typer(help="Audit schedule commands.")
-email_app = typer.Typer(help="Report email preference commands.")
+MAIN_HELP = """Agent-oriented CLI for Enji Guard repository audits.
+
+Model: projects group GitHub repositories. Pass the known owner/name repo
+selector directly when an agent is working on a specific checkout. Recon is
+baseline discovery; report audits are separate slow jobs that produce scores
+and readable reports. Use status/list for triage, audit start for work,
+wait/status for long-running jobs, and report read for the Markdown findings.
+Text tables are the default; add --json for automation.
+"""
+
+app = typer.Typer(help=MAIN_HELP)
+catalog_app = typer.Typer(help="Local audit aliases and metadata.")
+auth_app = typer.Typer(help="Credential bootstrap, refresh, and status.")
+project_app = typer.Typer(help="Project inventory for disambiguation.")
+repo_app = typer.Typer(help="Discover, resolve, and connect GitHub repositories.")
+recon_app = typer.Typer(help="Start baseline discovery. Recon is not a report audit.")
+audit_app = typer.Typer(help="Start slow report-producing audits.")
+report_app = typer.Typer(help="List and read generated audit reports.")
+schedule_app = typer.Typer(help="Manage scheduled report audits.")
+email_app = typer.Typer(help="Manage report completion email preferences.")
 app.add_typer(catalog_app, name="catalog", hidden=True)
 app.add_typer(auth_app, name="auth")
 app.add_typer(project_app, name="project")
@@ -472,7 +481,7 @@ def main(
         raise typer.Exit
 
 
-@app.command()
+@app.command(help="Return local process liveness.")
 def health() -> None:
     typer.echo("ok")
 
@@ -484,7 +493,7 @@ def access(
     _run_human_or_json_command(get_access, _json_output(json_output))
 
 
-@app.command()
+@app.command(help="Run MCP plus background auth refresh under one supervisor.")
 def run(
     transport: Annotated[
         Literal["stdio", "sse", "streamable-http"],
@@ -516,7 +525,7 @@ def serve(
     run_mcp_server(create_mcp_server(host=host, port=port), transport=transport, mount_path=mount_path)
 
 
-@app.command()
+@app.command(help="Show repository scores, report freshness, and active work.")
 def status(
     repo: Annotated[str | None, typer.Argument(help="Repo id or owner/name. Defaults to all repos.")] = None,
     sort: Annotated[
@@ -535,7 +544,7 @@ def status(
     )
 
 
-@app.command()
+@app.command(help="Poll until one recon or report audit is no longer running.")
 def wait(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     audit: Annotated[AuditAlias, typer.Argument(help="recon or canonical report audit alias.")],
@@ -556,7 +565,7 @@ def wait(
         raise typer.Exit(2)
 
 
-@project_app.command("list")
+@project_app.command("list", help="List Enji projects and their repository counts.")
 def project_list(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
@@ -578,7 +587,7 @@ def report_list(
     )
 
 
-@report_app.command("read")
+@report_app.command("read", help="Read ready report Markdown for a repository.")
 def report_read(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     audits: Annotated[
@@ -601,7 +610,7 @@ def report_read(
         raise typer.Exit(1) from None
 
 
-@report_app.command("show")
+@report_app.command("show", help="Read one report audit as Markdown.")
 def report_show(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     audit: Annotated[ReportAuditAlias, typer.Argument(help="Canonical report audit alias.")],
@@ -618,22 +627,7 @@ def report_show(
         raise typer.Exit(1) from None
 
 
-@repo_app.command("current")
-def repo_current(
-    path: Annotated[
-        Path | None,
-        typer.Option("--path", help="Path inside the local Git repository. Defaults to cwd."),
-    ] = None,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    payload = current_repo(path)
-    if _json_output(json_output):
-        _echo_json(payload)
-        return
-    _echo_key_values(cast(dict[str, object], payload))
-
-
-@repo_app.command("list")
+@repo_app.command("list", help="List connected repositories with triage scores.")
 def repo_list(
     sort: Annotated[
         Literal["default", "name", "weakest", "overall", "latest-report"],
@@ -651,9 +645,9 @@ def repo_list(
     )
 
 
-@repo_app.command("resolve")
+@repo_app.command("resolve", help="Resolve an Enji repo id or GitHub owner/name selector.")
 def repo_resolve(
-    repo: Annotated[str | None, typer.Argument(help="Repo id or owner/name. Defaults to current Git repo.")] = None,
+    repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     _run_human_or_json_command(
@@ -663,7 +657,7 @@ def repo_resolve(
     )
 
 
-@repo_app.command("connect")
+@repo_app.command("connect", help="Connect a GitHub owner/name repository to Enji Guard.")
 def repo_connect(
     github_repo: Annotated[str, typer.Argument(help="GitHub owner/name repository slug.")],
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
@@ -671,7 +665,7 @@ def repo_connect(
     _run_human_or_json_command(lambda: connect_repo(github_repo, _selected_project()), _json_output(json_output))
 
 
-@recon_app.command("start")
+@recon_app.command("start", help="Start baseline discovery for a connected repository.")
 def recon_start(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
@@ -679,7 +673,7 @@ def recon_start(
     _run_human_or_json_command(lambda: start_recon(repo, _selected_project()), _json_output(json_output))
 
 
-@audit_app.command("start")
+@audit_app.command("start", help="Start one or more slow report-producing audits.")
 def audit_start(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     audits: Annotated[
@@ -695,7 +689,7 @@ def audit_start(
     )
 
 
-@schedule_app.command("list")
+@schedule_app.command("list", help="List report audit schedules for a repository.")
 def schedule_list(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
@@ -703,7 +697,7 @@ def schedule_list(
     _run_human_or_json_command(lambda: list_schedules_for_repo(repo, _selected_project()), _json_output(json_output))
 
 
-@schedule_app.command("set")
+@schedule_app.command("set", help="Enable or update a report audit schedule.")
 def schedule_set(
     repo_and_audit: Annotated[
         list[str],
@@ -744,7 +738,7 @@ def schedule_set(
     )
 
 
-@schedule_app.command("disable")
+@schedule_app.command("disable", help="Disable a report audit schedule.")
 def schedule_disable(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     audit: Annotated[ReportAuditAlias, typer.Argument(help="Canonical report audit alias.")],
@@ -756,7 +750,7 @@ def schedule_disable(
     )
 
 
-@email_app.command("list")
+@email_app.command("list", help="List manual and scheduled report email preferences.")
 def email_list(
     repo: Annotated[
         str | None,
@@ -771,7 +765,7 @@ def email_list(
     )
 
 
-@email_app.command("set")
+@email_app.command("set", help="Batch update report email preferences.")
 def email_set(
     repo: Annotated[
         str | None,
@@ -824,7 +818,7 @@ def catalog_audit(
     _echo_key_values(_object_dict(payload))
 
 
-@auth_app.command("import-cookie")
+@auth_app.command("import-cookie", help="Import a raw browser Cookie header from stdin.")
 def auth_import_cookie(
     stdin: Annotated[bool, typer.Option("--stdin", help="Read a raw Cookie header from stdin.")] = False,
     auth_file: Annotated[
@@ -852,7 +846,7 @@ def auth_import_cookie(
         raise typer.Exit(1) from None
 
 
-@auth_app.command("import-token")
+@auth_app.command("import-token", help="Import a bearer or API token from stdin.")
 def auth_import_token(
     stdin: Annotated[bool, typer.Option("--stdin", help="Read a bearer token from stdin.")] = False,
     auth_file: Annotated[
@@ -897,7 +891,7 @@ def auth_status_command(
         raise typer.Exit(3)
 
 
-@auth_app.command("refresh")
+@auth_app.command("refresh", help="Refresh cookie auth and persist rotated cookies.")
 def auth_refresh_command(
     auth_file: Annotated[
         Path | None,

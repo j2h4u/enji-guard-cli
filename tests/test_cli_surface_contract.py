@@ -17,7 +17,6 @@ EXPECTED_VISIBLE_COMMANDS = {
     ("project", "list"),
     ("recon", "start"),
     ("repo", "connect"),
-    ("repo", "current"),
     ("repo", "list"),
     ("repo", "resolve"),
     ("report", "list"),

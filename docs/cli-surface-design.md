@@ -50,9 +50,8 @@ enji-guard auth import-token --stdin
 
 enji-guard project list
 
-enji-guard repo current
 enji-guard repo list [--sort default|name|weakest|overall|latest-report]
-enji-guard repo resolve [REPO]
+enji-guard repo resolve REPO
 enji-guard repo connect OWNER/NAME
 
 enji-guard status [REPO] [--sort default|name|weakest|overall|latest-report]

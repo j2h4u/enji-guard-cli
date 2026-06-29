@@ -171,6 +171,25 @@ def test_version_flag_reports_package_version() -> None:
     assert "0.1.0" in result.output
 
 
+def test_top_level_help_explains_agent_model() -> None:
+    result = CliRunner().invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "projects group GitHub repositories" in result.output
+    assert "Recon is" in result.output
+    assert "baseline discovery" in result.output
+    assert "Text tables are the default" in result.output
+
+
+def test_command_help_summarizes_workflow_groups() -> None:
+    result = CliRunner().invoke(app, ["repo", "--help"])
+
+    assert result.exit_code == 0
+    assert "Discover, resolve, and connect GitHub repositories." in result.output
+    assert "List connected repositories with triage scores." in result.output
+    assert "Connect a GitHub owner/name repository to Enji Guard." in result.output
+
+
 def test_catalog_audits_reports_canonical_identifier_map() -> None:
     result = CliRunner().invoke(app, ["catalog", "audits", "--json"])
 
@@ -350,21 +369,23 @@ def test_repo_list_can_emit_json(monkeypatch: MonkeyPatch) -> None:
     assert json.loads(result.output) == payload
 
 
-def test_repo_resolve_defaults_to_current_repo_selector(monkeypatch: MonkeyPatch) -> None:
+def test_repo_resolve_requires_explicit_selector(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_resolve(repo: str | None, project: str | None) -> dict[str, object]:
+    def fake_resolve(repo: str, project: str | None) -> dict[str, object]:
         captured["repo"] = repo
         captured["project"] = project
         return {"resolved": True, "matches": [{"repo_id": "repo_1"}]}
 
     monkeypatch.setattr(cli, "resolve_repo", fake_resolve)
 
-    result = CliRunner().invoke(app, ["repo", "resolve", "--json"])
+    missing = CliRunner().invoke(app, ["repo", "resolve", "--json"])
+    result = CliRunner().invoke(app, ["repo", "resolve", "j2h4u/enji-guard-cli", "--json"])
 
+    assert missing.exit_code == 2
     assert result.exit_code == 0
     assert json.loads(result.output)["resolved"] is True
-    assert captured == {"repo": None, "project": None}
+    assert captured == {"repo": "j2h4u/enji-guard-cli", "project": None}
 
 
 def test_repo_connect_uses_global_project_filter(monkeypatch: MonkeyPatch) -> None:

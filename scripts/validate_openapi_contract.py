@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+
 import json
 from collections.abc import Iterator
 from pathlib import Path

@@ -27,7 +27,7 @@ actionlint:
 
 # Validate the reconstructed Enji OpenAPI contract.
 openapi-contract:
-    uv run python -m scripts.validate_openapi_contract
+    scripts/validate_openapi_contract.py
 
 # Run the canonical static type checker on production code.
 typecheck:
@@ -70,7 +70,7 @@ crap-check:
     coverage_file="$(mktemp /tmp/enji-guard-crap-coverage.XXXXXX.json)"; \
     trap 'rm -f "$coverage_file"' EXIT; \
     uv run pytest --cov=src/enji_guard_cli --cov-report=json:"$coverage_file"; \
-    uv run python -m scripts.crap_gate --coverage "$coverage_file" --src src/enji_guard_cli --threshold 30
+    scripts/crap_gate.py --coverage "$coverage_file" --src src/enji_guard_cli --threshold 30
 
 # Build the Docker image.
 docker-build:

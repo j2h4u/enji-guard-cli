@@ -6,17 +6,80 @@ This repository is an early prototype. It supports a shared core, a Typer CLI,
 and a FastMCP server that can expose Enji Guard access and compact report
 metadata to local tools.
 
-## Requirements
+## Mental Model
 
-- Python 3.14
-- uv
-- Docker, for the long-running MCP service
+Enji Guard groups GitHub repositories into projects. Most workflows should use
+the GitHub `owner/name` repository selector; add `--project NAME_OR_ID` only
+when the account has ambiguous repositories or when a batch operation must be
+scoped to one project.
 
-## Install
+Recon is baseline discovery. Report audits are separate, slow jobs that produce
+readable reports and scores. Scores are triage hints: use them to sort and
+prioritize repositories, then read the reports before changing code. When a
+report exposes commit hashes, compare them with the current checkout before
+treating the report as fresh.
+
+CLI output is human text and tables by default. Use `--json` only when another
+tool needs structured output.
+
+## Agent Workflow
+
+The service runtime is Docker. Agents should call the CLI inside the running
+container instead of installing or running this Python package on the host:
 
 ```bash
-uv sync
-uv run enji-guard --help
+docker exec -i enji-guard-cli enji-guard --help
+```
+
+When working on another repository, pass the repository as `OWNER/NAME`. If an
+agent is already in a GitHub checkout and wants to derive it from `origin`, it
+can do that in the host shell and still pass an explicit selector to the
+container:
+
+```bash
+REPO=$(git config --get remote.origin.url | sed -E 's#^git@github.com:##; s#^https://github.com/##; s#\.git$##')
+
+docker exec -i enji-guard-cli enji-guard auth status
+docker exec -i enji-guard-cli enji-guard repo resolve "$REPO"
+docker exec -i enji-guard-cli enji-guard status "$REPO"
+```
+
+If the repository is absent from Enji:
+
+```bash
+docker exec -i enji-guard-cli enji-guard repo connect "$REPO"
+```
+
+For triage across all visible repositories:
+
+```bash
+docker exec -i enji-guard-cli enji-guard status --sort weakest
+docker exec -i enji-guard-cli enji-guard repo list --sort latest-report
+```
+
+For reports:
+
+```bash
+docker exec -i enji-guard-cli enji-guard audit start "$REPO" --all
+docker exec -i enji-guard-cli enji-guard wait "$REPO" security --timeout-seconds 7200
+docker exec -i enji-guard-cli enji-guard report read "$REPO"
+```
+
+Recon and report audits can take tens of minutes. Use `status` for a snapshot,
+`wait` for one audit, and `report read` after reports are ready. Prefer reading
+reports through CLI/MCP instead of relying on email; disable noisy scheduled
+mail when it is not part of the workflow.
+
+## Requirements
+
+- Docker
+- uv, only for repository development and QA
+
+## Runtime
+
+```bash
+docker compose up -d --force-recreate --remove-orphans --wait
+docker exec -i enji-guard-cli enji-guard --help
 ```
 
 ## Authentication
@@ -24,15 +87,15 @@ uv run enji-guard --help
 Preferred future path is an Enji API token:
 
 ```bash
-printf '%s' "$ENJI_API_TOKEN" | uv run enji-guard auth import-token --stdin
+printf '%s' "$ENJI_API_TOKEN" | docker exec -i enji-guard-cli enji-guard auth import-token --stdin
 ```
 
 Until API tokens are available, cookie auth is supported as a temporary
 compatibility path:
 
 ```bash
-pbpaste | uv run enji-guard auth import-cookie --stdin
-uv run enji-guard auth status
+pbpaste | docker exec -i enji-guard-cli enji-guard auth import-cookie --stdin
+docker exec -i enji-guard-cli enji-guard auth status
 ```
 
 Do not paste credentials directly into shell history. The auth file defaults to
@@ -41,15 +104,15 @@ Do not paste credentials directly into shell history. The auth file defaults to
 ## CLI
 
 ```bash
-uv run enji-guard access
-uv run enji-guard project list
-uv run enji-guard repo current
-uv run enji-guard status
-uv run enji-guard audit start j2h4u/enji-guard-cli --all
-uv run enji-guard wait j2h4u/enji-guard-cli security
-uv run enji-guard report read j2h4u/enji-guard-cli
-uv run enji-guard --project Pets email set --auto off
-uv run enji-guard auth refresh
+docker exec -i enji-guard-cli enji-guard access
+docker exec -i enji-guard-cli enji-guard project list
+docker exec -i enji-guard-cli enji-guard repo resolve j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard status j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard audit start j2h4u/enji-guard-cli --all
+docker exec -i enji-guard-cli enji-guard wait j2h4u/enji-guard-cli security
+docker exec -i enji-guard-cli enji-guard report read j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard --project Pets email set --auto off
+docker exec -i enji-guard-cli enji-guard auth refresh
 ```
 
 Pass `--json` when a command output is consumed by automation.
