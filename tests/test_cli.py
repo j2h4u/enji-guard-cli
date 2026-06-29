@@ -185,9 +185,10 @@ def test_command_help_summarizes_workflow_groups() -> None:
     result = CliRunner().invoke(app, ["repo", "--help"])
 
     assert result.exit_code == 0
-    assert "Discover, resolve, and connect GitHub repositories." in result.output
+    assert "Discover, resolve, connect, and move GitHub repositories." in result.output
     assert "List connected repositories with triage scores." in result.output
     assert "Connect a GitHub owner/name repository to Enji Guard." in result.output
+    assert "Move a repository to another Enji project." in result.output
 
 
 def test_catalog_audits_reports_canonical_identifier_map() -> None:
@@ -315,6 +316,58 @@ def test_project_list_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
     assert json.loads(result.output) == {"projects": [{"id": "project_1"}]}
 
 
+def test_project_create_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_create(name: str) -> dict[str, object]:
+        captured["name"] = name
+        return {"project_name": name, "response": {"project": {"id": "project_1"}}}
+
+    monkeypatch.setattr(cli, "create_project", fake_create)
+
+    result = CliRunner().invoke(app, ["project", "create", "Pets", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {"project_name": "Pets", "response": {"project": {"id": "project_1"}}}
+    assert captured == {"name": "Pets"}
+
+
+def test_project_rename_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_rename(project: str, name: str) -> dict[str, object]:
+        captured["project"] = project
+        captured["name"] = name
+        return {"project_id": "project_1", "project_name": name, "response": {}}
+
+    monkeypatch.setattr(cli, "rename_project", fake_rename)
+
+    result = CliRunner().invoke(app, ["project", "rename", "Pets", "Work", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {"project_id": "project_1", "project_name": "Work", "response": {}}
+    assert captured == {"project": "Pets", "name": "Work"}
+
+
+def test_project_delete_requires_yes_and_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_delete(project: str) -> dict[str, object]:
+        captured["project"] = project
+        return {"project_id": "project_1", "deleted": True}
+
+    monkeypatch.setattr(cli, "delete_project", fake_delete)
+
+    rejected = CliRunner().invoke(app, ["project", "delete", "Pets", "--json"])
+    result = CliRunner().invoke(app, ["project", "delete", "Pets", "--yes", "--json"])
+
+    assert rejected.exit_code == 1
+    assert rejected.stderr == "VALIDATION: project delete requires --yes\n"
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {"project_id": "project_1", "deleted": True}
+    assert captured == {"project": "Pets"}
+
+
 def test_repo_list_uses_global_project_filter(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
@@ -403,6 +456,37 @@ def test_repo_connect_uses_global_project_filter(monkeypatch: MonkeyPatch) -> No
     assert result.exit_code == 0
     assert json.loads(result.output) == {"repo": {"id": "repo_1"}}
     assert captured == {"github_repo": "j2h4u/enji-guard-cli", "project": "Pets"}
+
+
+def test_repo_move_uses_global_source_project_and_destination_option(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, str | None] = {}
+
+    def fake_move(repo: str, source_project: str | None, target_project: str) -> dict[str, object]:
+        captured["repo"] = repo
+        captured["source_project"] = source_project
+        captured["target_project"] = target_project
+        return {
+            "source_project_id": "project_1",
+            "target_project_id": "project_2",
+            "repo": {"repo_id": "repo_1", "github_repo": "j2h4u/enji-guard-cli"},
+            "preflight": {"ok": True},
+            "response": {"repo": {"id": "repo_1"}},
+        }
+
+    monkeypatch.setattr(cli, "move_repo", fake_move)
+
+    result = CliRunner().invoke(
+        app,
+        ["--project", "Pets", "repo", "move", "j2h4u/enji-guard-cli", "--to-project", "Work", "--json"],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["target_project_id"] == "project_2"
+    assert captured == {
+        "repo": "j2h4u/enji-guard-cli",
+        "source_project": "Pets",
+        "target_project": "Work",
+    }
 
 
 def test_status_routes_to_runtime_snapshot(monkeypatch: MonkeyPatch) -> None:

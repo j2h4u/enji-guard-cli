@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from pathlib import Path
 
 from typer.main import get_command
 
@@ -14,10 +15,14 @@ EXPECTED_VISIBLE_COMMANDS = {
     ("email", "list"),
     ("email", "set"),
     ("health",),
+    ("project", "create"),
+    ("project", "delete"),
     ("project", "list"),
+    ("project", "rename"),
     ("recon", "start"),
     ("repo", "connect"),
     ("repo", "list"),
+    ("repo", "move"),
     ("repo", "resolve"),
     ("report", "list"),
     ("report", "read"),
@@ -38,7 +43,28 @@ RAW_PLUMBING_NAMES = {
     "runbook",
     "task-link",
     "task-links",
+    "transfer",
+    "preflight",
 }
+
+PROJECT_ADMIN_COMMANDS = (
+    "enji-guard project create NAME",
+    "enji-guard project rename PROJECT NAME",
+    "enji-guard project delete PROJECT --yes",
+    "enji-guard repo move REPO --to-project PROJECT",
+)
+
+README_PROJECT_ADMIN_EXAMPLES = (
+    "docker exec -i enji-guard-cli enji-guard project create Pets",
+    "docker exec -i enji-guard-cli enji-guard project rename Pets Friends",
+    "docker exec -i enji-guard-cli enji-guard project delete Pets --yes",
+    "docker exec -i enji-guard-cli enji-guard repo move j2h4u/enji-guard-cli --to-project Friends",
+)
+
+PROJECT_ADMIN_RULES = (
+    "project delete is destructive and requires --yes",
+    "repo move uses global --project as source project or selector disambiguation when needed",
+)
 
 
 def test_visible_cli_command_inventory_matches_workflow_surface() -> None:
@@ -53,6 +79,24 @@ def test_visible_cli_surface_excludes_raw_api_plumbing() -> None:
     assert command_names.isdisjoint(RAW_PLUMBING_NAMES)
 
 
+def test_documented_cli_surface_covers_project_admin_and_repo_move_commands() -> None:
+    readme = _normalized_text(Path("README.md"))
+    design = _normalized_text(Path("docs/cli-surface-design.md"))
+    spec = _normalized_text(Path("docs/enji-cli-mcp-spec.md"))
+
+    for command in PROJECT_ADMIN_COMMANDS:
+        assert command in design
+        assert command in spec
+
+    for example in README_PROJECT_ADMIN_EXAMPLES:
+        assert example in readme
+
+    for rule in PROJECT_ADMIN_RULES:
+        assert rule in readme
+        assert rule in design
+        assert rule in spec
+
+
 def _visible_command_paths(command: object, prefix: tuple[str, ...] = ()) -> Iterable[tuple[str, ...]]:
     child_commands = getattr(command, "commands", None)
     if not isinstance(child_commands, dict):
@@ -62,3 +106,7 @@ def _visible_command_paths(command: object, prefix: tuple[str, ...] = ()) -> Ite
         if not isinstance(name, str) or getattr(child, "hidden", False):
             continue
         yield from _visible_command_paths(child, (*prefix, name))
+
+
+def _normalized_text(path: Path) -> str:
+    return " ".join(path.read_text(encoding="utf-8").replace("`", "").split())

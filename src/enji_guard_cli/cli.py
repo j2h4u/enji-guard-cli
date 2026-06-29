@@ -16,12 +16,16 @@ from enji_guard_cli.core import (
     OperationResult,
     ScheduleSettingsUpdate,
     connect_repo,
+    create_project,
+    delete_project,
     list_email_preferences,
     list_project_inventory,
     list_projects,
     list_schedule_settings,
+    move_repo,
     package_version,
     read_reports_for_repo,
+    rename_project,
     resolve_operation_result,
     resolve_operation_spec,
     resolve_repo,
@@ -51,8 +55,8 @@ Text tables are the default; add --json for automation.
 app = typer.Typer(help=MAIN_HELP)
 catalog_app = typer.Typer(help="Local audit aliases and metadata.")
 auth_app = typer.Typer(help="Credential bootstrap, refresh, and status.")
-project_app = typer.Typer(help="Project inventory for disambiguation.")
-repo_app = typer.Typer(help="Discover, resolve, and connect GitHub repositories.")
+project_app = typer.Typer(help="List and manage Enji projects.")
+repo_app = typer.Typer(help="Discover, resolve, connect, and move GitHub repositories.")
 recon_app = typer.Typer(help="Start baseline discovery. Recon is not a report audit.")
 audit_app = typer.Typer(help="Start slow report-producing audits.")
 report_app = typer.Typer(help="List and read generated audit reports.")
@@ -612,6 +616,35 @@ def project_list(
     _run_human_or_json_command(list_projects, _json_output(json_output), _echo_project_table)
 
 
+@project_app.command("create", help="Create an Enji project.")
+def project_create(
+    name: Annotated[str, typer.Argument(help="Project name.")],
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    _run_human_or_json_command(lambda: create_project(name), _json_output(json_output))
+
+
+@project_app.command("rename", help="Rename an Enji project.")
+def project_rename(
+    project: Annotated[str, typer.Argument(help="Exact project id or name.")],
+    name: Annotated[str, typer.Argument(help="New project name.")],
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    _run_human_or_json_command(lambda: rename_project(project, name), _json_output(json_output))
+
+
+@project_app.command("delete", help="Delete an Enji project. Requires --yes.")
+def project_delete(
+    project: Annotated[str, typer.Argument(help="Exact project id or name.")],
+    yes: Annotated[bool, typer.Option("--yes", help="Confirm destructive project deletion.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    if not yes:
+        _echo_error("VALIDATION", "project delete requires --yes")
+        raise typer.Exit(1)
+    _run_human_or_json_command(lambda: delete_project(project), _json_output(json_output))
+
+
 @report_app.command("list", help=REPORTS_LIST_OPERATION.summary)
 def report_list(
     selector: Annotated[
@@ -703,6 +736,15 @@ def repo_connect(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     _run_human_or_json_command(lambda: connect_repo(github_repo, _selected_project()), _json_output(json_output))
+
+
+@repo_app.command("move", help="Move a repository to another Enji project.")
+def repo_move(
+    repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
+    to_project: Annotated[str, typer.Option("--to-project", help="Destination exact Enji project id or name.")],
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    _run_human_or_json_command(lambda: move_repo(repo, _selected_project(), to_project), _json_output(json_output))
 
 
 @recon_app.command("start", help="Start baseline discovery for a connected repository.")

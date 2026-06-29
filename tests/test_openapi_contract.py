@@ -7,16 +7,22 @@ from urllib.parse import urlsplit
 from enji_guard_cli.auth import import_bearer_token
 from enji_guard_cli.enji_api import (
     AuditRunCreate,
+    RepoTransfer,
     access,
     audit_summary_snapshot,
     catalog,
     connect_project_repo,
+    create_project,
+    delete_project,
     github_installation_repos,
     github_installations,
     improvement_jobs,
+    move_repo,
+    preflight_repo_move,
     project_active_runs,
     project_detail,
     put_improvement_job,
+    rename_project,
     repo_active_runs,
     repo_audit_history,
     repo_audit_rerun_state,
@@ -52,6 +58,13 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
             json_response({"installations": []}),
             json_response({"repositories": []}),
             json_response({"project": {"id": "project_1"}, "repos": [], "webResources": []}),
+            json_response({"id": "project_1"}, status_code=201),
+            json_response({"project": {"id": "project_1"}}, status_code=201),
+            json_response({"project": {"id": "project_1", "name": "Friends"}}),
+            empty_response(status_code=204),
+            empty_response(status_code=204),
+            json_response({"ok": True}),
+            json_response({"repo": {"id": "repo_1"}}),
             json_response({"curatedActions": []}),
             json_response({"id": "runbook_1", "suggested_flow": "single"}),
             json_response({"repo": {"id": "repo_1"}}, status_code=201),
@@ -73,6 +86,11 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
     github_installations(auth_file, client)
     github_installation_repos("42", auth_file, client)
     project_detail("project_1", auth_file, client)
+    create_project("Pets", auth_file, client)
+    rename_project("project_1", "Friends", auth_file, client)
+    delete_project("project_1", auth_file, client)
+    preflight_repo_move("project_1", "repo_1", "project_2", auth_file, client)
+    move_repo(RepoTransfer("project_1", "repo_1", "project_2"), auth_file, client)
     catalog(auth_file, client)
     runbook("runbook_1", auth_file, client)
     connect_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client)
@@ -122,6 +140,10 @@ def json_response(payload: object, *, status_code: int = 200) -> EnjiHttpRespons
         headers={},
         content=json.dumps(payload).encode("utf-8"),
     )
+
+
+def empty_response(*, status_code: int = 204) -> EnjiHttpResponse:
+    return EnjiHttpResponse(status_code=status_code, headers={}, content=b"")
 
 
 def _has_contract_operation(contract_operations: set[tuple[str, str]], method: str, path: str) -> bool:

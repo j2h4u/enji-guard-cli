@@ -26,6 +26,7 @@ from enji_guard_cli.enji_api import (
     JsonObjectPayload,
     JsonValue,
     ReportsListPayload,
+    RepoTransfer,
 )
 from enji_guard_cli.enji_api import access as run_access
 from enji_guard_cli.enji_api import access_async as run_access_async
@@ -33,14 +34,19 @@ from enji_guard_cli.enji_api import audit_email_preferences as run_audit_email_p
 from enji_guard_cli.enji_api import audit_summary_snapshot as run_audit_summary_snapshot
 from enji_guard_cli.enji_api import catalog as run_catalog
 from enji_guard_cli.enji_api import connect_project_repo as run_connect_project_repo
+from enji_guard_cli.enji_api import create_project as run_create_project
+from enji_guard_cli.enji_api import delete_project as run_delete_project
 from enji_guard_cli.enji_api import github_installation_repos as run_github_installation_repos
 from enji_guard_cli.enji_api import github_installations as run_github_installations
 from enji_guard_cli.enji_api import improvement_jobs as run_improvement_jobs
+from enji_guard_cli.enji_api import move_repo as run_move_repo
+from enji_guard_cli.enji_api import preflight_repo_move as run_preflight_repo_move
 from enji_guard_cli.enji_api import project_active_runs as run_project_active_runs
 from enji_guard_cli.enji_api import project_detail as run_project_detail
 from enji_guard_cli.enji_api import projects as run_projects
 from enji_guard_cli.enji_api import put_audit_email_preferences as run_put_audit_email_preferences
 from enji_guard_cli.enji_api import put_improvement_job as run_put_improvement_job
+from enji_guard_cli.enji_api import rename_project as run_rename_project
 from enji_guard_cli.enji_api import repo_active_runs as run_repo_active_runs
 from enji_guard_cli.enji_api import repo_audit_history as run_repo_audit_history
 from enji_guard_cli.enji_api import repo_audit_rerun_state as run_repo_audit_rerun_state
@@ -393,6 +399,30 @@ def list_projects() -> JsonObjectPayload:
     return run_projects()
 
 
+def create_project(name: str) -> JsonObjectPayload:
+    project_name = _validated_project_name(name)
+    return {
+        "project_name": project_name,
+        "response": run_create_project(project_name),
+    }
+
+
+def rename_project(project: str, name: str) -> JsonObjectPayload:
+    project_id = _resolve_single_project_id(project)
+    project_name = _validated_project_name(name)
+    return {
+        "project_id": project_id,
+        "project_name": project_name,
+        "response": run_rename_project(project_id, project_name),
+    }
+
+
+def delete_project(project: str) -> JsonObjectPayload:
+    project_id = _resolve_single_project_id(project)
+    run_delete_project(project_id)
+    return {"project_id": project_id, "deleted": True}
+
+
 def list_project_inventory(project: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:
     project_ids = _selected_project_ids(project)
     project_status = _project_runtime_status if sort == "latest-report" else _project_inventory_status
@@ -417,6 +447,29 @@ def connect_repo(github_repo: str, project: str | None) -> JsonObjectPayload:
     project_id = _resolve_single_project_id(project)
     github_owner, github_name = _parse_github_repo(github_repo)
     return run_connect_project_repo(project_id, github_owner, github_name)
+
+
+def move_repo(repo: str, source_project: str | None, target_project: str) -> JsonObjectPayload:
+    source = _resolve_single_repo_target(repo, source_project)
+    target_project_id = _resolve_single_project_id(target_project)
+    if source["project_id"] == target_project_id:
+        raise ValueError("repo is already in target project")
+    preflight = run_preflight_repo_move(source["project_id"], source["repo_id"], target_project_id)
+    response = run_move_repo(
+        RepoTransfer(
+            source_project_id=source["project_id"],
+            repo_id=source["repo_id"],
+            target_project_id=target_project_id,
+            schedule_replacements=_transfer_schedule_replacements(preflight),
+        )
+    )
+    return {
+        "repo": cast(JsonValue, dict(source)),
+        "source_project_id": source["project_id"],
+        "target_project_id": target_project_id,
+        "preflight": preflight,
+        "response": response,
+    }
 
 
 def set_repo_connection(project_id: str, repo_id: str, *, connected: bool) -> JsonObjectPayload:
@@ -1158,6 +1211,20 @@ def _project_candidate(project_ref: ProjectRef) -> str:
     if name is None:
         return str(project_ref["id"])
     return f"{name} ({project_ref['id']})"
+
+
+def _validated_project_name(name: str) -> str:
+    normalized = name.strip()
+    if not normalized:
+        raise ValueError("project name must not be empty")
+    return normalized
+
+
+def _transfer_schedule_replacements(preflight: JsonObjectPayload) -> JsonObjectPayload | None:
+    replacements = preflight.get("scheduleReplacements")
+    if isinstance(replacements, dict):
+        return cast(JsonObjectPayload, replacements)
+    return None
 
 
 def _parse_github_repo(github_repo: str) -> tuple[str, str]:

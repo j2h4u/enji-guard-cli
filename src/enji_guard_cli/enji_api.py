@@ -1,8 +1,9 @@
 import asyncio
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import NotRequired, TypedDict, cast
 from urllib.parse import quote, urlencode
 from uuid import uuid4
 
@@ -31,6 +32,7 @@ from enji_guard_cli.transport import (
 
 HTTP_OK = 200
 HTTP_CREATED = 201
+HTTP_NO_CONTENT = 204
 HTTP_UNAUTHORIZED = 401
 HTTP_FORBIDDEN = 403
 REPORTS_LIST_DEFAULT_SELECTOR = "*"
@@ -38,6 +40,7 @@ REPORTS_LIST_DEFAULT_STALE = False
 REPORTS_LIST_DEFAULT_MIN_SEVERITY: str | None = None
 HTTP_OK_ONLY = frozenset({HTTP_OK})
 HTTP_CREATED_ONLY = frozenset({HTTP_CREATED})
+HTTP_NO_CONTENT_ONLY = frozenset({HTTP_NO_CONTENT})
 
 type JsonScalar = None | bool | int | float | str
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
@@ -107,6 +110,41 @@ class AuditRunCreate:
     project_id: str
     action_key: str
     fleet_task_body: JsonObjectPayload
+
+
+@dataclass(frozen=True, slots=True)
+class RepoTransfer:
+    source_project_id: str
+    repo_id: str
+    target_project_id: str
+    schedule_replacements: JsonObjectPayload | None = None
+
+
+class FleetProjectCreateRequest(TypedDict):
+    name: str
+
+
+class FleetProjectCreateResponse(TypedDict):
+    id: str
+
+
+class UxProjectCreateRequest(TypedDict):
+    fleetProjectId: str
+    name: str
+    createdAt: str
+
+
+class ProjectPatchRequest(TypedDict, total=False):
+    name: str
+
+
+class RepoTransferPreflightRequest(TypedDict):
+    targetProjectId: str
+
+
+class RepoTransferRequest(TypedDict):
+    targetProjectId: str
+    scheduleReplacements: NotRequired[dict[str, JsonValue]]
 
 
 def access(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> AccessPayload:
@@ -206,6 +244,134 @@ def project_detail(
         client,
         path=f"/api/ux/projects/{_quote_path(project_id)}",
         operation="project detail",
+    )
+
+
+def create_project(
+    name: str,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> JsonObjectPayload:
+    fleet_request: FleetProjectCreateRequest = {"name": name}
+    fleet_project = _run_api_request(
+        auth_file,
+        client,
+        ApiRequestSpec(
+            method="POST",
+            path="/api/v1/projects",
+            operation="project create",
+            parser=_parse_fleet_project_create_response,
+            json_body=cast(EnjiJsonValue, fleet_request),
+            expected_statuses=HTTP_CREATED_ONLY,
+        ),
+    )
+    ux_request: UxProjectCreateRequest = {
+        "fleetProjectId": fleet_project["id"],
+        "name": name,
+        "createdAt": datetime.now(UTC).isoformat(),
+    }
+    return _run_api_request(
+        auth_file,
+        client,
+        ApiRequestSpec(
+            method="POST",
+            path="/api/ux/projects",
+            operation="project create",
+            parser=_parse_json_object_payload,
+            json_body=cast(EnjiJsonValue, ux_request),
+            expected_statuses=HTTP_CREATED_ONLY,
+        ),
+    )
+
+
+def rename_project(
+    project_id: str,
+    name: str,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> JsonObjectPayload:
+    patch: ProjectPatchRequest = {"name": name}
+    return _run_api_request(
+        auth_file,
+        client,
+        ApiRequestSpec(
+            method="PATCH",
+            path=f"/api/ux/projects/{_quote_path(project_id)}",
+            operation="project rename",
+            parser=_parse_json_object_payload,
+            json_body=cast(EnjiJsonValue, patch),
+        ),
+    )
+
+
+def delete_project(
+    project_id: str,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> None:
+    _run_api_no_content(
+        auth_file,
+        client,
+        ApiRequestSpec(
+            method="DELETE",
+            path=f"/api/ux/projects/{_quote_path(project_id)}",
+            operation="project delete",
+            parser=_parse_json_object_payload,
+            expected_statuses=HTTP_NO_CONTENT_ONLY,
+        ),
+    )
+    _run_api_no_content(
+        auth_file,
+        client,
+        ApiRequestSpec(
+            method="DELETE",
+            path=f"/api/v1/projects/{_quote_path(project_id)}",
+            operation="project delete",
+            parser=_parse_json_object_payload,
+            expected_statuses=HTTP_NO_CONTENT_ONLY,
+        ),
+    )
+
+
+def preflight_repo_move(
+    source_project_id: str,
+    repo_id: str,
+    target_project_id: str,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> JsonObjectPayload:
+    request: RepoTransferPreflightRequest = {"targetProjectId": target_project_id}
+    return _run_api_request(
+        auth_file,
+        client,
+        ApiRequestSpec(
+            method="POST",
+            path=f"/api/ux/projects/{_quote_path(source_project_id)}/repos/{_quote_path(repo_id)}/transfer/preflight",
+            operation="repo move preflight",
+            parser=_parse_json_object_payload,
+            json_body=cast(EnjiJsonValue, request),
+        ),
+    )
+
+
+def move_repo(
+    request: RepoTransfer,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> JsonObjectPayload:
+    json_request: RepoTransferRequest = {"targetProjectId": request.target_project_id}
+    if request.schedule_replacements is not None:
+        json_request["scheduleReplacements"] = request.schedule_replacements
+    return _run_api_request(
+        auth_file,
+        client,
+        ApiRequestSpec(
+            method="POST",
+            path=f"/api/ux/projects/{_quote_path(request.source_project_id)}/repos/{_quote_path(request.repo_id)}/transfer",
+            operation="repo move",
+            parser=_parse_json_object_payload,
+            json_body=cast(EnjiJsonValue, json_request),
+        ),
     )
 
 
@@ -552,12 +718,61 @@ async def _run_api_request_async[T](
         raise EnjiApiError(exc.code, exc.message) from exc
 
 
+def _run_api_no_content(
+    auth_file: Path | None,
+    client: EnjiHttpClient | None,
+    spec: ApiRequestSpec[JsonObjectPayload],
+) -> JsonObjectPayload:
+    return asyncio.run(_run_api_no_content_async(auth_file, client, spec))
+
+
+async def _run_api_no_content_async(
+    auth_file: Path | None,
+    client: EnjiHttpClient | None,
+    spec: ApiRequestSpec[JsonObjectPayload],
+) -> JsonObjectPayload:
+    try:
+        session = load_api_session(auth_file)
+        if client is not None:
+            return await _request_no_content(session, client, spec)
+
+        async with HttpxEnjiHttpClient() as owned_client:
+            return await _request_no_content(session, owned_client, spec)
+    except EnjiHttpError as exc:
+        raise EnjiApiError(exc.code, exc.message) from exc
+
+
 async def _request_parsed_json_object[T](
     session: EnjiApiSession,
     client: EnjiHttpClient,
     spec: ApiRequestSpec[T],
 ) -> T:
     return spec.parser(await _request_json_object(session, client, spec))
+
+
+async def _request_no_content(
+    session: EnjiApiSession,
+    client: EnjiHttpClient,
+    spec: ApiRequestSpec[JsonObjectPayload],
+) -> JsonObjectPayload:
+    response = await _request_with_refresh(
+        session,
+        client,
+        EnjiHttpRequest(
+            method=spec.method,
+            url=f"{session.base_url}{spec.path}",
+            operation=spec.operation,
+            headers=dict(session.headers),
+            json_body=spec.json_body,
+        ),
+    )
+    _raise_for_api_response_status(response, operation=spec.operation, expected_statuses=spec.expected_statuses)
+    if not response.content:
+        return {}
+    payload = response.json(operation=spec.operation)
+    if not isinstance(payload, dict):
+        raise EnjiHttpError("UPSTREAM", f"{spec.operation} returned unexpected JSON")
+    return _normalize_json_object(payload)
 
 
 async def _get_json_object(
@@ -720,6 +935,13 @@ def _normalize_project(project: object) -> ProjectOverviewPayload:
 
 def _parse_json_object_payload(payload: dict[str, object]) -> JsonObjectPayload:
     return _normalize_json_object(payload)
+
+
+def _parse_fleet_project_create_response(payload: dict[str, object]) -> FleetProjectCreateResponse:
+    project_id = _optional_str(payload.get("id"))
+    if project_id is None:
+        raise EnjiHttpError("UPSTREAM", "project create returned no project id")
+    return {"id": project_id}
 
 
 def _normalize_str_list(value: object) -> list[str]:

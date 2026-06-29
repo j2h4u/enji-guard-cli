@@ -13,6 +13,10 @@ the GitHub `owner/name` repository selector; add `--project NAME_OR_ID` only
 when the account has ambiguous repositories or when a batch operation must be
 scoped to one project.
 
+Project admin commands are direct domain actions: create, rename, delete, and
+move repositories between projects. `project delete` is destructive and
+requires `--yes`.
+
 Recon is baseline discovery. Report audits are separate, slow jobs that produce
 readable reports and scores. Scores are triage hints: use them to sort and
 prioritize repositories, then read the reports before changing code. When a
@@ -106,7 +110,11 @@ Do not paste credentials directly into shell history. The auth file defaults to
 ```bash
 docker exec -i enji-guard-cli enji-guard access
 docker exec -i enji-guard-cli enji-guard project list
+docker exec -i enji-guard-cli enji-guard project create Pets
+docker exec -i enji-guard-cli enji-guard project rename Pets Friends
+docker exec -i enji-guard-cli enji-guard project delete Pets --yes
 docker exec -i enji-guard-cli enji-guard repo resolve j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard repo move j2h4u/enji-guard-cli --to-project Friends
 docker exec -i enji-guard-cli enji-guard status j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard audit start j2h4u/enji-guard-cli --all
 docker exec -i enji-guard-cli enji-guard wait j2h4u/enji-guard-cli security
@@ -121,6 +129,8 @@ Pass `--json` when a command output is consumed by automation.
 
 Use the global `--project NAME_OR_ID` filter when a command must be scoped to
 one Enji project.
+`repo move` uses global `--project` as source project or selector
+disambiguation when needed. `--to-project` selects the destination project.
 
 `schedule` controls automatic report-audit runs. It shows one row per
 repo/report audit and can batch update all report audits for one repo or one
