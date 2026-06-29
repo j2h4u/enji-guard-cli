@@ -107,8 +107,26 @@ class AuditRunBatchItem(TypedDict):
     response: JsonObjectPayload
 
 
+class AuditRunSkippedItem(TypedDict):
+    audit: str
+    action_key: str
+    reason: str
+    active_runs: list[JsonValue]
+    current_head_sha: str | None
+    last_audited_head_sha: str | None
+
+
 class AuditRunBatchPayload(TypedDict):
     runs: list[AuditRunBatchItem]
+    skipped: list[AuditRunSkippedItem]
+
+
+class AuditRunSkippedPayload(TypedDict):
+    skipped: bool
+    audit: str
+    action_key: str
+    reason: str
+    active_runs: list[JsonValue]
 
 
 class RepoTargetPayload(TypedDict):
@@ -570,14 +588,24 @@ def start_audit(
     repo_id: str,
     project_id: str,
     audit: AuditAlias,
-) -> JsonObjectPayload:
+) -> JsonObjectPayload | AuditRunSkippedPayload:
     resolved = resolve_audit(audit)
+    action_key = resolved["action_key"]
+    active_runs = _active_runs_for_action(_current_active_runs(list_repo_active_runs(repo_id)), action_key)
+    if active_runs:
+        return {
+            "skipped": True,
+            "audit": audit.value,
+            "action_key": action_key,
+            "reason": "already_running",
+            "active_runs": active_runs,
+        }
     return run_start_audit_run(
         AuditRunCreate(
             repo_id=repo_id,
             project_id=project_id,
-            action_key=resolved["action_key"],
-            fleet_task_body=_audit_run_task_body(project_id, repo_id, resolved["action_key"]),
+            action_key=action_key,
+            fleet_task_body=_audit_run_task_body(project_id, repo_id, action_key),
         )
     )
 
@@ -612,11 +640,41 @@ def _start_report_audits_for_target(
     audits: list[AuditAlias],
 ) -> AuditRunBatchPayload:
     runs: list[AuditRunBatchItem] = []
+    skipped: list[AuditRunSkippedItem] = []
+    active_runs = _current_active_runs(list_repo_active_runs(repo_id))
+    rerun_state = get_repo_rerun_state(repo_id)
+    current_head_sha = _current_head_sha(rerun_state)
     project = run_project_detail(project_id)
     catalog = run_catalog()
     for alias in audits:
         audit = _report_audit_definition(alias)
         action_key = audit["action_key"]
+        last_audited_head_sha = _last_audited_head_sha(rerun_state, action_key)
+        matching_active_runs = _active_runs_for_action(active_runs, action_key)
+        if matching_active_runs:
+            skipped.append(
+                {
+                    "audit": audit["alias"].value,
+                    "action_key": action_key,
+                    "reason": "already_running",
+                    "active_runs": matching_active_runs,
+                    "current_head_sha": current_head_sha,
+                    "last_audited_head_sha": last_audited_head_sha,
+                }
+            )
+            continue
+        if _out_of_date(current_head_sha, last_audited_head_sha) is False:
+            skipped.append(
+                {
+                    "audit": audit["alias"].value,
+                    "action_key": action_key,
+                    "reason": "up_to_date",
+                    "active_runs": [],
+                    "current_head_sha": current_head_sha,
+                    "last_audited_head_sha": last_audited_head_sha,
+                }
+            )
+            continue
         runs.append(
             {
                 "audit": audit["alias"].value,
@@ -633,7 +691,7 @@ def _start_report_audits_for_target(
                 ),
             }
         )
-    return {"runs": runs}
+    return {"runs": runs, "skipped": skipped}
 
 
 def show_report(repo_id: str, audit: AuditAlias) -> JsonObjectPayload:
@@ -955,6 +1013,10 @@ def _watched_active_runs(payload: JsonObjectPayload, action_key: str | None) -> 
     active_runs = _current_active_runs(payload)
     if action_key is None:
         return active_runs
+    return _active_runs_for_action(active_runs, action_key)
+
+
+def _active_runs_for_action(active_runs: list[JsonValue], action_key: str) -> list[JsonValue]:
     return [run for run in active_runs if _active_run_matches_action(run, action_key)]
 
 

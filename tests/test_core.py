@@ -238,6 +238,20 @@ def test_report_status_marks_started_report_runs_as_running(monkeypatch: MonkeyP
         lambda repo_id: {
             "state": {
                 "currentHeadSha": "head_2",
+                "actions": {
+                    "audit.security": {"lastAuditedHeadSha": "head_1"},
+                    "audit.tests": {"lastAuditedHeadSha": "head_1"},
+                    "audit.dead-code": {"lastAuditedHeadSha": "head_1"},
+                },
+            }
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_repo_audit_rerun_state",
+        lambda repo_id: {
+            "state": {
+                "currentHeadSha": "head_2",
                 "actions": {"audit.security": {"lastAuditedHeadSha": "head_1"}},
             }
         },
@@ -416,6 +430,20 @@ def test_resolve_repo_reports_ambiguous_owner_repo_candidates(monkeypatch: Monke
     )
     monkeypatch.setattr(
         core,
+        "run_repo_audit_rerun_state",
+        lambda repo_id: {
+            "state": {
+                "currentHeadSha": "head_2",
+                "actions": {
+                    "audit.security": {"lastAuditedHeadSha": "head_1"},
+                    "audit.tests": {"lastAuditedHeadSha": "head_1"},
+                    "audit.dead-code": {"lastAuditedHeadSha": "head_1"},
+                },
+            }
+        },
+    )
+    monkeypatch.setattr(
+        core,
         "run_project_detail",
         lambda project_id: {
             "project": {"id": project_id, "name": "Pets" if project_id == "project_1" else "Ops"},
@@ -585,6 +613,144 @@ def test_start_report_audits_selects_all_report_audits(monkeypatch: MonkeyPatch)
         "repo_id": "repo_1",
         "project_id": "project_1",
         "audits": ["security", "ai-readiness", "tests", "tech-health", "deps", "dead-code"],
+    }
+
+
+def test_start_all_report_audits_skips_already_running_audits(monkeypatch: MonkeyPatch) -> None:
+    captured_action_keys: list[str] = []
+    monkeypatch.setattr(
+        core,
+        "run_repo_active_runs",
+        lambda repo_id: {
+            "activeRuns": [
+                {
+                    "actionKey": "audit.security",
+                    "fleetTaskId": "task_security",
+                    "status": "pending",
+                    "completedAt": None,
+                },
+                {
+                    "task": {"actionKey": "audit.tests"},
+                    "fleetTaskId": "task_tests",
+                    "status": "in_progress",
+                    "completedAt": None,
+                },
+                {
+                    "actionKey": "audit.dead-code",
+                    "fleetTaskId": "task_dead_code_done",
+                    "status": "completed",
+                    "completedAt": "2026-06-29T12:00:00Z",
+                },
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_repo_audit_rerun_state",
+        lambda repo_id: {
+            "state": {
+                "currentHeadSha": "head_2",
+                "actions": {
+                    "audit.security": {"lastAuditedHeadSha": "head_1"},
+                    "audit.tests": {"lastAuditedHeadSha": "head_1"},
+                    "audit.dead-code": {"lastAuditedHeadSha": "head_1"},
+                },
+            }
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda project_id: {"project": {"id": project_id, "name": "Pets"}},
+    )
+    monkeypatch.setattr(core, "run_catalog", lambda: {"curatedActions": []})
+    monkeypatch.setattr(
+        core,
+        "_audit_run_task_body_from_context",
+        lambda project_id, repo_id, action_key, project, catalog: {"title": "Run audit"},
+    )
+
+    def fake_start(request: core.AuditRunCreate) -> dict[str, object]:
+        captured_action_keys.append(request.action_key)
+        return {"task": {"id": f"task_{request.action_key}", "status": "pending"}}
+
+    monkeypatch.setattr(core, "run_start_audit_run", fake_start)
+
+    payload = core._start_report_audits_for_target(
+        "repo_1",
+        "project_1",
+        [AuditAlias.SECURITY, AuditAlias.AI_READINESS, AuditAlias.TESTS, AuditAlias.DEAD_CODE],
+    )
+
+    assert captured_action_keys == ["audit.ai-readiness", "audit.dead-code"]
+    assert [run["audit"] for run in payload["runs"]] == ["ai-readiness", "dead-code"]
+    assert payload["skipped"] == [
+        {
+            "audit": "security",
+            "action_key": "audit.security",
+            "reason": "already_running",
+            "active_runs": [
+                {
+                    "actionKey": "audit.security",
+                    "fleetTaskId": "task_security",
+                    "status": "pending",
+                    "completedAt": None,
+                }
+            ],
+            "current_head_sha": "head_2",
+            "last_audited_head_sha": "head_1",
+        },
+        {
+            "audit": "tests",
+            "action_key": "audit.tests",
+            "reason": "already_running",
+            "active_runs": [
+                {
+                    "task": {"actionKey": "audit.tests"},
+                    "fleetTaskId": "task_tests",
+                    "status": "in_progress",
+                    "completedAt": None,
+                }
+            ],
+            "current_head_sha": "head_2",
+            "last_audited_head_sha": "head_1",
+        },
+    ]
+
+
+def test_start_report_audits_skips_up_to_date_audits(monkeypatch: MonkeyPatch) -> None:
+    def fail_start(request: core.AuditRunCreate) -> object:
+        raise AssertionError("up-to-date audit should not be started")
+
+    monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
+    monkeypatch.setattr(
+        core,
+        "run_repo_audit_rerun_state",
+        lambda repo_id: {
+            "state": {
+                "currentHeadSha": "head_2",
+                "actions": {"audit.security": {"lastAuditedHeadSha": "head_2"}},
+            }
+        },
+    )
+    monkeypatch.setattr(core, "run_project_detail", lambda project_id: {"project": {"id": project_id}})
+    monkeypatch.setattr(core, "run_catalog", lambda: {"curatedActions": []})
+    monkeypatch.setattr(core, "run_start_audit_run", fail_start)
+
+    payload = core._start_report_audits_for_target("repo_1", "project_1", [AuditAlias.SECURITY])
+
+    assert payload == {
+        "runs": [],
+        "skipped": [
+            {
+                "audit": "security",
+                "action_key": "audit.security",
+                "reason": "up_to_date",
+                "active_runs": [],
+                "current_head_sha": "head_2",
+                "last_audited_head_sha": "head_2",
+            }
+        ],
     }
 
 
@@ -896,6 +1062,7 @@ def test_start_audit_builds_spa_compatible_fleet_task_body(monkeypatch: MonkeyPa
     monkeypatch.setattr(
         core, "run_runbook", lambda runbook_id: {"suggested_flow": "single", "suggested_flow_config": {}}
     )
+    monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
     monkeypatch.setattr(core, "run_start_audit_run", fake_start)
 
     payload = core.start_audit("repo_1", "project_1", AuditAlias.RECON)
@@ -917,4 +1084,42 @@ def test_start_audit_builds_spa_compatible_fleet_task_body(monkeypatch: MonkeyPa
         "scope_owner": "project_1",
         "origin_type": "manual",
         "repo_access_contexts": [{"provider": "github", "repo_full_name": "j2h4u/enji-guard-cli"}],
+    }
+
+
+def test_start_audit_skips_already_running_audit(monkeypatch: MonkeyPatch) -> None:
+    def fail_start(request: core.AuditRunCreate) -> object:
+        raise AssertionError("duplicate audit should not be started")
+
+    monkeypatch.setattr(
+        core,
+        "run_repo_active_runs",
+        lambda repo_id: {
+            "activeRuns": [
+                {
+                    "actionKey": "audit.recon",
+                    "fleetTaskId": "task_recon",
+                    "status": "pending",
+                    "completedAt": None,
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(core, "run_start_audit_run", fail_start)
+
+    payload = core.start_audit("repo_1", "project_1", AuditAlias.RECON)
+
+    assert payload == {
+        "skipped": True,
+        "audit": "recon",
+        "action_key": "audit.recon",
+        "reason": "already_running",
+        "active_runs": [
+            {
+                "actionKey": "audit.recon",
+                "fleetTaskId": "task_recon",
+                "status": "pending",
+                "completedAt": None,
+            }
+        ],
     }
