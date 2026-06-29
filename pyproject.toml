@@ -5,11 +5,9 @@ description = "Command-line tools for Enji Guard."
 license = "PolyForm-Noncommercial-1.0.0"
 requires-python = ">=3.14"
 dependencies = [
-    "aiometer>=1,<2",
     "httpx>=0.28.1,<1",
     "httpx-retries>=0.4,<1",
     "mcp[cli]>=1.28.1,<2",
-    "platformdirs>=4,<5",
     "typer>=0.26.7",
 ]
 
@@ -106,6 +104,10 @@ ignore_decorators = [
     "@app.command",
 ]
 
+[tool.deptry]
+known_first_party = ["enji_guard_cli"]
+per_rule_ignores = { DEP004 = ["radon"] }
+
 [tool.coverage.run]
 source = ["src/enji_guard_cli"]
 branch = true
@@ -120,11 +122,24 @@ root_package = "enji_guard_cli"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-id = "implementation-independent-from-entrypoints"
-name = "Core, auth, and transport stay independent from CLI and MCP entrypoints"
+id = "core-independent-from-entrypoints"
+name = "Core stays independent from CLI and MCP entrypoints"
 type = "forbidden"
-source_modules = ["enji_guard_cli.core", "enji_guard_cli.auth", "enji_guard_cli.transport", "enji_guard_cli.enji_api"]
-forbidden_modules = ["enji_guard_cli.cli", "enji_guard_cli.mcp_server"]
+source_modules = ["enji_guard_cli.core"]
+forbidden_modules = ["enji_guard_cli.cli", "enji_guard_cli.runtime", "enji_guard_cli.mcp_server"]
+
+[[tool.importlinter.contracts]]
+id = "adapter-and-infrastructure-independent-from-core-and-entrypoints"
+name = "API adapter and infrastructure stay below core and entrypoints"
+type = "forbidden"
+source_modules = [
+    "enji_guard_cli.auth",
+    "enji_guard_cli.enji_api",
+    "enji_guard_cli.errors",
+    "enji_guard_cli.telemetry",
+    "enji_guard_cli.transport",
+]
+forbidden_modules = ["enji_guard_cli.core", "enji_guard_cli.cli", "enji_guard_cli.runtime", "enji_guard_cli.mcp_server"]
 
 [[tool.importlinter.contracts]]
 id = "package-dependency-direction"
@@ -132,20 +147,22 @@ name = "Package imports flow from entrypoints toward transport"
 type = "layers"
 layers = [
     "enji_guard_cli.cli",
+    "enji_guard_cli.runtime",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.core",
     "enji_guard_cli.enji_api",
     "enji_guard_cli.auth",
     "enji_guard_cli.transport",
     "enji_guard_cli.telemetry",
+    "enji_guard_cli.errors",
 ]
 
 [[tool.importlinter.contracts]]
-id = "entrypoints-avoid-transport-and-httpx"
-name = "CLI and MCP entrypoints avoid transport internals and HTTP clients"
+id = "entrypoints-avoid-api-transport-and-http-clients"
+name = "CLI and MCP entrypoints avoid API adapter, transport internals, and HTTP clients"
 type = "forbidden"
-source_modules = ["enji_guard_cli.cli", "enji_guard_cli.mcp_server"]
-forbidden_modules = ["enji_guard_cli.transport", "httpx"]
+source_modules = ["enji_guard_cli.cli", "enji_guard_cli.runtime", "enji_guard_cli.mcp_server"]
+forbidden_modules = ["enji_guard_cli.enji_api", "enji_guard_cli.transport", "httpx", "httpx_retries"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -158,15 +175,32 @@ source_modules = [
     "enji_guard_cli.core",
     "enji_guard_cli.enji_api",
     "enji_guard_cli.mcp_server",
+    "enji_guard_cli.runtime",
     "enji_guard_cli.telemetry",
 ]
-forbidden_modules = ["httpx"]
+forbidden_modules = ["httpx", "httpx_retries"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "frameworks-stay-in-entrypoints"
+name = "Typer and MCP frameworks stay out of core, adapter, auth, and transport"
+type = "forbidden"
+source_modules = [
+    "enji_guard_cli.auth",
+    "enji_guard_cli.core",
+    "enji_guard_cli.enji_api",
+    "enji_guard_cli.errors",
+    "enji_guard_cli.telemetry",
+    "enji_guard_cli.transport",
+]
+forbidden_modules = ["typer", "mcp"]
 allow_indirect_imports = true
 
 [dependency-groups]
 dev = [
     "actionlint-py>=1.7.12.24",
     "basedpyright>=1.39.8",
+    "deptry>=0.25",
     "import-linter>=2.12",
     "pytest>=9.1.1",
     "pytest-cov>=7",

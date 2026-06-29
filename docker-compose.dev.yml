@@ -1,0 +1,7 @@
+services:
+  enji-guard-cli:
+    environment:
+      PYTHONPATH: /app/src
+    volumes:
+      - ./src:/app/src:ro
+      - ${HOME}/.config/enji-guard:/home/app/.config/enji-guard

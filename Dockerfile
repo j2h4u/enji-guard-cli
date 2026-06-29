@@ -35,4 +35,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["enji-guard", "health"]
 
 ENTRYPOINT ["enji-guard"]
-CMD ["serve", "--transport", "streamable-http", "--host", "0.0.0.0"]
+CMD ["run", "--transport", "streamable-http", "--host", "0.0.0.0"]

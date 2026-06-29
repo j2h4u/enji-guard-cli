@@ -13,12 +13,8 @@
   "security": [
     {
       "sessionCookie": []
-    },
-    {
-      "bearerAuth": []
     }
   ],
-  "x-enji-contract-source": "docs/enji-guard-api.md",
   "x-enji-contract-status": "reconstructed",
   "paths": {
     "/api/v1/auth/me": {
@@ -135,6 +131,19 @@
             "$ref": "#/components/responses/GenericObject"
           }
         }
+      },
+      "put": {
+        "operationId": "putUserPreferences",
+        "summary": "Update UI user preferences.",
+        "x-enji-observed": true,
+        "requestBody": {
+          "$ref": "#/components/requestBodies/GenericObject"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
       }
     },
     "/api/ux/catalog": {
@@ -179,6 +188,19 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createUxProject",
+        "summary": "Create the UX project record for an existing Fleet project.",
+        "x-enji-observed": true,
+        "requestBody": {
+          "$ref": "#/components/requestBodies/UxProjectCreate"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/CreatedObject"
           }
         }
       }
@@ -229,7 +251,14 @@
         ],
         "responses": {
           "200": {
-            "$ref": "#/components/responses/GenericObject"
+            "description": "Repository active runs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepoActiveRunsResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -290,6 +319,27 @@
             "$ref": "#/components/parameters/RepoId"
           }
         ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putRepoCodeReviewState",
+        "summary": "Trigger or update repository code-review state inside a project.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          },
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/GenericObject"
+        },
         "responses": {
           "200": {
             "$ref": "#/components/responses/GenericObject"
@@ -520,14 +570,495 @@
         }
       }
     },
-    "/api/ux/task-notifications/{id}": {
-      "get": {
-        "operationId": "getTaskNotification",
-        "summary": "Return a task notification.",
-        "x-enji-observed": false,
+    "/api/v1/projects": {
+      "post": {
+        "operationId": "createFleetProject",
+        "summary": "Create the canonical Fleet project record.",
+        "x-enji-observed": true,
+        "requestBody": {
+          "$ref": "#/components/requestBodies/FleetProjectCreate"
+        },
+        "responses": {
+          "201": {
+            "description": "Created Fleet project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetProjectCreateResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{projectId}": {
+      "delete": {
+        "operationId": "deleteFleetProject",
+        "summary": "Delete the canonical Fleet project record and cascade its data.",
+        "x-enji-observed": true,
         "parameters": [
           {
-            "$ref": "#/components/parameters/NotificationId"
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/NoContent"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{projectId}": {
+      "get": {
+        "operationId": "getProject",
+        "summary": "Return project details.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchProject",
+        "summary": "Update project metadata, such as name.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ProjectPatch"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteUxProject",
+        "summary": "Delete the UX project record.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/NoContent"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{projectId}/favorite": {
+      "put": {
+        "operationId": "putProjectFavorite",
+        "summary": "Update project favorite state.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/GenericObject"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{projectId}/audit-favorites": {
+      "put": {
+        "operationId": "putProjectAuditFavorites",
+        "summary": "Update project audit favorites.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ProjectAuditFavoritesUpdate"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{projectId}/repo-order": {
+      "get": {
+        "operationId": "getProjectRepoOrder",
+        "summary": "Return repository ordering for a project.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putProjectRepoOrder",
+        "summary": "Update repository ordering for a project.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ProjectRepoOrderUpdate"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{projectId}/web-resources": {
+      "post": {
+        "operationId": "createProjectWebResource",
+        "summary": "Add a web resource to a project.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/GenericObject"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/CreatedObject"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{projectId}/web-resources/{wrId}/repos/{repoId}": {
+      "delete": {
+        "operationId": "deleteProjectWebResourceRepo",
+        "summary": "Detach a web-resource repository from a project.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          },
+          {
+            "$ref": "#/components/parameters/WebResourceId"
+          },
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/NoContent"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{projectId}/share-email": {
+      "post": {
+        "operationId": "shareProjectByEmail",
+        "summary": "Share a project by email.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/GenericObject"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/v1/github/app/installations/{installationId}/repos": {
+      "get": {
+        "operationId": "listGitHubInstallationRepos",
+        "summary": "List repositories available through a GitHub App installation.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/InstallationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/v1/github/app/installations/{installationId}/repos/verify": {
+      "get": {
+        "operationId": "verifyGitHubInstallationRepos",
+        "summary": "Verify repository access for a GitHub App installation.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/InstallationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{projectId}/repos": {
+      "post": {
+        "operationId": "connectProjectRepo",
+        "summary": "Connect a GitHub repository to a project.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/GitHubRepoConnect"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/CreatedObject"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{projectId}/repos/{repoId}/connection": {
+      "put": {
+        "operationId": "putProjectRepoConnection",
+        "summary": "Update repository connection verification state.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          },
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/RepoConnectionUpdate"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/audit-runs": {
+      "post": {
+        "operationId": "createRepoAuditRun",
+        "summary": "Start a repository audit run.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/AuditRunCreate"
+        },
+        "responses": {
+          "201": {
+            "description": "Started audit run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditRunCreateResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ux/github-installations": {
+      "get": {
+        "operationId": "listGitHubInstallations",
+        "summary": "List GitHub App installations linked to the account.",
+        "x-enji-observed": true,
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/github-installations/claim": {
+      "post": {
+        "operationId": "claimGitHubInstallation",
+        "summary": "Claim a GitHub App installation after OAuth.",
+        "x-enji-observed": true,
+        "requestBody": {
+          "$ref": "#/components/requestBodies/GitHubInstallationClaim"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{sourceProjectId}/repos/{repoId}/transfer/preflight": {
+      "post": {
+        "operationId": "preflightRepoTransfer",
+        "summary": "Preflight a repository transfer between projects.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SourceProjectId"
+          },
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/RepoTransferPreflight"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{sourceProjectId}/repos/{repoId}/transfer": {
+      "post": {
+        "operationId": "transferRepo",
+        "summary": "Transfer a repository between projects.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SourceProjectId"
+          },
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/RepoTransfer"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/metric-card-order": {
+      "put": {
+        "operationId": "putRepoMetricCardOrder",
+        "summary": "Update repository metric-card ordering.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/GenericObject"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/audit-auto-runs/{slug}": {
+      "put": {
+        "operationId": "putRepoAuditAutoRun",
+        "summary": "Update audit auto-run settings through the alternate route-slug endpoint.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          },
+          {
+            "$ref": "#/components/parameters/AuditRouteSlug"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/GenericObject"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{taskId}": {
+      "get": {
+        "operationId": "getTask",
+        "summary": "Return a Fleet task.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TaskId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{taskId}/activities": {
+      "get": {
+        "operationId": "listTaskActivities",
+        "summary": "Return activity for a Fleet task.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TaskId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/task-notifications/{taskId}": {
+      "get": {
+        "operationId": "getTaskNotification",
+        "summary": "Return task notifications.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TaskId"
           }
         ],
         "responses": {
@@ -538,13 +1069,335 @@
       },
       "put": {
         "operationId": "putTaskNotification",
-        "summary": "Update a task notification.",
-        "x-enji-observed": false,
+        "summary": "Update task notifications.",
+        "x-enji-observed": true,
         "parameters": [
           {
-            "$ref": "#/components/parameters/NotificationId"
+            "$ref": "#/components/parameters/TaskId"
           }
         ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/GenericObject"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/task-links": {
+      "get": {
+        "operationId": "listRepoTaskLinks",
+        "summary": "Return repository-task links.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/v1/runbooks/{runbookId}": {
+      "get": {
+        "operationId": "getRunbook",
+        "summary": "Return a Fleet runbook.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunbookId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/pentest-jobs/{repoId}": {
+      "get": {
+        "operationId": "listPentestJobs",
+        "summary": "Return pentest jobs for a repository.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{projectId}/activity-timeline": {
+      "get": {
+        "operationId": "listProjectActivityTimeline",
+        "summary": "Return project activity timeline.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{projectId}/code-review-summary": {
+      "get": {
+        "operationId": "getProjectCodeReviewSummary",
+        "summary": "Return project code-review summary.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{projectId}/run-language": {
+      "get": {
+        "operationId": "getProjectRunLanguage",
+        "summary": "Return project run language settings.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/snapshots/{snapshotId}": {
+      "get": {
+        "operationId": "getRepoSnapshot",
+        "summary": "Return a repository report snapshot.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          },
+          {
+            "$ref": "#/components/parameters/SnapshotId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putRepoSnapshot",
+        "summary": "Save a repository report snapshot.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          },
+          {
+            "$ref": "#/components/parameters/SnapshotId"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/GenericObject"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/audit-email-watches": {
+      "get": {
+        "operationId": "listRepoAuditEmailWatches",
+        "summary": "Return repository audit email watches.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/pro-request": {
+      "post": {
+        "operationId": "createProRequest",
+        "summary": "Request Pro access.",
+        "x-enji-observed": true,
+        "requestBody": {
+          "$ref": "#/components/requestBodies/GenericObject"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/snapshots/upfront.audit.summary": {
+      "get": {
+        "operationId": "getRepoAuditSummarySnapshot",
+        "summary": "Return the markdown report snapshot for an audit route slug.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          },
+          {
+            "$ref": "#/components/parameters/SnapshotGroup"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit summary snapshot.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditSummarySnapshotResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/audit-rerun-state": {
+      "get": {
+        "operationId": "getRepoAuditRerunState",
+        "summary": "Return current head and per-audit rerun eligibility.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit rerun state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditRerunStateResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ux/runbook-freshness/{actionKey}": {
+      "get": {
+        "operationId": "getRunbookFreshness",
+        "summary": "Return runbook freshness for an audit action.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AuditActionKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/audit-history": {
+      "get": {
+        "operationId": "listRepoAuditHistory",
+        "summary": "Return repository audit history.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/improvement-jobs/{repoId}/{fixKind}/backlog-state": {
+      "get": {
+        "operationId": "getImprovementJobBacklogState",
+        "summary": "Return autofix backlog state for an improvement fix kind.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          },
+          {
+            "$ref": "#/components/parameters/FixKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/admin/auth/check": {
+      "get": {
+        "operationId": "checkAdminAuth",
+        "summary": "Check admin access gate.",
+        "x-enji-observed": true,
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/pentest-consents": {
+      "get": {
+        "operationId": "listPentestConsents",
+        "summary": "Return pentest consent state.",
+        "x-enji-observed": true,
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/feedback": {
+      "post": {
+        "operationId": "createFeedback",
+        "summary": "Submit developer feedback with optional screenshots.",
+        "x-enji-observed": true,
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Feedback"
+        },
         "responses": {
           "200": {
             "$ref": "#/components/responses/GenericObject"
@@ -560,12 +1413,6 @@
         "in": "header",
         "name": "Cookie",
         "description": "Raw Cookie header copied from an authenticated browser session. Exact upstream cookie names are opaque."
-      },
-      "bearerAuth": {
-        "type": "http",
-        "scheme": "bearer",
-        "bearerFormat": "JWT",
-        "description": "Short-lived access JWT accepted by the gateway. Official long-lived API tokens are not available yet."
       }
     },
     "parameters": {
@@ -609,6 +1456,78 @@
         "schema": {
           "$ref": "#/components/schemas/AuditActionKey"
         }
+      },
+      "SourceProjectId": {
+        "name": "sourceProjectId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "InstallationId": {
+        "name": "installationId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskId": {
+        "name": "taskId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "RunbookId": {
+        "name": "runbookId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "SnapshotId": {
+        "name": "snapshotId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "WebResourceId": {
+        "name": "wrId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "AuditRouteSlug": {
+        "name": "slug",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/AuditRouteSlug"
+        }
+      },
+      "FixKind": {
+        "name": "fixKind",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "SnapshotGroup": {
+        "name": "group",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/AuditRouteSlug"
+        }
       }
     },
     "requestBodies": {
@@ -621,6 +1540,141 @@
             }
           }
         }
+      },
+      "GenericObject": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GenericObject"
+            }
+          }
+        }
+      },
+      "FleetProjectCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/FleetProjectCreateRequest"
+            }
+          }
+        }
+      },
+      "UxProjectCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/UxProjectCreateRequest"
+            }
+          }
+        }
+      },
+      "ProjectPatch": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProjectPatch"
+            }
+          }
+        }
+      },
+      "ProjectAuditFavoritesUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProjectAuditFavoritesUpdate"
+            }
+          }
+        }
+      },
+      "ProjectRepoOrderUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProjectRepoOrderUpdate"
+            }
+          }
+        }
+      },
+      "GitHubRepoConnect": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GitHubRepoConnectRequest"
+            }
+          }
+        }
+      },
+      "RepoConnectionUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RepoConnectionUpdate"
+            }
+          }
+        }
+      },
+      "AuditRunCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AuditRunCreateRequest"
+            }
+          }
+        }
+      },
+      "GitHubInstallationClaim": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GitHubInstallationClaimRequest"
+            }
+          }
+        }
+      },
+      "RepoTransferPreflight": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RepoTransferPreflightRequest"
+            }
+          }
+        }
+      },
+      "RepoTransfer": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RepoTransferRequest"
+            }
+          }
+        }
+      },
+      "Feedback": {
+        "required": true,
+        "content": {
+          "multipart/form-data": {
+            "schema": {
+              "$ref": "#/components/schemas/FeedbackRequest"
+            },
+            "encoding": {
+              "screenshots": {
+                "contentType": "image/jpeg, image/png, image/webp"
+              }
+            }
+          }
+        }
       }
     },
     "responses": {
@@ -629,8 +1683,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "additionalProperties": true
+              "$ref": "#/components/schemas/GenericObject"
             }
           }
         }
@@ -651,6 +1704,20 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "NoContent": {
+        "description": "No response body."
+      },
+      "CreatedObject": {
+        "description": "Object created.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": true
             }
           }
         }
@@ -1201,6 +2268,416 @@
               }
             },
             "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "GenericObject": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "FleetProjectCreateRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": true
+      },
+      "FleetProjectCreateResponse": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "UxProjectCreateRequest": {
+        "type": "object",
+        "required": [
+          "fleetProjectId",
+          "name",
+          "createdAt"
+        ],
+        "properties": {
+          "fleetProjectId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": true
+      },
+      "ProjectPatch": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": true
+      },
+      "ProjectAuditFavoritesUpdate": {
+        "type": "object",
+        "properties": {
+          "auditFavorites": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "ProjectRepoOrderUpdate": {
+        "type": "object",
+        "properties": {
+          "repoIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^repo_"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "GitHubRepoConnectRequest": {
+        "type": "object",
+        "required": [
+          "githubOwner",
+          "githubName"
+        ],
+        "properties": {
+          "githubOwner": {
+            "type": "string"
+          },
+          "githubName": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "RepoConnectionUpdate": {
+        "type": "object",
+        "required": [
+          "connected"
+        ],
+        "properties": {
+          "connected": {
+            "type": "boolean"
+          },
+          "lastVerifiedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditRunCreateRequest": {
+        "type": "object",
+        "required": [
+          "projectId",
+          "actionKey",
+          "fleetTaskBody",
+          "clientRequestId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "actionKey": {
+            "$ref": "#/components/schemas/AuditRunActionKey"
+          },
+          "fleetTaskBody": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "clientRequestId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditRunActionKey": {
+        "type": "string",
+        "enum": [
+          "audit.security",
+          "audit.ai-readiness",
+          "audit.tests",
+          "audit.tech-health",
+          "audit.dependency-hygiene",
+          "audit.dead-code",
+          "audit.recon"
+        ]
+      },
+      "GitHubInstallationClaimRequest": {
+        "type": "object",
+        "required": [
+          "install_intent_id",
+          "installation_id",
+          "account",
+          "account_type"
+        ],
+        "properties": {
+          "install_intent_id": {
+            "type": "string"
+          },
+          "installation_id": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          },
+          "account_type": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "RepoTransferPreflightRequest": {
+        "type": "object",
+        "required": [
+          "targetProjectId"
+        ],
+        "properties": {
+          "targetProjectId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "RepoTransferRequest": {
+        "type": "object",
+        "required": [
+          "targetProjectId"
+        ],
+        "properties": {
+          "targetProjectId": {
+            "type": "string"
+          },
+          "scheduleReplacements": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditRouteSlug": {
+        "type": "string",
+        "enum": [
+          "vulns",
+          "ai-readiness",
+          "tests",
+          "tech-health",
+          "dependency-hygiene",
+          "dead-code"
+        ]
+      },
+      "AuditRunCreateResponse": {
+        "type": "object",
+        "required": [
+          "task"
+        ],
+        "properties": {
+          "task": {
+            "$ref": "#/components/schemas/FleetTaskRef"
+          }
+        },
+        "additionalProperties": true
+      },
+      "FleetTaskRef": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "RepoActiveRunsResponse": {
+        "type": "object",
+        "properties": {
+          "activeRuns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RepoActiveRun"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "RepoActiveRun": {
+        "type": "object",
+        "properties": {
+          "actionKey": {
+            "$ref": "#/components/schemas/AuditRunActionKey"
+          },
+          "fleetTaskId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditRerunStateResponse": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/AuditRerunState"
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditRerunState": {
+        "type": "object",
+        "properties": {
+          "currentHeadSha": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "actions": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AuditRerunActionState"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditRerunActionState": {
+        "type": "object",
+        "properties": {
+          "lastAuditedHeadSha": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastAuditedFleetTaskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastAuditedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "canRerun": {
+            "type": "boolean"
+          },
+          "disabledReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditSummarySnapshotResponse": {
+        "type": "object",
+        "required": [
+          "snapshot"
+        ],
+        "properties": {
+          "snapshot": {
+            "$ref": "#/components/schemas/AuditSummarySnapshot"
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditSummarySnapshot": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/AuditRouteSlug"
+          },
+          "fleetTaskId": {
+            "type": "string"
+          },
+          "collectedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "schemaName": {
+            "type": "string",
+            "const": "upfront.audit.summary"
+          },
+          "schemaVersion": {
+            "type": "string"
+          },
+          "content": {
+            "type": "object",
+            "properties": {
+              "report": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "FeedbackRequest": {
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 3500
+          },
+          "screenshots": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "string",
+              "format": "binary"
+            }
           }
         },
         "additionalProperties": true

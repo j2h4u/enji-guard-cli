@@ -1,0 +1,100 @@
+# CLI Surface Design
+
+This CLI is a workflow surface for a tech-lead agent. It must not mirror Enji's
+frontend API.
+
+## Goals
+
+- Keep commands close to agent tasks: inspect state, connect repos, start work,
+  wait, read reports, manage schedules.
+- Hide frontend implementation details behind core use cases.
+- Accept project and repo names where they are unambiguous.
+- Keep read commands broad and safe; keep write commands explicit.
+
+## Public Ontology
+
+Primary nouns:
+
+- `project`: Enji workspace/project inventory.
+- `repo`: GitHub repository inventory, target resolution, and connection.
+- `recon`: preliminary repository diagnostics.
+- `audit`: the six report-producing checks.
+- `report`: generated report content.
+- `schedule`: recurring audit settings.
+- `status`: runtime snapshot across projects/repos/tasks.
+- `wait`: polling for long-running work.
+
+Canonical report audits:
+
+- `security`
+- `ai-readiness`
+- `tests`
+- `tech-health`
+- `deps`
+- `dead-code`
+
+`recon` is not one of the six report audits. It is a separate preliminary
+diagnostic phase.
+
+## Command Shape
+
+```text
+enji-guard project list
+
+enji-guard repo current
+enji-guard repo list
+enji-guard repo resolve [REPO]
+enji-guard repo connect OWNER/NAME
+
+enji-guard status [REPO]
+
+enji-guard recon start REPO
+enji-guard audit start REPO AUDIT...
+enji-guard audit start REPO --all
+
+enji-guard wait REPO AUDIT_OR_RECON
+
+enji-guard report list [--selector SELECTOR]
+enji-guard report read REPO [AUDIT...] [--all] [--format markdown|json]
+enji-guard report show REPO AUDIT --format json|markdown
+
+enji-guard schedule list REPO
+enji-guard schedule set REPO AUDIT --freq FREQ [--day DAY...] [--at auto|HH:MM|HH:MM@TZ]
+enji-guard schedule disable REPO AUDIT
+```
+
+Project filtering is a global option:
+
+```text
+enji-guard --project NAME_OR_ID status
+enji-guard --project NAME_OR_ID audit start OWNER/NAME --all
+```
+
+## Resolution Rules
+
+- Global `--project` accepts an Enji project id or an exact project name.
+- Repo selectors accept an Enji repo id or `owner/name`.
+- Read commands may omit `--project`; they show all projects or all matching
+  repos.
+- Write commands may omit `--project` only when the target repo is unambiguous.
+- Ambiguous targets fail with `BAD_SELECTOR` and include candidates.
+- There is no default project.
+- No fuzzy matching in write commands.
+- `report list` is compact inventory; `report read` returns report content.
+- `report read REPO` defaults to all currently ready reports for that repo.
+
+## Hidden Details
+
+These concepts belong in core or debug tooling, not the public CLI:
+
+- raw run plumbing
+- raw report-link plumbing
+- raw history payloads
+- raw freshness/rerun payloads
+- GitHub installation plumbing
+- raw schedule JSON payloads
+- `*-all` command variants
+
+Public commands should expose scenario state such as `ready`, `running`,
+`missing`, `connected`, `recon_done`, `active_run_count`, and report revision
+drift.

@@ -14,15 +14,16 @@ Python 3.14 Docker service exposing Enji Guard through core code, CLI, and MCP.
 
 - `just verify` is the completion gate.
 - Do not weaken, skip, or suppress Ruff, types, import contracts, Vulture,
-  OpenAPI, CRAP, tests, or Docker build.
+  deptry, OpenAPI, CRAP, tests, or Docker build.
 - Update reconstructed OpenAPI, docs, and tests together when API behavior changes.
 
 ## Ops
 
 - Docker is the runtime. Verify the running container, not just source.
 - Recreate the service after runtime, env, image, or auth-mount changes.
-- MCP owns background cookie refresh. The host auth file must stay writable
-  because Enji rotates refresh cookies.
+- The container runs `enji-guard run`: supervisor owns background cookie
+  refresh and MCP as sibling tasks. MCP must not own refresh.
+- The host auth file must stay writable because Enji rotates refresh cookies.
 - Cookie bootstrap is one-time: refresh in the browser first, then import the
   current cookie state. Prefer a `Cookie` header from any Fleet request made
   after refresh. If using the refresh request itself, merge its response

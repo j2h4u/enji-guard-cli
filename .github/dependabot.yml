@@ -1,13 +1,8 @@
 # Dependabot configuration for version and security update PRs.
 #
-# Repository settings still need to enable:
-# - Dependency graph
-# - Dependabot alerts
-# - Dependabot security updates
-# - Malware alerts, where GitHub supports them for the ecosystem
-#
-# This file controls scheduling and grouping. Security alert generation itself
-# is a repository/organization setting, not a dependabot.yml toggle.
+# This file controls scheduling and grouping. Dependency graph, Dependabot
+# alerts, Dependabot security updates, and secret scanning are repository or
+# organization settings, not dependabot.yml toggles.
 version: 2
 updates:
   - package-ecosystem: "uv"

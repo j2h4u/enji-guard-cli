@@ -14,6 +14,21 @@ REQUIRED_PATHS = frozenset(
         "/api/ux/improvement-jobs/{repoId}",
         "/api/ux/improvement-jobs/{repoId}/{kind}",
         "/api/ux/repos/{repoId}/audits/{actionKey}/email-preferences",
+        "/api/v1/projects",
+        "/api/v1/projects/{projectId}",
+        "/api/ux/projects/{projectId}",
+        "/api/ux/projects/{projectId}/repos",
+        "/api/ux/projects/{projectId}/repos/{repoId}/connection",
+        "/api/ux/repos/{repoId}/audit-runs",
+        "/api/ux/github-installations",
+        "/api/ux/projects/{sourceProjectId}/repos/{repoId}/transfer/preflight",
+        "/api/ux/projects/{sourceProjectId}/repos/{repoId}/transfer",
+        "/api/ux/repos/{repoId}/snapshots/upfront.audit.summary",
+        "/api/ux/repos/{repoId}/audit-rerun-state",
+        "/api/ux/runbook-freshness/{actionKey}",
+        "/api/ux/repos/{repoId}/audit-history",
+        "/api/v1/tasks/{taskId}",
+        "/api/ux/feedback",
     }
 )
 
@@ -36,8 +51,6 @@ def _load_contract() -> dict[str, object]:
     spec = _as_object(loaded, "contract root")
     if spec.get("openapi") != "3.1.0":
         raise SystemExit("contract must use OpenAPI 3.1.0")
-    if spec.get("x-enji-contract-source") != "docs/enji-guard-api.md":
-        raise SystemExit("contract source marker must point to docs/enji-guard-api.md")
     return spec
 
 
@@ -79,7 +92,7 @@ def _validate_operation(
         raise SystemExit(f"duplicate operationId: {operation_id}")
     operation_ids.add(operation_id)
     responses = _as_object(operation.get("responses"), f"responses for {method.upper()} {path}")
-    if "200" not in responses and "204" not in responses:
+    if not any(status_code.startswith("2") for status_code in responses):
         raise SystemExit(f"{method.upper()} {path} must define a success response")
     if "requestBody" in operation:
         request_body = _as_object(operation["requestBody"], f"requestBody for {method.upper()} {path}")

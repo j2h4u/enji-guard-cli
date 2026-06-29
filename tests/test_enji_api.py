@@ -11,7 +11,30 @@ from enji_guard_cli.auth import (
     import_cookie,
     load_stored_auth,
 )
-from enji_guard_cli.enji_api import EnjiApiError, _get_json_object, access, load_api_session, reports_list
+from enji_guard_cli.enji_api import (
+    AuditRunCreate,
+    EnjiApiError,
+    _get_json_object,
+    access,
+    audit_summary_snapshot,
+    catalog,
+    connect_project_repo,
+    github_installation_repos,
+    github_installations,
+    improvement_jobs,
+    load_api_session,
+    project_active_runs,
+    project_detail,
+    put_improvement_job,
+    repo_active_runs,
+    repo_audit_history,
+    repo_audit_rerun_state,
+    repo_task_links,
+    reports_list,
+    runbook,
+    start_audit_run,
+    update_repo_connection,
+)
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse
 
 
@@ -89,7 +112,7 @@ def test_access_returns_normalized_payload_and_uses_stored_auth_headers(tmp_path
             method="GET",
             url="https://fleet.enji.ai/api/ux/me/access",
             operation="access",
-            headers={"Authorization": "Bearer token-123"},
+            headers={"Authorization": "Bearer token-123", "Origin": AUTH_REFRESH_ORIGIN},
         )
     ]
 
@@ -149,7 +172,7 @@ def test_reports_list_returns_compact_project_overview(tmp_path: Path) -> None:
             },
         ]
     }
-    assert client.requests[0].headers == {"Cookie": "session=abc"}
+    assert client.requests[0].headers == {"Cookie": "session=abc", "Origin": AUTH_REFRESH_ORIGIN}
 
 
 def test_reports_list_filters_project_selector(tmp_path: Path) -> None:
@@ -179,6 +202,85 @@ def test_reports_list_filters_project_selector(tmp_path: Path) -> None:
             "recon_pending": None,
         }
     ]
+
+
+def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_bearer_token("token-123", auth_file)
+    client = FakeEnjiHttpClient(
+        [
+            json_response({"installations": []}),
+            json_response({"repositories": []}),
+            json_response({"project": {"id": "project_1"}, "repos": [], "webResources": []}),
+            json_response({"curatedActions": []}),
+            json_response({"id": "runbook_1", "suggested_flow": "single"}),
+            json_response({"repo": {"id": "repo_1"}}, status_code=201),
+            json_response({"connected": True}),
+            json_response({"activeRuns": []}),
+            json_response({"activeRuns": []}),
+            json_response({"state": {"currentHeadSha": "abc"}}),
+            json_response({"links": []}),
+            json_response({"history": {}}),
+            json_response({"task": {"id": "task_1"}}, status_code=201),
+            json_response({"snapshot": {"content": {"report": "ok"}}}),
+            json_response({"jobs": []}),
+            json_response({"job": {"enabled": True}}),
+        ]
+    )
+
+    github_installations(auth_file, client)
+    github_installation_repos("42", auth_file, client)
+    project_detail("project_1", auth_file, client)
+    catalog(auth_file, client)
+    runbook("runbook_1", auth_file, client)
+    connect_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client)
+    update_repo_connection("project_1", "repo_1", connected=True, auth_file=auth_file, client=client)
+    project_active_runs("project_1", auth_file, client)
+    repo_active_runs("repo_1", auth_file, client)
+    repo_audit_rerun_state("repo_1", auth_file, client)
+    repo_task_links("repo_1", auth_file, client)
+    repo_audit_history("repo_1", auth_file, client)
+    start_audit_run(
+        AuditRunCreate(
+            repo_id="repo_1",
+            project_id="project_1",
+            action_key="audit.recon",
+            fleet_task_body={"title": "Run recon"},
+        ),
+        auth_file,
+        client,
+    )
+    audit_summary_snapshot("repo_1", "vulns", auth_file, client)
+    improvement_jobs("repo_1", auth_file, client)
+    put_improvement_job("repo_1", "vuln-audit", {"enabled": True}, auth_file, client)
+
+    assert [(request.method, request.url) for request in client.requests] == [
+        ("GET", "https://fleet.enji.ai/api/ux/github-installations"),
+        ("GET", "https://fleet.enji.ai/api/v1/github/app/installations/42/repos"),
+        ("GET", "https://fleet.enji.ai/api/ux/projects/project_1"),
+        ("GET", "https://fleet.enji.ai/api/ux/catalog"),
+        ("GET", "https://fleet.enji.ai/api/v1/runbooks/runbook_1"),
+        ("POST", "https://fleet.enji.ai/api/ux/projects/project_1/repos"),
+        ("PUT", "https://fleet.enji.ai/api/ux/projects/project_1/repos/repo_1/connection"),
+        ("GET", "https://fleet.enji.ai/api/ux/projects/project_1/active-runs"),
+        ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/active-runs"),
+        ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/audit-rerun-state"),
+        ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/task-links"),
+        ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/audit-history"),
+        ("POST", "https://fleet.enji.ai/api/ux/repos/repo_1/audit-runs"),
+        ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/snapshots/upfront.audit.summary?group=vulns"),
+        ("GET", "https://fleet.enji.ai/api/ux/improvement-jobs/repo_1"),
+        ("PUT", "https://fleet.enji.ai/api/ux/improvement-jobs/repo_1/vuln-audit"),
+    ]
+    assert client.requests[5].json_body == {"githubOwner": "j2h4u", "githubName": "enji-guard-cli"}
+    assert client.requests[6].json_body == {"connected": True}
+    audit_body = client.requests[12].json_body
+    assert isinstance(audit_body, dict)
+    assert audit_body["projectId"] == "project_1"
+    assert audit_body["actionKey"] == "audit.recon"
+    assert audit_body["fleetTaskBody"] == {"title": "Run recon"}
+    assert isinstance(audit_body["clientRequestId"], str)
+    assert client.requests[15].json_body == {"enabled": True}
 
 
 def test_reports_list_rejects_unsupported_filters(tmp_path: Path) -> None:
@@ -218,6 +320,27 @@ def test_reports_list_raises_upstream_error_for_non_object_response(tmp_path: Pa
         raise AssertionError("expected EnjiHttpError")
 
 
+def test_api_error_payload_is_preserved_for_unexpected_status(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_bearer_token("token-123", auth_file)
+    client = FakeEnjiHttpClient(
+        [
+            json_response(
+                {"code": "CLIENT_NOT_ALLOWED", "message": "client is not allowed"},
+                status_code=403,
+            )
+        ]
+    )
+
+    try:
+        github_installation_repos("42", auth_file, client)
+    except EnjiApiError as exc:
+        assert exc.code == "CLIENT_NOT_ALLOWED"
+        assert exc.message == "client is not allowed"
+    else:
+        raise AssertionError("expected EnjiApiError")
+
+
 def test_access_refreshes_cookie_on_auth_invalid_and_retries_once(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access=old; refresh=long", auth_file)
@@ -238,17 +361,39 @@ def test_access_refreshes_cookie_on_auth_invalid_and_retries_once(tmp_path: Path
         ("POST", "https://fleet.enji.ai/api/v1/auth/refresh"),
         ("GET", "https://fleet.enji.ai/api/ux/me/access"),
     ]
-    assert client.requests[0].headers == {"Cookie": "access=old; refresh=long"}
+    assert client.requests[0].headers == {"Cookie": "access=old; refresh=long", "Origin": AUTH_REFRESH_ORIGIN}
     assert client.requests[1].headers == {
         "Cookie": "access=old; refresh=long",
         "Origin": AUTH_REFRESH_ORIGIN,
         "Referer": AUTH_REFRESH_REFERER,
         "User-Agent": AUTH_REFRESH_USER_AGENT,
     }
-    assert client.requests[2].headers == {"Cookie": "access=new; refresh=long"}
+    assert client.requests[2].headers == {"Cookie": "access=new; refresh=long", "Origin": AUTH_REFRESH_ORIGIN}
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access=new; refresh=long"}
+
+
+def test_access_refreshes_cookie_on_plain_unauthorized_and_retries_once(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access=old; refresh=long", auth_file)
+    client = FakeEnjiHttpClient(
+        [
+            json_response({"message": "unauthorized"}, status_code=401),
+            json_response({"message": "token refreshed"}, set_cookie_headers=("access=new; Path=/; HttpOnly",)),
+            json_response({"access": {"group": "pro", "fullAccess": True, "limits": {"canUseSchedules": True}}}),
+        ]
+    )
+
+    payload = access(auth_file, client)
+
+    assert payload["group"] == "pro"
+    assert [(request.method, request.url) for request in client.requests] == [
+        ("GET", "https://fleet.enji.ai/api/ux/me/access"),
+        ("POST", "https://fleet.enji.ai/api/v1/auth/refresh"),
+        ("GET", "https://fleet.enji.ai/api/ux/me/access"),
+    ]
+    assert client.requests[2].headers == {"Cookie": "access=new; refresh=long", "Origin": AUTH_REFRESH_ORIGIN}
 
 
 def test_access_surfaces_auth_required_when_refresh_cookie_is_invalid(tmp_path: Path) -> None:
@@ -338,7 +483,7 @@ def test_concurrent_auth_invalid_responses_dedupe_cookie_refresh(tmp_path: Path)
         {"access": {"group": "pro", "fullAccess": True, "limits": {}}},
     ]
     assert [request.method for request in client.requests].count("POST") == 1
-    assert client.requests[-1].headers == {"Cookie": "access=new; refresh=long"}
+    assert client.requests[-1].headers == {"Cookie": "access=new; refresh=long", "Origin": AUTH_REFRESH_ORIGIN}
 
 
 def json_response(

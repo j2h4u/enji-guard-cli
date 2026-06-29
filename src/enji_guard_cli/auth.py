@@ -2,15 +2,17 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import fcntl
 import json
 import logging
 import os
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from enum import StrEnum
-from http.cookies import SimpleCookie
+from http.cookies import Morsel, SimpleCookie
 from pathlib import Path
 from typing import Literal, NotRequired, TypedDict, cast
 
@@ -37,6 +39,7 @@ HTTP_OK = 200
 HTTP_UNAUTHORIZED = 401
 HTTP_FORBIDDEN = 403
 HTTP_AUTH_FAILURE_CODES = frozenset({401, 403})
+HTTP_TRANSIENT_REFRESH_ERROR_CODES = frozenset({429, 500, 502, 503, 504})
 DEFAULT_AUTO_REFRESH_LEAD_SECONDS = 300
 DEFAULT_AUTO_REFRESH_FALLBACK_SECONDS = 900
 AUTO_REFRESH_ENABLED_ENV = "ENJI_GUARD_AUTO_REFRESH_ENABLED"
@@ -45,6 +48,8 @@ AUTO_REFRESH_FALLBACK_SECONDS_ENV = "ENJI_GUARD_AUTO_REFRESH_FALLBACK_SECONDS"
 AUTO_REFRESH_RETRY_SECONDS_ENV = "ENJI_GUARD_AUTO_REFRESH_RETRY_SECONDS"
 DEFAULT_AUTO_REFRESH_RETRY_SECONDS = 60
 JWT_MIN_PART_COUNT = 2
+AUTH_COOKIE_NAMES = frozenset({"access_token", "refresh_token"})
+REFRESH_TOKEN_COOKIE_NAME = "refresh_token"
 _LOGGER = logging.getLogger(__name__)
 _COOKIE_REFRESH_LOCK = asyncio.Lock()
 
@@ -230,6 +235,7 @@ def merge_set_cookie_headers(cookie_header: str, set_cookie_headers: Iterable[st
         updated_cookie = SimpleCookie()
         updated_cookie.load(set_cookie_header)
         for name, morsel in updated_cookie.items():
+            _validate_auth_cookie_update(name, morsel)
             cookie[name] = morsel.value
 
     if not cookie:
@@ -544,10 +550,11 @@ async def _auth_status_after_refresh(
 
 async def refresh_cookie_auth(path: Path, stored_auth: StoredAuth, client: EnjiHttpClient) -> StoredAuth:
     async with _COOKIE_REFRESH_LOCK:
-        latest_auth = _latest_auth_for_refresh(path, stored_auth)
-        if latest_auth is not stored_auth:
-            return latest_auth
-        return await _refresh_cookie_auth_unlocked(path, stored_auth, client)
+        with _cookie_refresh_file_lock(path):
+            latest_auth = _latest_auth_for_refresh(path, stored_auth)
+            if latest_auth is not stored_auth:
+                return latest_auth
+            return await _refresh_cookie_auth_unlocked(path, stored_auth, client)
 
 
 async def refresh_stored_cookie_auth(path: Path, client: EnjiHttpClient) -> StoredAuth:
@@ -573,9 +580,25 @@ async def _refresh_cookie_auth_unlocked(path: Path, stored_auth: StoredAuth, cli
         raise EnjiHttpError(
             "AUTH_REQUIRED", "stored refresh cookie is not authenticated", status_code=response.status_code
         )
+    refreshed_auth = _persist_refresh_response_cookies(path, stored_auth, response)
     raise_for_response_status(response, operation="auth refresh", expected_statuses={HTTP_OK})
     if not response.set_cookie_headers:
         raise EnjiHttpError("UPSTREAM", "auth refresh did not return Set-Cookie")
+    return refreshed_auth
+
+
+def _persist_refresh_response_cookies(
+    path: Path,
+    stored_auth: StoredAuth,
+    response: EnjiHttpResponse,
+) -> StoredAuth:
+    if not response.set_cookie_headers:
+        return stored_auth
+    if response.status_code != HTTP_OK and not _should_persist_transient_refresh_cookies(response):
+        return stored_auth
+    credential = stored_auth["credential"]
+    if credential["type"] != CredentialType.COOKIE.value:
+        raise EnjiHttpError("AUTH_REQUIRED", "stored credential is not cookie based")
     try:
         cookie_header = merge_set_cookie_headers(credential["cookie_header"], response.set_cookie_headers)
         return replace_cookie_credential(path, stored_auth, cookie_header.value)
@@ -583,6 +606,55 @@ async def _refresh_cookie_auth_unlocked(path: Path, stored_auth: StoredAuth, cli
         raise EnjiHttpError("STORAGE", f"failed to persist refreshed cookie: {exc}") from exc
     except ValueError as exc:
         raise EnjiHttpError("AUTH_REQUIRED", str(exc)) from exc
+
+
+def _should_persist_transient_refresh_cookies(response: EnjiHttpResponse) -> bool:
+    if response.status_code not in HTTP_TRANSIENT_REFRESH_ERROR_CODES:
+        return False
+    updated_cookie = SimpleCookie()
+    for set_cookie_header in response.set_cookie_headers:
+        updated_cookie.load(set_cookie_header)
+    if REFRESH_TOKEN_COOKIE_NAME not in updated_cookie:
+        return False
+    return all(
+        _is_persistable_auth_cookie_update(name, morsel)
+        for name, morsel in updated_cookie.items()
+        if name in AUTH_COOKIE_NAMES
+    )
+
+
+def _validate_auth_cookie_update(name: str, morsel: Morsel[str]) -> None:
+    if name not in AUTH_COOKIE_NAMES:
+        return
+    if not _is_persistable_auth_cookie_update(name, morsel):
+        raise ValueError(f"auth refresh returned non-persistable {name} cookie")
+
+
+def _is_persistable_auth_cookie_update(name: str, morsel: Morsel[str]) -> bool:
+    if name not in AUTH_COOKIE_NAMES:
+        return True
+    return bool(morsel.value) and not _morsel_deletes_cookie(morsel)
+
+
+def _morsel_deletes_cookie(morsel: Morsel[str]) -> bool:
+    max_age = _morsel_attribute(morsel, "max-age").strip()
+    if max_age.startswith("-") or max_age == "0":
+        return True
+    expires = _morsel_attribute(morsel, "expires").strip()
+    if not expires:
+        return False
+    try:
+        expires_at = parsedate_to_datetime(expires)
+    except TypeError, ValueError:
+        return False
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at <= datetime.now(UTC)
+
+
+def _morsel_attribute(morsel: Morsel[str], name: str) -> str:
+    value = cast(object, morsel[name])
+    return value if isinstance(value, str) else ""
 
 
 def _latest_auth_for_refresh(path: Path, stored_auth: StoredAuth) -> StoredAuth:
@@ -599,6 +671,19 @@ def _latest_auth_for_refresh(path: Path, stored_auth: StoredAuth) -> StoredAuth:
     if latest_credential["cookie_header"] != stored_credential["cookie_header"]:
         return latest_auth
     return stored_auth
+
+
+@contextlib.contextmanager
+def _cookie_refresh_file_lock(path: Path) -> Iterator[None]:
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock_path = path.with_suffix(f"{path.suffix}.lock")
+    with lock_path.open("a", encoding="utf-8") as lock_file:
+        lock_path.chmod(0o600)
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def is_auth_invalid_response(response: EnjiHttpResponse) -> bool:
