@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from os import environ
 from pathlib import Path
 from typing import Literal
 
@@ -12,8 +11,6 @@ APP_CONFIG_DIR_NAME = "enji-guard"
 AUTH_FILE_NAME = "auth.json"
 LOG_DIR_NAME = "logs"
 LOG_FILE_NAME = "enji-guard.jsonl"
-
-AUTH_FILE_ENV = "ENJI_GUARD_AUTH_FILE"
 
 DEFAULT_BASE_URL = "https://fleet.enji.ai"
 DEFAULT_AUTO_REFRESH_ENABLED = True
@@ -70,7 +67,7 @@ class EnjiGuardSettings:
 def default_settings() -> EnjiGuardSettings:
     config_root = default_config_root()
     return EnjiGuardSettings(
-        auth=AuthSettings(base_url=DEFAULT_BASE_URL, auth_file=_auth_file(config_root)),
+        auth=AuthSettings(base_url=DEFAULT_BASE_URL, auth_file=config_root / AUTH_FILE_NAME),
         auto_refresh=AutoRefreshSettings(
             enabled=DEFAULT_AUTO_REFRESH_ENABLED,
             lead_seconds=DEFAULT_AUTO_REFRESH_LEAD_SECONDS,
@@ -94,10 +91,3 @@ def default_settings() -> EnjiGuardSettings:
 
 def default_config_root() -> Path:
     return Path.home() / APP_CONFIG_PARENT_DIR_NAME / APP_CONFIG_DIR_NAME
-
-
-def _auth_file(config_root: Path) -> Path:
-    raw_auth_file = environ.get(AUTH_FILE_ENV)
-    if raw_auth_file is not None and raw_auth_file.strip():
-        return Path(raw_auth_file).expanduser()
-    return config_root / AUTH_FILE_NAME
