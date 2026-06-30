@@ -10,10 +10,14 @@ from enji_guard_cli.audits import AuditAlias, ReportAuditAlias
 from enji_guard_cli.auth import AuthError, AuthStatusPayload, import_bearer_token, import_cookie, refresh_auth
 from enji_guard_cli.core import (
     DEFAULT_REPO_SORT,
+    DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS,
+    DEFAULT_REPORT_WAIT_POLL_SECONDS,
+    DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS,
     REPORTS_LIST_DEFAULT_SELECTOR,
     EmailPreferenceUpdate,
     OperationName,
     OperationResult,
+    ReportWaitOptions,
     ScheduleSettingsUpdate,
     connect_repo,
     create_project,
@@ -35,7 +39,7 @@ from enji_guard_cli.core import (
     show_report_for_repo,
     start_recon,
     start_report_audits,
-    wait_for_work,
+    wait_for_reports,
 )
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.mcp_server import create_mcp_server, run_mcp_server
@@ -256,11 +260,43 @@ def _echo_audit_catalog(payload: object) -> None:
 
 def _echo_wait_status(payload: object) -> None:
     data = _object_dict(payload)
-    idle = "yes" if data.get("idle") is True else "no"
-    typer.echo(f"idle: {idle}")
-    for key in ("repo_id", "audit", "elapsed_seconds"):
+    complete = "yes" if data.get("complete") is True else "no"
+    typer.echo(f"complete: {complete}")
+    for key in ("reason", "repo_id", "elapsed_seconds", "current_head_sha", "last_report_at"):
         typer.echo(f"{key}: {_text_cell(data.get(key))}")
-    typer.echo(f"active_runs: {len(_object_list(data.get('active_runs')))}")
+    counts = _object_dict(data.get("counts"))
+    typer.echo(
+        "reports: "
+        f"{_text_cell(counts.get('ready'))} ready, "
+        f"{_text_cell(counts.get('running'))} running, "
+        f"{_text_cell(counts.get('missing'))} missing, "
+        f"{_text_cell(counts.get('stale'))} stale"
+    )
+    _echo_wait_list("missing", data)
+    _echo_wait_list("running", data)
+    _echo_wait_list("failed", data)
+    _echo_wait_list("stale", data)
+
+
+def _echo_wait_list(key: str, data: dict[str, object]) -> None:
+    values = [value for value in _object_list(data.get(key)) if isinstance(value, str)]
+    if values:
+        typer.echo(f"{key}: {', '.join(values)}")
+
+
+def _echo_wait_heartbeat(payload: dict[str, object]) -> None:
+    data = _object_dict(payload)
+    counts = _object_dict(data.get("counts"))
+    typer.echo(
+        "wait heartbeat: "
+        f"elapsed_seconds={_text_cell(data.get('elapsed_seconds'))} "
+        f"ready={_text_cell(counts.get('ready'))} "
+        f"running={_text_cell(counts.get('running'))} "
+        f"missing={_text_cell(counts.get('missing'))} "
+        f"stale={_text_cell(counts.get('stale'))} "
+        f"current_head_sha={_text_cell(data.get('current_head_sha'))}",
+        err=True,
+    )
 
 
 def _echo_generic_payload(payload: object) -> None:
@@ -588,24 +624,36 @@ def status(
     )
 
 
-@app.command(help="Poll until one recon or report audit is no longer running.")
+@app.command(help="Poll until all report audits for a repository have results.")
 def wait(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
-    audit: Annotated[AuditAlias, typer.Argument(help="recon or canonical report audit alias.")],
     timeout_seconds: Annotated[
         int,
-        typer.Option("--timeout-seconds", min=1, help="Maximum wait time in seconds."),
-    ] = 7200,
+        typer.Option(
+            "--timeout-seconds",
+            min=DEFAULT_REPORT_WAIT_POLL_SECONDS,
+            help="Maximum wait time in seconds.",
+        ),
+    ] = DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     payload = _resolve_command_payload(
-        lambda: wait_for_work(repo, audit, _selected_project(), poll_seconds=10, timeout_seconds=timeout_seconds)
+        lambda: wait_for_reports(
+            repo,
+            _selected_project(),
+            options=ReportWaitOptions(
+                poll_seconds=DEFAULT_REPORT_WAIT_POLL_SECONDS,
+                timeout_seconds=timeout_seconds,
+                heartbeat_seconds=DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS,
+            ),
+            heartbeat=_echo_wait_heartbeat,
+        )
     )
     if _json_output(json_output):
         _echo_json(payload)
     else:
         _echo_wait_status(payload)
-    if isinstance(payload, dict) and payload.get("idle") is False:
+    if isinstance(payload, dict) and payload.get("complete") is False:
         raise typer.Exit(2)
 
 

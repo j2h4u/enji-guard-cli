@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -8,7 +9,7 @@ from typer.testing import CliRunner
 from enji_guard_cli import cli
 from enji_guard_cli.audits import AuditAlias
 from enji_guard_cli.cli import app
-from enji_guard_cli.core import EmailPreferenceUpdate, ScheduleSettingsUpdate
+from enji_guard_cli.core import EmailPreferenceUpdate, ReportWaitOptions, ScheduleSettingsUpdate
 from enji_guard_cli.enji_api import EnjiApiError
 
 
@@ -624,51 +625,90 @@ def test_wait_routes_to_top_level_workflow(monkeypatch: MonkeyPatch) -> None:
 
     def fake_wait(
         repo: str,
-        audit: AuditAlias,
         project: str | None,
         *,
-        poll_seconds: int,
-        timeout_seconds: int,
+        options: ReportWaitOptions,
+        heartbeat: object,
     ) -> dict[str, object]:
         captured["repo"] = repo
-        captured["audit"] = audit.value
         captured["project"] = project
-        captured["poll_seconds"] = poll_seconds
-        captured["timeout_seconds"] = timeout_seconds
-        return {"idle": True, "active_runs": []}
+        captured["poll_seconds"] = options.poll_seconds
+        captured["timeout_seconds"] = options.timeout_seconds
+        captured["heartbeat_seconds"] = options.heartbeat_seconds
+        captured["heartbeat"] = callable(heartbeat)
+        return {
+            "complete": True,
+            "reason": "complete",
+            "counts": {"ready": 7, "running": 0, "missing": 0, "stale": 1},
+            "stale": ["security"],
+        }
 
-    monkeypatch.setattr(cli, "wait_for_work", fake_wait)
+    monkeypatch.setattr(cli, "wait_for_reports", fake_wait)
 
     result = CliRunner().invoke(
         app,
-        ["--project", "Pets", "wait", "j2h4u/enji-guard-cli", "recon", "--timeout-seconds", "30", "--json"],
+        ["--project", "Pets", "wait", "j2h4u/enji-guard-cli", "--timeout-seconds", "30", "--json"],
     )
 
     assert result.exit_code == 0
-    assert json.loads(result.output)["idle"] is True
+    assert json.loads(result.output)["complete"] is True
     assert captured == {
         "repo": "j2h4u/enji-guard-cli",
-        "audit": "recon",
         "project": "Pets",
-        "poll_seconds": 10,
+        "poll_seconds": 30,
         "timeout_seconds": 30,
+        "heartbeat_seconds": 120,
+        "heartbeat": True,
     }
 
 
-def test_wait_exits_two_when_timeout_payload_is_not_idle(monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        cli,
-        "wait_for_work",
-        lambda repo, audit, project, *, poll_seconds, timeout_seconds: {
-            "idle": False,
-            "active_runs": [{"id": "task_1"}],
-        },
-    )
-
-    result = CliRunner().invoke(app, ["wait", "repo_1", "security", "--timeout-seconds", "1", "--json"])
+def test_wait_rejects_old_single_audit_shape() -> None:
+    result = CliRunner().invoke(app, ["wait", "repo_1", "security", "--timeout-seconds", "30"])
 
     assert result.exit_code == 2
-    assert json.loads(result.output)["idle"] is False
+
+
+def test_wait_exits_two_when_timeout_payload_is_not_complete(monkeypatch: MonkeyPatch) -> None:
+    def fake_wait(_repo: str, _project: str | None, **_kwargs: object) -> dict[str, object]:
+        return {
+            "complete": False,
+            "reason": "timeout",
+            "counts": {"ready": 6, "running": 0, "missing": 1, "stale": 6},
+        }
+
+    monkeypatch.setattr(cli, "wait_for_reports", fake_wait)
+
+    result = CliRunner().invoke(app, ["wait", "repo_1", "--timeout-seconds", "30", "--json"])
+
+    assert result.exit_code == 2
+    assert json.loads(result.output)["complete"] is False
+
+
+def test_wait_heartbeat_writes_stderr_without_polluting_json_stdout(monkeypatch: MonkeyPatch) -> None:
+    def fake_wait(
+        _repo: str,
+        _project: str | None,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        heartbeat = cast(Callable[[dict[str, object]], None], kwargs["heartbeat"])
+        heartbeat(
+            {
+                "elapsed_seconds": 120,
+                "current_head_sha": "abc123",
+                "counts": {"ready": 6, "running": 1, "missing": 0, "stale": 3},
+            }
+        )
+        return {"complete": True, "reason": "complete", "counts": {"ready": 7, "running": 0, "missing": 0, "stale": 0}}
+
+    monkeypatch.setattr(cli, "wait_for_reports", fake_wait)
+
+    result = CliRunner().invoke(app, ["wait", "repo_1", "--timeout-seconds", "30", "--json"])
+
+    assert result.exit_code == 0
+    assert result.stderr == (
+        "wait heartbeat: elapsed_seconds=120 ready=6 running=1 missing=0 stale=3 current_head_sha=abc123\n"
+    )
+    assert json.loads(result.stdout)["complete"] is True
 
 
 def test_report_show_resolves_repo_selector_and_can_emit_markdown(monkeypatch: MonkeyPatch) -> None:

@@ -24,7 +24,7 @@ Primary nouns:
 - `schedule`: recurring audit settings.
 - `email`: report completion email preferences.
 - `status`: runtime snapshot across projects/repos/tasks.
-- `wait`: polling for long-running work.
+- `wait`: blocking readiness check for all report audits in one repo.
 
 Canonical report audits:
 
@@ -65,7 +65,7 @@ enji-guard recon start REPO
 enji-guard audit start REPO AUDIT...
 enji-guard audit start REPO --all
 
-enji-guard wait REPO AUDIT_OR_RECON
+enji-guard wait REPO
 
 enji-guard report list [--selector SELECTOR]
 enji-guard report read REPO [AUDIT...] [--all] [--json]

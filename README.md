@@ -69,14 +69,16 @@ For reports:
 
 ```bash
 docker exec -i enji-guard-cli enji-guard audit start "$REPO" --all
-docker exec -i enji-guard-cli enji-guard wait "$REPO" security --timeout-seconds 7200
+docker exec -i enji-guard-cli enji-guard wait "$REPO"
 docker exec -i enji-guard-cli enji-guard report read "$REPO"
 ```
 
 Recon and report audits can take tens of minutes. Use `status` for a snapshot,
-`wait` for one audit, and `report read` after reports are ready. Prefer reading
-reports through CLI/MCP instead of relying on email; disable noisy scheduled
-mail when it is not part of the workflow.
+`wait` until all report audits have results, and `report read` after reports
+are ready. `wait` reports stale audited commit hashes but does not fail only
+because Enji has not caught up to the current HEAD. Prefer reading reports
+through CLI/MCP instead of relying on email; disable noisy scheduled mail when
+it is not part of the workflow.
 
 ## Requirements
 
@@ -121,7 +123,7 @@ docker exec -i enji-guard-cli enji-guard repo resolve j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard repo move j2h4u/enji-guard-cli --to-project Friends
 docker exec -i enji-guard-cli enji-guard status j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard audit start j2h4u/enji-guard-cli --all
-docker exec -i enji-guard-cli enji-guard wait j2h4u/enji-guard-cli security
+docker exec -i enji-guard-cli enji-guard wait j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard report read j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard --project Pets schedule list
 docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos --enabled off

@@ -155,6 +155,13 @@ class ProjectRef(TypedDict):
 
 
 type ReportAuditState = Literal["missing", "ready", "running"]
+type ReportWaitReason = Literal["complete", "waiting", "timeout", "failed"]
+type ReportWaitCallback = Callable[[dict[str, object]], None]
+
+DEFAULT_REPORT_WAIT_POLL_SECONDS = 30
+DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS = 2700
+DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS = 120
+FAILED_REPORT_WAIT_STATUSES = frozenset({"failed", "canceled", "cancelled"})
 
 
 class ReportAuditStatusPayload(TypedDict):
@@ -183,6 +190,32 @@ class ReportStatusPayload(TypedDict):
     ready: list[str]
     running: list[str]
     missing: list[str]
+    reports: list[ReportAuditStatusPayload]
+
+
+class ReportWaitCountsPayload(TypedDict):
+    total: int
+    ready: int
+    running: int
+    missing: int
+    stale: int
+    failed: int
+
+
+class ReportWaitPayload(TypedDict):
+    repo_id: str
+    complete: bool
+    timed_out: bool
+    reason: ReportWaitReason
+    elapsed_seconds: int
+    current_head_sha: str | None
+    last_report_at: str | None
+    counts: ReportWaitCountsPayload
+    ready: list[str]
+    running: list[str]
+    missing: list[str]
+    stale: list[str]
+    failed: list[str]
     reports: list[ReportAuditStatusPayload]
 
 
@@ -277,6 +310,13 @@ class OperationSpec:
     mcp_tool: str
     summary: str
     execute: OperationExecutor
+
+
+@dataclass(frozen=True, slots=True)
+class ReportWaitOptions:
+    poll_seconds: int
+    timeout_seconds: int
+    heartbeat_seconds: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -560,6 +600,30 @@ def wait_for_audit_completion(
         time.sleep(_next_poll_sleep(deadline, poll_seconds))
 
 
+def wait_for_report_completion(
+    repo_id: str,
+    *,
+    options: ReportWaitOptions,
+    heartbeat: Callable[[ReportWaitPayload], None] | None,
+) -> ReportWaitPayload:
+    _validate_report_wait_options(options)
+    started_at = time.monotonic()
+    deadline = started_at + options.timeout_seconds
+    next_heartbeat_at = started_at
+    while True:
+        status = report_status(repo_id)
+        payload = _report_wait_payload(repo_id, status, started_at, timed_out=False)
+        if payload["complete"] or payload["reason"] == "failed":
+            return payload
+        now = time.monotonic()
+        if now >= deadline:
+            return _report_wait_payload(repo_id, status, started_at, timed_out=True)
+        if heartbeat is not None and now >= next_heartbeat_at:
+            heartbeat(payload)
+            next_heartbeat_at += options.heartbeat_seconds
+        time.sleep(_next_poll_sleep(deadline, options.poll_seconds))
+
+
 def start_audit(
     repo_id: str,
     project_id: str,
@@ -785,6 +849,30 @@ def set_schedule_settings(
         for audit in REPORT_AUDITS
     ]
     return _schedule_settings_payload(rows)
+
+
+def wait_for_reports(
+    repo: str,
+    project: str | None,
+    *,
+    options: ReportWaitOptions,
+    heartbeat: ReportWaitCallback | None,
+) -> dict[str, object]:
+    target = _resolve_single_repo_target(repo, project)
+    targeted_heartbeat: Callable[[ReportWaitPayload], None] | None = None
+    if heartbeat is not None:
+
+        def target_heartbeat(payload: ReportWaitPayload) -> None:
+            heartbeat(_targeted_run_payload(target, payload))
+
+        targeted_heartbeat = target_heartbeat
+
+    payload = wait_for_report_completion(
+        target["repo_id"],
+        options=options,
+        heartbeat=targeted_heartbeat,
+    )
+    return _targeted_run_payload(target, payload)
 
 
 def wait_for_work(
@@ -1032,11 +1120,83 @@ def _audit_wait_payload(
     }
 
 
+def _report_wait_payload(
+    repo_id: str,
+    status: ReportStatusPayload,
+    started_at: float,
+    *,
+    timed_out: bool,
+) -> ReportWaitPayload:
+    stale = _stale_report_audits(status)
+    failed = _failed_report_audits(status)
+    complete = status["complete"] and not failed and not timed_out
+    return {
+        "repo_id": repo_id,
+        "complete": complete,
+        "timed_out": timed_out,
+        "reason": _report_wait_reason(status, failed=failed, timed_out=timed_out),
+        "elapsed_seconds": round(time.monotonic() - started_at),
+        "current_head_sha": status["current_head_sha"],
+        "last_report_at": status["last_report_at"],
+        "counts": {
+            "total": len(status["reports"]),
+            "ready": len(status["ready"]),
+            "running": len(status["running"]),
+            "missing": len(status["missing"]),
+            "stale": len(stale),
+            "failed": len(failed),
+        },
+        "ready": status["ready"],
+        "running": status["running"],
+        "missing": status["missing"],
+        "stale": stale,
+        "failed": failed,
+        "reports": status["reports"],
+    }
+
+
+def _report_wait_reason(
+    status: ReportStatusPayload,
+    *,
+    failed: list[str],
+    timed_out: bool,
+) -> ReportWaitReason:
+    if failed:
+        return "failed"
+    if timed_out:
+        return "timeout"
+    if status["complete"]:
+        return "complete"
+    return "waiting"
+
+
+def _stale_report_audits(status: ReportStatusPayload) -> list[str]:
+    return [report["audit"] for report in status["reports"] if report["out_of_date"] is True]
+
+
+def _failed_report_audits(status: ReportStatusPayload) -> list[str]:
+    return [
+        report["audit"]
+        for report in status["reports"]
+        if _normalized_run_status(report["run_status"]) in FAILED_REPORT_WAIT_STATUSES
+    ]
+
+
+def _normalized_run_status(value: str | None) -> str | None:
+    return value.strip().lower() if value is not None else None
+
+
 def _validate_wait_options(poll_seconds: int, timeout_seconds: int) -> None:
     if poll_seconds < 1:
         raise ValueError("poll_seconds must be at least 1")
     if timeout_seconds < poll_seconds:
         raise ValueError("timeout_seconds must be greater than or equal to poll_seconds")
+
+
+def _validate_report_wait_options(options: ReportWaitOptions) -> None:
+    _validate_wait_options(options.poll_seconds, options.timeout_seconds)
+    if options.heartbeat_seconds < 1:
+        raise ValueError("heartbeat_seconds must be at least 1")
 
 
 def _next_poll_sleep(deadline: float, poll_seconds: int) -> float:

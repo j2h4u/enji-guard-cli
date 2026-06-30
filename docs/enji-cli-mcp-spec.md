@@ -61,7 +61,7 @@ request body references. OpenAPI must not generate CLI or MCP surfaces directly.
 - `recon`: preliminary diagnostics, separate from report audits.
 - `audit`: report-producing checks.
 - `report`: generated report content.
-- `wait`: polling for long-running work.
+- `wait`: blocking readiness check for all report audits in one repo.
 - `schedule`: recurring audit settings.
 - `email`: report completion email preferences.
 
@@ -104,7 +104,7 @@ enji-guard recon start REPO
 enji-guard audit start REPO AUDIT...
 enji-guard audit start REPO --all
 
-enji-guard wait REPO AUDIT_OR_RECON
+enji-guard wait REPO
 
 enji-guard report list [--selector SELECTOR]
 enji-guard report read REPO [AUDIT...] [--all] [--json]
@@ -169,11 +169,12 @@ Recon is not schedulable here.
 
 ## Long-Running Work
 
-Recon and report audits can take tens of minutes. `wait` means “no matching
-active run is observed anymore”; report readiness is checked separately through
-`status`. `report read REPO` is the main content path after reports become
-ready; it reads all currently ready reports unless explicit audit aliases or
-`--all` are passed.
+Recon and report audits can take tens of minutes. `wait REPO` waits until all
+report audits for that repo have results. It exits nonzero on timeout or failed
+runs, and reports stale audited commit hashes as context instead of treating
+them as failure. `report read REPO` is the main content path after reports
+become ready; it reads all currently ready reports unless explicit audit aliases
+or `--all` are passed.
 
 `status` must expose scenario state, not raw API internals:
 

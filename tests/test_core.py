@@ -17,6 +17,7 @@ from enji_guard_cli.core import (
     OPERATION_SPECS,
     EmailPreferenceUpdate,
     OperationName,
+    ReportWaitOptions,
     ScheduleSettingsUpdate,
     operation_catalog,
     resolve_operation,
@@ -1496,6 +1497,102 @@ def test_wait_for_audit_completion_ignores_completed_matching_runs(monkeypatch: 
 
     assert payload["idle"] is True
     assert payload["active_runs"] == []
+
+
+def test_wait_for_report_completion_succeeds_when_reports_are_ready_but_stale(monkeypatch: MonkeyPatch) -> None:
+    status = _report_wait_status(
+        complete=True,
+        state="ready",
+        out_of_date=True,
+        run_status="completed",
+    )
+    monkeypatch.setattr(core, "report_status", lambda _repo_id: status)
+
+    payload = core.wait_for_report_completion(
+        "repo_1",
+        options=ReportWaitOptions(poll_seconds=30, timeout_seconds=30, heartbeat_seconds=120),
+        heartbeat=None,
+    )
+
+    assert payload["complete"] is True
+    assert payload["timed_out"] is False
+    assert payload["reason"] == "complete"
+    assert payload["counts"]["stale"] == 1
+    assert payload["stale"] == ["security"]
+
+
+def test_wait_for_report_completion_times_out_when_reports_remain_missing(monkeypatch: MonkeyPatch) -> None:
+    class FakeClock:
+        value = 0.0
+
+        def monotonic(self) -> float:
+            self.value += 31.0
+            return self.value
+
+        def sleep(self, seconds: float) -> None:
+            assert seconds >= 0.0
+
+    status = _report_wait_status(
+        complete=False,
+        state="missing",
+        out_of_date=None,
+        run_status=None,
+    )
+    clock = FakeClock()
+    monkeypatch.setattr(core, "report_status", lambda _repo_id: status)
+    monkeypatch.setattr(core.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(core.time, "sleep", clock.sleep)
+
+    payload = core.wait_for_report_completion(
+        "repo_1",
+        options=ReportWaitOptions(poll_seconds=30, timeout_seconds=30, heartbeat_seconds=120),
+        heartbeat=None,
+    )
+
+    assert payload["complete"] is False
+    assert payload["timed_out"] is True
+    assert payload["reason"] == "timeout"
+    assert payload["counts"]["missing"] == 1
+
+
+def _report_wait_status(
+    *,
+    complete: bool,
+    state: core.ReportAuditState,
+    out_of_date: bool | None,
+    run_status: str | None,
+) -> core.ReportStatusPayload:
+    ready = ["security"] if state == "ready" else []
+    running = ["security"] if state == "running" else []
+    missing = ["security"] if state == "missing" else []
+    return {
+        "repo_id": "repo_1",
+        "current_head_sha": "head_2",
+        "last_report_at": "2026-06-30T12:00:00Z",
+        "complete": complete,
+        "ready": ready,
+        "running": running,
+        "missing": missing,
+        "reports": [
+            {
+                "audit": "security",
+                "label": "Security",
+                "action_key": "audit.security",
+                "route_slug": "security",
+                "state": state,
+                "ready": state == "ready",
+                "running": state == "running",
+                "fleet_task_id": "task_1",
+                "created_at": "2026-06-30T11:00:00Z",
+                "started_at": "2026-06-30T11:00:00Z",
+                "completed_at": "2026-06-30T12:00:00Z",
+                "run_status": run_status,
+                "current_head_sha": "head_2",
+                "last_audited_head_sha": "head_1",
+                "out_of_date": out_of_date,
+            }
+        ],
+    }
 
 
 def test_start_audit_builds_spa_compatible_fleet_task_body(monkeypatch: MonkeyPatch) -> None:
