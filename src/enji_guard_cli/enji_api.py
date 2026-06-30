@@ -3,10 +3,42 @@ from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, NotRequired, TypedDict, cast
+from typing import NotRequired, TypedDict, cast
 from urllib.parse import quote, urlencode
 from uuid import uuid4
 
+from enji_guard_cli._enji_api_contract import (
+    ACCESS_ENDPOINT_SPEC,
+    AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT_SPEC,
+    AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT_SPEC,
+    CATALOG_ENDPOINT_SPEC,
+    FLEET_PROJECT_CREATE_ENDPOINT_SPEC,
+    FLEET_PROJECT_DELETE_ENDPOINT_SPEC,
+    GITHUB_INSTALLATION_REPOS_ENDPOINT_SPEC,
+    GITHUB_INSTALLATIONS_ENDPOINT_SPEC,
+    IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC,
+    IMPROVEMENT_JOBS_ENDPOINT_SPEC,
+    PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC,
+    PROJECT_DETAIL_ENDPOINT_SPEC,
+    PROJECT_RENAME_ENDPOINT_SPEC,
+    PROJECT_REPO_CONNECTION_ENDPOINT_SPEC,
+    PROJECT_REPOS_CONNECT_ENDPOINT_SPEC,
+    PROJECTS_ENDPOINT_SPEC,
+    REPO_ACTIVE_RUNS_ENDPOINT_SPEC,
+    REPO_AUDIT_HISTORY_ENDPOINT_SPEC,
+    REPO_AUDIT_RERUN_STATE_ENDPOINT_SPEC,
+    REPO_AUDIT_RUNS_ENDPOINT_SPEC,
+    REPO_AUDIT_SUMMARY_ENDPOINT_SPEC,
+    REPO_TASK_LINKS_ENDPOINT_SPEC,
+    REPO_TRANSFER_ENDPOINT_SPEC,
+    REPO_TRANSFER_PREFLIGHT_ENDPOINT_SPEC,
+    REPORTS_LIST_ENDPOINT_SPEC,
+    RUNBOOK_ENDPOINT_SPEC,
+    UX_PROJECT_CREATE_ENDPOINT_SPEC,
+    UX_PROJECT_DELETE_ENDPOINT_SPEC,
+    EnjiEndpointSpec,
+    HttpMethod,
+)
 from enji_guard_cli.auth import (
     AUTH_INVALID_CODE,
     AUTH_REFRESH_ORIGIN,
@@ -47,7 +79,6 @@ type JsonScalar = None | bool | int | float | str
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
 type JsonObjectParser[T] = Callable[[dict[str, object]], T]
 type JsonObjectPayload = dict[str, JsonValue]
-type HttpMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
 type ApiPathParams = Mapping[str, str]
 type ApiQueryParams = Mapping[str, str]
 
@@ -83,14 +114,6 @@ class ReportsListPayload(TypedDict):
     projects: list[ProjectOverviewPayload]
 
 
-class ApiEndpointPayload(TypedDict):
-    method: HttpMethod
-    path_template: str
-    operation_id: str
-    operation: str
-    request_body_ref: str | None
-
-
 @dataclass(slots=True)
 class EnjiApiSession:
     auth_file: Path
@@ -118,12 +141,8 @@ class ApiRequestSpec[T]:
 
 @dataclass(frozen=True, slots=True)
 class ApiEndpoint[T]:
-    method: HttpMethod
-    path_template: str
-    operation_id: str
-    operation: str
+    spec: EnjiEndpointSpec
     parser: JsonObjectParser[T]
-    request_body_ref: str | None = None
     expected_statuses: Collection[int] = HTTP_OK_ONLY
 
     def request(
@@ -134,26 +153,17 @@ class ApiEndpoint[T]:
         json_body: EnjiJsonValue | None = None,
         parser: JsonObjectParser[T] | None = None,
     ) -> ApiRequestSpec[T]:
-        path = _render_api_path(self.path_template, path_params)
+        path = _render_api_path(self.spec.path_template, path_params)
         if query_params:
             path = f"{path}?{urlencode(query_params)}"
         return ApiRequestSpec(
-            method=self.method,
+            method=self.spec.method,
             path=path,
-            operation=self.operation,
+            operation=self.spec.operation,
             parser=parser if parser is not None else self.parser,
             json_body=json_body,
             expected_statuses=self.expected_statuses,
         )
-
-    def catalog_entry(self) -> ApiEndpointPayload:
-        return {
-            "method": self.method,
-            "path_template": self.path_template,
-            "operation_id": self.operation_id,
-            "operation": self.operation,
-            "request_body_ref": self.request_body_ref,
-        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -919,254 +929,124 @@ def _parse_fleet_project_create_response(payload: dict[str, object]) -> FleetPro
 
 
 ACCESS_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/me/access",
-    operation_id="getUxMeAccess",
-    operation="access",
+    spec=ACCESS_ENDPOINT_SPEC,
     parser=_parse_access_payload,
 )
 REPORTS_LIST_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/projects",
-    operation_id="listProjects",
-    operation="reports list",
+    spec=REPORTS_LIST_ENDPOINT_SPEC,
     parser=_reports_list_parser(REPORTS_LIST_DEFAULT_SELECTOR),
 )
 PROJECTS_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/projects",
-    operation_id="listProjects",
-    operation="repo list",
+    spec=PROJECTS_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 PROJECT_DETAIL_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/projects/{projectId}",
-    operation_id="getProject",
-    operation="project detail",
+    spec=PROJECT_DETAIL_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 FLEET_PROJECT_CREATE_ENDPOINT = ApiEndpoint(
-    method="POST",
-    path_template="/api/v1/projects",
-    operation_id="createFleetProject",
-    operation="project create",
+    spec=FLEET_PROJECT_CREATE_ENDPOINT_SPEC,
     parser=_parse_fleet_project_create_response,
-    request_body_ref="#/components/requestBodies/FleetProjectCreate",
     expected_statuses=HTTP_CREATED_ONLY,
 )
 UX_PROJECT_CREATE_ENDPOINT = ApiEndpoint(
-    method="POST",
-    path_template="/api/ux/projects",
-    operation_id="createUxProject",
-    operation="project create",
+    spec=UX_PROJECT_CREATE_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
-    request_body_ref="#/components/requestBodies/UxProjectCreate",
     expected_statuses=HTTP_CREATED_ONLY,
 )
 PROJECT_RENAME_ENDPOINT = ApiEndpoint(
-    method="PATCH",
-    path_template="/api/ux/projects/{projectId}",
-    operation_id="patchProject",
-    operation="project rename",
+    spec=PROJECT_RENAME_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
-    request_body_ref="#/components/requestBodies/ProjectPatch",
 )
 UX_PROJECT_DELETE_ENDPOINT = ApiEndpoint(
-    method="DELETE",
-    path_template="/api/ux/projects/{projectId}",
-    operation_id="deleteUxProject",
-    operation="project delete",
+    spec=UX_PROJECT_DELETE_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
     expected_statuses=HTTP_NO_CONTENT_ONLY,
 )
 FLEET_PROJECT_DELETE_ENDPOINT = ApiEndpoint(
-    method="DELETE",
-    path_template="/api/v1/projects/{projectId}",
-    operation_id="deleteFleetProject",
-    operation="project delete",
+    spec=FLEET_PROJECT_DELETE_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
     expected_statuses=HTTP_NO_CONTENT_ONLY,
 )
 REPO_TRANSFER_PREFLIGHT_ENDPOINT = ApiEndpoint(
-    method="POST",
-    path_template="/api/ux/projects/{sourceProjectId}/repos/{repoId}/transfer/preflight",
-    operation_id="preflightRepoTransfer",
-    operation="repo move preflight",
+    spec=REPO_TRANSFER_PREFLIGHT_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
-    request_body_ref="#/components/requestBodies/RepoTransferPreflight",
     expected_statuses=HTTP_OK_OR_NO_CONTENT,
 )
 REPO_TRANSFER_ENDPOINT = ApiEndpoint(
-    method="POST",
-    path_template="/api/ux/projects/{sourceProjectId}/repos/{repoId}/transfer",
-    operation_id="transferRepo",
-    operation="repo move",
+    spec=REPO_TRANSFER_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
-    request_body_ref="#/components/requestBodies/RepoTransfer",
 )
 CATALOG_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/catalog",
-    operation_id="getUxCatalog",
-    operation="catalog",
+    spec=CATALOG_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 RUNBOOK_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/v1/runbooks/{runbookId}",
-    operation_id="getRunbook",
-    operation="runbook",
+    spec=RUNBOOK_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 GITHUB_INSTALLATIONS_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/github-installations",
-    operation_id="listGitHubInstallations",
-    operation="repo github installations",
+    spec=GITHUB_INSTALLATIONS_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 GITHUB_INSTALLATION_REPOS_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/v1/github/app/installations/{installationId}/repos",
-    operation_id="listGitHubInstallationRepos",
-    operation="repo github repos",
+    spec=GITHUB_INSTALLATION_REPOS_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 PROJECT_REPOS_CONNECT_ENDPOINT = ApiEndpoint(
-    method="POST",
-    path_template="/api/ux/projects/{projectId}/repos",
-    operation_id="connectProjectRepo",
-    operation="repo add",
+    spec=PROJECT_REPOS_CONNECT_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
-    request_body_ref="#/components/requestBodies/GitHubRepoConnect",
     expected_statuses=HTTP_CREATED_ONLY,
 )
 PROJECT_REPO_CONNECTION_ENDPOINT = ApiEndpoint(
-    method="PUT",
-    path_template="/api/ux/projects/{projectId}/repos/{repoId}/connection",
-    operation_id="putProjectRepoConnection",
-    operation="repo connection",
+    spec=PROJECT_REPO_CONNECTION_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
-    request_body_ref="#/components/requestBodies/RepoConnectionUpdate",
 )
 PROJECT_ACTIVE_RUNS_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/projects/{projectId}/active-runs",
-    operation_id="listProjectActiveRuns",
-    operation="project active runs",
+    spec=PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 REPO_ACTIVE_RUNS_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/repos/{repoId}/active-runs",
-    operation_id="listRepoActiveRuns",
-    operation="repo active runs",
+    spec=REPO_ACTIVE_RUNS_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 REPO_AUDIT_RERUN_STATE_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/repos/{repoId}/audit-rerun-state",
-    operation_id="getRepoAuditRerunState",
-    operation="repo rerun state",
+    spec=REPO_AUDIT_RERUN_STATE_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 REPO_TASK_LINKS_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/repos/{repoId}/task-links",
-    operation_id="listRepoTaskLinks",
-    operation="repo task links",
+    spec=REPO_TASK_LINKS_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 REPO_AUDIT_HISTORY_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/repos/{repoId}/audit-history",
-    operation_id="listRepoAuditHistory",
-    operation="repo audit history",
+    spec=REPO_AUDIT_HISTORY_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 REPO_AUDIT_RUNS_ENDPOINT = ApiEndpoint(
-    method="POST",
-    path_template="/api/ux/repos/{repoId}/audit-runs",
-    operation_id="createRepoAuditRun",
-    operation="audit start",
+    spec=REPO_AUDIT_RUNS_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
-    request_body_ref="#/components/requestBodies/AuditRunCreate",
     expected_statuses=HTTP_CREATED_ONLY,
 )
 REPO_AUDIT_SUMMARY_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/repos/{repoId}/snapshots/upfront.audit.summary",
-    operation_id="getRepoAuditSummarySnapshot",
-    operation="report show",
+    spec=REPO_AUDIT_SUMMARY_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/repos/{repoId}/audits/{actionKey}/email-preferences",
-    operation_id="getAuditEmailPreferences",
-    operation="email list",
+    spec=AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT = ApiEndpoint(
-    method="PUT",
-    path_template="/api/ux/repos/{repoId}/audits/{actionKey}/email-preferences",
-    operation_id="putAuditEmailPreferences",
-    operation="email set",
+    spec=AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
-    request_body_ref="#/components/requestBodies/EmailPreferencesPatch",
 )
 IMPROVEMENT_JOBS_ENDPOINT = ApiEndpoint(
-    method="GET",
-    path_template="/api/ux/improvement-jobs/{repoId}",
-    operation_id="listImprovementJobs",
-    operation="schedule list",
+    spec=IMPROVEMENT_JOBS_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 IMPROVEMENT_JOB_PUT_ENDPOINT = ApiEndpoint(
-    method="PUT",
-    path_template="/api/ux/improvement-jobs/{repoId}/{kind}",
-    operation_id="putImprovementJob",
-    operation="schedule set",
+    spec=IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
-    request_body_ref="#/components/schemas/ImprovementJobUpdate",
 )
-
-
-def implemented_api_endpoints() -> list[ApiEndpointPayload]:
-    return [
-        endpoint.catalog_entry()
-        for endpoint in (
-            ACCESS_ENDPOINT,
-            REPORTS_LIST_ENDPOINT,
-            PROJECTS_ENDPOINT,
-            PROJECT_DETAIL_ENDPOINT,
-            FLEET_PROJECT_CREATE_ENDPOINT,
-            UX_PROJECT_CREATE_ENDPOINT,
-            PROJECT_RENAME_ENDPOINT,
-            UX_PROJECT_DELETE_ENDPOINT,
-            FLEET_PROJECT_DELETE_ENDPOINT,
-            REPO_TRANSFER_PREFLIGHT_ENDPOINT,
-            REPO_TRANSFER_ENDPOINT,
-            CATALOG_ENDPOINT,
-            RUNBOOK_ENDPOINT,
-            GITHUB_INSTALLATIONS_ENDPOINT,
-            GITHUB_INSTALLATION_REPOS_ENDPOINT,
-            PROJECT_REPOS_CONNECT_ENDPOINT,
-            PROJECT_REPO_CONNECTION_ENDPOINT,
-            PROJECT_ACTIVE_RUNS_ENDPOINT,
-            REPO_ACTIVE_RUNS_ENDPOINT,
-            REPO_AUDIT_RERUN_STATE_ENDPOINT,
-            REPO_TASK_LINKS_ENDPOINT,
-            REPO_AUDIT_HISTORY_ENDPOINT,
-            REPO_AUDIT_RUNS_ENDPOINT,
-            REPO_AUDIT_SUMMARY_ENDPOINT,
-            AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT,
-            AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT,
-            IMPROVEMENT_JOBS_ENDPOINT,
-            IMPROVEMENT_JOB_PUT_ENDPOINT,
-        )
-    ]
 
 
 def _render_api_path(path_template: str, path_params: ApiPathParams | None) -> str:
