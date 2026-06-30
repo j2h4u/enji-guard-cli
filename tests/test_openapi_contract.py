@@ -63,7 +63,7 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
             json_response({"project": {"id": "project_1", "name": "Friends"}}),
             empty_response(status_code=204),
             empty_response(status_code=204),
-            json_response({"ok": True}),
+            empty_response(status_code=204),
             json_response({"repo": {"id": "repo_1"}}),
             json_response({"curatedActions": []}),
             json_response({"id": "runbook_1", "suggested_flow": "single"}),

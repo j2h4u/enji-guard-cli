@@ -222,7 +222,7 @@ def test_project_admin_and_repo_transfer_operations_use_expected_requests(tmp_pa
             json_response({"project": {"id": "project_1", "name": "Friends"}}),
             empty_response(status_code=204),
             empty_response(status_code=204),
-            json_response({"ok": True, "scheduleReplacements": {}}),
+            empty_response(status_code=204),
             json_response({"repo": {"id": "repo_1", "projectId": "project_2"}}),
         ]
     )
@@ -235,7 +235,7 @@ def test_project_admin_and_repo_transfer_operations_use_expected_requests(tmp_pa
 
     assert created == {"project": {"id": "project_1", "name": "Pets"}}
     assert renamed == {"project": {"id": "project_1", "name": "Friends"}}
-    assert preflight == {"ok": True, "scheduleReplacements": {}}
+    assert preflight == {}
     assert moved == {"repo": {"id": "repo_1", "projectId": "project_2"}}
     assert [(request.method, request.url) for request in client.requests] == [
         ("POST", "https://fleet.enji.ai/api/v1/projects"),
