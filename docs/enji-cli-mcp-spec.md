@@ -49,6 +49,9 @@ MCP         curated read-mostly tool wrapper over core
 
 Правило: core operation должна быть пользовательским сценарием, а не копией
 frontend endpoint. CLI и MCP не содержат Enji/auth/business logic.
+Enji adapter owns typed endpoint specs for implemented lower-level API calls;
+tests bind those specs to the reconstructed OpenAPI operation IDs and request
+body references. OpenAPI must not generate CLI or MCP surfaces directly.
 
 ## Основные Нouns
 
