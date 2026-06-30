@@ -8,6 +8,7 @@ README.md carries the user-facing CLI model and workflows.
 - Use `uv` only. Keep `uv.lock` current; use hardlink mode outside Docker.
 - Keep CLI and MCP thin. Put Enji/auth behavior behind the shared core/API layer.
 - Treat import-linter as architecture policy, not style advice.
+- Keep mutating batch writes explicit; never infer all-project or all-repo scope.
 - Cookie auth is temporary. Keep bearer/API-token support first-class.
 - Never print secrets. Store credentials only in the configured auth file.
 
