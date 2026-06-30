@@ -72,10 +72,14 @@ enji-guard report read REPO [AUDIT...] [--all] [--json]
 enji-guard report show REPO AUDIT [--json]
 
 enji-guard schedule list [REPO]
-enji-guard schedule set [REPO] --enabled on|off|keep [--freq FREQ]
+enji-guard schedule set REPO --enabled on|off|keep [--freq FREQ]
+enji-guard --project PROJECT schedule set --all-repos --enabled on|off|keep [--freq FREQ]
+enji-guard schedule set --all-projects --enabled on|off|keep [--freq FREQ]
 
 enji-guard email list [REPO]
-enji-guard email set [REPO] [--manual on|off|keep] [--auto on|off|keep]
+enji-guard email set REPO [--manual on|off|keep] [--auto on|off|keep]
+enji-guard --project PROJECT email set --all-repos [--manual on|off|keep] [--auto on|off|keep]
+enji-guard email set --all-projects [--manual on|off|keep] [--auto on|off|keep]
 ```
 
 Project filtering is a global option:
@@ -83,7 +87,7 @@ Project filtering is a global option:
 ```text
 enji-guard --project NAME_OR_ID status
 enji-guard --project NAME_OR_ID audit start OWNER/NAME --all
-enji-guard --project NAME_OR_ID email set --auto off
+enji-guard --project NAME_OR_ID email set --all-repos --auto off
 ```
 
 CLI output is human-readable by default. Use `--json` only when automation needs
@@ -101,11 +105,10 @@ the raw machine contract.
 - Write commands may omit `--project` only when the target repo is unambiguous.
 - `repo move` uses global `--project` as source project or selector
   disambiguation when needed. `--to-project` selects the destination project.
-- `schedule set` without `REPO` is an explicit batch write over every repo in
-  the current project filter. It requires `--project`; use a `REPO` argument for
-  a single repository.
-- `email set` without `REPO` is an explicit batch write over every repo in the
-  current project filter; without `--project`, it spans all projects.
+- Mutating batch commands require explicit scope. Use `REPO` for one repo,
+  `--all-repos` with `--project` for every repo in one project, or
+  `--all-projects` for every repo in every project.
+- `schedule set` and `email set` follow the same write-scope rules.
 - Ambiguous targets fail with `BAD_SELECTOR` and include candidates.
 - There is no default project.
 - No fuzzy matching in write commands.
@@ -138,5 +141,5 @@ separate score flag.
 `schedule` is the public noun for automatic report audit runs. It exposes
 domain settings (`enabled`, `frequency`, days, time) and hides Enji's
 `improvement-jobs` payload shape. `schedule set` applies to all report audits in
-the selected repo/project scope; per-audit schedule controls are intentionally
+the selected explicit write scope; per-audit schedule controls are intentionally
 not part of the default workflow.

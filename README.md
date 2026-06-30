@@ -13,6 +13,10 @@ the GitHub `owner/name` repository selector; add `--project NAME_OR_ID` only
 when the account has ambiguous repositories or when a batch operation must be
 scoped to one project.
 
+Mutating batch commands require explicit scope. Use a `REPO` argument for one
+repository, `--all-repos` with `--project NAME_OR_ID` for every repository in
+one project, or `--all-projects` for every repository in every project.
+
 Project admin commands are direct domain actions: create, rename, delete, and
 move repositories between projects. `project delete` is destructive and
 requires `--yes`.
@@ -120,8 +124,8 @@ docker exec -i enji-guard-cli enji-guard audit start j2h4u/enji-guard-cli --all
 docker exec -i enji-guard-cli enji-guard wait j2h4u/enji-guard-cli security
 docker exec -i enji-guard-cli enji-guard report read j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard --project Pets schedule list
-docker exec -i enji-guard-cli enji-guard --project Pets schedule set --enabled off
-docker exec -i enji-guard-cli enji-guard --project Pets email set --auto off
+docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos --enabled off
+docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --auto off
 docker exec -i enji-guard-cli enji-guard auth refresh
 ```
 
@@ -134,8 +138,8 @@ disambiguation when needed. `--to-project` selects the destination project.
 
 `schedule` controls automatic report-audit runs. It shows one row per
 repo/report audit and can batch update all report audits for one repo or one
-project. Account-wide schedule writes are intentionally rejected; pass `REPO` or
-`--project`.
+explicit batch scope. Use `REPO`, `--project NAME_OR_ID --all-repos`, or
+`--all-projects`.
 
 ## MCP
 
