@@ -23,6 +23,8 @@ README.md carries the user-facing CLI model and workflows.
 
 - Docker is the runtime. Verify the running container, not just source.
 - Recreate the service after runtime, env, image, or auth-mount changes.
+- Application logs live in `~/.config/enji-guard/logs/enji-guard.jsonl`;
+  stdout/stderr belong to CLI results, progress, and CLI errors.
 - The container runs `enji-guard run`: supervisor owns background cookie
   refresh and MCP as sibling tasks. MCP must not own refresh.
 - The host auth file must stay writable because Enji rotates refresh cookies.

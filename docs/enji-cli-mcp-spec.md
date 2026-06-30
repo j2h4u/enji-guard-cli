@@ -29,6 +29,9 @@ administration, repository moves, schedule changes, email preferences, auth
 bootstrap, and operational commands. CLI should stay task-oriented, but it is
 allowed to be broad.
 
+CLI stdout/stderr are command I/O. Application telemetry belongs in the
+configured persistent log file, not interleaved with command output.
+
 MCP is the curated read-mostly agent surface. It is for a tech-lead or project
 manager agent that needs the Enji picture: project/repo overview, scores,
 freshness, active work, report inventory, and report content. MCP should not

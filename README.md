@@ -39,6 +39,15 @@ container instead of installing or running this Python package on the host:
 docker exec -i enji-guard-cli enji-guard --help
 ```
 
+Application logs are persisted outside the container at:
+
+```text
+~/.config/enji-guard/logs/enji-guard.jsonl
+```
+
+CLI stdout/stderr are reserved for command results, progress, and CLI errors.
+Use the log file for HTTP/auth/runtime telemetry.
+
 When working on another repository, pass the repository as `OWNER/NAME`. If an
 agent is already in a GitHub checkout and wants to derive it from `origin`, it
 can do that in the host shell and still pass an explicit selector to the

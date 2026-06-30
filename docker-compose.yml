@@ -15,6 +15,7 @@ services:
       ENJI_GUARD_AUTO_REFRESH_LEAD_SECONDS: "300"
       ENJI_GUARD_AUTO_REFRESH_RETRY_SECONDS: "60"
       ENJI_GUARD_AUTH_FILE: /home/app/.config/enji-guard/auth.json
+      ENJI_GUARD_LOG_FILE: /home/app/.config/enji-guard/logs/enji-guard.jsonl
       ENJI_GUARD_LOG_FORMAT: json
       ENJI_GUARD_LOG_LEVEL: INFO
       PYTHONUNBUFFERED: "1"
