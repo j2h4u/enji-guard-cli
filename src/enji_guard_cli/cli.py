@@ -44,6 +44,7 @@ from enji_guard_cli.core import (
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.mcp_server import create_mcp_server, run_mcp_server
 from enji_guard_cli.runtime import run_service
+from enji_guard_cli.settings import DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT, DEFAULT_MCP_TRANSPORT
 from enji_guard_cli.telemetry import configure_logging
 
 MAIN_HELP = """Agent-oriented CLI for Enji Guard repository audits.
@@ -544,18 +545,10 @@ def main(
         typer.Option("--project", help="Global exact Enji project id or name filter."),
     ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-    log_level: Annotated[
-        str | None,
-        typer.Option("--log-level", help="Project log level. Defaults to ENJI_GUARD_LOG_LEVEL or WARNING."),
-    ] = None,
-    log_format: Annotated[
-        Literal["text", "json"] | None,
-        typer.Option("--log-format", help="Project log format. Defaults to ENJI_GUARD_LOG_FORMAT or text."),
-    ] = None,
 ) -> None:
     _cli_state["project"] = project
     _cli_state["json"] = json_output
-    configure_logging(log_level, log_format)
+    configure_logging()
     if version:
         typer.echo(package_version())
         raise typer.Exit
@@ -578,9 +571,9 @@ def run(
     transport: Annotated[
         Literal["stdio", "sse", "streamable-http"],
         typer.Option(help="FastMCP transport to run."),
-    ] = "stdio",
-    host: Annotated[str, typer.Option(help="Host for HTTP MCP transports.")] = "127.0.0.1",
-    port: Annotated[int, typer.Option(min=1, max=65535, help="Port for HTTP MCP transports.")] = 8000,
+    ] = DEFAULT_MCP_TRANSPORT,
+    host: Annotated[str, typer.Option(help="Host for HTTP MCP transports.")] = DEFAULT_HTTP_HOST,
+    port: Annotated[int, typer.Option(min=1, max=65535, help="Port for HTTP MCP transports.")] = DEFAULT_HTTP_PORT,
     mount_path: Annotated[
         str | None,
         typer.Option(help="Optional mount path for SSE transport."),
@@ -594,9 +587,9 @@ def serve(
     transport: Annotated[
         Literal["stdio", "sse", "streamable-http"],
         typer.Option(help="FastMCP transport to run."),
-    ] = "stdio",
-    host: Annotated[str, typer.Option(help="Host for HTTP MCP transports.")] = "127.0.0.1",
-    port: Annotated[int, typer.Option(min=1, max=65535, help="Port for HTTP MCP transports.")] = 8000,
+    ] = DEFAULT_MCP_TRANSPORT,
+    host: Annotated[str, typer.Option(help="Host for HTTP MCP transports.")] = DEFAULT_HTTP_HOST,
+    port: Annotated[int, typer.Option(min=1, max=65535, help="Port for HTTP MCP transports.")] = DEFAULT_HTTP_PORT,
     mount_path: Annotated[
         str | None,
         typer.Option(help="Optional mount path for SSE transport."),
@@ -960,7 +953,7 @@ def auth_import_cookie(
     stdin: Annotated[bool, typer.Option("--stdin", help="Read a raw Cookie header from stdin.")] = False,
     auth_file: Annotated[
         Path | None,
-        typer.Option("--auth-file", help="Auth file path. Defaults to ENJI_GUARD_AUTH_FILE or XDG config."),
+        typer.Option("--auth-file", help="Auth file path. Defaults to ~/.config/enji-guard/auth.json."),
     ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
@@ -988,7 +981,7 @@ def auth_import_token(
     stdin: Annotated[bool, typer.Option("--stdin", help="Read a bearer token from stdin.")] = False,
     auth_file: Annotated[
         Path | None,
-        typer.Option("--auth-file", help="Auth file path. Defaults to ENJI_GUARD_AUTH_FILE or XDG config."),
+        typer.Option("--auth-file", help="Auth file path. Defaults to ~/.config/enji-guard/auth.json."),
     ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
@@ -1015,7 +1008,7 @@ def auth_import_token(
 def auth_status_command(
     auth_file: Annotated[
         Path | None,
-        typer.Option("--auth-file", help="Auth file path. Defaults to ENJI_GUARD_AUTH_FILE or XDG config."),
+        typer.Option("--auth-file", help="Auth file path. Defaults to ~/.config/enji-guard/auth.json."),
     ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
@@ -1032,7 +1025,7 @@ def auth_status_command(
 def auth_refresh_command(
     auth_file: Annotated[
         Path | None,
-        typer.Option("--auth-file", help="Auth file path. Defaults to ENJI_GUARD_AUTH_FILE or XDG config."),
+        typer.Option("--auth-file", help="Auth file path. Defaults to ~/.config/enji-guard/auth.json."),
     ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:

@@ -12,6 +12,8 @@ from enji_guard_cli.audits import AuditAlias
 from enji_guard_cli.cli import app
 from enji_guard_cli.core import EmailPreferenceUpdate, ReportWaitOptions, ScheduleSettingsUpdate
 from enji_guard_cli.enji_api import EnjiApiError
+from enji_guard_cli.settings import TelemetrySettings
+from enji_guard_cli.telemetry import configure_logging as configure_test_logging
 from enji_guard_cli.telemetry import log_event
 
 
@@ -79,20 +81,14 @@ def test_serve_runs_mcp_server_with_stdio_defaults(monkeypatch: MonkeyPatch) -> 
     assert captured["mount_path"] is None
 
 
-def test_serve_does_not_override_log_format_environment(monkeypatch: MonkeyPatch) -> None:
-    captured: dict[str, str | None] = {}
+def test_serve_uses_project_logging_settings(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, bool] = {}
 
     class FakeServer:
         pass
 
-    def fake_configure_logging(
-        log_level: str | None = None,
-        log_format: str | None = None,
-        log_file: str | None = None,
-    ) -> None:
-        captured["log_level"] = log_level
-        captured["log_format"] = log_format
-        captured["log_file"] = log_file
+    def fake_configure_logging() -> None:
+        captured["called"] = True
 
     monkeypatch.setattr(cli, "configure_logging", fake_configure_logging)
     monkeypatch.setattr(cli, "create_mcp_server", lambda host="127.0.0.1", port=8000: FakeServer())
@@ -101,7 +97,7 @@ def test_serve_does_not_override_log_format_environment(monkeypatch: MonkeyPatch
     result = CliRunner().invoke(app, ["serve"])
 
     assert result.exit_code == 0
-    assert captured == {"log_level": None, "log_format": None, "log_file": None}
+    assert captured == {"called": True}
 
 
 def test_serve_passes_transport_options_to_mcp_server(monkeypatch: MonkeyPatch) -> None:
@@ -745,15 +741,23 @@ def test_wait_routes_transport_info_logs_to_file_not_operator_stderr(
 
     monkeypatch.setattr(cli, "wait_for_reports", fake_wait)
     log_file = tmp_path / "logs" / "enji-guard.jsonl"
-    monkeypatch.setenv("ENJI_GUARD_LOG_FILE", str(log_file))
+
+    def configure_logging_to_file() -> None:
+        configure_test_logging(
+            TelemetrySettings(
+                level_name="INFO",
+                log_format="json",
+                log_file=log_file,
+                max_bytes=10_000,
+                backup_count=1,
+            )
+        )
+
+    monkeypatch.setattr(cli, "configure_logging", configure_logging_to_file)
 
     result = CliRunner().invoke(
         app,
         [
-            "--log-level",
-            "INFO",
-            "--log-format",
-            "json",
             "wait",
             "repo_1",
             "--timeout-seconds",

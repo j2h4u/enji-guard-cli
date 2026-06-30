@@ -8,16 +8,13 @@ services:
     restart: unless-stopped
     init: true
     ports:
-      - "127.0.0.1:${ENJI_GUARD_HOST_PORT:-8001}:8000"
-    environment:
-      ENJI_GUARD_AUTO_REFRESH_ENABLED: "1"
-      ENJI_GUARD_AUTO_REFRESH_FALLBACK_SECONDS: "900"
-      ENJI_GUARD_AUTO_REFRESH_LEAD_SECONDS: "300"
-      ENJI_GUARD_AUTO_REFRESH_RETRY_SECONDS: "60"
-      ENJI_GUARD_AUTH_FILE: /home/app/.config/enji-guard/auth.json
-      ENJI_GUARD_LOG_FILE: /home/app/.config/enji-guard/logs/enji-guard.jsonl
-      ENJI_GUARD_LOG_FORMAT: json
-      ENJI_GUARD_LOG_LEVEL: INFO
-      PYTHONUNBUFFERED: "1"
+      - "127.0.0.1:8001:8000"
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "enji-guard", "health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     volumes:
       - ${HOME}/.config/enji-guard:/home/app/.config/enji-guard
