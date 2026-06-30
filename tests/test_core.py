@@ -1193,7 +1193,7 @@ def test_set_email_preferences_fans_out_over_project_repos_and_report_audits(mon
 
     monkeypatch.setattr(core, "run_put_audit_email_preferences", fake_put)
 
-    payload = core.set_email_preferences(None, "Pets", EmailPreferenceUpdate(None, False))
+    payload = core.set_email_preferences(None, "Pets", EmailPreferenceUpdate(None, False), all_repos=True)
 
     preferences = payload["preferences"]
     assert isinstance(preferences, list)
@@ -1327,6 +1327,7 @@ def test_set_schedule_settings_updates_project_repos_and_report_audits(monkeypat
             schedule_time="09:30",
             timezone="Asia/Almaty",
         ),
+        all_repos=True,
     )
 
     assert payload["summary"] == {
@@ -1422,8 +1423,8 @@ def test_set_schedule_settings_skips_unchanged_existing_jobs(monkeypatch: Monkey
     assert schedules[0]["status"] == "unchanged"
 
 
-def test_set_schedule_settings_requires_project_for_repo_omitted_write() -> None:
-    with pytest.raises(ValueError, match="schedule set without REPO requires --project"):
+def test_set_schedule_settings_requires_explicit_write_scope() -> None:
+    with pytest.raises(ValueError, match="schedule set: pass REPO, --all-repos with --project, or --all-projects"):
         core.set_schedule_settings(
             None,
             None,
@@ -1434,6 +1435,27 @@ def test_set_schedule_settings_requires_project_for_repo_omitted_write() -> None
                 schedule_time=None,
                 timezone=None,
             ),
+        )
+
+
+def test_set_email_preferences_requires_explicit_write_scope() -> None:
+    with pytest.raises(ValueError, match="email set: pass REPO, --all-repos with --project, or --all-projects"):
+        core.set_email_preferences(None, "Pets", EmailPreferenceUpdate(None, False))
+
+
+def test_set_schedule_settings_requires_project_for_all_repos() -> None:
+    with pytest.raises(ValueError, match="schedule set: --all-repos requires --project"):
+        core.set_schedule_settings(
+            None,
+            None,
+            ScheduleSettingsUpdate(
+                enabled=False,
+                frequency=None,
+                days_of_week=None,
+                schedule_time=None,
+                timezone=None,
+            ),
+            all_repos=True,
         )
 
 

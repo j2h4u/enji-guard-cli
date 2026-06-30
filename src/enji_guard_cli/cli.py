@@ -790,7 +790,14 @@ def schedule_list(
 def schedule_set(
     repo: Annotated[
         str | None,
-        typer.Argument(help="Optional repo id or owner/name. Without REPO, pass --project to batch one project."),
+        typer.Argument(help="Optional repo id or owner/name for a single-repo update."),
+    ] = None,
+    batch_scope: Annotated[
+        bool | None,
+        typer.Option(
+            "--all-projects/--all-repos",
+            help="Batch every repo in every project, or every repo in the selected --project.",
+        ),
     ] = None,
     enabled: Annotated[
         Literal["on", "off", "keep"],
@@ -802,6 +809,7 @@ def schedule_set(
     ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
+    all_repos, all_projects = _batch_scope_flags(batch_scope)
     _run_human_or_json_command(
         lambda: set_schedule_settings(
             repo,
@@ -813,6 +821,8 @@ def schedule_set(
                 schedule_time=None,
                 timezone=None,
             ),
+            all_repos=all_repos,
+            all_projects=all_projects,
         ),
         _json_output(json_output),
         _echo_schedule_settings_table,
@@ -838,7 +848,14 @@ def email_list(
 def email_set(
     repo: Annotated[
         str | None,
-        typer.Argument(help="Optional repo id or owner/name. Defaults to every repo in scope."),
+        typer.Argument(help="Optional repo id or owner/name for a single-repo update."),
+    ] = None,
+    batch_scope: Annotated[
+        bool | None,
+        typer.Option(
+            "--all-projects/--all-repos",
+            help="Batch every repo in every project, or every repo in the selected --project.",
+        ),
     ] = None,
     manual: Annotated[
         Literal["on", "off", "keep"],
@@ -850,6 +867,7 @@ def email_set(
     ] = "keep",
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
+    all_repos, all_projects = _batch_scope_flags(batch_scope)
     _run_human_or_json_command(
         lambda: set_email_preferences(
             repo,
@@ -858,6 +876,8 @@ def email_set(
                 manual_run_completion=_preference_switch(manual),
                 scheduled_run_completion=_preference_switch(auto),
             ),
+            all_repos=all_repos,
+            all_projects=all_projects,
         ),
         _json_output(json_output),
         _echo_email_preferences_table,
@@ -1049,6 +1069,10 @@ def _selected_project() -> str | None:
 
 def _json_output(local_json_output: bool = False) -> bool:
     return local_json_output or _cli_state["json"] is True
+
+
+def _batch_scope_flags(batch_scope: bool | None) -> tuple[bool, bool]:
+    return batch_scope is False, batch_scope is True
 
 
 def _report_audit(audit: ReportAuditAlias) -> AuditAlias:

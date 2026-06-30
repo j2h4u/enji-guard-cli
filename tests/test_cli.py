@@ -811,11 +811,20 @@ def test_schedule_list_can_emit_json(monkeypatch: MonkeyPatch) -> None:
 def test_schedule_set_routes_batch_update(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_set(repo: str | None, project: str | None, update: ScheduleSettingsUpdate) -> dict[str, object]:
+    def fake_set(
+        repo: str | None,
+        project: str | None,
+        update: ScheduleSettingsUpdate,
+        *,
+        all_repos: bool = False,
+        all_projects: bool = False,
+    ) -> dict[str, object]:
         captured["repo"] = repo
         captured["project"] = project
         captured["enabled"] = update.enabled
         captured["frequency"] = update.frequency
+        captured["all_repos"] = all_repos
+        captured["all_projects"] = all_projects
         return {
             "schedules": [
                 {
@@ -859,28 +868,45 @@ def test_schedule_set_routes_batch_update(monkeypatch: MonkeyPatch) -> None:
         "project": "Pets",
         "enabled": True,
         "frequency": "weekly-2x",
+        "all_repos": False,
+        "all_projects": False,
     }
 
 
 def test_schedule_set_can_emit_json(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_set(repo: str | None, project: str | None, update: ScheduleSettingsUpdate) -> dict[str, object]:
+    def fake_set(
+        repo: str | None,
+        project: str | None,
+        update: ScheduleSettingsUpdate,
+        *,
+        all_repos: bool = False,
+        all_projects: bool = False,
+    ) -> dict[str, object]:
         captured["repo"] = repo
         captured["project"] = project
         captured["enabled"] = update.enabled
+        captured["all_repos"] = all_repos
+        captured["all_projects"] = all_projects
         return {"schedules": [], "summary": {"repo_count": 1, "audit_count": 7}}
 
     monkeypatch.setattr(cli, "set_schedule_settings", fake_set)
 
     result = CliRunner().invoke(
         app,
-        ["--project", "Pets", "schedule", "set", "--enabled", "off", "--json"],
+        ["--project", "Pets", "schedule", "set", "--all-repos", "--enabled", "off", "--json"],
     )
 
     assert result.exit_code == 0
     assert json.loads(result.output) == {"schedules": [], "summary": {"repo_count": 1, "audit_count": 7}}
-    assert captured == {"repo": None, "project": "Pets", "enabled": False}
+    assert captured == {
+        "repo": None,
+        "project": "Pets",
+        "enabled": False,
+        "all_repos": True,
+        "all_projects": False,
+    }
 
 
 def test_email_list_defaults_to_text_table(monkeypatch: MonkeyPatch) -> None:
@@ -914,11 +940,20 @@ def test_email_list_defaults_to_text_table(monkeypatch: MonkeyPatch) -> None:
 def test_email_set_routes_batch_update(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_set(repo: str | None, project: str | None, update: EmailPreferenceUpdate) -> dict[str, object]:
+    def fake_set(
+        repo: str | None,
+        project: str | None,
+        update: EmailPreferenceUpdate,
+        *,
+        all_repos: bool = False,
+        all_projects: bool = False,
+    ) -> dict[str, object]:
         captured["repo"] = repo
         captured["project"] = project
         captured["manual"] = update.manual_run_completion
         captured["auto"] = update.scheduled_run_completion
+        captured["all_repos"] = all_repos
+        captured["all_projects"] = all_projects
         return {
             "preferences": [
                 {
@@ -934,11 +969,18 @@ def test_email_set_routes_batch_update(monkeypatch: MonkeyPatch) -> None:
 
     monkeypatch.setattr(cli, "set_email_preferences", fake_set)
 
-    result = CliRunner().invoke(app, ["--project", "Pets", "email", "set", "--auto", "off", "--json"])
+    result = CliRunner().invoke(app, ["--project", "Pets", "email", "set", "--all-repos", "--auto", "off", "--json"])
 
     assert result.exit_code == 0
     assert json.loads(result.output)["summary"] == {"repo_count": 1, "audit_count": 1}
-    assert captured == {"repo": None, "project": "Pets", "manual": None, "auto": False}
+    assert captured == {
+        "repo": None,
+        "project": "Pets",
+        "manual": None,
+        "auto": False,
+        "all_repos": True,
+        "all_projects": False,
+    }
 
 
 def test_auth_status_reports_text_and_zero_exit_code(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:

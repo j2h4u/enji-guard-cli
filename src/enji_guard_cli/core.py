@@ -713,6 +713,9 @@ def set_email_preferences(
     repo: str | None,
     project: str | None,
     update: EmailPreferenceUpdate,
+    *,
+    all_repos: bool = False,
+    all_projects: bool = False,
 ) -> JsonObjectPayload:
     patch = _email_preferences_patch(update)
     return _email_preferences_payload(
@@ -722,7 +725,13 @@ def set_email_preferences(
                 audit,
                 run_put_audit_email_preferences(target["repo_id"], audit.action_key, patch),
             )
-            for target in _selected_repo_targets(repo, project)
+            for target in _selected_write_repo_targets(
+                repo,
+                project,
+                all_repos=all_repos,
+                all_projects=all_projects,
+                operation="email set",
+            )
             for audit in REPORT_AUDITS
         ]
     )
@@ -758,11 +767,20 @@ def set_schedule_settings(
     repo: str | None,
     project: str | None,
     update: ScheduleSettingsUpdate,
+    *,
+    all_repos: bool = False,
+    all_projects: bool = False,
 ) -> JsonObjectPayload:
-    _validate_schedule_settings_update(repo, project, update)
+    _validate_schedule_settings_update(update)
     rows = [
         _set_schedule_setting(target, audit, jobs, update)
-        for target in _selected_repo_targets(repo, project)
+        for target in _selected_write_repo_targets(
+            repo,
+            project,
+            all_repos=all_repos,
+            all_projects=all_projects,
+            operation="schedule set",
+        )
         for jobs in (list_schedules(target["repo_id"]),)
         for audit in REPORT_AUDITS
     ]
@@ -1240,6 +1258,50 @@ def _selected_repo_targets(repo: str | None, project: str | None) -> list[RepoTa
     return [target for project_id in _selected_project_ids(project) for target in _project_repo_targets(project_id)]
 
 
+def _selected_write_repo_targets(
+    repo: str | None,
+    project: str | None,
+    *,
+    all_repos: bool,
+    all_projects: bool,
+    operation: str,
+) -> list[RepoTargetPayload]:
+    _validate_write_scope(repo, project, all_repos=all_repos, all_projects=all_projects, operation=operation)
+    if all_projects:
+        return _selected_repo_targets(None, None)
+    if all_repos:
+        return _selected_repo_targets(None, project)
+    if repo is None:
+        raise AssertionError("write scope validation should require repo when no batch flag is set")
+    return _selected_repo_targets(repo, project)
+
+
+def _validate_write_scope(
+    repo: str | None,
+    project: str | None,
+    *,
+    all_repos: bool,
+    all_projects: bool,
+    operation: str,
+) -> None:
+    if all_repos and all_projects:
+        raise ValueError(f"{operation}: pass --all-repos or --all-projects, not both")
+    if all_projects:
+        if repo is not None:
+            raise ValueError(f"{operation}: REPO cannot be combined with --all-projects")
+        if project is not None:
+            raise ValueError(f"{operation}: --project cannot be combined with --all-projects")
+        return
+    if all_repos:
+        if repo is not None:
+            raise ValueError(f"{operation}: REPO cannot be combined with --all-repos")
+        if project is None:
+            raise ValueError(f"{operation}: --all-repos requires --project")
+        return
+    if repo is None:
+        raise ValueError(f"{operation}: pass REPO, --all-repos with --project, or --all-projects")
+
+
 def _project_repo_targets(project_id: str) -> list[RepoTargetPayload]:
     project = run_project_detail(project_id)
     project_payload = _json_dict(project.get("project"))
@@ -1576,13 +1638,7 @@ def _email_preference_repo_count(rows: list[dict[str, JsonValue]]) -> int:
     return len({repo_id for row in rows if isinstance(repo_id := row.get("repo_id"), str)})
 
 
-def _validate_schedule_settings_update(
-    repo: str | None,
-    project: str | None,
-    update: ScheduleSettingsUpdate,
-) -> None:
-    if repo is None and project is None:
-        raise ValueError("schedule set without REPO requires --project")
+def _validate_schedule_settings_update(update: ScheduleSettingsUpdate) -> None:
     if (
         update.enabled is None
         and update.frequency is None
