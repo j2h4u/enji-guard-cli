@@ -1,5 +1,6 @@
 import json
 import logging
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -33,6 +34,30 @@ def test_json_logging_keeps_structured_safe_fields_and_drops_objects(capsys: pyt
         "logger": "enji_guard_cli.test",
         "message": "event_name",
         "operation": "access",
+    }
+
+
+def test_configure_logging_can_write_json_lines_to_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    log_file = tmp_path / "logs" / "enji-guard.jsonl"
+    configure_logging("INFO", "json", str(log_file))
+    logger = logging.getLogger("enji_guard_cli.test")
+
+    log_event(logger, logging.INFO, "event_name", {"operation": "wait", "elapsed_ms": 12})
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    payload = cast(object, json.loads(log_file.read_text(encoding="utf-8")))
+    assert isinstance(payload, dict)
+    assert payload == {
+        "elapsed_ms": 12,
+        "level": "info",
+        "logger": "enji_guard_cli.test",
+        "message": "event_name",
+        "operation": "wait",
     }
 
 

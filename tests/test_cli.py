@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypedDict, cast
@@ -11,6 +12,7 @@ from enji_guard_cli.audits import AuditAlias
 from enji_guard_cli.cli import app
 from enji_guard_cli.core import EmailPreferenceUpdate, ReportWaitOptions, ScheduleSettingsUpdate
 from enji_guard_cli.enji_api import EnjiApiError
+from enji_guard_cli.telemetry import log_event
 
 
 class AuditPayload(TypedDict):
@@ -83,9 +85,14 @@ def test_serve_does_not_override_log_format_environment(monkeypatch: MonkeyPatch
     class FakeServer:
         pass
 
-    def fake_configure_logging(log_level: str | None = None, log_format: str | None = None) -> None:
+    def fake_configure_logging(
+        log_level: str | None = None,
+        log_format: str | None = None,
+        log_file: str | None = None,
+    ) -> None:
         captured["log_level"] = log_level
         captured["log_format"] = log_format
+        captured["log_file"] = log_file
 
     monkeypatch.setattr(cli, "configure_logging", fake_configure_logging)
     monkeypatch.setattr(cli, "create_mcp_server", lambda host="127.0.0.1", port=8000: FakeServer())
@@ -94,7 +101,7 @@ def test_serve_does_not_override_log_format_environment(monkeypatch: MonkeyPatch
     result = CliRunner().invoke(app, ["serve"])
 
     assert result.exit_code == 0
-    assert captured == {"log_level": None, "log_format": None}
+    assert captured == {"log_level": None, "log_format": None, "log_file": None}
 
 
 def test_serve_passes_transport_options_to_mcp_server(monkeypatch: MonkeyPatch) -> None:
@@ -709,6 +716,58 @@ def test_wait_heartbeat_writes_stderr_without_polluting_json_stdout(monkeypatch:
         "wait heartbeat: elapsed_seconds=120 ready=6 running=1 missing=0 stale=3 current_head_sha=abc123\n"
     )
     assert json.loads(result.stdout)["complete"] is True
+
+
+def test_wait_routes_transport_info_logs_to_file_not_operator_stderr(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_wait(
+        _repo: str,
+        _project: str | None,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        heartbeat = cast(Callable[[dict[str, object]], None], kwargs["heartbeat"])
+        log_event(
+            logging.getLogger("enji_guard_cli.transport"),
+            logging.INFO,
+            "enji_http_response",
+            {"operation": "report status"},
+        )
+        heartbeat(
+            {
+                "elapsed_seconds": 120,
+                "current_head_sha": "abc123",
+                "counts": {"ready": 6, "running": 1, "missing": 0, "stale": 3},
+            }
+        )
+        return {"complete": True, "reason": "complete", "counts": {"ready": 7, "running": 0, "missing": 0, "stale": 0}}
+
+    monkeypatch.setattr(cli, "wait_for_reports", fake_wait)
+    log_file = tmp_path / "logs" / "enji-guard.jsonl"
+    monkeypatch.setenv("ENJI_GUARD_LOG_FILE", str(log_file))
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "--log-level",
+            "INFO",
+            "--log-format",
+            "json",
+            "wait",
+            "repo_1",
+            "--timeout-seconds",
+            "30",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == (
+        "wait heartbeat: elapsed_seconds=120 ready=6 running=1 missing=0 stale=3 current_head_sha=abc123\n"
+    )
+    assert "enji_http_response" not in result.stderr
+    assert json.loads(log_file.read_text(encoding="utf-8"))["message"] == "enji_http_response"
 
 
 def test_report_show_resolves_repo_selector_and_can_emit_markdown(monkeypatch: MonkeyPatch) -> None:
