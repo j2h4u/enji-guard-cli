@@ -168,6 +168,42 @@ def test_run_passes_transport_options_to_supervised_runtime(monkeypatch: MonkeyP
     }
 
 
+def test_health_ready_checks_local_mcp_listener(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeSocket:
+        def __enter__(self) -> None:
+            return None
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def fake_create_connection(address: tuple[str, int], *, timeout: float) -> FakeSocket:
+        captured["address"] = address
+        captured["timeout"] = timeout
+        return FakeSocket()
+
+    monkeypatch.setattr(cli.socket, "create_connection", fake_create_connection)
+
+    result = CliRunner().invoke(app, ["health", "--ready"])
+
+    assert result.exit_code == 0
+    assert result.output == "ready\n"
+    assert captured == {"address": ("127.0.0.1", 8000), "timeout": 2.0}
+
+
+def test_health_ready_fails_when_local_mcp_listener_is_down(monkeypatch: MonkeyPatch) -> None:
+    def fake_create_connection(_address: tuple[str, int], *, timeout: float) -> object:
+        raise ConnectionRefusedError("connection refused")
+
+    monkeypatch.setattr(cli.socket, "create_connection", fake_create_connection)
+
+    result = CliRunner().invoke(app, ["health", "--ready"])
+
+    assert result.exit_code == 1
+    assert result.stderr == "UNREADY: MCP listener is not ready at 127.0.0.1:8000: connection refused\n"
+
+
 def test_version_flag_reports_package_version() -> None:
     result = CliRunner().invoke(app, ["--version"])
 
@@ -709,7 +745,8 @@ def test_wait_heartbeat_writes_stderr_without_polluting_json_stdout(monkeypatch:
 
     assert result.exit_code == 0
     assert result.stderr == (
-        "wait heartbeat: elapsed_seconds=120 ready=6 running=1 missing=0 stale=3 current_head_sha=abc123\n"
+        'wait heartbeat: elapsed_seconds=120 elapsed_human="2m" ready=6 running=1 missing=0 stale=3 '
+        "current_head_sha=abc123\n"
     )
     assert json.loads(result.stdout)["complete"] is True
 
@@ -768,10 +805,21 @@ def test_wait_routes_transport_info_logs_to_file_not_operator_stderr(
 
     assert result.exit_code == 0
     assert result.stderr == (
-        "wait heartbeat: elapsed_seconds=120 ready=6 running=1 missing=0 stale=3 current_head_sha=abc123\n"
+        'wait heartbeat: elapsed_seconds=120 elapsed_human="2m" ready=6 running=1 missing=0 stale=3 '
+        "current_head_sha=abc123\n"
     )
     assert "enji_http_response" not in result.stderr
     assert json.loads(log_file.read_text(encoding="utf-8"))["message"] == "enji_http_response"
+
+
+def test_duration_formatting_uses_readable_largest_units() -> None:
+    assert cli._format_duration_seconds(-1) == "0s"
+    assert cli._format_duration_seconds(11) == "11s"
+    assert cli._format_duration_seconds(131) == "2m 11s"
+    assert cli._format_duration_seconds(300) == "5m"
+    assert cli._format_duration_seconds(301) == "5m"
+    assert cli._format_duration_seconds(3661) == "1h 1m"
+    assert cli._format_duration_seconds(183_845) == "2d 3h"
 
 
 def test_report_show_resolves_repo_selector_and_can_emit_markdown(monkeypatch: MonkeyPatch) -> None:

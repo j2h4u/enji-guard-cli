@@ -97,6 +97,10 @@ it is not part of the workflow.
 ## Runtime
 
 ```bash
+mkdir -p ~/.config/enji-guard/logs
+chown -R 1000:1000 ~/.config/enji-guard
+chmod 700 ~/.config/enji-guard
+
 docker compose up -d --force-recreate --remove-orphans --wait
 docker exec -i enji-guard-cli enji-guard --help
 ```
@@ -170,13 +174,7 @@ http://127.0.0.1:8001/mcp
 ```
 
 The Docker service starts a background cookie refresh loop. Keep
-`~/.config/enji-guard` writable by the container user:
-
-```bash
-mkdir -p ~/.config/enji-guard
-chown -R 1000:1000 ~/.config/enji-guard
-chmod 700 ~/.config/enji-guard
-```
+`~/.config/enji-guard` writable by the container user.
 
 ## Development
 
