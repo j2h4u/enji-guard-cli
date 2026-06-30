@@ -16,6 +16,7 @@ from enji_guard_cli.core import (
     resolve_operation_result,
     resolve_operation_spec,
 )
+from enji_guard_cli.settings import DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT
 
 type JsonCommandResult = OperationResult
 type McpTransport = Literal["stdio", "sse", "streamable-http"]
@@ -72,7 +73,7 @@ def run_mcp_server(
     asyncio.run(run_mcp_server_async(server, transport=transport, mount_path=mount_path))
 
 
-def create_mcp_server(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
+def create_mcp_server(host: str = DEFAULT_HTTP_HOST, port: int = DEFAULT_HTTP_PORT) -> FastMCP:
     server = FastMCP(
         name="enji-guard-cli",
         instructions=(

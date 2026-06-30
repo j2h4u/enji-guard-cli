@@ -101,6 +101,9 @@ docker compose up -d --force-recreate --remove-orphans --wait
 docker exec -i enji-guard-cli enji-guard --help
 ```
 
+Compose binds MCP to loopback, defines the service healthcheck, and limits the
+container to 512 MiB memory.
+
 ## Authentication
 
 Preferred future path is an Enji API token:

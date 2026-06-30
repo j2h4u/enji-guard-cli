@@ -5,7 +5,6 @@ import contextlib
 import fcntl
 import json
 import logging
-import os
 import tempfile
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
@@ -13,9 +12,12 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from enum import StrEnum
 from http.cookies import Morsel, SimpleCookie
+from os import O_RDONLY, close, fsync
+from os import open as os_open
 from pathlib import Path
 from typing import Literal, NotRequired, TypedDict, cast
 
+from enji_guard_cli.settings import DEFAULT_BASE_URL, AutoRefreshSettings, default_settings
 from enji_guard_cli.telemetry import log_event
 from enji_guard_cli.transport import (
     EnjiHttpClient,
@@ -26,8 +28,6 @@ from enji_guard_cli.transport import (
     raise_for_response_status,
 )
 
-DEFAULT_BASE_URL = "https://fleet.enji.ai"
-AUTH_FILE_ENV = "ENJI_GUARD_AUTH_FILE"
 AUTH_REFRESH_PATH = "/api/v1/auth/refresh"
 AUTH_INVALID_CODE = "AUTH_INVALID"
 AUTH_REFRESH_ORIGIN = "https://guard.enji.ai"
@@ -40,13 +40,6 @@ HTTP_UNAUTHORIZED = 401
 HTTP_FORBIDDEN = 403
 HTTP_AUTH_FAILURE_CODES = frozenset({401, 403})
 HTTP_TRANSIENT_REFRESH_ERROR_CODES = frozenset({429, 500, 502, 503, 504})
-DEFAULT_AUTO_REFRESH_LEAD_SECONDS = 300
-DEFAULT_AUTO_REFRESH_FALLBACK_SECONDS = 900
-AUTO_REFRESH_ENABLED_ENV = "ENJI_GUARD_AUTO_REFRESH_ENABLED"
-AUTO_REFRESH_LEAD_SECONDS_ENV = "ENJI_GUARD_AUTO_REFRESH_LEAD_SECONDS"
-AUTO_REFRESH_FALLBACK_SECONDS_ENV = "ENJI_GUARD_AUTO_REFRESH_FALLBACK_SECONDS"
-AUTO_REFRESH_RETRY_SECONDS_ENV = "ENJI_GUARD_AUTO_REFRESH_RETRY_SECONDS"
-DEFAULT_AUTO_REFRESH_RETRY_SECONDS = 60
 JWT_MIN_PART_COUNT = 2
 AUTH_COOKIE_NAMES = frozenset({"access_token", "refresh_token"})
 REFRESH_TOKEN_COOKIE_NAME = "refresh_token"
@@ -125,13 +118,7 @@ class CookieHeader:
 
 
 def default_auth_file() -> Path:
-    env_auth_file = os.environ.get(AUTH_FILE_ENV)
-    if env_auth_file:
-        return Path(env_auth_file).expanduser()
-
-    env_config_home = os.environ.get("XDG_CONFIG_HOME")
-    config_root = Path(env_config_home).expanduser() if env_config_home else Path.home() / ".config"
-    return config_root / "enji-guard" / "auth.json"
+    return default_settings().auth.auth_file
 
 
 def normalize_cookie_header(raw_cookie: str) -> CookieHeader:
@@ -218,13 +205,13 @@ def cookie_refresh_sleep_seconds(
     stored_auth: StoredAuth,
     now: datetime,
     *,
-    lead_seconds: int = DEFAULT_AUTO_REFRESH_LEAD_SECONDS,
-    fallback_seconds: int = DEFAULT_AUTO_REFRESH_FALLBACK_SECONDS,
+    settings: AutoRefreshSettings | None = None,
 ) -> int:
+    refresh_settings = settings if settings is not None else default_settings().auto_refresh
     expires_at = cookie_access_expires_at(stored_auth)
     if expires_at is None:
-        return fallback_seconds
-    refresh_at_delta = int((expires_at - now).total_seconds()) - lead_seconds
+        return refresh_settings.fallback_seconds
+    refresh_at_delta = int((expires_at - now).total_seconds()) - refresh_settings.lead_seconds
     return max(refresh_at_delta, 0)
 
 
@@ -297,16 +284,13 @@ async def refresh_auth_async(auth_file: Path | None = None, client: EnjiHttpClie
 
 
 def start_auto_refresh_task() -> asyncio.Task[None] | None:
-    if not _auto_refresh_enabled():
+    settings = default_settings()
+    if not settings.auto_refresh.enabled:
         return None
     return asyncio.create_task(
         _auto_refresh_loop(
-            auth_file=default_auth_file(),
-            lead_seconds=_env_positive_int(AUTO_REFRESH_LEAD_SECONDS_ENV, DEFAULT_AUTO_REFRESH_LEAD_SECONDS),
-            fallback_seconds=_env_positive_int(
-                AUTO_REFRESH_FALLBACK_SECONDS_ENV, DEFAULT_AUTO_REFRESH_FALLBACK_SECONDS
-            ),
-            retry_seconds=_env_positive_int(AUTO_REFRESH_RETRY_SECONDS_ENV, DEFAULT_AUTO_REFRESH_RETRY_SECONDS),
+            auth_file=settings.auth.auth_file,
+            refresh_settings=settings.auto_refresh,
         ),
         name="enji-guard-auth-auto-refresh",
     )
@@ -315,16 +299,13 @@ def start_auto_refresh_task() -> asyncio.Task[None] | None:
 async def _auto_refresh_loop(
     *,
     auth_file: Path,
-    lead_seconds: int,
-    fallback_seconds: int,
-    retry_seconds: int,
+    refresh_settings: AutoRefreshSettings,
 ) -> None:
     async with HttpxEnjiHttpClient() as client:
         while True:
             sleep_seconds = _auto_refresh_sleep_seconds(
                 auth_file=auth_file,
-                lead_seconds=lead_seconds,
-                fallback_seconds=fallback_seconds,
+                refresh_settings=refresh_settings,
             )
             log_event(
                 _LOGGER,
@@ -340,9 +321,13 @@ async def _auto_refresh_loop(
                     _LOGGER,
                     logging.WARNING,
                     "enji_auth_auto_refresh_failed",
-                    {"code": exc.code, "status_code": exc.status_code, "retry_seconds": retry_seconds},
+                    {
+                        "code": exc.code,
+                        "status_code": exc.status_code,
+                        "retry_seconds": refresh_settings.retry_seconds,
+                    },
                 )
-                await asyncio.sleep(retry_seconds)
+                await asyncio.sleep(refresh_settings.retry_seconds)
             else:
                 expires_at = cookie_access_expires_at(refreshed_auth)
                 log_event(
@@ -353,36 +338,11 @@ async def _auto_refresh_loop(
                 )
 
 
-def _auto_refresh_sleep_seconds(*, auth_file: Path, lead_seconds: int, fallback_seconds: int) -> int:
+def _auto_refresh_sleep_seconds(*, auth_file: Path, refresh_settings: AutoRefreshSettings) -> int:
     stored_auth = load_stored_auth(auth_file)
     if stored_auth is None:
-        return fallback_seconds
-    return cookie_refresh_sleep_seconds(
-        stored_auth,
-        datetime.now(UTC),
-        lead_seconds=lead_seconds,
-        fallback_seconds=fallback_seconds,
-    )
-
-
-def _auto_refresh_enabled() -> bool:
-    raw_value = os.environ.get(AUTO_REFRESH_ENABLED_ENV)
-    if raw_value is None:
-        return True
-    return raw_value.strip().lower() not in {"0", "false", "no", "off"}
-
-
-def _env_positive_int(name: str, default: int) -> int:
-    raw_value = os.environ.get(name)
-    if raw_value is None:
-        return default
-    try:
-        parsed = int(raw_value)
-    except ValueError:
-        return default
-    if parsed <= 0:
-        return default
-    return parsed
+        return refresh_settings.fallback_seconds
+    return cookie_refresh_sleep_seconds(stored_auth, datetime.now(UTC), settings=refresh_settings)
 
 
 def _stored_auth(base_url: str, credential: Credential) -> StoredAuth:
@@ -424,7 +384,7 @@ def _write_auth_file(path: Path, payload: StoredAuth) -> None:
             temp_path = Path(temp_file.name)
             temp_file.write(serialized)
             temp_file.flush()
-            os.fsync(temp_file.fileno())
+            fsync(temp_file.fileno())
         temp_path.chmod(0o600)
         temp_path.replace(path)
         _fsync_directory(path.parent)
@@ -820,10 +780,10 @@ def _optional_str(value: object) -> str | None:
 
 def _fsync_directory(path: Path) -> None:
     try:
-        directory_fd = os.open(path, os.O_RDONLY)
+        directory_fd = os_open(path, O_RDONLY)
     except OSError:
         return
     try:
-        os.fsync(directory_fd)
+        fsync(directory_fd)
     finally:
-        os.close(directory_fd)
+        close(directory_fd)

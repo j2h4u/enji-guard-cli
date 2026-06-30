@@ -8,6 +8,7 @@ from typing import cast
 import httpx
 import pytest
 
+from enji_guard_cli.settings import TelemetrySettings
 from enji_guard_cli.telemetry import configure_logging
 from enji_guard_cli.transport import (
     EnjiHttpRequest,
@@ -43,7 +44,15 @@ def test_httpx_enji_http_client_returns_response_body() -> None:
 
 
 def test_httpx_enji_http_client_logs_sanitized_request_metadata(capsys: pytest.CaptureFixture[str]) -> None:
-    configure_logging("INFO", "json")
+    configure_logging(
+        TelemetrySettings(
+            level_name="INFO",
+            log_format="json",
+            log_file=None,
+            max_bytes=10_000,
+            backup_count=1,
+        )
+    )
 
     async def run() -> None:
         async with httpx.AsyncClient(

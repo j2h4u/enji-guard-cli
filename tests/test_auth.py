@@ -29,6 +29,7 @@ from enji_guard_cli.auth import (
 )
 from enji_guard_cli.auth import StoredAuth as RuntimeStoredAuth
 from enji_guard_cli.cli import app
+from enji_guard_cli.settings import AutoRefreshSettings
 from enji_guard_cli.transport import HttpxEnjiHttpClient
 
 
@@ -104,7 +105,7 @@ def test_cookie_refresh_sleep_seconds_refreshes_before_access_expiration(tmp_pat
     stored_auth = load_stored_auth(auth_file)
 
     assert stored_auth is not None
-    assert cookie_refresh_sleep_seconds(stored_auth, now, lead_seconds=300, fallback_seconds=900) == 420
+    assert cookie_refresh_sleep_seconds(stored_auth, now, settings=auto_refresh_settings()) == 420
 
 
 def test_cookie_refresh_sleep_seconds_returns_zero_inside_refresh_window(tmp_path: Path) -> None:
@@ -115,7 +116,7 @@ def test_cookie_refresh_sleep_seconds_returns_zero_inside_refresh_window(tmp_pat
     stored_auth = load_stored_auth(auth_file)
 
     assert stored_auth is not None
-    assert cookie_refresh_sleep_seconds(stored_auth, now, lead_seconds=300, fallback_seconds=900) == 0
+    assert cookie_refresh_sleep_seconds(stored_auth, now, settings=auto_refresh_settings()) == 0
 
 
 def test_import_locks_down_existing_parent_directory(tmp_path: Path) -> None:
@@ -497,6 +498,10 @@ def test_cli_import_cookie_rejects_missing_stdin_flag(tmp_path: Path) -> None:
 
 def run_auth_status(task_factory: Callable[[], Awaitable[AuthStatusPayload]]) -> AuthStatusPayload:
     return asyncio.run(task_factory())
+
+
+def auto_refresh_settings() -> AutoRefreshSettings:
+    return AutoRefreshSettings(enabled=True, lead_seconds=300, fallback_seconds=900, retry_seconds=60)
 
 
 def unsigned_jwt(payload: dict[str, object]) -> str:
