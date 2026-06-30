@@ -1,9 +1,9 @@
 import asyncio
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NotRequired, TypedDict, cast
+from typing import Literal, NotRequired, TypedDict, cast
 from urllib.parse import quote, urlencode
 from uuid import uuid4
 
@@ -47,6 +47,9 @@ type JsonScalar = None | bool | int | float | str
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
 type JsonObjectParser[T] = Callable[[dict[str, object]], T]
 type JsonObjectPayload = dict[str, JsonValue]
+type HttpMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
+type ApiPathParams = Mapping[str, str]
+type ApiQueryParams = Mapping[str, str]
 
 
 class AccessLimitsPayload(TypedDict):
@@ -80,6 +83,14 @@ class ReportsListPayload(TypedDict):
     projects: list[ProjectOverviewPayload]
 
 
+class ApiEndpointPayload(TypedDict):
+    method: HttpMethod
+    path_template: str
+    operation_id: str
+    operation: str
+    request_body_ref: str | None
+
+
 @dataclass(slots=True)
 class EnjiApiSession:
     auth_file: Path
@@ -97,12 +108,52 @@ class EnjiApiSession:
 
 @dataclass(frozen=True, slots=True)
 class ApiRequestSpec[T]:
-    method: str
+    method: HttpMethod
     path: str
     operation: str
     parser: JsonObjectParser[T]
     json_body: EnjiJsonValue | None = None
     expected_statuses: Collection[int] = HTTP_OK_ONLY
+
+
+@dataclass(frozen=True, slots=True)
+class ApiEndpoint[T]:
+    method: HttpMethod
+    path_template: str
+    operation_id: str
+    operation: str
+    parser: JsonObjectParser[T]
+    request_body_ref: str | None = None
+    expected_statuses: Collection[int] = HTTP_OK_ONLY
+
+    def request(
+        self,
+        *,
+        path_params: ApiPathParams | None = None,
+        query_params: ApiQueryParams | None = None,
+        json_body: EnjiJsonValue | None = None,
+        parser: JsonObjectParser[T] | None = None,
+    ) -> ApiRequestSpec[T]:
+        path = _render_api_path(self.path_template, path_params)
+        if query_params:
+            path = f"{path}?{urlencode(query_params)}"
+        return ApiRequestSpec(
+            method=self.method,
+            path=path,
+            operation=self.operation,
+            parser=parser if parser is not None else self.parser,
+            json_body=json_body,
+            expected_statuses=self.expected_statuses,
+        )
+
+    def catalog_entry(self) -> ApiEndpointPayload:
+        return {
+            "method": self.method,
+            "path_template": self.path_template,
+            "operation_id": self.operation_id,
+            "operation": self.operation,
+            "request_body_ref": self.request_body_ref,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,11 +199,32 @@ class RepoTransferRequest(TypedDict):
     scheduleReplacements: NotRequired[dict[str, JsonValue]]
 
 
+class RepoConnectRequest(TypedDict):
+    githubOwner: str
+    githubName: str
+
+
+class RepoConnectionRequest(TypedDict):
+    connected: bool
+
+
+class AuditRunCreateRequest(TypedDict):
+    projectId: str
+    actionKey: str
+    fleetTaskBody: JsonObjectPayload
+    clientRequestId: str
+
+
+class AuditEmailPreferenceRequest(TypedDict, total=False):
+    manualRunCompletion: bool
+    scheduledRunCompletion: bool
+
+
 def access(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> AccessPayload:
     return _run_api_request(
         auth_file,
         client,
-        ApiRequestSpec(method="GET", path="/api/ux/me/access", operation="access", parser=_parse_access_payload),
+        ACCESS_ENDPOINT.request(),
     )
 
 
@@ -160,7 +232,7 @@ async def access_async(auth_file: Path | None = None, client: EnjiHttpClient | N
     return await _run_api_request_async(
         auth_file,
         client,
-        ApiRequestSpec(method="GET", path="/api/ux/me/access", operation="access", parser=_parse_access_payload),
+        ACCESS_ENDPOINT.request(),
     )
 
 
@@ -197,12 +269,7 @@ def reports_list(
     return _run_api_request(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="GET",
-            path="/api/ux/projects",
-            operation="reports list",
-            parser=_reports_list_parser(selector),
-        ),
+        REPORTS_LIST_ENDPOINT.request(parser=_reports_list_parser(selector)),
     )
 
 
@@ -218,21 +285,16 @@ async def reports_list_async(
     return await _run_api_request_async(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="GET",
-            path="/api/ux/projects",
-            operation="reports list",
-            parser=_reports_list_parser(selector),
-        ),
+        REPORTS_LIST_ENDPOINT.request(parser=_reports_list_parser(selector)),
     )
 
 
 def projects(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> JsonObjectPayload:
-    return _run_api_get(auth_file, client, path="/api/ux/projects", operation="repo list")
+    return _run_api_request(auth_file, client, PROJECTS_ENDPOINT.request())
 
 
 async def projects_async(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> JsonObjectPayload:
-    return await _run_api_get_async(auth_file, client, path="/api/ux/projects", operation="repo list")
+    return await _run_api_request_async(auth_file, client, PROJECTS_ENDPOINT.request())
 
 
 def project_detail(
@@ -240,11 +302,10 @@ def project_detail(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_get(
+    return _run_api_request(
         auth_file,
         client,
-        path=f"/api/ux/projects/{_quote_path(project_id)}",
-        operation="project detail",
+        PROJECT_DETAIL_ENDPOINT.request(path_params={"projectId": project_id}),
     )
 
 
@@ -257,14 +318,7 @@ def create_project(
     fleet_project = _run_api_request(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="POST",
-            path="/api/v1/projects",
-            operation="project create",
-            parser=_parse_fleet_project_create_response,
-            json_body=cast(EnjiJsonValue, fleet_request),
-            expected_statuses=HTTP_CREATED_ONLY,
-        ),
+        FLEET_PROJECT_CREATE_ENDPOINT.request(json_body=cast(EnjiJsonValue, fleet_request)),
     )
     ux_request: UxProjectCreateRequest = {
         "fleetProjectId": fleet_project["id"],
@@ -274,14 +328,7 @@ def create_project(
     return _run_api_request(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="POST",
-            path="/api/ux/projects",
-            operation="project create",
-            parser=_parse_json_object_payload,
-            json_body=cast(EnjiJsonValue, ux_request),
-            expected_statuses=HTTP_CREATED_ONLY,
-        ),
+        UX_PROJECT_CREATE_ENDPOINT.request(json_body=cast(EnjiJsonValue, ux_request)),
     )
 
 
@@ -295,13 +342,7 @@ def rename_project(
     return _run_api_request(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="PATCH",
-            path=f"/api/ux/projects/{_quote_path(project_id)}",
-            operation="project rename",
-            parser=_parse_json_object_payload,
-            json_body=cast(EnjiJsonValue, patch),
-        ),
+        PROJECT_RENAME_ENDPOINT.request(path_params={"projectId": project_id}, json_body=cast(EnjiJsonValue, patch)),
     )
 
 
@@ -313,24 +354,12 @@ def delete_project(
     _run_api_no_content(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="DELETE",
-            path=f"/api/ux/projects/{_quote_path(project_id)}",
-            operation="project delete",
-            parser=_parse_json_object_payload,
-            expected_statuses=HTTP_NO_CONTENT_ONLY,
-        ),
+        UX_PROJECT_DELETE_ENDPOINT.request(path_params={"projectId": project_id}),
     )
     _run_api_no_content(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="DELETE",
-            path=f"/api/v1/projects/{_quote_path(project_id)}",
-            operation="project delete",
-            parser=_parse_json_object_payload,
-            expected_statuses=HTTP_NO_CONTENT_ONLY,
-        ),
+        FLEET_PROJECT_DELETE_ENDPOINT.request(path_params={"projectId": project_id}),
     )
 
 
@@ -345,13 +374,9 @@ def preflight_repo_move(
     return _run_api_no_content(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="POST",
-            path=f"/api/ux/projects/{_quote_path(source_project_id)}/repos/{_quote_path(repo_id)}/transfer/preflight",
-            operation="repo move preflight",
-            parser=_parse_json_object_payload,
+        REPO_TRANSFER_PREFLIGHT_ENDPOINT.request(
+            path_params={"sourceProjectId": source_project_id, "repoId": repo_id},
             json_body=cast(EnjiJsonValue, request),
-            expected_statuses=HTTP_OK_OR_NO_CONTENT,
         ),
     )
 
@@ -367,18 +392,15 @@ def move_repo(
     return _run_api_request(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="POST",
-            path=f"/api/ux/projects/{_quote_path(request.source_project_id)}/repos/{_quote_path(request.repo_id)}/transfer",
-            operation="repo move",
-            parser=_parse_json_object_payload,
+        REPO_TRANSFER_ENDPOINT.request(
+            path_params={"sourceProjectId": request.source_project_id, "repoId": request.repo_id},
             json_body=cast(EnjiJsonValue, json_request),
         ),
     )
 
 
 def catalog(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> JsonObjectPayload:
-    return _run_api_get(auth_file, client, path="/api/ux/catalog", operation="catalog")
+    return _run_api_request(auth_file, client, CATALOG_ENDPOINT.request())
 
 
 def runbook(
@@ -386,20 +408,18 @@ def runbook(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_get(
+    return _run_api_request(
         auth_file,
         client,
-        path=f"/api/v1/runbooks/{_quote_path(runbook_id)}",
-        operation="runbook",
+        RUNBOOK_ENDPOINT.request(path_params={"runbookId": runbook_id}),
     )
 
 
 def github_installations(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> JsonObjectPayload:
-    return _run_api_get(
+    return _run_api_request(
         auth_file,
         client,
-        path="/api/ux/github-installations",
-        operation="repo github installations",
+        GITHUB_INSTALLATIONS_ENDPOINT.request(),
     )
 
 
@@ -408,11 +428,10 @@ def github_installation_repos(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_get(
+    return _run_api_request(
         auth_file,
         client,
-        path=f"/api/v1/github/app/installations/{_quote_path(installation_id)}/repos",
-        operation="repo github repos",
+        GITHUB_INSTALLATION_REPOS_ENDPOINT.request(path_params={"installationId": installation_id}),
     )
 
 
@@ -423,16 +442,13 @@ def connect_project_repo(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
+    request: RepoConnectRequest = {"githubOwner": github_owner, "githubName": github_name}
     return _run_api_request(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="POST",
-            path=f"/api/ux/projects/{_quote_path(project_id)}/repos",
-            operation="repo add",
-            parser=_parse_json_object_payload,
-            json_body={"githubOwner": github_owner, "githubName": github_name},
-            expected_statuses=HTTP_CREATED_ONLY,
+        PROJECT_REPOS_CONNECT_ENDPOINT.request(
+            path_params={"projectId": project_id},
+            json_body=cast(EnjiJsonValue, request),
         ),
     )
 
@@ -445,15 +461,13 @@ def update_repo_connection(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
+    request: RepoConnectionRequest = {"connected": connected}
     return _run_api_request(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="PUT",
-            path=f"/api/ux/projects/{_quote_path(project_id)}/repos/{_quote_path(repo_id)}/connection",
-            operation="repo connection",
-            parser=_parse_json_object_payload,
-            json_body={"connected": connected},
+        PROJECT_REPO_CONNECTION_ENDPOINT.request(
+            path_params={"projectId": project_id, "repoId": repo_id},
+            json_body=cast(EnjiJsonValue, request),
         ),
     )
 
@@ -463,11 +477,10 @@ def project_active_runs(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_get(
+    return _run_api_request(
         auth_file,
         client,
-        path=f"/api/ux/projects/{_quote_path(project_id)}/active-runs",
-        operation="project active runs",
+        PROJECT_ACTIVE_RUNS_ENDPOINT.request(path_params={"projectId": project_id}),
     )
 
 
@@ -476,11 +489,10 @@ def repo_active_runs(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_get(
+    return _run_api_request(
         auth_file,
         client,
-        path=f"/api/ux/repos/{_quote_path(repo_id)}/active-runs",
-        operation="repo active runs",
+        REPO_ACTIVE_RUNS_ENDPOINT.request(path_params={"repoId": repo_id}),
     )
 
 
@@ -489,11 +501,10 @@ def repo_audit_rerun_state(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_get(
+    return _run_api_request(
         auth_file,
         client,
-        path=f"/api/ux/repos/{_quote_path(repo_id)}/audit-rerun-state",
-        operation="repo rerun state",
+        REPO_AUDIT_RERUN_STATE_ENDPOINT.request(path_params={"repoId": repo_id}),
     )
 
 
@@ -502,11 +513,10 @@ def repo_task_links(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_get(
+    return _run_api_request(
         auth_file,
         client,
-        path=f"/api/ux/repos/{_quote_path(repo_id)}/task-links",
-        operation="repo task links",
+        REPO_TASK_LINKS_ENDPOINT.request(path_params={"repoId": repo_id}),
     )
 
 
@@ -515,11 +525,10 @@ def repo_audit_history(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_get(
+    return _run_api_request(
         auth_file,
         client,
-        path=f"/api/ux/repos/{_quote_path(repo_id)}/audit-history",
-        operation="repo audit history",
+        REPO_AUDIT_HISTORY_ENDPOINT.request(path_params={"repoId": repo_id}),
     )
 
 
@@ -528,21 +537,18 @@ def start_audit_run(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
+    json_request: AuditRunCreateRequest = {
+        "projectId": request.project_id,
+        "actionKey": request.action_key,
+        "fleetTaskBody": request.fleet_task_body,
+        "clientRequestId": str(uuid4()),
+    }
     return _run_api_request(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="POST",
-            path=f"/api/ux/repos/{_quote_path(request.repo_id)}/audit-runs",
-            operation="audit start",
-            parser=_parse_json_object_payload,
-            json_body={
-                "projectId": request.project_id,
-                "actionKey": request.action_key,
-                "fleetTaskBody": request.fleet_task_body,
-                "clientRequestId": str(uuid4()),
-            },
-            expected_statuses=HTTP_CREATED_ONLY,
+        REPO_AUDIT_RUNS_ENDPOINT.request(
+            path_params={"repoId": request.repo_id},
+            json_body=cast(EnjiJsonValue, json_request),
         ),
     )
 
@@ -553,12 +559,13 @@ def audit_summary_snapshot(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    query = urlencode({"group": route_slug})
-    return _run_api_get(
+    return _run_api_request(
         auth_file,
         client,
-        path=f"/api/ux/repos/{_quote_path(repo_id)}/snapshots/upfront.audit.summary?{query}",
-        operation="report show",
+        REPO_AUDIT_SUMMARY_ENDPOINT.request(
+            path_params={"repoId": repo_id},
+            query_params={"group": route_slug},
+        ),
     )
 
 
@@ -568,11 +575,10 @@ def audit_email_preferences(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_get(
+    return _run_api_request(
         auth_file,
         client,
-        path=f"/api/ux/repos/{_quote_path(repo_id)}/audits/{_quote_path(action_key)}/email-preferences",
-        operation="email list",
+        AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT.request(path_params={"repoId": repo_id, "actionKey": action_key}),
     )
 
 
@@ -583,15 +589,13 @@ def put_audit_email_preferences(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
+    request = _audit_email_preference_request(patch)
     return _run_api_request(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="PUT",
-            path=f"/api/ux/repos/{_quote_path(repo_id)}/audits/{_quote_path(action_key)}/email-preferences",
-            operation="email set",
-            parser=_parse_json_object_payload,
-            json_body=cast(EnjiJsonValue, patch),
+        AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT.request(
+            path_params={"repoId": repo_id, "actionKey": action_key},
+            json_body=cast(EnjiJsonValue, request),
         ),
     )
 
@@ -601,11 +605,10 @@ def improvement_jobs(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_get(
+    return _run_api_request(
         auth_file,
         client,
-        path=f"/api/ux/improvement-jobs/{_quote_path(repo_id)}",
-        operation="schedule list",
+        IMPROVEMENT_JOBS_ENDPOINT.request(path_params={"repoId": repo_id}),
     )
 
 
@@ -619,41 +622,10 @@ def put_improvement_job(
     return _run_api_request(
         auth_file,
         client,
-        ApiRequestSpec(
-            method="PUT",
-            path=f"/api/ux/improvement-jobs/{_quote_path(repo_id)}/{_quote_path(job_kind)}",
-            operation="schedule set",
-            parser=_parse_json_object_payload,
+        IMPROVEMENT_JOB_PUT_ENDPOINT.request(
+            path_params={"repoId": repo_id, "kind": job_kind},
             json_body=cast(EnjiJsonValue, job),
         ),
-    )
-
-
-def _run_api_get(
-    auth_file: Path | None,
-    client: EnjiHttpClient | None,
-    *,
-    path: str,
-    operation: str,
-) -> JsonObjectPayload:
-    return _run_api_request(
-        auth_file,
-        client,
-        ApiRequestSpec(method="GET", path=path, operation=operation, parser=_parse_json_object_payload),
-    )
-
-
-async def _run_api_get_async(
-    auth_file: Path | None,
-    client: EnjiHttpClient | None,
-    *,
-    path: str,
-    operation: str,
-) -> JsonObjectPayload:
-    return await _run_api_request_async(
-        auth_file,
-        client,
-        ApiRequestSpec(method="GET", path=path, operation=operation, parser=_parse_json_object_payload),
     )
 
 
@@ -944,6 +916,281 @@ def _parse_fleet_project_create_response(payload: dict[str, object]) -> FleetPro
     if project_id is None:
         raise EnjiHttpError("UPSTREAM", "project create returned no project id")
     return {"id": project_id}
+
+
+ACCESS_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/me/access",
+    operation_id="getUxMeAccess",
+    operation="access",
+    parser=_parse_access_payload,
+)
+REPORTS_LIST_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/projects",
+    operation_id="listProjects",
+    operation="reports list",
+    parser=_reports_list_parser(REPORTS_LIST_DEFAULT_SELECTOR),
+)
+PROJECTS_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/projects",
+    operation_id="listProjects",
+    operation="repo list",
+    parser=_parse_json_object_payload,
+)
+PROJECT_DETAIL_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/projects/{projectId}",
+    operation_id="getProject",
+    operation="project detail",
+    parser=_parse_json_object_payload,
+)
+FLEET_PROJECT_CREATE_ENDPOINT = ApiEndpoint(
+    method="POST",
+    path_template="/api/v1/projects",
+    operation_id="createFleetProject",
+    operation="project create",
+    parser=_parse_fleet_project_create_response,
+    request_body_ref="#/components/requestBodies/FleetProjectCreate",
+    expected_statuses=HTTP_CREATED_ONLY,
+)
+UX_PROJECT_CREATE_ENDPOINT = ApiEndpoint(
+    method="POST",
+    path_template="/api/ux/projects",
+    operation_id="createUxProject",
+    operation="project create",
+    parser=_parse_json_object_payload,
+    request_body_ref="#/components/requestBodies/UxProjectCreate",
+    expected_statuses=HTTP_CREATED_ONLY,
+)
+PROJECT_RENAME_ENDPOINT = ApiEndpoint(
+    method="PATCH",
+    path_template="/api/ux/projects/{projectId}",
+    operation_id="patchProject",
+    operation="project rename",
+    parser=_parse_json_object_payload,
+    request_body_ref="#/components/requestBodies/ProjectPatch",
+)
+UX_PROJECT_DELETE_ENDPOINT = ApiEndpoint(
+    method="DELETE",
+    path_template="/api/ux/projects/{projectId}",
+    operation_id="deleteUxProject",
+    operation="project delete",
+    parser=_parse_json_object_payload,
+    expected_statuses=HTTP_NO_CONTENT_ONLY,
+)
+FLEET_PROJECT_DELETE_ENDPOINT = ApiEndpoint(
+    method="DELETE",
+    path_template="/api/v1/projects/{projectId}",
+    operation_id="deleteFleetProject",
+    operation="project delete",
+    parser=_parse_json_object_payload,
+    expected_statuses=HTTP_NO_CONTENT_ONLY,
+)
+REPO_TRANSFER_PREFLIGHT_ENDPOINT = ApiEndpoint(
+    method="POST",
+    path_template="/api/ux/projects/{sourceProjectId}/repos/{repoId}/transfer/preflight",
+    operation_id="preflightRepoTransfer",
+    operation="repo move preflight",
+    parser=_parse_json_object_payload,
+    request_body_ref="#/components/requestBodies/RepoTransferPreflight",
+    expected_statuses=HTTP_OK_OR_NO_CONTENT,
+)
+REPO_TRANSFER_ENDPOINT = ApiEndpoint(
+    method="POST",
+    path_template="/api/ux/projects/{sourceProjectId}/repos/{repoId}/transfer",
+    operation_id="transferRepo",
+    operation="repo move",
+    parser=_parse_json_object_payload,
+    request_body_ref="#/components/requestBodies/RepoTransfer",
+)
+CATALOG_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/catalog",
+    operation_id="getUxCatalog",
+    operation="catalog",
+    parser=_parse_json_object_payload,
+)
+RUNBOOK_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/v1/runbooks/{runbookId}",
+    operation_id="getRunbook",
+    operation="runbook",
+    parser=_parse_json_object_payload,
+)
+GITHUB_INSTALLATIONS_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/github-installations",
+    operation_id="listGitHubInstallations",
+    operation="repo github installations",
+    parser=_parse_json_object_payload,
+)
+GITHUB_INSTALLATION_REPOS_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/v1/github/app/installations/{installationId}/repos",
+    operation_id="listGitHubInstallationRepos",
+    operation="repo github repos",
+    parser=_parse_json_object_payload,
+)
+PROJECT_REPOS_CONNECT_ENDPOINT = ApiEndpoint(
+    method="POST",
+    path_template="/api/ux/projects/{projectId}/repos",
+    operation_id="connectProjectRepo",
+    operation="repo add",
+    parser=_parse_json_object_payload,
+    request_body_ref="#/components/requestBodies/GitHubRepoConnect",
+    expected_statuses=HTTP_CREATED_ONLY,
+)
+PROJECT_REPO_CONNECTION_ENDPOINT = ApiEndpoint(
+    method="PUT",
+    path_template="/api/ux/projects/{projectId}/repos/{repoId}/connection",
+    operation_id="putProjectRepoConnection",
+    operation="repo connection",
+    parser=_parse_json_object_payload,
+    request_body_ref="#/components/requestBodies/RepoConnectionUpdate",
+)
+PROJECT_ACTIVE_RUNS_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/projects/{projectId}/active-runs",
+    operation_id="listProjectActiveRuns",
+    operation="project active runs",
+    parser=_parse_json_object_payload,
+)
+REPO_ACTIVE_RUNS_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/repos/{repoId}/active-runs",
+    operation_id="listRepoActiveRuns",
+    operation="repo active runs",
+    parser=_parse_json_object_payload,
+)
+REPO_AUDIT_RERUN_STATE_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/repos/{repoId}/audit-rerun-state",
+    operation_id="getRepoAuditRerunState",
+    operation="repo rerun state",
+    parser=_parse_json_object_payload,
+)
+REPO_TASK_LINKS_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/repos/{repoId}/task-links",
+    operation_id="listRepoTaskLinks",
+    operation="repo task links",
+    parser=_parse_json_object_payload,
+)
+REPO_AUDIT_HISTORY_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/repos/{repoId}/audit-history",
+    operation_id="listRepoAuditHistory",
+    operation="repo audit history",
+    parser=_parse_json_object_payload,
+)
+REPO_AUDIT_RUNS_ENDPOINT = ApiEndpoint(
+    method="POST",
+    path_template="/api/ux/repos/{repoId}/audit-runs",
+    operation_id="createRepoAuditRun",
+    operation="audit start",
+    parser=_parse_json_object_payload,
+    request_body_ref="#/components/requestBodies/AuditRunCreate",
+    expected_statuses=HTTP_CREATED_ONLY,
+)
+REPO_AUDIT_SUMMARY_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/repos/{repoId}/snapshots/upfront.audit.summary",
+    operation_id="getRepoAuditSummarySnapshot",
+    operation="report show",
+    parser=_parse_json_object_payload,
+)
+AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/repos/{repoId}/audits/{actionKey}/email-preferences",
+    operation_id="getAuditEmailPreferences",
+    operation="email list",
+    parser=_parse_json_object_payload,
+)
+AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT = ApiEndpoint(
+    method="PUT",
+    path_template="/api/ux/repos/{repoId}/audits/{actionKey}/email-preferences",
+    operation_id="putAuditEmailPreferences",
+    operation="email set",
+    parser=_parse_json_object_payload,
+    request_body_ref="#/components/requestBodies/EmailPreferencesPatch",
+)
+IMPROVEMENT_JOBS_ENDPOINT = ApiEndpoint(
+    method="GET",
+    path_template="/api/ux/improvement-jobs/{repoId}",
+    operation_id="listImprovementJobs",
+    operation="schedule list",
+    parser=_parse_json_object_payload,
+)
+IMPROVEMENT_JOB_PUT_ENDPOINT = ApiEndpoint(
+    method="PUT",
+    path_template="/api/ux/improvement-jobs/{repoId}/{kind}",
+    operation_id="putImprovementJob",
+    operation="schedule set",
+    parser=_parse_json_object_payload,
+    request_body_ref="#/components/schemas/ImprovementJobUpdate",
+)
+
+
+def implemented_api_endpoints() -> list[ApiEndpointPayload]:
+    return [
+        endpoint.catalog_entry()
+        for endpoint in (
+            ACCESS_ENDPOINT,
+            REPORTS_LIST_ENDPOINT,
+            PROJECTS_ENDPOINT,
+            PROJECT_DETAIL_ENDPOINT,
+            FLEET_PROJECT_CREATE_ENDPOINT,
+            UX_PROJECT_CREATE_ENDPOINT,
+            PROJECT_RENAME_ENDPOINT,
+            UX_PROJECT_DELETE_ENDPOINT,
+            FLEET_PROJECT_DELETE_ENDPOINT,
+            REPO_TRANSFER_PREFLIGHT_ENDPOINT,
+            REPO_TRANSFER_ENDPOINT,
+            CATALOG_ENDPOINT,
+            RUNBOOK_ENDPOINT,
+            GITHUB_INSTALLATIONS_ENDPOINT,
+            GITHUB_INSTALLATION_REPOS_ENDPOINT,
+            PROJECT_REPOS_CONNECT_ENDPOINT,
+            PROJECT_REPO_CONNECTION_ENDPOINT,
+            PROJECT_ACTIVE_RUNS_ENDPOINT,
+            REPO_ACTIVE_RUNS_ENDPOINT,
+            REPO_AUDIT_RERUN_STATE_ENDPOINT,
+            REPO_TASK_LINKS_ENDPOINT,
+            REPO_AUDIT_HISTORY_ENDPOINT,
+            REPO_AUDIT_RUNS_ENDPOINT,
+            REPO_AUDIT_SUMMARY_ENDPOINT,
+            AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT,
+            AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT,
+            IMPROVEMENT_JOBS_ENDPOINT,
+            IMPROVEMENT_JOB_PUT_ENDPOINT,
+        )
+    ]
+
+
+def _render_api_path(path_template: str, path_params: ApiPathParams | None) -> str:
+    path = path_template
+    for name, value in (path_params or {}).items():
+        path = path.replace(f"{{{name}}}", _quote_path(value))
+    if "{" in path or "}" in path:
+        raise ValueError(f"unresolved API path parameter in {path_template}")
+    return path
+
+
+def _audit_email_preference_request(patch: JsonObjectPayload) -> AuditEmailPreferenceRequest:
+    request: AuditEmailPreferenceRequest = {}
+    manual = patch.get("manualRunCompletion")
+    if manual is not None:
+        if not isinstance(manual, bool):
+            raise EnjiApiError("VALIDATION", "manualRunCompletion must be boolean")
+        request["manualRunCompletion"] = manual
+    scheduled = patch.get("scheduledRunCompletion")
+    if scheduled is not None:
+        if not isinstance(scheduled, bool):
+            raise EnjiApiError("VALIDATION", "scheduledRunCompletion must be boolean")
+        request["scheduledRunCompletion"] = scheduled
+    return request
 
 
 def _normalize_str_list(value: object) -> list[str]:

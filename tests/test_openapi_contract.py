@@ -16,6 +16,7 @@ from enji_guard_cli.enji_api import (
     delete_project,
     github_installation_repos,
     github_installations,
+    implemented_api_endpoints,
     improvement_jobs,
     move_repo,
     preflight_repo_move,
@@ -134,6 +135,24 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
     ] == []
 
 
+def test_implemented_endpoint_specs_match_openapi_contract() -> None:
+    contract = cast(object, json.loads(CONTRACT_PATH.read_text(encoding="utf-8")))
+    assert isinstance(contract, dict)
+    paths = contract.get("paths")
+    assert isinstance(paths, dict)
+
+    for endpoint in implemented_api_endpoints():
+        path_template = endpoint["path_template"]
+        method = endpoint["method"].lower()
+        assert path_template in paths
+        path_item = paths[path_template]
+        assert isinstance(path_item, dict)
+        operation = path_item.get(method)
+        assert isinstance(operation, dict)
+        assert operation.get("operationId") == endpoint["operation_id"]
+        assert _request_body_ref(operation) == endpoint["request_body_ref"]
+
+
 def json_response(payload: object, *, status_code: int = 200) -> EnjiHttpResponse:
     return EnjiHttpResponse(
         status_code=status_code,
@@ -168,3 +187,23 @@ def _path_segment_matches(template_part: str, path_part: str) -> bool:
     if template_part.startswith("{") and template_part.endswith("}"):
         return bool(path_part)
     return template_part == path_part
+
+
+def _request_body_ref(operation: dict[str, object]) -> str | None:
+    request_body = operation.get("requestBody")
+    if not isinstance(request_body, dict):
+        return None
+    ref = request_body.get("$ref")
+    if isinstance(ref, str):
+        return ref
+    content = request_body.get("content")
+    if not isinstance(content, dict):
+        return None
+    json_content = content.get("application/json")
+    if not isinstance(json_content, dict):
+        return None
+    schema = json_content.get("schema")
+    if not isinstance(schema, dict):
+        return None
+    schema_ref = schema.get("$ref")
+    return schema_ref if isinstance(schema_ref, str) else None
