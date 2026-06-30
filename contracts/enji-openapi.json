@@ -142,6 +142,9 @@
         "responses": {
           "200": {
             "$ref": "#/components/responses/GenericObject"
+          },
+          "204": {
+            "$ref": "#/components/responses/NoContent"
           }
         }
       }

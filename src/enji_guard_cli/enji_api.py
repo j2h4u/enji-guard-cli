@@ -41,6 +41,7 @@ REPORTS_LIST_DEFAULT_MIN_SEVERITY: str | None = None
 HTTP_OK_ONLY = frozenset({HTTP_OK})
 HTTP_CREATED_ONLY = frozenset({HTTP_CREATED})
 HTTP_NO_CONTENT_ONLY = frozenset({HTTP_NO_CONTENT})
+HTTP_OK_OR_NO_CONTENT = frozenset({HTTP_OK, HTTP_NO_CONTENT})
 
 type JsonScalar = None | bool | int | float | str
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
@@ -341,7 +342,7 @@ def preflight_repo_move(
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
     request: RepoTransferPreflightRequest = {"targetProjectId": target_project_id}
-    return _run_api_request(
+    return _run_api_no_content(
         auth_file,
         client,
         ApiRequestSpec(
@@ -350,6 +351,7 @@ def preflight_repo_move(
             operation="repo move preflight",
             parser=_parse_json_object_payload,
             json_body=cast(EnjiJsonValue, request),
+            expected_statuses=HTTP_OK_OR_NO_CONTENT,
         ),
     )
 
