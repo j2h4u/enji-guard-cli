@@ -10,11 +10,24 @@ services:
     ports:
       - "127.0.0.1:8001:8000"
     mem_limit: 512m
+    memswap_limit: 512m
+    pids_limit: 128
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     healthcheck:
-      test: ["CMD", "enji-guard", "health"]
+      test: ["CMD", "enji-guard", "health", "--ready"]
       interval: 30s
       timeout: 5s
       start_period: 10s
       retries: 3
     volumes:
-      - ${HOME}/.config/enji-guard:/home/app/.config/enji-guard
+      - type: bind
+        source: ${HOME}/.config/enji-guard
+        target: /home/app/.config/enji-guard
+        bind:
+          create_host_path: false

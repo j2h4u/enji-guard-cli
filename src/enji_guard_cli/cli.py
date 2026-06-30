@@ -1,4 +1,5 @@
 import json
+import socket
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -89,6 +90,12 @@ auth_status = AUTH_STATUS_OPERATION.execute
 _cli_state: dict[str, object] = {"project": None, "json": False}
 
 type JsonCommandAction = Callable[[], OperationResult]
+
+SECONDS_PER_MINUTE = 60
+SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE
+SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR
+SHORT_DURATION_SECONDS_LIMIT = 5 * SECONDS_PER_MINUTE
+HEALTH_READY_TIMEOUT_SECONDS = 2.0
 
 
 def _echo_json(payload: object) -> None:
@@ -265,6 +272,8 @@ def _echo_wait_status(payload: object) -> None:
     typer.echo(f"complete: {complete}")
     for key in ("reason", "repo_id", "elapsed_seconds", "current_head_sha", "last_report_at"):
         typer.echo(f"{key}: {_text_cell(data.get(key))}")
+        if key == "elapsed_seconds":
+            typer.echo(f"elapsed_human: {_duration_cell(data.get(key))}")
     counts = _object_dict(data.get("counts"))
     typer.echo(
         "reports: "
@@ -291,6 +300,7 @@ def _echo_wait_heartbeat(payload: dict[str, object]) -> None:
     typer.echo(
         "wait heartbeat: "
         f"elapsed_seconds={_text_cell(data.get('elapsed_seconds'))} "
+        f'elapsed_human="{_duration_cell(data.get("elapsed_seconds"))}" '
         f"ready={_text_cell(counts.get('ready'))} "
         f"running={_text_cell(counts.get('running'))} "
         f"missing={_text_cell(counts.get('missing'))} "
@@ -302,6 +312,34 @@ def _echo_wait_heartbeat(payload: dict[str, object]) -> None:
 
 def _echo_generic_payload(payload: object) -> None:
     _echo_key_values(_object_dict(payload))
+
+
+def _duration_cell(value: object) -> str:
+    if not isinstance(value, int):
+        return "-"
+    return _format_duration_seconds(value)
+
+
+def _format_duration_seconds(seconds: int) -> str:
+    normalized_seconds = max(seconds, 0)
+    days, day_remainder = divmod(normalized_seconds, SECONDS_PER_DAY)
+    hours, hour_remainder = divmod(day_remainder, SECONDS_PER_HOUR)
+    minutes, remaining_seconds = divmod(hour_remainder, SECONDS_PER_MINUTE)
+
+    if days > 0:
+        return _join_duration_parts((days, "d"), (hours, "h"))
+    if hours > 0:
+        return _join_duration_parts((hours, "h"), (minutes, "m"))
+    if normalized_seconds > SHORT_DURATION_SECONDS_LIMIT:
+        return f"{minutes}m"
+    if minutes > 0:
+        return _join_duration_parts((minutes, "m"), (remaining_seconds, "s"))
+    return f"{remaining_seconds}s"
+
+
+def _join_duration_parts(*parts: tuple[int, str]) -> str:
+    formatted = [f"{value}{suffix}" for value, suffix in parts if value > 0]
+    return " ".join(formatted) if formatted else "0s"
 
 
 def _echo_key_values(payload: dict[str, object]) -> None:
@@ -555,8 +593,26 @@ def main(
 
 
 @app.command(help="Return local process liveness.")
-def health() -> None:
+def health(
+    ready: Annotated[
+        bool,
+        typer.Option("--ready", help="Also check the local MCP listener."),
+    ] = False,
+) -> None:
+    if ready:
+        try:
+            _check_local_listener(DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT)
+        except OSError as exc:
+            _echo_error("UNREADY", f"MCP listener is not ready at {DEFAULT_HTTP_HOST}:{DEFAULT_HTTP_PORT}: {exc}")
+            raise typer.Exit(1) from None
+        typer.echo("ready")
+        return
     typer.echo("ok")
+
+
+def _check_local_listener(host: str, port: int) -> None:
+    with socket.create_connection((host, port), timeout=HEALTH_READY_TIMEOUT_SECONDS):
+        pass
 
 
 @app.command(help=ACCESS_OPERATION.summary)
