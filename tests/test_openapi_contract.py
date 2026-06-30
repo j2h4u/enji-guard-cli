@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
+from enji_guard_cli._enji_api_contract import implemented_api_endpoints
 from enji_guard_cli.auth import import_bearer_token
 from enji_guard_cli.enji_api import (
     AuditRunCreate,
@@ -16,7 +17,6 @@ from enji_guard_cli.enji_api import (
     delete_project,
     github_installation_repos,
     github_installations,
-    implemented_api_endpoints,
     improvement_jobs,
     move_repo,
     preflight_repo_move,

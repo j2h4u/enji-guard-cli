@@ -133,6 +133,7 @@ id = "adapter-and-infrastructure-independent-from-core-and-entrypoints"
 name = "API adapter and infrastructure stay below core and entrypoints"
 type = "forbidden"
 source_modules = [
+    "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
     "enji_guard_cli.enji_api",
     "enji_guard_cli.errors",
@@ -152,6 +153,7 @@ layers = [
     "enji_guard_cli.core",
     "enji_guard_cli.audits",
     "enji_guard_cli.enji_api",
+    "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
     "enji_guard_cli.transport",
     "enji_guard_cli.telemetry",
@@ -163,7 +165,13 @@ id = "entrypoints-avoid-api-transport-and-http-clients"
 name = "CLI and MCP entrypoints avoid API adapter, transport internals, and HTTP clients"
 type = "forbidden"
 source_modules = ["enji_guard_cli.cli", "enji_guard_cli.runtime", "enji_guard_cli.mcp_server"]
-forbidden_modules = ["enji_guard_cli.enji_api", "enji_guard_cli.transport", "httpx", "httpx_retries"]
+forbidden_modules = [
+    "enji_guard_cli._enji_api_contract",
+    "enji_guard_cli.enji_api",
+    "enji_guard_cli.transport",
+    "httpx",
+    "httpx_retries",
+]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -172,6 +180,14 @@ name = "Core uses Enji API adapter instead of transport internals"
 type = "forbidden"
 source_modules = ["enji_guard_cli.core"]
 forbidden_modules = ["enji_guard_cli.transport", "httpx", "httpx_retries"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "core-avoids-enji-api-contract-internals"
+name = "Core uses Enji API behavior, not endpoint contract metadata"
+type = "forbidden"
+source_modules = ["enji_guard_cli.core"]
+forbidden_modules = ["enji_guard_cli._enji_api_contract"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -188,6 +204,7 @@ name = "Audit registry stays pure domain metadata"
 type = "forbidden"
 source_modules = ["enji_guard_cli.audits"]
 forbidden_modules = [
+    "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
     "enji_guard_cli.cli",
     "enji_guard_cli.core",
@@ -225,6 +242,7 @@ id = "frameworks-stay-in-entrypoints"
 name = "Typer and MCP frameworks stay out of core, adapter, auth, and transport"
 type = "forbidden"
 source_modules = [
+    "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
     "enji_guard_cli.audits",
     "enji_guard_cli.core",
