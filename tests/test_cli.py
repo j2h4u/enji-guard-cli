@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 from enji_guard_cli import cli
 from enji_guard_cli.audits import AuditAlias
 from enji_guard_cli.cli import app
-from enji_guard_cli.cli_impl.rendering import format_duration_seconds
+from enji_guard_cli.cli_impl.durations import format_duration_seconds
 from enji_guard_cli.core import EmailPreferenceUpdate, ReportWaitOptions, ScheduleSettingsUpdate
 from enji_guard_cli.enji_api import EnjiApiError
 from enji_guard_cli.settings import TelemetrySettings

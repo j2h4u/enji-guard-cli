@@ -4,13 +4,11 @@ from typing import cast
 
 import typer
 
-type JsonCommandAction = Callable[[], object]
-type DurationSeconds = int
+from enji_guard_cli.cli_impl.durations import format_duration_seconds
+from enji_guard_cli.cli_impl.rendering_support import object_dict, object_list
 
-SECONDS_PER_MINUTE = 60
-SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE
-SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR
-SHORT_DURATION_SECONDS_LIMIT = 5 * SECONDS_PER_MINUTE
+type JsonCommandAction = Callable[[], object]
+
 MIN_TIMEZONE_DIVERGENCE_COUNT = 2
 
 
@@ -237,40 +235,6 @@ def echo_generic_payload(payload: object) -> None:
     echo_key_values(object_dict(payload))
 
 
-def report_read_summary_payload(payload: object) -> dict[str, object]:
-    data = object_dict(payload)
-    summary: dict[str, object] = {
-        "reports": [report_read_summary_item(item) for item in object_list(data.get("reports"))]
-    }
-    if "target" in data:
-        summary["target"] = data["target"]
-    return summary
-
-
-def report_read_summary_item(item: object) -> dict[str, object]:
-    report = object_dict(item)
-    snapshot = object_dict(report.get("snapshot"))
-    content = object_dict(snapshot.get("content"))
-    summary_payload = object_dict(object_dict(content.get("summary")).get("summary"))
-    available = report.get("available")
-    if not isinstance(available, bool):
-        available = bool(snapshot)
-    return {
-        "audit": report.get("audit"),
-        "available": available,
-        "score": number_or_none(summary_payload.get("score")),
-        "headline": string_or_none(summary_payload.get("headline")),
-        "completed_at": string_or_none(content.get("completedAt")) or string_or_none(snapshot.get("collectedAt")),
-        "current_head_sha": report.get("current_head_sha"),
-        "last_audited_head_sha": report.get("last_audited_head_sha"),
-        "out_of_date": report.get("out_of_date"),
-        "state": string_or_none(report.get("state")),
-        "reason": string_or_none(report.get("reason")),
-        "message": string_or_none(report.get("message")),
-        "error_code": string_or_none(report.get("error_code")),
-    }
-
-
 def echo_access(payload: object) -> None:
     data = object_dict(payload)
     limits = object_dict(data.get("limits"))
@@ -292,50 +256,6 @@ def duration_cell(value: object) -> str:
     if not isinstance(value, int):
         return "-"
     return format_duration_seconds(value)
-
-
-def parse_duration_seconds(value: str) -> DurationSeconds:
-    normalized = value.strip().lower()
-    if not normalized:
-        raise ValueError("duration cannot be empty")
-    suffix_multipliers = {
-        "s": 1,
-        "m": SECONDS_PER_MINUTE,
-        "h": SECONDS_PER_HOUR,
-        "d": SECONDS_PER_DAY,
-    }
-    suffix = normalized[-1]
-    if suffix in suffix_multipliers:
-        amount = normalized[:-1]
-        multiplier = suffix_multipliers[suffix]
-    else:
-        amount = normalized
-        multiplier = 1
-    if not amount.isdigit():
-        raise ValueError("duration must be an integer optionally followed by s, m, h, or d")
-    return int(amount) * multiplier
-
-
-def format_duration_seconds(seconds: int) -> str:
-    normalized_seconds = max(seconds, 0)
-    days, day_remainder = divmod(normalized_seconds, SECONDS_PER_DAY)
-    hours, hour_remainder = divmod(day_remainder, SECONDS_PER_HOUR)
-    minutes, remaining_seconds = divmod(hour_remainder, SECONDS_PER_MINUTE)
-
-    if days > 0:
-        return join_duration_parts((days, "d"), (hours, "h"))
-    if hours > 0:
-        return join_duration_parts((hours, "h"), (minutes, "m"))
-    if normalized_seconds > SHORT_DURATION_SECONDS_LIMIT:
-        return f"{minutes}m"
-    if minutes > 0:
-        return join_duration_parts((minutes, "m"), (remaining_seconds, "s"))
-    return f"{remaining_seconds}s"
-
-
-def join_duration_parts(*parts: tuple[int, str]) -> str:
-    formatted = [f"{value}{suffix}" for value, suffix in parts if value > 0]
-    return " ".join(formatted) if formatted else "0s"
 
 
 def echo_key_values(payload: dict[str, object]) -> None:
@@ -601,56 +521,3 @@ def value_cell(value: object) -> str:
     if isinstance(value, dict):
         return f"{len(value)} field(s)"
     return str(value)
-
-
-def object_dict(value: object) -> dict[str, object]:
-    return cast(dict[str, object], value) if isinstance(value, dict) else {}
-
-
-def object_list(value: object) -> list[object]:
-    return value if isinstance(value, list) else []
-
-
-def string_or_none(value: object) -> str | None:
-    return value if isinstance(value, str) else None
-
-
-def number_or_none(value: object) -> int | float | None:
-    return value if isinstance(value, int | float) and not isinstance(value, bool) else None
-
-
-def report_markdown(payload: object) -> str:
-    if not isinstance(payload, dict):
-        raise ValueError("report payload is not an object")
-    snapshot = payload.get("snapshot")
-    if not isinstance(snapshot, dict):
-        raise ValueError("report payload does not contain snapshot")
-    content = snapshot.get("content")
-    if not isinstance(content, dict):
-        raise ValueError("report snapshot does not contain content")
-    report = content.get("report")
-    if not isinstance(report, str):
-        raise ValueError("report snapshot does not contain markdown report")
-    return report
-
-
-def reports_markdown(payload: object) -> str:
-    if not isinstance(payload, dict):
-        raise ValueError("reports payload is not an object")
-    reports = payload.get("reports")
-    if not isinstance(reports, list):
-        raise ValueError("reports payload does not contain reports")
-    parts = [report_item_markdown(item) for item in reports]
-    return "\n\n---\n\n".join(parts)
-
-
-def report_item_markdown(item: object) -> str:
-    if not isinstance(item, dict):
-        raise ValueError("report item is not an object")
-    audit = item.get("audit")
-    if not isinstance(audit, str):
-        raise ValueError("report item does not contain audit")
-    if item.get("available") is False:
-        message = string_or_none(item.get("message")) or f"{audit} report is unavailable"
-        return f"<!-- enji-report audit={audit} unavailable=true -->\n\n_{message}_"
-    return f"<!-- enji-report audit={audit} -->\n\n{report_markdown(item).strip()}"
