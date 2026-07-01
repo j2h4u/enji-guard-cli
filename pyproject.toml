@@ -126,7 +126,12 @@ id = "core-independent-from-entrypoints"
 name = "Core stays independent from CLI and MCP entrypoints"
 type = "forbidden"
 source_modules = ["enji_guard_cli.core", "enji_guard_cli.core_impl"]
-forbidden_modules = ["enji_guard_cli.cli", "enji_guard_cli.runtime", "enji_guard_cli.mcp_server"]
+forbidden_modules = [
+    "enji_guard_cli.cli",
+    "enji_guard_cli.cli_impl",
+    "enji_guard_cli.runtime",
+    "enji_guard_cli.mcp_server",
+]
 
 [[tool.importlinter.contracts]]
 id = "adapter-and-infrastructure-independent-from-core-and-entrypoints"
@@ -144,6 +149,7 @@ forbidden_modules = [
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
     "enji_guard_cli.cli",
+    "enji_guard_cli.cli_impl",
     "enji_guard_cli.runtime",
     "enji_guard_cli.mcp_server",
 ]
@@ -154,6 +160,7 @@ name = "Package imports flow from entrypoints toward transport"
 type = "layers"
 layers = [
     "enji_guard_cli.cli",
+    "enji_guard_cli.cli_impl",
     "enji_guard_cli.runtime",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.core",
@@ -172,7 +179,12 @@ layers = [
 id = "entrypoints-use-core-facade"
 name = "CLI and MCP entrypoints use the core facade"
 type = "forbidden"
-source_modules = ["enji_guard_cli.cli", "enji_guard_cli.runtime", "enji_guard_cli.mcp_server"]
+source_modules = [
+    "enji_guard_cli.cli",
+    "enji_guard_cli.cli_impl",
+    "enji_guard_cli.runtime",
+    "enji_guard_cli.mcp_server",
+]
 forbidden_modules = ["enji_guard_cli.core_impl"]
 allow_indirect_imports = true
 
@@ -180,7 +192,12 @@ allow_indirect_imports = true
 id = "entrypoints-avoid-api-transport-and-http-clients"
 name = "CLI and MCP entrypoints avoid API adapter, transport internals, and HTTP clients"
 type = "forbidden"
-source_modules = ["enji_guard_cli.cli", "enji_guard_cli.runtime", "enji_guard_cli.mcp_server"]
+source_modules = [
+    "enji_guard_cli.cli",
+    "enji_guard_cli.cli_impl",
+    "enji_guard_cli.runtime",
+    "enji_guard_cli.mcp_server",
+]
 forbidden_modules = [
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.enji_api",
@@ -223,6 +240,7 @@ forbidden_modules = [
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
     "enji_guard_cli.cli",
+    "enji_guard_cli.cli_impl",
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
     "enji_guard_cli.enji_api",

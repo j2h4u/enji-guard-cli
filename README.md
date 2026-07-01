@@ -96,6 +96,7 @@ disable noisy scheduled mail when it is not part of the workflow.
 ## Requirements
 
 - Docker
+- just
 - uv, only for repository development and QA
 
 ## Runtime

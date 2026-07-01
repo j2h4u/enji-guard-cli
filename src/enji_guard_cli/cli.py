@@ -1,8 +1,6 @@
-import json
 import socket
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, TypeGuard, cast
 
@@ -10,6 +8,30 @@ import typer
 
 from enji_guard_cli.audits import AuditAlias, ReportAuditAlias
 from enji_guard_cli.auth import AuthError, AuthStatusPayload, import_bearer_token, import_cookie, refresh_auth
+from enji_guard_cli.cli_impl.rendering import (
+    echo_access,
+    echo_audit_catalog,
+    echo_auth_status,
+    echo_email_preferences_table,
+    echo_generic_payload,
+    echo_json,
+    echo_key_values,
+    echo_project_table,
+    echo_repo_resolve_table,
+    echo_repo_score_table,
+    echo_repo_status_table,
+    echo_schedule_settings_table,
+    echo_wait_heartbeat,
+    echo_wait_status,
+    object_dict,
+    parse_duration_seconds,
+    report_read_summary_payload,
+    reports_markdown,
+)
+from enji_guard_cli.cli_impl.write_targets import (
+    parse_email_set_args,
+    parse_schedule_set_args,
+)
 from enji_guard_cli.core import (
     DEFAULT_REPO_SORT,
     DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS,
@@ -86,20 +108,8 @@ auth_status = AUTH_STATUS_OPERATION.execute
 _cli_state: dict[str, object] = {"project": None, "json": False}
 
 type JsonCommandAction = Callable[[], OperationResult]
-type DurationSeconds = int
-type PreferenceSwitch = Literal["on", "off"]
-type ScheduleFrequencyOption = Literal["daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"]
-
-SECONDS_PER_MINUTE = 60
-SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE
-SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR
-SHORT_DURATION_SECONDS_LIMIT = 5 * SECONDS_PER_MINUTE
 HEALTH_READY_TIMEOUT_SECONDS = 2.0
-MIN_TIMEZONE_DIVERGENCE_COUNT = 2
 DEFAULT_REPORT_WAIT_TIMEOUT = "45m"
-WRITE_FLAG_OPTIONS = frozenset({"--all-repos", "--all-projects", "--json"})
-SCHEDULE_SET_VALUE_OPTIONS = frozenset({"--enabled", "--frequency", "--timezone"})
-EMAIL_SET_VALUE_OPTIONS = frozenset({"--manual", "--scheduled"})
 SCHEDULE_SET_EPILOG = """
 Targets: REPO, --project PROJECT --all-repos, or --all-projects.
 Options: --enabled on|off, --frequency daily|workdays|weekly-3x|weekly-2x|weekly|monthly, --timezone TZ, --json.
@@ -108,40 +118,6 @@ EMAIL_SET_EPILOG = """
 Targets: REPO, --project PROJECT --all-repos, or --all-projects.
 Options: --manual on|off, --scheduled on|off, --json.
 """
-
-
-@dataclass(frozen=True, slots=True)
-class ParsedWriteArgs:
-    repo: str | None
-    all_repos: bool
-    all_projects: bool
-    json_output: bool
-    values: dict[str, str]
-
-
-@dataclass(frozen=True, slots=True)
-class ScheduleSetCliArgs:
-    repo: str | None
-    all_repos: bool
-    all_projects: bool
-    json_output: bool
-    enabled: PreferenceSwitch | None
-    frequency: ScheduleFrequencyOption | None
-    timezone: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class EmailSetCliArgs:
-    repo: str | None
-    all_repos: bool
-    all_projects: bool
-    json_output: bool
-    manual: PreferenceSwitch | None
-    scheduled: PreferenceSwitch | None
-
-
-def _echo_json(payload: object) -> None:
-    typer.echo(json.dumps(payload, sort_keys=True))
 
 
 def _echo_error(code: str, message: str) -> None:
@@ -155,703 +131,10 @@ def _run_human_or_json_command(
 ) -> None:
     payload = _resolve_command_payload(action)
     if json_output:
-        _echo_json(payload)
+        echo_json(payload)
         return
-    renderer = human_renderer if human_renderer is not None else _echo_generic_payload
+    renderer = human_renderer if human_renderer is not None else echo_generic_payload
     renderer(payload)
-
-
-def _echo_table(headers: tuple[str, ...], rows: list[tuple[str, ...]], empty_message: str = "No rows.") -> None:
-    if not rows:
-        typer.echo(empty_message)
-        return
-    widths = [len(header) for header in headers]
-    for row in rows:
-        widths = [max(width, len(cell)) for width, cell in zip(widths, row, strict=True)]
-    typer.echo(_table_line(headers, widths))
-    typer.echo(_table_line(tuple("-" * width for width in widths), widths))
-    for row in rows:
-        typer.echo(_table_line(row, widths))
-
-
-def _table_line(cells: tuple[str, ...], widths: list[int]) -> str:
-    return "  ".join(cell.ljust(width) for cell, width in zip(cells, widths, strict=True))
-
-
-def _echo_repo_score_table(payload: object) -> None:
-    headers = (
-        "project",
-        "repo",
-        "state",
-        "last_report",
-        "overall",
-        "grade",
-        "weakest",
-        "vulns",
-        "ai",
-        "tests",
-        "tech",
-        "deps",
-        "cog",
-        "dead",
-    )
-    _echo_table(
-        headers,
-        [_repo_score_row(project, repo) for project, repo in _payload_repos(payload)],
-        "No repositories.",
-    )
-
-
-def _echo_repo_status_table(payload: object) -> None:
-    headers = (
-        "project",
-        "repo",
-        "state",
-        "overall",
-        "weakest",
-        "reports",
-        "stale",
-        "active",
-        "last_report",
-        "current",
-        "audited",
-    )
-    _echo_table(
-        headers,
-        [_repo_status_row(project, repo) for project, repo in _payload_repos(payload)],
-        "No repositories.",
-    )
-    repo = _single_status_repo(payload)
-    if repo is not None:
-        typer.echo("")
-        _echo_status_report_table(repo)
-
-
-def _echo_project_table(payload: object) -> None:
-    headers = ("project", "id", "repos", "recon", "score_axes")
-    _echo_table(headers, [_project_row(project) for project in _payload_projects(payload)], "No projects.")
-
-
-def _echo_repo_resolve_table(payload: object) -> None:
-    data = _object_dict(payload)
-    headers = ("selector", "resolved", "project", "repo", "repo_id", "state")
-    rows = [_repo_resolve_row(data, _object_dict(match)) for match in _object_list(data.get("matches"))]
-    _echo_table(headers, rows, "No repositories.")
-
-
-def _echo_status_report_table(repo: dict[str, object]) -> None:
-    headers = ("repo", "audit", "state", "run", "completed", "current", "audited", "freshness")
-    reports = _object_dict(repo.get("reports"))
-    rows = [_status_report_row(repo, _object_dict(report)) for report in _object_list(reports.get("reports"))]
-    _echo_table(headers, rows, "No reports.")
-
-
-def _echo_email_preferences_table(payload: object) -> None:
-    headers = ("project", "repo", "audit", "manual", "auto")
-    rows = [
-        (
-            _text_cell(row.get("project_name"), fallback=_text_cell(row.get("project_id"))),
-            _text_cell(row.get("github_repo"), fallback=_text_cell(row.get("repo_id"))),
-            _text_cell(row.get("audit")),
-            _text_cell(row.get("manual_run_completion")),
-            _text_cell(row.get("scheduled_run_completion")),
-        )
-        for row in (_object_dict(item) for item in _object_list(_object_dict(payload).get("preferences")))
-    ]
-    _echo_table(headers, rows, "No email preferences.")
-
-
-def _echo_schedule_settings_table(payload: object) -> None:
-    schedule_rows = [_object_dict(item) for item in _object_list(_object_dict(payload).get("schedules"))]
-    headers = _schedule_settings_headers(schedule_rows)
-    rows = [_schedule_settings_row(row, include_status="status" in headers) for row in schedule_rows]
-    _echo_table(headers, rows, "No schedules.")
-    for warning in _schedule_timezone_warnings(schedule_rows):
-        typer.echo(warning)
-
-
-def _schedule_settings_headers(rows: list[dict[str, object]]) -> tuple[str, ...]:
-    base = ("project", "repo", "audit", "enabled", "freq", "days", "at", "timezone")
-    if any("status" in row for row in rows):
-        return (*base, "status")
-    return base
-
-
-def _schedule_settings_row(row: dict[str, object], *, include_status: bool) -> tuple[str, ...]:
-    base = (
-        _text_cell(row.get("project_name"), fallback=_text_cell(row.get("project_id"))),
-        _text_cell(row.get("github_repo"), fallback=_text_cell(row.get("repo_id"))),
-        _text_cell(row.get("audit")),
-        _text_cell(row.get("enabled")),
-        _text_cell(row.get("frequency")),
-        _days_cell(row.get("days_of_week")),
-        _schedule_at_cell(row),
-        _text_cell(row.get("timezone")),
-    )
-    if include_status:
-        return (*base, _text_cell(row.get("status")))
-    return base
-
-
-def _schedule_timezone_warnings(rows: list[dict[str, object]]) -> list[str]:
-    by_repo: dict[str, dict[str, list[str]]] = {}
-    for row in rows:
-        if row.get("enabled") is not True:
-            continue
-        timezone = row.get("timezone")
-        audit = row.get("audit")
-        if not isinstance(timezone, str) or not isinstance(audit, str):
-            continue
-        repo = _text_cell(row.get("github_repo"), fallback=_text_cell(row.get("repo_id")))
-        by_repo.setdefault(repo, {}).setdefault(timezone, []).append(audit)
-    warnings: list[str] = []
-    for repo, audits_by_timezone in by_repo.items():
-        if len(audits_by_timezone) < MIN_TIMEZONE_DIVERGENCE_COUNT:
-            continue
-        parts = [f"{timezone}: {', '.join(sorted(audits))}" for timezone, audits in sorted(audits_by_timezone.items())]
-        warnings.append(f"timezone divergence: {repo}: {'; '.join(parts)}")
-    return warnings
-
-
-def _echo_auth_status(payload: object) -> None:
-    data = _object_dict(payload)
-    authenticated = "yes" if data.get("authenticated") is True else "no"
-    typer.echo(f"authenticated: {authenticated}")
-    for key in ("credential_type", "email", "name", "user_id", "auth_file", "code", "message"):
-        value = _text_cell(data.get(key))
-        if value != "-":
-            typer.echo(f"{key}: {value}")
-
-
-def _echo_audit_catalog(payload: object) -> None:
-    headers = ("audit", "label", "job_kind", "route")
-    rows = [
-        (
-            _text_cell(audit.get("alias")),
-            _text_cell(audit.get("label")),
-            _text_cell(audit.get("job_kind")),
-            _text_cell(audit.get("route_slug")),
-        )
-        for audit in (_object_dict(item) for item in _object_list(payload))
-    ]
-    _echo_table(headers, rows, "No audits.")
-
-
-def _echo_wait_status(payload: object) -> None:
-    data = _object_dict(payload)
-    complete = "yes" if data.get("complete") is True else "no"
-    typer.echo(f"complete: {complete}")
-    typer.echo(f"fresh: {_text_cell(data.get('fresh'))}")
-    for key in ("reason", "repo_id", "elapsed_seconds", "current_head_sha", "last_report_at"):
-        typer.echo(f"{key}: {_text_cell(data.get(key))}")
-        if key == "elapsed_seconds":
-            typer.echo(f"elapsed_human: {_duration_cell(data.get(key))}")
-    counts = _object_dict(data.get("counts"))
-    typer.echo(
-        "reports: "
-        f"{_text_cell(counts.get('ready'))} ready, "
-        f"{_text_cell(counts.get('running'))} running, "
-        f"{_text_cell(counts.get('missing'))} missing, "
-        f"{_text_cell(counts.get('stale'))} stale"
-    )
-    _echo_wait_list("missing", data)
-    _echo_wait_list("running", data)
-    _echo_wait_list("failed", data)
-    _echo_wait_list("stale", data)
-
-
-def _echo_wait_list(key: str, data: dict[str, object]) -> None:
-    values = [value for value in _object_list(data.get(key)) if isinstance(value, str)]
-    if values:
-        typer.echo(f"{key}: {', '.join(values)}")
-
-
-def _echo_wait_heartbeat(payload: dict[str, object]) -> None:
-    data = _object_dict(payload)
-    counts = _object_dict(data.get("counts"))
-    typer.echo(
-        "wait heartbeat: "
-        f"elapsed_seconds={_text_cell(data.get('elapsed_seconds'))} "
-        f'elapsed_human="{_duration_cell(data.get("elapsed_seconds"))}" '
-        f"ready={_text_cell(counts.get('ready'))} "
-        f"running={_text_cell(counts.get('running'))} "
-        f"missing={_text_cell(counts.get('missing'))} "
-        f"stale={_text_cell(counts.get('stale'))} "
-        f"current_head_sha={_text_cell(data.get('current_head_sha'))}",
-        err=True,
-    )
-
-
-def _echo_generic_payload(payload: object) -> None:
-    _echo_key_values(_object_dict(payload))
-
-
-def _parse_schedule_set_args(raw_args: list[str]) -> ScheduleSetCliArgs:
-    parsed = _parse_write_args(raw_args, value_options=SCHEDULE_SET_VALUE_OPTIONS)
-    return ScheduleSetCliArgs(
-        repo=parsed.repo,
-        all_repos=parsed.all_repos,
-        all_projects=parsed.all_projects,
-        json_output=parsed.json_output,
-        enabled=_optional_switch(parsed.values.get("--enabled"), "--enabled"),
-        frequency=_optional_schedule_frequency(parsed.values.get("--frequency")),
-        timezone=parsed.values.get("--timezone"),
-    )
-
-
-def _parse_email_set_args(raw_args: list[str]) -> EmailSetCliArgs:
-    parsed = _parse_write_args(raw_args, value_options=EMAIL_SET_VALUE_OPTIONS)
-    return EmailSetCliArgs(
-        repo=parsed.repo,
-        all_repos=parsed.all_repos,
-        all_projects=parsed.all_projects,
-        json_output=parsed.json_output,
-        manual=_optional_switch(parsed.values.get("--manual"), "--manual"),
-        scheduled=_optional_switch(parsed.values.get("--scheduled"), "--scheduled"),
-    )
-
-
-def _parse_write_args(raw_args: list[str], *, value_options: frozenset[str]) -> ParsedWriteArgs:
-    positional: list[str] = []
-    flags: set[str] = set()
-    values: dict[str, str] = {}
-    index = 0
-    while index < len(raw_args):
-        token = raw_args[index]
-        if token in WRITE_FLAG_OPTIONS:
-            _add_write_flag(flags, token)
-            index += 1
-        elif token in value_options:
-            values[token] = _read_write_option_value(raw_args, index, values)
-            index += 2
-        elif token.startswith("--"):
-            raise ValueError(f"unknown option: {token}")
-        else:
-            positional.append(token)
-            index += 1
-    if len(positional) > 1:
-        raise ValueError("pass at most one REPO")
-    return ParsedWriteArgs(
-        repo=positional[0] if positional else None,
-        all_repos="--all-repos" in flags,
-        all_projects="--all-projects" in flags,
-        json_output="--json" in flags,
-        values=values,
-    )
-
-
-def _add_write_flag(flags: set[str], option: str) -> None:
-    if option in flags:
-        raise ValueError(f"duplicate option: {option}")
-    flags.add(option)
-
-
-def _read_write_option_value(raw_args: list[str], index: int, values: dict[str, str]) -> str:
-    option = raw_args[index]
-    if option in values:
-        raise ValueError(f"duplicate option: {option}")
-    value_index = index + 1
-    if value_index >= len(raw_args) or raw_args[value_index].startswith("--"):
-        raise ValueError(f"{option} requires a value")
-    return raw_args[value_index]
-
-
-def _optional_switch(value: str | None, option: str) -> PreferenceSwitch | None:
-    if value is None:
-        return None
-    if value in {"on", "off"}:
-        return cast(PreferenceSwitch, value)
-    raise ValueError(f"{option} must be on or off")
-
-
-def _optional_schedule_frequency(value: str | None) -> ScheduleFrequencyOption | None:
-    if value is None:
-        return None
-    if value in {"daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"}:
-        return cast(ScheduleFrequencyOption, value)
-    raise ValueError("--frequency is invalid")
-
-
-def _report_read_summary_payload(payload: object) -> dict[str, object]:
-    data = _object_dict(payload)
-    summary: dict[str, object] = {
-        "reports": [_report_read_summary_item(item) for item in _object_list(data.get("reports"))]
-    }
-    if "target" in data:
-        summary["target"] = data["target"]
-    return summary
-
-
-def _report_read_summary_item(item: object) -> dict[str, object]:
-    report = _object_dict(item)
-    snapshot = _object_dict(report.get("snapshot"))
-    content = _object_dict(snapshot.get("content"))
-    summary_payload = _object_dict(_object_dict(content.get("summary")).get("summary"))
-    available = report.get("available")
-    if not isinstance(available, bool):
-        available = bool(snapshot)
-    return {
-        "audit": report.get("audit"),
-        "available": available,
-        "score": _number_or_none(summary_payload.get("score")),
-        "headline": _string_or_none(summary_payload.get("headline")),
-        "completed_at": _string_or_none(content.get("completedAt")) or _string_or_none(snapshot.get("collectedAt")),
-        "current_head_sha": report.get("current_head_sha"),
-        "last_audited_head_sha": report.get("last_audited_head_sha"),
-        "out_of_date": report.get("out_of_date"),
-        "state": _string_or_none(report.get("state")),
-        "reason": _string_or_none(report.get("reason")),
-        "message": _string_or_none(report.get("message")),
-        "error_code": _string_or_none(report.get("error_code")),
-    }
-
-
-def _echo_access(payload: object) -> None:
-    data = _object_dict(payload)
-    limits = _object_dict(data.get("limits"))
-    for key in ("group", "full_access"):
-        typer.echo(f"{key}: {_text_cell(data.get(key))}")
-    for key in (
-        "can_use_schedules",
-        "can_add_repo",
-        "can_create_project",
-        "can_run_one_shot_autofix",
-        "can_run_one_shot_pentest",
-    ):
-        typer.echo(f"{key}: {_text_cell(limits.get(key))}")
-    for key in ("audit_runs", "autofix_runs"):
-        typer.echo(f"{key}: {_value_cell(limits.get(key))}")
-
-
-def _duration_cell(value: object) -> str:
-    if not isinstance(value, int):
-        return "-"
-    return _format_duration_seconds(value)
-
-
-def _parse_duration_seconds(value: str) -> DurationSeconds:
-    normalized = value.strip().lower()
-    if not normalized:
-        raise ValueError("duration cannot be empty")
-    suffix_multipliers = {
-        "s": 1,
-        "m": SECONDS_PER_MINUTE,
-        "h": SECONDS_PER_HOUR,
-        "d": SECONDS_PER_DAY,
-    }
-    suffix = normalized[-1]
-    if suffix in suffix_multipliers:
-        amount = normalized[:-1]
-        multiplier = suffix_multipliers[suffix]
-    else:
-        amount = normalized
-        multiplier = 1
-    if not amount.isdigit():
-        raise ValueError("duration must be an integer optionally followed by s, m, h, or d")
-    return int(amount) * multiplier
-
-
-def _format_duration_seconds(seconds: int) -> str:
-    normalized_seconds = max(seconds, 0)
-    days, day_remainder = divmod(normalized_seconds, SECONDS_PER_DAY)
-    hours, hour_remainder = divmod(day_remainder, SECONDS_PER_HOUR)
-    minutes, remaining_seconds = divmod(hour_remainder, SECONDS_PER_MINUTE)
-
-    if days > 0:
-        return _join_duration_parts((days, "d"), (hours, "h"))
-    if hours > 0:
-        return _join_duration_parts((hours, "h"), (minutes, "m"))
-    if normalized_seconds > SHORT_DURATION_SECONDS_LIMIT:
-        return f"{minutes}m"
-    if minutes > 0:
-        return _join_duration_parts((minutes, "m"), (remaining_seconds, "s"))
-    return f"{remaining_seconds}s"
-
-
-def _join_duration_parts(*parts: tuple[int, str]) -> str:
-    formatted = [f"{value}{suffix}" for value, suffix in parts if value > 0]
-    return " ".join(formatted) if formatted else "0s"
-
-
-def _echo_key_values(payload: dict[str, object]) -> None:
-    if not payload:
-        typer.echo("No data.")
-        return
-    for key, value in payload.items():
-        typer.echo(f"{key}: {_value_cell(value)}")
-
-
-def _payload_projects(payload: object) -> list[dict[str, object]]:
-    return [_object_dict(project) for project in _object_list(_object_dict(payload).get("projects"))]
-
-
-def _payload_repos(payload: object) -> list[tuple[dict[str, object], dict[str, object]]]:
-    repos: list[tuple[dict[str, object], dict[str, object]]] = []
-    for project in _payload_projects(payload):
-        repos.extend((project, _object_dict(repo_value)) for repo_value in _object_list(project.get("repos")))
-    return repos
-
-
-def _single_status_repo(payload: object) -> dict[str, object] | None:
-    repo_pairs = _payload_repos(payload)
-    if len(repo_pairs) != 1:
-        return None
-    return repo_pairs[0][1]
-
-
-def _project_row(project: dict[str, object]) -> tuple[str, ...]:
-    return (
-        _project_label(project),
-        _text_cell(project.get("id"), fallback=_text_cell(project.get("project_id"))),
-        str(_repo_count(project)),
-        _project_recon_cell(project),
-        str(len(_object_dict(project.get("scores")))),
-    )
-
-
-def _repo_resolve_row(data: dict[str, object], match: dict[str, object]) -> tuple[str, ...]:
-    return (
-        _text_cell(data.get("selector")),
-        _text_cell(data.get("resolved")),
-        _project_label(match),
-        _repo_label(match),
-        _text_cell(match.get("repo_id")),
-        _repo_state(match),
-    )
-
-
-def _repo_score_row(project: dict[str, object], repo: dict[str, object]) -> tuple[str, ...]:
-    scores = _object_dict(repo.get("scores"))
-    score_summary = _object_dict(repo.get("score_summary"))
-    return (
-        _project_label(project),
-        _repo_label(repo),
-        _repo_state(repo),
-        _date_cell(repo.get("last_report_at")),
-        _score_cell(score_summary.get("overall_score")),
-        _text_cell(score_summary.get("overall_grade")),
-        _weakest_cell(score_summary),
-        _score_cell(scores.get("vulns")),
-        _score_cell(scores.get("ai-readiness")),
-        _score_cell(scores.get("tests")),
-        _score_cell(scores.get("tech-health")),
-        _score_cell(scores.get("dependency-hygiene")),
-        _score_cell(scores.get("cognitive-debt")),
-        _score_cell(scores.get("dead-code")),
-    )
-
-
-def _status_report_row(repo: dict[str, object], report: dict[str, object]) -> tuple[str, ...]:
-    return (
-        _repo_label(repo),
-        _text_cell(report.get("audit")),
-        _text_cell(report.get("state")),
-        _text_cell(report.get("run_status")),
-        _date_cell(report.get("completed_at")),
-        _sha_cell(report.get("current_head_sha")),
-        _sha_cell(report.get("last_audited_head_sha")),
-        _freshness_cell(report.get("out_of_date")),
-    )
-
-
-def _freshness_cell(value: object) -> str:
-    if value is True:
-        return "stale"
-    if value is False:
-        return "fresh"
-    return "-"
-
-
-def _repo_status_row(project: dict[str, object], repo: dict[str, object]) -> tuple[str, ...]:
-    score_summary = _object_dict(repo.get("score_summary"))
-    reports = _object_dict(repo.get("reports"))
-    return (
-        _project_label(project),
-        _repo_label(repo),
-        _repo_state(repo),
-        _score_cell(score_summary.get("overall_score")),
-        _weakest_cell(score_summary),
-        _reports_cell(reports),
-        _stale_audits_cell(reports),
-        _text_cell(repo.get("active_run_count")),
-        _date_cell(repo.get("last_report_at")),
-        _sha_cell(repo.get("current_head_sha")),
-        _sha_cell(_audited_head(reports)),
-    )
-
-
-def _project_label(project: dict[str, object]) -> str:
-    return _text_cell(
-        project.get("project_name"),
-        fallback=_text_cell(project.get("name"), fallback=_text_cell(project.get("project_id"))),
-    )
-
-
-def _repo_label(repo: dict[str, object]) -> str:
-    return _text_cell(repo.get("github_repo"), fallback=_text_cell(repo.get("repo_id")))
-
-
-def _repo_state(repo: dict[str, object]) -> str:
-    if repo.get("connected") is not True:
-        return "disconnected"
-    if repo.get("recon_done") is not True:
-        return "uninitialized"
-    if not _object_dict(repo.get("scores")):
-        return "unscored"
-    return "scored"
-
-
-def _repo_count(project: dict[str, object]) -> int:
-    repo_ids = _object_list(project.get("repo_ids"))
-    if repo_ids:
-        return len(repo_ids)
-    camel_repo_ids = _object_list(project.get("repoIds"))
-    if camel_repo_ids:
-        return len(camel_repo_ids)
-    return len(_object_list(project.get("repos")))
-
-
-def _project_recon_cell(project: dict[str, object]) -> str:
-    value = project.get("recon_pending")
-    if value is None:
-        value = project.get("reconPending")
-    if value is True:
-        return "pending"
-    if value is False:
-        return "done"
-    return "-"
-
-
-def _weakest_cell(score_summary: dict[str, object]) -> str:
-    axis = score_summary.get("weakest_axis")
-    score = _score_cell(score_summary.get("weakest_score"))
-    if not isinstance(axis, str) or score == "-":
-        return "-"
-    return f"{axis}={score}"
-
-
-def _reports_cell(reports: dict[str, object]) -> str:
-    ready = len(_object_list(reports.get("ready")))
-    running = len(_object_list(reports.get("running")))
-    missing = len(_object_list(reports.get("missing")))
-    parts: list[str] = []
-    if ready:
-        parts.append(f"{ready} ready")
-    if running:
-        parts.append(f"{running} running")
-    if missing:
-        parts.append(f"{missing} missing")
-    stale = len(_stale_audits(reports))
-    if stale:
-        parts.append(f"{stale} stale")
-    return ", ".join(parts) if parts else "-"
-
-
-def _audited_head(reports: dict[str, object]) -> object | None:
-    audited_heads: set[str] = set()
-    for report_value in _object_list(reports.get("reports")):
-        report = _object_dict(report_value)
-        audited_head = report.get("last_audited_head_sha")
-        if isinstance(audited_head, str) and audited_head:
-            audited_heads.add(audited_head)
-    if not audited_heads:
-        return None
-    if len(audited_heads) > 1:
-        return "mixed"
-    return next(iter(audited_heads))
-
-
-def _stale_audits_cell(reports: dict[str, object]) -> str:
-    stale = _stale_audits(reports)
-    return ", ".join(stale) if stale else "-"
-
-
-def _stale_audits(reports: dict[str, object]) -> list[str]:
-    stale: list[str] = []
-    for report_value in _object_list(reports.get("reports")):
-        report = _object_dict(report_value)
-        if report.get("out_of_date") is True and isinstance(report.get("audit"), str):
-            stale.append(cast(str, report["audit"]))
-    return stale
-
-
-def _sha_cell(value: object) -> str:
-    if not isinstance(value, str) or not value:
-        return "-"
-    return value[:8]
-
-
-def _date_cell(value: object) -> str:
-    if not isinstance(value, str) or not value:
-        return "-"
-    return value[:10]
-
-
-def _days_cell(value: object) -> str:
-    days = [item for item in _object_list(value) if isinstance(item, str)]
-    if not days:
-        return "-"
-    return ",".join(days)
-
-
-def _schedule_at_cell(row: dict[str, object]) -> str:
-    schedule_time = _text_cell(row.get("schedule_time"))
-    source = row.get("schedule_time_source")
-    if source == "auto":
-        if schedule_time == "-":
-            return "auto"
-        return f"{schedule_time} (auto)"
-    if source == "user":
-        if schedule_time == "-":
-            return "manual"
-        return f"{schedule_time} (manual)"
-    return schedule_time
-
-
-def _score_cell(value: object) -> str:
-    if isinstance(value, bool) or value is None:
-        return "-"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        return f"{value:.1f}".removesuffix(".0")
-    return "-"
-
-
-def _text_cell(value: object, *, fallback: str = "-") -> str:
-    if isinstance(value, str) and value:
-        return value
-    if isinstance(value, bool):
-        return "yes" if value else "no"
-    if isinstance(value, int):
-        return str(value)
-    return fallback
-
-
-def _value_cell(value: object) -> str:
-    if isinstance(value, str | int | float) or value is None or isinstance(value, bool):
-        return _text_cell(value)
-    if isinstance(value, list):
-        return f"{len(value)} item(s)"
-    if isinstance(value, dict):
-        return f"{len(value)} field(s)"
-    return str(value)
-
-
-def _object_dict(value: object) -> dict[str, object]:
-    return cast(dict[str, object], value) if isinstance(value, dict) else {}
-
-
-def _object_list(value: object) -> list[object]:
-    return value if isinstance(value, list) else []
-
-
-def _string_or_none(value: object) -> str | None:
-    return value if isinstance(value, str) else None
-
-
-def _number_or_none(value: object) -> int | float | None:
-    return value if isinstance(value, int | float) and not isinstance(value, bool) else None
 
 
 def _resolve_command_payload(action: JsonCommandAction) -> object:
@@ -917,7 +200,7 @@ def _check_local_listener(host: str, port: int) -> None:
 def access(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_human_or_json_command(get_access, _json_output(json_output), _echo_access)
+    _run_human_or_json_command(get_access, _json_output(json_output), echo_access)
 
 
 @app.command(help="Run MCP plus background auth refresh under one supervisor.")
@@ -967,7 +250,7 @@ def status(
     _run_human_or_json_command(
         lambda: runtime_status(repo, _selected_project(), sort),
         _json_output(json_output),
-        _echo_repo_status_table,
+        echo_repo_status_table,
     )
 
 
@@ -989,16 +272,16 @@ def wait(
             _selected_project(),
             options=ReportWaitOptions(
                 poll_seconds=DEFAULT_REPORT_WAIT_POLL_SECONDS,
-                timeout_seconds=_parse_duration_seconds(timeout),
+                timeout_seconds=parse_duration_seconds(timeout),
                 heartbeat_seconds=DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS,
             ),
-            heartbeat=_echo_wait_heartbeat,
+            heartbeat=echo_wait_heartbeat,
         )
     )
     if _json_output(json_output):
-        _echo_json(payload)
+        echo_json(payload)
     else:
-        _echo_wait_status(payload)
+        echo_wait_status(payload)
     if isinstance(payload, dict) and payload.get("complete") is False:
         raise typer.Exit(2)
 
@@ -1007,7 +290,7 @@ def wait(
 def project_list(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_human_or_json_command(list_projects, _json_output(json_output), _echo_project_table)
+    _run_human_or_json_command(list_projects, _json_output(json_output), echo_project_table)
 
 
 @project_app.command("create", help="Create an Enji project.")
@@ -1053,10 +336,10 @@ def report_read(
         lambda: read_reports_for_repo(repo, _selected_project(), _report_audits(audits or []), all_reports=all_reports)
     )
     if _json_output(json_output):
-        _echo_json(_report_read_summary_payload(payload))
+        echo_json(report_read_summary_payload(payload))
         return
     try:
-        typer.echo(_reports_markdown(payload))
+        typer.echo(reports_markdown(payload))
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
@@ -1076,7 +359,7 @@ def repo_list(
     _run_human_or_json_command(
         lambda: list_project_inventory(_selected_project(), sort),
         _json_output(json_output),
-        _echo_repo_score_table,
+        echo_repo_score_table,
     )
 
 
@@ -1088,7 +371,7 @@ def repo_resolve(
     _run_human_or_json_command(
         lambda: resolve_repo(repo, _selected_project()),
         _json_output(json_output),
-        _echo_repo_resolve_table,
+        echo_repo_resolve_table,
     )
 
 
@@ -1144,7 +427,7 @@ def schedule_list(
     _run_human_or_json_command(
         lambda: list_schedule_settings(repo, _selected_project()),
         _json_output(json_output),
-        _echo_schedule_settings_table,
+        echo_schedule_settings_table,
     )
 
 
@@ -1157,7 +440,7 @@ def schedule_list(
 )
 def schedule_set(ctx: typer.Context) -> None:
     try:
-        args = _parse_schedule_set_args(ctx.args)
+        args = parse_schedule_set_args(ctx.args)
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
@@ -1176,7 +459,7 @@ def schedule_set(ctx: typer.Context) -> None:
             all_projects=args.all_projects,
         ),
         _json_output(args.json_output),
-        _echo_schedule_settings_table,
+        echo_schedule_settings_table,
     )
 
 
@@ -1205,7 +488,7 @@ def schedule_auto_time(
             all_projects=all_projects,
         ),
         _json_output(json_output),
-        _echo_schedule_settings_table,
+        echo_schedule_settings_table,
     )
 
 
@@ -1220,7 +503,7 @@ def email_list(
     _run_human_or_json_command(
         lambda: list_email_preferences(repo, _selected_project()),
         _json_output(json_output),
-        _echo_email_preferences_table,
+        echo_email_preferences_table,
     )
 
 
@@ -1233,7 +516,7 @@ def email_list(
 )
 def email_set(ctx: typer.Context) -> None:
     try:
-        args = _parse_email_set_args(ctx.args)
+        args = parse_email_set_args(ctx.args)
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
@@ -1249,7 +532,7 @@ def email_set(ctx: typer.Context) -> None:
             all_projects=args.all_projects,
         ),
         _json_output(args.json_output),
-        _echo_email_preferences_table,
+        echo_email_preferences_table,
     )
 
 
@@ -1259,9 +542,9 @@ def catalog_audits(
 ) -> None:
     payload = resolve_operation_result(CATALOG_AUDITS_OPERATION.execute())
     if _json_output(json_output):
-        _echo_json(payload)
+        echo_json(payload)
         return
-    _echo_audit_catalog(payload)
+    echo_audit_catalog(payload)
 
 
 @catalog_app.command("audit", help=CATALOG_AUDIT_OPERATION.summary)
@@ -1271,9 +554,9 @@ def catalog_audit(
 ) -> None:
     payload = resolve_operation_result(CATALOG_AUDIT_OPERATION.execute(audit))
     if _json_output(json_output):
-        _echo_json(payload)
+        echo_json(payload)
         return
-    _echo_key_values(_object_dict(payload))
+    echo_key_values(object_dict(payload))
 
 
 @auth_app.command("import-cookie", help="Import a raw browser Cookie header from stdin.")
@@ -1293,9 +576,9 @@ def auth_import_cookie(
     try:
         payload = import_cookie(raw_cookie, auth_file)
         if _json_output(json_output):
-            _echo_json(payload)
+            echo_json(payload)
         else:
-            _echo_key_values(cast(dict[str, object], payload))
+            echo_key_values(cast(dict[str, object], payload))
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
@@ -1321,9 +604,9 @@ def auth_import_token(
     try:
         payload = import_bearer_token(raw_token, auth_file)
         if _json_output(json_output):
-            _echo_json(payload)
+            echo_json(payload)
         else:
-            _echo_key_values(cast(dict[str, object], payload))
+            echo_key_values(cast(dict[str, object], payload))
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
@@ -1342,9 +625,9 @@ def auth_status_command(
 ) -> None:
     payload = cast_auth_status_payload(resolve_operation_result(auth_status(auth_file)))
     if _json_output(json_output):
-        _echo_json(payload)
+        echo_json(payload)
     else:
-        _echo_auth_status(payload)
+        echo_auth_status(payload)
     if not payload["authenticated"]:
         raise typer.Exit(3)
 
@@ -1360,9 +643,9 @@ def auth_refresh_command(
     try:
         payload = refresh_auth(auth_file)
         if _json_output(json_output):
-            _echo_json(payload)
+            echo_json(payload)
         else:
-            _echo_key_values(cast(dict[str, object], payload))
+            echo_key_values(cast(dict[str, object], payload))
     except AuthError as exc:
         _echo_error(exc.code, exc.message)
         raise typer.Exit(_exit_code_for_error(exc.code)) from None
@@ -1387,43 +670,6 @@ def _invalid_auth_status_payload() -> AuthStatusPayload:
         "name": None,
         "user_id": None,
     }
-
-
-def _report_markdown(payload: object) -> str:
-    if not isinstance(payload, dict):
-        raise ValueError("report payload is not an object")
-    snapshot = payload.get("snapshot")
-    if not isinstance(snapshot, dict):
-        raise ValueError("report payload does not contain snapshot")
-    content = snapshot.get("content")
-    if not isinstance(content, dict):
-        raise ValueError("report snapshot does not contain content")
-    report = content.get("report")
-    if not isinstance(report, str):
-        raise ValueError("report snapshot does not contain markdown report")
-    return report
-
-
-def _reports_markdown(payload: object) -> str:
-    if not isinstance(payload, dict):
-        raise ValueError("reports payload is not an object")
-    reports = payload.get("reports")
-    if not isinstance(reports, list):
-        raise ValueError("reports payload does not contain reports")
-    parts = [_report_item_markdown(item) for item in reports]
-    return "\n\n---\n\n".join(parts)
-
-
-def _report_item_markdown(item: object) -> str:
-    if not isinstance(item, dict):
-        raise ValueError("report item is not an object")
-    audit = item.get("audit")
-    if not isinstance(audit, str):
-        raise ValueError("report item does not contain audit")
-    if item.get("available") is False:
-        message = _string_or_none(item.get("message")) or f"{audit} report is unavailable"
-        return f"<!-- enji-report audit={audit} unavailable=true -->\n\n_{message}_"
-    return f"<!-- enji-report audit={audit} -->\n\n{_report_markdown(item).strip()}"
 
 
 def _preference_switch(value: Literal["on", "off"] | None) -> bool | None:

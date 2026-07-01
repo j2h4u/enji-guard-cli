@@ -120,7 +120,7 @@ def test_set_schedule_normalizes_json_payload(monkeypatch: MonkeyPatch) -> None:
 
     monkeypatch.setattr(core, "run_put_improvement_job", fake_put_improvement_job)
 
-    payload = core.set_schedule(
+    payload = core._set_schedule(
         "repo_1",
         AuditAlias.SECURITY,
         {
@@ -170,7 +170,7 @@ def test_report_status_derives_ready_and_missing_reports_from_task_links(monkeyp
         },
     )
 
-    payload = core.report_status("repo_1")
+    payload = core._report_status("repo_1")
 
     assert payload["complete"] is False
     assert payload["ready"] == ["security"]
@@ -251,7 +251,7 @@ def test_report_status_marks_started_report_runs_as_running(monkeypatch: MonkeyP
         },
     )
 
-    payload = core.report_status("repo_1")
+    payload = core._report_status("repo_1")
 
     assert payload["complete"] is False
     assert payload["ready"] == []
@@ -274,44 +274,6 @@ def test_report_status_marks_started_report_runs_as_running(monkeypatch: MonkeyP
         "last_audited_head_sha": "head_1",
         "out_of_date": True,
     }
-
-
-def test_repo_status_combines_active_runs_rerun_state_and_report_status(monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
-    monkeypatch.setattr(
-        core,
-        "run_repo_audit_rerun_state",
-        lambda repo_id: {
-            "state": {
-                "currentHeadSha": "head_2",
-                "actions": {"audit.security": {"lastAuditedHeadSha": "head_1"}},
-            }
-        },
-    )
-    monkeypatch.setattr(core, "run_repo_task_links", lambda repo_id: {"links": []})
-
-    payload = core.repo_status("repo_1")
-
-    assert payload["repo_id"] == "repo_1"
-    assert payload["active_run_count"] == 0
-    assert payload["active_runs"] == []
-    assert payload["current_head_sha"] == "head_2"
-    assert payload["rerun_state"] == {
-        "state": {
-            "currentHeadSha": "head_2",
-            "actions": {"audit.security": {"lastAuditedHeadSha": "head_1"}},
-        }
-    }
-    assert payload["reports"]["missing"] == [
-        "security",
-        "ai-readiness",
-        "tests",
-        "tech-health",
-        "deps",
-        "cognitive-debt",
-        "dead-code",
-    ]
-    assert payload["reports"]["reports"][0]["out_of_date"] is True
 
 
 def test_repo_status_all_summarizes_projects_repos_runs_and_reports(monkeypatch: MonkeyPatch) -> None:
@@ -1107,7 +1069,7 @@ def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatc
     )
     monkeypatch.setattr(
         core,
-        "report_status",
+        "_report_status",
         lambda repo_id: _report_status_payload(
             repo_id,
             [
@@ -1123,7 +1085,7 @@ def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatc
         captured_audits.append(audit.value)
         return {"snapshot": {"content": {"report": f"# {audit.value}"}}}
 
-    monkeypatch.setattr(core, "show_report", fake_show_report)
+    monkeypatch.setattr(core, "_show_report", fake_show_report)
 
     payload = core.read_reports_for_repo("j2h4u/enji-guard-cli", "Pets", [], all_reports=False)
 
@@ -1173,10 +1135,10 @@ def test_read_reports_for_repo_can_read_all_report_audits(monkeypatch: MonkeyPat
             "recon_done": True,
         },
     )
-    monkeypatch.setattr(core, "show_report", lambda repo_id, audit: {"snapshot": {"content": {"report": audit.value}}})
+    monkeypatch.setattr(core, "_show_report", lambda repo_id, audit: {"snapshot": {"content": {"report": audit.value}}})
     monkeypatch.setattr(
         core,
-        "report_status",
+        "_report_status",
         lambda repo_id: _report_status_payload(
             repo_id,
             [_report_status_item(audit.value, "ready", last_audited_head_sha=None) for audit in REPORT_AUDIT_ALIASES],
@@ -1217,7 +1179,7 @@ def test_read_reports_for_repo_all_marks_missing_reports_unavailable(monkeypatch
     )
     monkeypatch.setattr(
         core,
-        "report_status",
+        "_report_status",
         lambda repo_id: _report_status_payload(
             repo_id,
             [
@@ -1231,7 +1193,7 @@ def test_read_reports_for_repo_all_marks_missing_reports_unavailable(monkeypatch
         captured_audits.append(audit.value)
         return {"snapshot": {"content": {"report": f"# {audit.value}"}}}
 
-    monkeypatch.setattr(core, "show_report", fake_show_report)
+    monkeypatch.setattr(core, "_show_report", fake_show_report)
 
     payload = core.read_reports_for_repo("j2h4u/mcp-strava", None, [], all_reports=True)
 
@@ -1280,7 +1242,7 @@ def test_read_reports_for_repo_all_marks_missing_ready_snapshot_unavailable(monk
     )
     monkeypatch.setattr(
         core,
-        "report_status",
+        "_report_status",
         lambda repo_id: _report_status_payload(
             repo_id,
             [_report_status_item("security", "ready", last_audited_head_sha="head_1")],
@@ -1290,7 +1252,7 @@ def test_read_reports_for_repo_all_marks_missing_ready_snapshot_unavailable(monk
     def fake_show_report(repo_id: str, audit: AuditAlias) -> dict[str, object]:
         raise EnjiApiError("NOT_FOUND", "snapshot not found")
 
-    monkeypatch.setattr(core, "show_report", fake_show_report)
+    monkeypatch.setattr(core, "_show_report", fake_show_report)
 
     payload = core.read_reports_for_repo("j2h4u/mcp-strava", None, [], all_reports=True)
 
@@ -1328,7 +1290,7 @@ def test_read_reports_for_repo_explicit_missing_report_has_precise_error(monkeyp
     )
     monkeypatch.setattr(
         core,
-        "report_status",
+        "_report_status",
         lambda repo_id: _report_status_payload(
             repo_id,
             [_report_status_item("cognitive-debt", "missing", last_audited_head_sha=None)],
@@ -1423,7 +1385,7 @@ def test_list_schedule_settings_fans_out_over_project_repos_and_report_audits(mo
     )
     monkeypatch.setattr(
         core,
-        "list_schedules",
+        "_list_schedules",
         lambda repo_id: {
             "jobs": [
                 {
@@ -1490,7 +1452,7 @@ def test_set_schedule_settings_updates_project_repos_and_report_audits(monkeypat
             ],
         },
     )
-    monkeypatch.setattr(core, "list_schedules", lambda repo_id: {"jobs": []})
+    monkeypatch.setattr(core, "_list_schedules", lambda repo_id: {"jobs": []})
 
     def fake_put(repo_id: str, job_kind: str, payload: object) -> dict[str, object]:
         captured.append((repo_id, job_kind, payload))
@@ -1563,7 +1525,7 @@ def test_set_schedule_settings_skips_unchanged_existing_jobs(monkeypatch: Monkey
     )
     monkeypatch.setattr(
         core,
-        "list_schedules",
+        "_list_schedules",
         lambda repo_id: {
             "jobs": [
                 {
@@ -1625,7 +1587,7 @@ def test_set_schedule_settings_can_update_timezone_without_time(monkeypatch: Mon
     )
     monkeypatch.setattr(
         core,
-        "list_schedules",
+        "_list_schedules",
         lambda repo_id: {
             "jobs": [
                 {
@@ -1645,7 +1607,7 @@ def test_set_schedule_settings_can_update_timezone_without_time(monkeypatch: Mon
         captured.append(payload)
         return {"job": payload}
 
-    monkeypatch.setattr(core, "set_schedule", fake_set_schedule)
+    monkeypatch.setattr(core, "_set_schedule", fake_set_schedule)
 
     payload = core.set_schedule_settings(
         "j2h4u/enji-guard-cli",
@@ -1686,7 +1648,7 @@ def test_set_schedule_settings_can_reset_schedule_time_to_auto(monkeypatch: Monk
     )
     monkeypatch.setattr(
         core,
-        "list_schedules",
+        "_list_schedules",
         lambda repo_id: {
             "jobs": [
                 {
@@ -1706,7 +1668,7 @@ def test_set_schedule_settings_can_reset_schedule_time_to_auto(monkeypatch: Monk
         captured.append(payload)
         return {"job": payload}
 
-    monkeypatch.setattr(core, "set_schedule", fake_set_schedule)
+    monkeypatch.setattr(core, "_set_schedule", fake_set_schedule)
 
     payload = core.set_schedule_settings(
         "j2h4u/enji-guard-cli",
@@ -1764,45 +1726,6 @@ def test_set_schedule_settings_requires_project_for_all_repos() -> None:
         )
 
 
-def test_wait_for_audit_completion_ignores_unrelated_active_runs(monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        core,
-        "run_repo_active_runs",
-        lambda repo_id: {"activeRuns": [{"actionKey": "audit.security", "id": "task_security"}]},
-    )
-
-    payload = core.wait_for_audit_completion("repo_1", AuditAlias.RECON, 1, 1)
-
-    assert payload == {
-        "repo_id": "repo_1",
-        "audit": "recon",
-        "idle": True,
-        "elapsed_seconds": 0,
-        "active_runs": [],
-    }
-
-
-def test_wait_for_audit_completion_ignores_completed_matching_runs(monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        core,
-        "run_repo_active_runs",
-        lambda repo_id: {
-            "activeRuns": [
-                {
-                    "actionKey": "audit.recon",
-                    "completedAt": "2026-06-29T12:00:00Z",
-                    "status": "completed",
-                }
-            ]
-        },
-    )
-
-    payload = core.wait_for_audit_completion("repo_1", AuditAlias.RECON, 1, 1)
-
-    assert payload["idle"] is True
-    assert payload["active_runs"] == []
-
-
 def test_wait_for_report_completion_succeeds_when_reports_are_ready_but_stale(monkeypatch: MonkeyPatch) -> None:
     status = _report_wait_status(
         complete=True,
@@ -1810,7 +1733,7 @@ def test_wait_for_report_completion_succeeds_when_reports_are_ready_but_stale(mo
         out_of_date=True,
         run_status="completed",
     )
-    monkeypatch.setattr(core, "report_status", lambda _repo_id: status)
+    monkeypatch.setattr(core, "_report_status", lambda _repo_id: status)
 
     payload = core.wait_for_report_completion(
         "repo_1",
@@ -1843,7 +1766,7 @@ def test_wait_for_report_completion_times_out_when_reports_remain_missing(monkey
         run_status=None,
     )
     clock = FakeClock()
-    monkeypatch.setattr(core, "report_status", lambda _repo_id: status)
+    monkeypatch.setattr(core, "_report_status", lambda _repo_id: status)
     monkeypatch.setattr(core.time, "monotonic", clock.monotonic)
     monkeypatch.setattr(core.time, "sleep", clock.sleep)
 

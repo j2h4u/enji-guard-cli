@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from enji_guard_cli import cli
 from enji_guard_cli.audits import AuditAlias
 from enji_guard_cli.cli import app
+from enji_guard_cli.cli_impl.rendering import format_duration_seconds
 from enji_guard_cli.core import EmailPreferenceUpdate, ReportWaitOptions, ScheduleSettingsUpdate
 from enji_guard_cli.enji_api import EnjiApiError
 from enji_guard_cli.settings import TelemetrySettings
@@ -816,13 +817,13 @@ def test_wait_routes_transport_info_logs_to_file_not_operator_stderr(
 
 
 def test_duration_formatting_uses_readable_largest_units() -> None:
-    assert cli._format_duration_seconds(-1) == "0s"
-    assert cli._format_duration_seconds(11) == "11s"
-    assert cli._format_duration_seconds(131) == "2m 11s"
-    assert cli._format_duration_seconds(300) == "5m"
-    assert cli._format_duration_seconds(301) == "5m"
-    assert cli._format_duration_seconds(3661) == "1h 1m"
-    assert cli._format_duration_seconds(183_845) == "2d 3h"
+    assert format_duration_seconds(-1) == "0s"
+    assert format_duration_seconds(11) == "11s"
+    assert format_duration_seconds(131) == "2m 11s"
+    assert format_duration_seconds(300) == "5m"
+    assert format_duration_seconds(301) == "5m"
+    assert format_duration_seconds(3661) == "1h 1m"
+    assert format_duration_seconds(183_845) == "2d 3h"
 
 
 def test_report_show_is_not_exposed() -> None:

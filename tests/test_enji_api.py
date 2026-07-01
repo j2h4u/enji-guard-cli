@@ -15,33 +15,33 @@ from enji_guard_cli.enji_api import (
     AuditRunCreate,
     EnjiApiError,
     RepoTransfer,
+    _connect_project_repo,
     _get_json_object,
+    _github_installation_repos,
+    _github_installations,
+    _project_active_runs,
+    _repo_audit_history,
+    _update_repo_connection,
     access,
     audit_email_preferences,
     audit_summary_snapshot,
     catalog,
-    connect_project_repo,
     create_project,
     delete_project,
-    github_installation_repos,
-    github_installations,
     improvement_jobs,
     load_api_session,
     move_repo,
     preflight_repo_move,
-    project_active_runs,
     project_detail,
     put_audit_email_preferences,
     put_improvement_job,
     rename_project,
     repo_active_runs,
-    repo_audit_history,
     repo_audit_rerun_state,
     repo_task_links,
     reports_list,
     runbook,
     start_audit_run,
-    update_repo_connection,
 )
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse
 
@@ -281,18 +281,18 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
         ]
     )
 
-    github_installations(auth_file, client)
-    github_installation_repos("42", auth_file, client)
+    _github_installations(auth_file, client)
+    _github_installation_repos("42", auth_file, client)
     project_detail("project_1", auth_file, client)
     catalog(auth_file, client)
     runbook("runbook_1", auth_file, client)
-    connect_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client)
-    update_repo_connection("project_1", "repo_1", connected=True, auth_file=auth_file, client=client)
-    project_active_runs("project_1", auth_file, client)
+    _connect_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client)
+    _update_repo_connection("project_1", "repo_1", connected=True, auth_file=auth_file, client=client)
+    _project_active_runs("project_1", auth_file, client)
     repo_active_runs("repo_1", auth_file, client)
     repo_audit_rerun_state("repo_1", auth_file, client)
     repo_task_links("repo_1", auth_file, client)
-    repo_audit_history("repo_1", auth_file, client)
+    _repo_audit_history("repo_1", auth_file, client)
     start_audit_run(
         AuditRunCreate(
             repo_id="repo_1",
@@ -414,7 +414,7 @@ def test_api_error_payload_is_preserved_for_unexpected_status(tmp_path: Path) ->
     )
 
     try:
-        github_installation_repos("42", auth_file, client)
+        _github_installation_repos("42", auth_file, client)
     except EnjiApiError as exc:
         assert exc.code == "CLIENT_NOT_ALLOWED"
         assert exc.message == "client is not allowed"

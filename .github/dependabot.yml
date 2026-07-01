@@ -15,6 +15,11 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     groups:
       python-minor-patch:
         applies-to: "version-updates"
@@ -38,12 +43,36 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
+    cooldown:
+      default-days: 7
     groups:
       github-actions:
         applies-to: "version-updates"
         patterns:
           - "*"
       github-actions-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Asia/Almaty"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    cooldown:
+      default-days: 7
+    groups:
+      docker-images:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+      docker-images-security:
         applies-to: "security-updates"
         patterns:
           - "*"

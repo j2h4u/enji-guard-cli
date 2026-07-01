@@ -303,10 +303,6 @@ def projects(auth_file: Path | None = None, client: EnjiHttpClient | None = None
     return _run_api_request(auth_file, client, PROJECTS_ENDPOINT.request())
 
 
-async def projects_async(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> JsonObjectPayload:
-    return await _run_api_request_async(auth_file, client, PROJECTS_ENDPOINT.request())
-
-
 def project_detail(
     project_id: str,
     auth_file: Path | None = None,
@@ -425,7 +421,7 @@ def runbook(
     )
 
 
-def github_installations(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> JsonObjectPayload:
+def _github_installations(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> JsonObjectPayload:
     return _run_api_request(
         auth_file,
         client,
@@ -433,7 +429,7 @@ def github_installations(auth_file: Path | None = None, client: EnjiHttpClient |
     )
 
 
-def github_installation_repos(
+def _github_installation_repos(
     installation_id: str,
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
@@ -445,7 +441,7 @@ def github_installation_repos(
     )
 
 
-def connect_project_repo(
+def _connect_project_repo(
     project_id: str,
     github_owner: str,
     github_name: str,
@@ -463,7 +459,7 @@ def connect_project_repo(
     )
 
 
-def update_repo_connection(
+def _update_repo_connection(
     project_id: str,
     repo_id: str,
     *,
@@ -482,7 +478,7 @@ def update_repo_connection(
     )
 
 
-def project_active_runs(
+def _project_active_runs(
     project_id: str,
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
@@ -530,7 +526,7 @@ def repo_task_links(
     )
 
 
-def repo_audit_history(
+def _repo_audit_history(
     repo_id: str,
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
