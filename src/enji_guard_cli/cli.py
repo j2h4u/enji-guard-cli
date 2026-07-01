@@ -1093,6 +1093,41 @@ def schedule_timezone(
     )
 
 
+@schedule_app.command("auto-time", help="Let Enji choose automatic report audit times.")
+def schedule_auto_time(
+    repo: Annotated[
+        str | None,
+        typer.Option("--repo", help="Optional repo id or owner/name for a single-repo update."),
+    ] = None,
+    batch_scope: Annotated[
+        bool | None,
+        typer.Option(
+            "--all-projects/--all-repos",
+            help="Batch every repo in every project, or every repo in the selected --project.",
+        ),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    all_repos, all_projects = _batch_scope_flags(batch_scope)
+    _run_human_or_json_command(
+        lambda: set_schedule_settings(
+            repo,
+            _selected_project(),
+            ScheduleSettingsUpdate(
+                enabled=None,
+                frequency=None,
+                days_of_week=None,
+                schedule_time="auto",
+                timezone=None,
+            ),
+            all_repos=all_repos,
+            all_projects=all_projects,
+        ),
+        _json_output(json_output),
+        _echo_schedule_settings_table,
+    )
+
+
 @email_app.command("list", help="List manual and scheduled report email preferences.")
 def email_list(
     repo: Annotated[

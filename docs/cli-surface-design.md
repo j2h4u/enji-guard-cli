@@ -75,6 +75,9 @@ enji-guard schedule list [REPO]
 enji-guard schedule set REPO --enabled on|off|keep [--freq FREQ]
 enji-guard --project PROJECT schedule set --all-repos --enabled on|off|keep [--freq FREQ]
 enji-guard schedule set --all-projects --enabled on|off|keep [--freq FREQ]
+enji-guard schedule auto-time --repo REPO
+enji-guard --project PROJECT schedule auto-time --all-repos
+enji-guard schedule auto-time --all-projects
 
 enji-guard email list [REPO]
 enji-guard email set REPO [--manual on|off|keep] [--auto on|off|keep]
@@ -145,11 +148,13 @@ generated from different commits: use explicit stale audit names and
 as raw `scores`, simple `score_grades`, and a compact `score_summary`; there is
 no separate score flag.
 
-`schedule` is the public noun for automatic report audit runs. It exposes
-domain settings (`enabled`, `frequency`, days, time, timezone) and hides Enji's
+`schedule` is the public noun for automatic report audit runs. It exposes domain
+settings (`enabled`, `frequency`, time source, timezone) and hides Enji's
 `improvement-jobs` payload shape. `schedule set` applies enabled/frequency
-changes to all report audits in the selected explicit write scope; `schedule
-timezone` aligns timezone in the same explicit scopes. Per-audit schedule
-controls are intentionally not part of the default workflow. `schedule list`
-should call out timezone divergence inside one repo because that often explains
-stale report audits.
+changes to all report audits in the selected explicit write scope; it does not
+surface manual run time. Enji-assigned run time is the default model, and
+`schedule auto-time` resets existing schedules back to that model in the same
+explicit write scopes. `schedule timezone` aligns timezone. Per-audit schedule
+controls and manual run-time tuning are intentionally not part of the default
+workflow. `schedule list` should call out timezone divergence inside one repo
+because that often explains stale report audits.
