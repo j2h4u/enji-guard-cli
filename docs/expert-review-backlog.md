@@ -130,6 +130,10 @@ Panel:
   - Progress: schedule/email settings fanout and explicit write-scope targeting
     moved to `core_impl/write_settings.py`; API calls remain callback-injected
     from the core facade.
+  - Progress: audit-run orchestration moved to `core_impl/audit_runs.py` for
+    duplicate-start checks, report-audit selection, batch skip/run decisions,
+    and Fleet task-body assembly; `core.py` remains the public facade and keeps
+    Enji API calls injected at the boundary.
 
 - [x] Split `enji_api.py` into request mechanics and endpoint wrappers.
   - Source: Kaizen / Architecture Simplification.

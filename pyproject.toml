@@ -241,6 +241,7 @@ name = "Core implementation helpers keep JSON typing out of the adapter"
 type = "forbidden"
 source_modules = [
     "enji_guard_cli.core_impl.models",
+    "enji_guard_cli.core_impl.audit_runs",
     "enji_guard_cli.core_impl.audit_tasks",
     "enji_guard_cli.core_impl.email_preferences",
     "enji_guard_cli.core_impl.payloads",
