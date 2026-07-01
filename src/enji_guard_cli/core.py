@@ -20,9 +20,6 @@ from enji_guard_cli.core_impl.audit_tasks import linked_web_resources as _linked
 from enji_guard_cli.core_impl.audit_tasks import project_repo as _project_repo
 from enji_guard_cli.core_impl.audit_tasks import repo_full_name as _repo_full_name
 from enji_guard_cli.core_impl.audit_tasks import task_description as _task_description
-from enji_guard_cli.core_impl.email_preferences import email_preference_row as _email_preference_row
-from enji_guard_cli.core_impl.email_preferences import email_preferences_patch as _email_preferences_patch
-from enji_guard_cli.core_impl.email_preferences import email_preferences_payload as _email_preferences_payload
 from enji_guard_cli.core_impl.models import (
     DEFAULT_EXECUTION_FLOW,
     DEFAULT_REPO_SORT,
@@ -94,12 +91,6 @@ from enji_guard_cli.core_impl.repo_status import report_status_from_task_links a
 from enji_guard_cli.core_impl.repo_status import report_wait_payload as _report_wait_payload
 from enji_guard_cli.core_impl.repo_status import sort_project_repos as _sort_project_repos
 from enji_guard_cli.core_impl.repo_status import validate_report_wait_options as _validate_report_wait_options
-from enji_guard_cli.core_impl.schedules import schedule_effective_state as _schedule_effective_state
-from enji_guard_cli.core_impl.schedules import schedule_job_by_kind as _schedule_job_by_kind
-from enji_guard_cli.core_impl.schedules import schedule_setting_row as _schedule_setting_row
-from enji_guard_cli.core_impl.schedules import schedule_settings_payload as _schedule_settings_payload
-from enji_guard_cli.core_impl.schedules import schedule_settings_payload_for_job as _schedule_settings_payload_for_job
-from enji_guard_cli.core_impl.schedules import validate_schedule_settings_update as _validate_schedule_settings_update
 from enji_guard_cli.core_impl.selectors import parse_github_repo as _parse_github_repo
 from enji_guard_cli.core_impl.selectors import repo_target as _repo_target
 from enji_guard_cli.core_impl.selectors import targeted_run_payload as _targeted_run_payload
@@ -113,6 +104,17 @@ from enji_guard_cli.core_impl.targets import resolve_single_project_id as _resol
 from enji_guard_cli.core_impl.targets import resolve_single_repo_target as _resolve_single_repo_target_impl
 from enji_guard_cli.core_impl.targets import selected_project_ids as _selected_project_ids_impl
 from enji_guard_cli.core_impl.targets import selected_repo_targets as _selected_repo_targets_impl
+from enji_guard_cli.core_impl.write_settings import EmailReadDependencies as _EmailReadDependencies
+from enji_guard_cli.core_impl.write_settings import EmailWriteDependencies as _EmailWriteDependencies
+from enji_guard_cli.core_impl.write_settings import ScheduleReadDependencies as _ScheduleReadDependencies
+from enji_guard_cli.core_impl.write_settings import ScheduleWriteDependencies as _ScheduleWriteDependencies
+from enji_guard_cli.core_impl.write_settings import WriteScopeDependencies as _WriteScopeDependencies
+from enji_guard_cli.core_impl.write_settings import list_email_preferences as _list_email_preferences
+from enji_guard_cli.core_impl.write_settings import list_schedule_settings as _list_schedule_settings
+from enji_guard_cli.core_impl.write_settings import selected_write_repo_targets as _selected_write_repo_targets_impl
+from enji_guard_cli.core_impl.write_settings import set_email_preferences as _set_email_preferences
+from enji_guard_cli.core_impl.write_settings import set_schedule_setting as _set_schedule_setting_impl
+from enji_guard_cli.core_impl.write_settings import set_schedule_settings as _set_schedule_settings
 from enji_guard_cli.enji_api import REPORTS_LIST_DEFAULT_SELECTOR as REPORTS_LIST_DEFAULT_SELECTOR
 from enji_guard_cli.enji_api import (
     AuditRunCreate,
@@ -405,12 +407,13 @@ def _read_report_snapshot(repo_id: str, audit: AuditAlias) -> JsonObjectPayload:
 
 
 def list_email_preferences(repo: str | None, project: str | None) -> JsonObjectPayload:
-    return _email_preferences_payload(
-        [
-            _email_preference_row(target, audit, _get_audit_email_preferences(target["repo_id"], audit.action_key))
-            for target in _selected_repo_targets(repo, project)
-            for audit in REPORT_AUDITS
-        ]
+    return _list_email_preferences(
+        repo,
+        project,
+        dependencies=_EmailReadDependencies(
+            selected_repo_targets=_selected_repo_targets,
+            get_audit_email_preferences=_get_audit_email_preferences,
+        ),
     )
 
 
@@ -426,23 +429,20 @@ def set_email_preferences(
     all_repos: bool = False,
     all_projects: bool = False,
 ) -> JsonObjectPayload:
-    patch = _email_preferences_patch(update)
-    return _email_preferences_payload(
-        [
-            _email_preference_row(
-                target,
-                audit,
-                run_put_audit_email_preferences(target["repo_id"], audit.action_key, patch),
-            )
-            for target in _selected_write_repo_targets(
-                repo,
-                project,
-                all_repos=all_repos,
-                all_projects=all_projects,
-                operation="email set",
-            )
-            for audit in REPORT_AUDITS
-        ]
+    return _set_email_preferences(
+        repo,
+        project,
+        update,
+        selected_write_repo_targets=lambda selected_repo, selected_project: _selected_write_repo_targets(
+            selected_repo,
+            selected_project,
+            all_repos=all_repos,
+            all_projects=all_projects,
+            operation="email set",
+        ),
+        dependencies=_EmailWriteDependencies(
+            put_audit_email_preferences=run_put_audit_email_preferences,
+        ),
     )
 
 
@@ -451,13 +451,14 @@ def _list_schedules(repo_id: str) -> JsonObjectPayload:
 
 
 def list_schedule_settings(repo: str | None, project: str | None) -> JsonObjectPayload:
-    rows = [
-        _schedule_setting_row(target, audit, _schedule_job_by_kind(jobs, audit.job_kind))
-        for target in _selected_repo_targets(repo, project)
-        for jobs in (_list_schedules(target["repo_id"]),)
-        for audit in REPORT_AUDITS
-    ]
-    return _schedule_settings_payload(rows)
+    return _list_schedule_settings(
+        repo,
+        project,
+        dependencies=_ScheduleReadDependencies(
+            selected_repo_targets=_selected_repo_targets,
+            list_schedules=_list_schedules,
+        ),
+    )
 
 
 def _set_schedule(
@@ -478,20 +479,22 @@ def set_schedule_settings(
     all_repos: bool = False,
     all_projects: bool = False,
 ) -> JsonObjectPayload:
-    _validate_schedule_settings_update(update)
-    rows = [
-        _set_schedule_setting(target, audit, jobs, update)
-        for target in _selected_write_repo_targets(
-            repo,
-            project,
+    return _set_schedule_settings(
+        repo,
+        project,
+        update,
+        selected_write_repo_targets=lambda selected_repo, selected_project: _selected_write_repo_targets(
+            selected_repo,
+            selected_project,
             all_repos=all_repos,
             all_projects=all_projects,
             operation="schedule set",
-        )
-        for jobs in (_list_schedules(target["repo_id"]),)
-        for audit in REPORT_AUDITS
-    ]
-    return _schedule_settings_payload(rows)
+        ),
+        dependencies=_ScheduleWriteDependencies(
+            list_schedules=_list_schedules,
+            set_schedule=_set_schedule,
+        ),
+    )
 
 
 def wait_for_reports(
@@ -548,14 +551,22 @@ def _selected_write_repo_targets(
     all_projects: bool,
     operation: str,
 ) -> list[RepoTargetPayload]:
-    _validate_write_scope(repo, project, all_repos=all_repos, all_projects=all_projects, operation=operation)
-    if all_projects:
-        return _selected_repo_targets(None, None)
-    if all_repos:
-        return _selected_repo_targets(None, project)
-    if repo is None:
-        raise AssertionError("write scope validation should require repo when no batch flag is set")
-    return _selected_repo_targets(repo, project)
+    return _selected_write_repo_targets_impl(
+        repo,
+        project,
+        all_repos=all_repos,
+        all_projects=all_projects,
+        dependencies=_WriteScopeDependencies(
+            validate_write_scope=lambda selected_repo, selected_project: _validate_write_scope(
+                selected_repo,
+                selected_project,
+                all_repos=all_repos,
+                all_projects=all_projects,
+                operation=operation,
+            ),
+            selected_repo_targets=_selected_repo_targets,
+        ),
+    )
 
 
 def _project_repo_targets(project_id: str) -> list[RepoTargetPayload]:
@@ -718,15 +729,7 @@ def _set_schedule_setting(
     jobs: JsonObjectPayload,
     update: ScheduleSettingsUpdate,
 ) -> dict[str, JsonValue]:
-    existing = _schedule_job_by_kind(jobs, audit.job_kind)
-    desired = _schedule_settings_payload_for_job(existing, update)
-    if desired is None:
-        return _schedule_setting_row(target, audit, existing, changed=False, status="unchanged")
-    if existing is not None and _schedule_effective_state(existing) == _schedule_effective_state(desired):
-        return _schedule_setting_row(target, audit, existing, changed=False, status="unchanged")
-    response = _set_schedule(target["repo_id"], audit.alias, desired)
-    job = _json_dict(response.get("job")) or desired
-    return _schedule_setting_row(target, audit, job, changed=True, status="changed")
+    return _set_schedule_setting_impl(target, audit, jobs, update, set_schedule=_set_schedule)
 
 
 def _raise_bad_selector(message: str) -> Never:
