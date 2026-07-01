@@ -151,14 +151,17 @@ def active_runs_for_action(active_runs: list[JsonValue], action_key: str) -> lis
 def _active_run_matches_action(run: JsonValue, action_key: str) -> bool:
     if not isinstance(run, dict):
         return False
-    return json_str(run.get("actionKey")) == action_key or _nested_action_key_matches(run, action_key)
+    return _active_run_action_key(run) == action_key
 
 
-def _nested_action_key_matches(run: dict[str, JsonValue], action_key: str) -> bool:
+def _active_run_action_key(run: dict[str, JsonValue]) -> str | None:
+    action_key = json_str(run.get("actionKey"))
+    if action_key is not None:
+        return action_key
     task = run.get("task")
     if not isinstance(task, dict):
-        return False
-    return json_str(task.get("actionKey")) == action_key
+        return None
+    return json_str(task.get("actionKey"))
 
 
 def report_wait_payload(
@@ -410,7 +413,7 @@ def active_runs_by_action_map(active_runs: list[JsonValue]) -> dict[str, dict[st
     for run in active_runs:
         if not isinstance(run, dict):
             continue
-        action_key = json_str(run.get("actionKey"))
+        action_key = _active_run_action_key(run)
         if action_key is None:
             continue
         runs_by_action.setdefault(action_key, run)

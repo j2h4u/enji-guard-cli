@@ -24,8 +24,10 @@ packages = ["src/enji_guard_cli"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "--strict-config --strict-markers -W error"
 tmp_path_retention_policy = "failed"
 tmp_path_retention_count = 1
+xfail_strict = true
 
 [tool.ruff]
 src = ["src", "scripts", "tests"]
@@ -97,7 +99,7 @@ reportImplicitStringConcatenation = "none"
 reportPrivateUsage = "none"
 
 [tool.vulture]
-paths = ["src/enji_guard_cli", "tests"]
+paths = ["src/enji_guard_cli", "scripts", "tests"]
 min_confidence = 80
 ignore_decorators = [
     "@app.callback",
@@ -325,6 +327,7 @@ dev = [
     "basedpyright>=1.39.8",
     "deptry>=0.25",
     "import-linter>=2.12",
+    "openapi-spec-validator>=0.9.0",
     "pytest>=9.1.1",
     "pytest-cov>=7",
     "pytest-crap>=0.3.0",

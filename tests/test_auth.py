@@ -26,6 +26,7 @@ from enji_guard_cli.auth import (
     load_stored_auth,
     merge_set_cookie_headers,
     refresh_auth_async,
+    start_auto_refresh_task,
 )
 from enji_guard_cli.auth import StoredAuth as RuntimeStoredAuth
 from enji_guard_cli.cli import app
@@ -470,6 +471,58 @@ def test_refresh_auth_does_not_persist_cookies_from_auth_failure(tmp_path: Path)
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}
+
+
+def test_start_auto_refresh_task_skips_bearer_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_bearer_token("token-123", auth_file)
+
+    monkeypatch.setattr(
+        "enji_guard_cli.auth.default_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "auto_refresh": auto_refresh_settings(),
+                "auth": type("Auth", (), {"auth_file": auth_file})(),
+            },
+        )(),
+    )
+
+    assert start_auto_refresh_task() is None
+
+
+def test_start_auto_refresh_task_runs_without_bootstrapped_auth_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    auth_file = tmp_path / "auth.json"
+    captured: dict[str, object] = {}
+
+    async def fake_auto_refresh_loop(*, auth_file: Path, refresh_settings: AutoRefreshSettings) -> None:
+        captured["auth_file"] = auth_file
+        captured["refresh_settings"] = refresh_settings
+
+    monkeypatch.setattr("enji_guard_cli.auth._auto_refresh_loop", fake_auto_refresh_loop)
+    monkeypatch.setattr(
+        "enji_guard_cli.auth.default_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "auto_refresh": auto_refresh_settings(),
+                "auth": type("Auth", (), {"auth_file": auth_file})(),
+            },
+        )(),
+    )
+
+    async def run_task() -> None:
+        task = start_auto_refresh_task()
+        assert task is not None
+        await task
+
+    asyncio.run(run_task())
+
+    assert captured == {"auth_file": auth_file, "refresh_settings": auto_refresh_settings()}
 
 
 def test_cli_import_token_reads_from_stdin(tmp_path: Path) -> None:

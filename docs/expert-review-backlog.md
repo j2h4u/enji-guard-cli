@@ -36,7 +36,7 @@ Panel:
 
 ## High
 
-- [ ] Fix report status/wait handling for nested active-run `task.actionKey`.
+- [x] Fix report status/wait handling for nested active-run `task.actionKey`.
   - Source: Adversarial Python Code Reviewer.
   - Evidence: `src/enji_guard_cli/core_impl/repo_status.py` handles nested
     `task.actionKey` for duplicate-start checks, but active-run grouping for
@@ -49,7 +49,7 @@ Panel:
   - Tests: report status/wait with active runs that only have nested
     `task.actionKey`.
 
-- [ ] Make background auto-refresh a no-op for bearer/API-token credentials.
+- [x] Make background auto-refresh a no-op for bearer/API-token credentials.
   - Sources: System Architect, Adversarial Python Code Reviewer.
   - Evidence: Docker runs `enji-guard run`; runtime starts auto-refresh
     unconditionally; refresh rejects non-cookie credentials.
@@ -72,7 +72,7 @@ Panel:
     `mcp_server` from importing `auth`; allow `runtime` to own supervisor
     refresh.
 
-- [ ] Reject malformed GitHub repo slugs for mutating commands.
+- [x] Reject malformed GitHub repo slugs for mutating commands.
   - Source: Adversarial Python Code Reviewer.
   - Evidence: `parse_github_repo("owner/name/extra")` currently returns
     `("owner", "name")`.
@@ -206,7 +206,7 @@ Panel:
 
 ## Hard-Gate Improvements
 
-- [ ] Add explicit Ruff preview complexity rules: `PLR0914`, `PLR0916`,
+- [x] Add explicit Ruff preview complexity rules: `PLR0914`, `PLR0916`,
   `PLR0917`.
   - Source: QA / Static Analysis.
   - Rationale: current `PLR09` with `explicit-preview-rules = true` does not
@@ -214,7 +214,7 @@ Panel:
   - Verified by expert: repo passes
     `uv run ruff check --preview --select PLR0914,PLR0916,PLR0917 src scripts tests`.
 
-- [ ] Add production-only print/debug leakage lint: `T20` for
+- [x] Add production-only print/debug leakage lint: `T20` for
   `src/enji_guard_cli`.
   - Source: QA / Static Analysis.
   - Rationale: CLI should write through Typer/rendering paths, not raw
@@ -227,19 +227,19 @@ Panel:
     `core_impl/repo_status.py:report_wait_payload`.
   - Action: remove, use, or rename that parameter, then add `ARG` to hard gate.
 
-- [ ] Expand Vulture paths to include `scripts`.
+- [x] Expand Vulture paths to include `scripts`.
   - Source: QA / Static Analysis.
   - Current config covers `src/enji_guard_cli` and `tests`.
   - Verified by expert: `uv run vulture src/enji_guard_cli scripts tests` is
     clean.
 
-- [ ] Harden pytest config.
+- [x] Harden pytest config.
   - Source: QA / Static Analysis.
   - Add: `--strict-config --strict-markers -W error`.
   - Add: `xfail_strict = true`.
   - Verified by expert: all current tests passed with those flags.
 
-- [ ] Add Docker static checks.
+- [x] Add Docker static checks.
   - Source: QA / Static Analysis.
   - Candidate commands:
     - `docker compose config --quiet`
@@ -247,7 +247,7 @@ Panel:
     - `docker build --check .`
   - Verified by expert: all three passed.
 
-- [ ] Add OpenAPI schema validation in addition to the custom semantic
+- [x] Add OpenAPI schema validation in addition to the custom semantic
   validator.
   - Source: QA / Static Analysis.
   - Candidate dependency: `openapi-spec-validator`.
@@ -294,10 +294,10 @@ Panel:
 
 ## Suggested Triage Order
 
-1. [ ] Fix nested active-run `task.actionKey` in status/wait.
-2. [ ] Make bearer/API-token auth skip cookie auto-refresh.
-3. [ ] Reject malformed GitHub repo slugs.
-4. [ ] Add the cheap hard-gate improvements that already pass.
+1. [x] Fix nested active-run `task.actionKey` in status/wait.
+2. [x] Make bearer/API-token auth skip cookie auto-refresh.
+3. [x] Reject malformed GitHub repo slugs.
+4. [x] Add the cheap hard-gate improvements that already pass.
 5. [ ] Move CLI auth commands behind core and tighten import-linter.
 6. [ ] Move neutral JSON types out of `enji_api.py` and tighten import-linter.
 7. [ ] Split `core.py` by use case.

@@ -23,6 +23,7 @@ from enji_guard_cli.core import (
     resolve_operation,
     resolve_operation_spec,
 )
+from enji_guard_cli.core_impl.selectors import parse_github_repo
 from enji_guard_cli.errors import EnjiApiError
 
 
@@ -136,6 +137,25 @@ def test_set_schedule_normalizes_json_payload(monkeypatch: MonkeyPatch) -> None:
     assert payload["job"] == captured["payload"]
     assert captured["repo_id"] == "repo_1"
     assert captured["job_kind"] == "vuln-audit"
+
+
+@pytest.mark.parametrize(
+    ("slug", "message"),
+    [
+        ("owner/name/extra", "repo must be an owner/name GitHub slug"),
+        ("/name", "repo must be an owner/name GitHub slug"),
+        ("owner/", "repo must be an owner/name GitHub slug"),
+        ("", "repo must be an owner/name GitHub slug"),
+        ("owner//name", "repo must be an owner/name GitHub slug"),
+    ],
+)
+def test_parse_github_repo_rejects_malformed_slugs(slug: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        parse_github_repo(slug)
+
+
+def test_parse_github_repo_accepts_exact_owner_name_slug() -> None:
+    assert parse_github_repo("j2h4u/enji-guard-cli") == ("j2h4u", "enji-guard-cli")
 
 
 def test_report_status_derives_ready_and_missing_reports_from_task_links(monkeypatch: MonkeyPatch) -> None:
@@ -274,6 +294,58 @@ def test_report_status_marks_started_report_runs_as_running(monkeypatch: MonkeyP
         "last_audited_head_sha": "head_1",
         "out_of_date": True,
     }
+
+
+def test_report_status_marks_nested_task_action_key_runs_as_running(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        core,
+        "run_repo_task_links",
+        lambda repo_id: {
+            "links": [
+                {
+                    "actionKey": "audit.security",
+                    "artifactSchemaName": "upfront.audit.summary",
+                    "fleetTaskId": "task_security",
+                    "createdAt": "2026-06-29T12:00:00Z",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_repo_active_runs",
+        lambda repo_id: {
+            "activeRuns": [
+                {
+                    "task": {"actionKey": "audit.security"},
+                    "fleetTaskId": "task_security",
+                    "createdAt": "2026-06-29T12:00:00Z",
+                    "startedAt": "2026-06-29T12:00:01Z",
+                    "completedAt": None,
+                    "status": "in_progress",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_repo_audit_rerun_state",
+        lambda repo_id: {
+            "state": {
+                "currentHeadSha": "head_2",
+                "actions": {"audit.security": {"lastAuditedHeadSha": "head_1"}},
+            }
+        },
+    )
+
+    payload = core._report_status("repo_1")
+
+    assert payload["complete"] is False
+    assert payload["ready"] == []
+    assert payload["running"] == ["security"]
+    assert payload["missing"] == ["ai-readiness", "tests", "tech-health", "deps", "cognitive-debt", "dead-code"]
+    assert payload["reports"][0]["state"] == "running"
+    assert payload["reports"][0]["run_status"] == "in_progress"
 
 
 def test_repo_status_all_summarizes_projects_repos_runs_and_reports(monkeypatch: MonkeyPatch) -> None:
@@ -1746,6 +1818,41 @@ def test_wait_for_report_completion_succeeds_when_reports_are_ready_but_stale(mo
     assert payload["reason"] == "complete"
     assert payload["counts"]["stale"] == 1
     assert payload["stale"] == ["security"]
+
+
+def test_wait_for_report_completion_counts_nested_task_action_key_runs(monkeypatch: MonkeyPatch) -> None:
+    class FakeClock:
+        value = 0.0
+
+        def monotonic(self) -> float:
+            self.value += 31.0
+            return self.value
+
+        def sleep(self, seconds: float) -> None:
+            assert seconds >= 0.0
+
+    status = _report_wait_status(
+        complete=False,
+        state="running",
+        out_of_date=True,
+        run_status="in_progress",
+    )
+    clock = FakeClock()
+    monkeypatch.setattr(core, "_report_status", lambda _repo_id: status)
+    monkeypatch.setattr(core.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(core.time, "sleep", clock.sleep)
+
+    payload = core.wait_for_report_completion(
+        "repo_1",
+        options=ReportWaitOptions(poll_seconds=30, timeout_seconds=30, heartbeat_seconds=120),
+        heartbeat=None,
+    )
+
+    assert payload["complete"] is False
+    assert payload["timed_out"] is True
+    assert payload["reason"] == "timeout"
+    assert payload["counts"]["running"] == 1
+    assert payload["counts"]["stale"] == 1
 
 
 def test_wait_for_report_completion_times_out_when_reports_remain_missing(monkeypatch: MonkeyPatch) -> None:

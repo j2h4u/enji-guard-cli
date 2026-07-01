@@ -8,7 +8,7 @@ from enji_guard_cli.enji_api import JsonObjectPayload, JsonValue
 
 def owner_name_from_slug(slug: str) -> tuple[str | None, str | None]:
     parts = slug.split("/")
-    if len(parts) < OWNER_NAME_SLUG_PARTS:
+    if len(parts) != OWNER_NAME_SLUG_PARTS:
         return None, None
     owner = parts[0]
     name = parts[1]

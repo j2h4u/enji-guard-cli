@@ -13,6 +13,14 @@ compile:
 lint:
     uv run ruff check --preview src scripts tests
 
+# Check preview complexity/refactor rules not covered by prefix selection.
+preview-complexity-lint:
+    uv run ruff check --preview --select PLR0914,PLR0916,PLR0917 src scripts tests
+
+# Guard production code from raw print/debug output.
+print-lint:
+    uv run ruff check --preview --select T20 src/enji_guard_cli
+
 # Check formatting without writing.
 fmt-check:
     uv run ruff format --no-preview --check src scripts tests
@@ -26,8 +34,15 @@ actionlint:
     uv run actionlint
 
 # Validate the reconstructed Enji OpenAPI contract.
-openapi-contract:
+openapi-semantic-contract:
     scripts/validate_openapi_contract.py
+
+# Validate OpenAPI schema shape with the upstream validator.
+openapi-schema-contract:
+    uv run openapi-spec-validator contracts/enji-openapi.json
+
+# Validate the reconstructed Enji OpenAPI contract.
+openapi-contract: openapi-semantic-contract openapi-schema-contract
 
 # Run the canonical static type checker on production code.
 typecheck:
@@ -51,7 +66,7 @@ fix:
     uv run ruff format --no-preview src scripts tests
 
 # Static quality gate.
-check: fmt-check lint typecheck typecheck-tests import-contracts actionlint openapi-contract compile dead-code dependency-lint
+check: fmt-check lint preview-complexity-lint print-lint typecheck typecheck-tests import-contracts actionlint openapi-contract compile dead-code dependency-lint
 
 # Unit tests.
 unit:
@@ -72,8 +87,14 @@ crap-check:
     uv run pytest --cov=src/enji_guard_cli --cov-report=json:"$coverage_file"; \
     scripts/crap_gate.py --coverage "$coverage_file" --src src/enji_guard_cli --threshold 30
 
+# Validate Dockerfile and Compose files without running containers.
+docker-check:
+    docker compose config --quiet
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
+    docker build --check .
+
 # Build the Docker image.
-docker-build:
+docker-build: docker-check
     docker build -t enji-guard-cli:local .
 
 # Recreate the local Docker service.
