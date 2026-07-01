@@ -1,5 +1,5 @@
 from enji_guard_cli.core_impl.models import DEFAULT_FLOW_CONFIG
-from enji_guard_cli.enji_api import JsonObjectPayload, JsonValue
+from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 
 def json_object_payload(payload: object) -> JsonObjectPayload:

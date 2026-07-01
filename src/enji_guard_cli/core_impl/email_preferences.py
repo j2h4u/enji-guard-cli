@@ -3,7 +3,7 @@ from typing import cast
 from enji_guard_cli.audits import AuditDefinition
 from enji_guard_cli.core_impl.models import EmailPreferenceUpdate, RepoTargetPayload
 from enji_guard_cli.core_impl.payloads import json_bool, json_dict
-from enji_guard_cli.enji_api import JsonObjectPayload, JsonValue
+from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 
 def email_preferences_patch(update: EmailPreferenceUpdate) -> JsonObjectPayload:

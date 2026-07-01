@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, NotRequired, TypedDict
 
-from enji_guard_cli.enji_api import JsonObjectPayload, JsonValue
+from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 type OperationResult = object | Awaitable[object]
 type OperationExecutor = Callable[..., OperationResult]

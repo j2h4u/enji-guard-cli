@@ -20,7 +20,7 @@ from enji_guard_cli.core_impl.payloads import (
     json_str,
     json_str_values,
 )
-from enji_guard_cli.enji_api import JsonObjectPayload, JsonValue
+from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 
 def validate_schedule_settings_update(update: ScheduleSettingsUpdate) -> None:

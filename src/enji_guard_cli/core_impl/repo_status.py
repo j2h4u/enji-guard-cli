@@ -23,7 +23,7 @@ from enji_guard_cli.core_impl.models import (
     ScoreSummaryPayload,
 )
 from enji_guard_cli.core_impl.payloads import json_dict, json_list, json_object_list, json_str
-from enji_guard_cli.enji_api import JsonObjectPayload, JsonValue
+from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 
 def report_status_from_task_links(

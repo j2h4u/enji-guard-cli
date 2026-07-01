@@ -62,7 +62,7 @@ Panel:
 
 ## Medium
 
-- [ ] Route CLI auth commands through the core facade.
+- [x] Route CLI auth commands through the core facade.
   - Sources: System Architect, Kaizen / Architecture Simplification.
   - Evidence: `src/enji_guard_cli/cli.py` imports `enji_guard_cli.auth`
     directly for import-cookie, import-token, refresh, and status.
@@ -92,7 +92,7 @@ Panel:
     if the backend makes it safe.
   - Tests: UX failure after Fleet create; Fleet failure after UX delete.
 
-- [ ] Move generic JSON type aliases out of `enji_api.py`.
+- [x] Move generic JSON type aliases out of `enji_api.py`.
   - Sources: System Architect, Kaizen / Architecture Simplification.
   - Evidence: `core_impl.models` and related core helpers depend on adapter
     module `enji_api` for `JsonValue` / `JsonObjectPayload`.
@@ -118,6 +118,9 @@ Panel:
       scopes.
   - Rule: move one responsibility at a time; do not introduce service classes
     or containers.
+  - Progress: report-read selection and snapshot materialization moved to
+    `core_impl/report_reads.py`; `core.py` still owns the public facade and
+    selector resolution.
 
 - [ ] Split `enji_api.py` into request mechanics and endpoint wrappers.
   - Source: Kaizen / Architecture Simplification.
@@ -298,8 +301,8 @@ Panel:
 2. [x] Make bearer/API-token auth skip cookie auto-refresh.
 3. [x] Reject malformed GitHub repo slugs.
 4. [x] Add the cheap hard-gate improvements that already pass.
-5. [ ] Move CLI auth commands behind core and tighten import-linter.
-6. [ ] Move neutral JSON types out of `enji_api.py` and tighten import-linter.
+5. [x] Move CLI auth commands behind core and tighten import-linter.
+6. [x] Move neutral JSON types out of `enji_api.py` and tighten import-linter.
 7. [ ] Split `core.py` by use case.
 8. [ ] Split auth cookie/store responsibilities.
 9. [ ] Split `enji_api.py` request mechanics from endpoint wrappers.

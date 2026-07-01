@@ -1,6 +1,6 @@
 from enji_guard_cli.core_impl.models import AUDIT_REPORT_SCHEMA, RECON_REPORT_SCHEMA
 from enji_guard_cli.core_impl.payloads import json_list, json_object_list, json_str, required_str
-from enji_guard_cli.enji_api import JsonObjectPayload, JsonValue
+from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 
 def project_repo(project: JsonObjectPayload, repo_id: str) -> dict[str, JsonValue]:
