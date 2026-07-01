@@ -945,13 +945,44 @@ def test_start_all_report_audits_skips_already_running_audits(monkeypatch: Monke
     monkeypatch.setattr(
         core,
         "run_project_detail",
-        lambda project_id: {"project": {"id": project_id, "name": "Pets"}},
+        lambda project_id: {
+            "project": {"id": project_id, "name": "Pets"},
+            "repos": [
+                {
+                    "id": "repo_1",
+                    "githubOwner": "j2h4u",
+                    "githubName": "enji-guard-cli",
+                    "connected": True,
+                }
+            ],
+        },
     )
-    monkeypatch.setattr(core, "run_catalog", lambda: {"curatedActions": []})
     monkeypatch.setattr(
         core,
-        "_audit_run_task_body_from_context",
-        lambda project_id, repo_id, action_key, project, catalog: {"title": "Run audit"},
+        "run_catalog",
+        lambda: {
+            "curatedActions": [
+                {
+                    "actionKey": "audit.ai-readiness",
+                    "title": "AI readiness",
+                    "fleetRunbookId": "runbook_1",
+                    "artifactSchemaName": "upfront.audit.summary",
+                    "artifactSchemaVersion": "v1",
+                },
+                {
+                    "actionKey": "audit.dead-code",
+                    "title": "Dead code",
+                    "fleetRunbookId": "runbook_1",
+                    "artifactSchemaName": "upfront.audit.summary",
+                    "artifactSchemaVersion": "v1",
+                },
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_runbook",
+        lambda runbook_id: {"suggested_flow": "single", "suggested_flow_config": {}},
     )
 
     def fake_start(request: core.AuditRunCreate) -> dict[str, object]:

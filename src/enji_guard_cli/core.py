@@ -3,9 +3,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Never
 
-from enji_guard_cli.audits import REPORT_AUDITS, AuditAlias, ReportAuditDefinition
+from enji_guard_cli.audits import AuditAlias, ReportAuditDefinition
 from enji_guard_cli.audits import require_report_audit as registry_require_report_audit
-from enji_guard_cli.audits import resolve_audit as registry_resolve_audit
 from enji_guard_cli.auth import AuthError as AuthError
 from enji_guard_cli.auth import AuthRefreshPayload as AuthRefreshPayload
 from enji_guard_cli.auth import AuthStatusPayload as AuthStatusPayload
@@ -13,19 +12,11 @@ from enji_guard_cli.auth import ImportCredentialPayload as ImportCredentialPaylo
 from enji_guard_cli.auth import import_bearer_token as import_bearer_token
 from enji_guard_cli.auth import import_cookie as import_cookie
 from enji_guard_cli.auth import refresh_auth as refresh_auth
+from enji_guard_cli.core_impl import audit_runs as _audit_runs
 from enji_guard_cli.core_impl import report_reads as _report_reads
-from enji_guard_cli.core_impl.audit_tasks import action_title as _action_title
-from enji_guard_cli.core_impl.audit_tasks import catalog_action as _catalog_action
-from enji_guard_cli.core_impl.audit_tasks import linked_web_resources as _linked_web_resources
-from enji_guard_cli.core_impl.audit_tasks import project_repo as _project_repo
-from enji_guard_cli.core_impl.audit_tasks import repo_full_name as _repo_full_name
-from enji_guard_cli.core_impl.audit_tasks import task_description as _task_description
 from enji_guard_cli.core_impl.models import (
-    DEFAULT_EXECUTION_FLOW,
     DEFAULT_REPO_SORT,
-    AuditRunBatchItem,
     AuditRunBatchPayload,
-    AuditRunSkippedItem,
     AuditRunSkippedPayload,
     EmailPreferenceUpdate,
     ProjectRef,
@@ -70,23 +61,18 @@ from enji_guard_cli.core_impl.operations import resolve_operation_result as reso
 from enji_guard_cli.core_impl.operations import resolve_operation_spec as resolve_operation_spec
 from enji_guard_cli.core_impl.payloads import json_dict as _json_dict
 from enji_guard_cli.core_impl.payloads import json_object_list as _json_object_list
-from enji_guard_cli.core_impl.payloads import json_object_or_default as _json_object_or_default
 from enji_guard_cli.core_impl.payloads import json_object_payload as _json_object_payload
 from enji_guard_cli.core_impl.payloads import json_str as _json_str
-from enji_guard_cli.core_impl.payloads import required_str as _required_str
 from enji_guard_cli.core_impl.project_admin import MoveRepoDependencies as _MoveRepoDependencies
 from enji_guard_cli.core_impl.project_admin import connect_repo_payload as _connect_repo_payload
 from enji_guard_cli.core_impl.project_admin import create_project_payload as _create_project_payload
 from enji_guard_cli.core_impl.project_admin import delete_project_payload as _delete_project_payload
 from enji_guard_cli.core_impl.project_admin import move_repo_payload as _move_repo_payload
 from enji_guard_cli.core_impl.project_admin import rename_project_payload as _rename_project_payload
-from enji_guard_cli.core_impl.repo_status import active_runs_for_action as _active_runs_for_action
 from enji_guard_cli.core_impl.repo_status import current_active_runs as _current_active_runs
 from enji_guard_cli.core_impl.repo_status import current_head_sha as _current_head_sha
 from enji_guard_cli.core_impl.repo_status import empty_report_status as _empty_report_status
-from enji_guard_cli.core_impl.repo_status import last_audited_head_sha as _last_audited_head_sha
 from enji_guard_cli.core_impl.repo_status import next_poll_sleep as _next_poll_sleep
-from enji_guard_cli.core_impl.repo_status import out_of_date as _out_of_date
 from enji_guard_cli.core_impl.repo_status import report_status_from_task_links as _report_status_from_task_links
 from enji_guard_cli.core_impl.repo_status import report_wait_payload as _report_wait_payload
 from enji_guard_cli.core_impl.repo_status import sort_project_repos as _sort_project_repos
@@ -280,24 +266,11 @@ def start_audit(
     project_id: str,
     audit: AuditAlias,
 ) -> JsonObjectPayload | AuditRunSkippedPayload:
-    resolved = registry_resolve_audit(audit)
-    action_key = resolved.action_key
-    active_runs = _active_runs_for_action(_current_active_runs(_list_repo_active_runs(repo_id)), action_key)
-    if active_runs:
-        return {
-            "skipped": True,
-            "audit": audit.value,
-            "action_key": action_key,
-            "reason": "already_running",
-            "active_runs": active_runs,
-        }
-    return run_start_audit_run(
-        AuditRunCreate(
-            repo_id=repo_id,
-            project_id=project_id,
-            action_key=action_key,
-            fleet_task_body=_audit_run_task_body(project_id, repo_id, action_key),
-        )
+    return _audit_runs.start_audit(
+        repo_id,
+        project_id,
+        audit,
+        dependencies=_start_audit_dependencies(),
     )
 
 
@@ -326,59 +299,13 @@ def _start_report_audits_for_target(
     project_id: str,
     audits: list[AuditAlias],
 ) -> AuditRunBatchPayload:
-    runs: list[AuditRunBatchItem] = []
-    skipped: list[AuditRunSkippedItem] = []
-    active_runs = _current_active_runs(_list_repo_active_runs(repo_id))
-    rerun_state = _get_repo_rerun_state(repo_id)
-    current_head_sha = _current_head_sha(rerun_state)
-    project = run_project_detail(project_id)
-    catalog = run_catalog()
-    for alias in audits:
-        audit = registry_require_report_audit(alias)
-        action_key = audit.action_key
-        last_audited_head_sha = _last_audited_head_sha(rerun_state, action_key)
-        matching_active_runs = _active_runs_for_action(active_runs, action_key)
-        if matching_active_runs:
-            skipped.append(
-                {
-                    "audit": audit.alias.value,
-                    "action_key": action_key,
-                    "reason": "already_running",
-                    "active_runs": matching_active_runs,
-                    "current_head_sha": current_head_sha,
-                    "last_audited_head_sha": last_audited_head_sha,
-                }
-            )
-            continue
-        if _out_of_date(current_head_sha, last_audited_head_sha) is False:
-            skipped.append(
-                {
-                    "audit": audit.alias.value,
-                    "action_key": action_key,
-                    "reason": "up_to_date",
-                    "active_runs": [],
-                    "current_head_sha": current_head_sha,
-                    "last_audited_head_sha": last_audited_head_sha,
-                }
-            )
-            continue
-        runs.append(
-            {
-                "audit": audit.alias.value,
-                "action_key": action_key,
-                "response": run_start_audit_run(
-                    AuditRunCreate(
-                        repo_id=repo_id,
-                        project_id=project_id,
-                        action_key=action_key,
-                        fleet_task_body=_audit_run_task_body_from_context(
-                            project_id, repo_id, action_key, project, catalog
-                        ),
-                    )
-                ),
-            }
-        )
-    return {"runs": runs, "skipped": skipped}
+    return _audit_runs.start_report_audits_for_target(
+        repo_id,
+        project_id,
+        audits,
+        dependencies=_start_audit_dependencies(),
+        get_repo_rerun_state=_get_repo_rerun_state,
+    )
 
 
 def read_reports_for_repo(
@@ -712,15 +639,7 @@ def _repo_status_summary(projects: list[ProjectRuntimeStatusPayload]) -> RepoSta
 
 
 def _selected_report_audits(audits: list[AuditAlias], *, all_reports: bool) -> list[AuditAlias]:
-    if all_reports:
-        if audits:
-            raise ValueError("pass report audits or --all, not both")
-        return [audit.alias for audit in REPORT_AUDITS]
-    if not audits:
-        raise ValueError("pass at least one report audit or --all")
-    for audit in audits:
-        registry_require_report_audit(audit)
-    return audits
+    return _audit_runs.selected_report_audits(audits, all_reports=all_reports)
 
 
 def _set_schedule_setting(
@@ -736,33 +655,26 @@ def _raise_bad_selector(message: str) -> Never:
     raise EnjiApiError("BAD_SELECTOR", message)
 
 
-def _audit_run_task_body(project_id: str, repo_id: str, action_key: str) -> JsonObjectPayload:
-    return _audit_run_task_body_from_context(
-        project_id, repo_id, action_key, run_project_detail(project_id), run_catalog()
+def _make_audit_run_create(
+    repo_id: str,
+    project_id: str,
+    action_key: str,
+    fleet_task_body: JsonObjectPayload,
+) -> AuditRunCreate:
+    return AuditRunCreate(
+        repo_id=repo_id,
+        project_id=project_id,
+        action_key=action_key,
+        fleet_task_body=fleet_task_body,
     )
 
 
-def _audit_run_task_body_from_context(
-    project_id: str,
-    repo_id: str,
-    action_key: str,
-    project: JsonObjectPayload,
-    catalog: JsonObjectPayload,
-) -> JsonObjectPayload:
-    repo = _project_repo(project, repo_id)
-    action = _catalog_action(catalog, action_key)
-    runbook_id = _required_str(action, "fleetRunbookId", f"curated action {action_key} has no Fleet runbook")
-    runbook = run_runbook(runbook_id)
-    repo_full_name = _repo_full_name(repo)
-    return {
-        "title": f"{_action_title(action)} for {repo_full_name}",
-        "description": _task_description(action, repo, _linked_web_resources(project, repo_id)),
-        "project_id": project_id,
-        "execution_flow": _json_str(runbook.get("suggested_flow")) or DEFAULT_EXECUTION_FLOW,
-        "flow_config": _json_object_or_default(runbook.get("suggested_flow_config")),
-        "runbook_id": runbook_id,
-        "scope_type": "project",
-        "scope_owner": project_id,
-        "origin_type": "manual",
-        "repo_access_contexts": [{"provider": "github", "repo_full_name": repo_full_name}],
-    }
+def _start_audit_dependencies() -> _audit_runs.StartAuditDependencies[AuditRunCreate]:
+    return _audit_runs.StartAuditDependencies(
+        list_repo_active_runs=_list_repo_active_runs,
+        make_audit_run_create=_make_audit_run_create,
+        start_audit_run=run_start_audit_run,
+        project_detail=run_project_detail,
+        catalog=run_catalog,
+        runbook=run_runbook,
+    )
