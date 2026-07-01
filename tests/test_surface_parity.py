@@ -2,18 +2,10 @@ import asyncio
 from pathlib import Path
 from typing import cast
 
-import pytest
+from mcp.types import Tool
 
-try:
-    from mcp.types import Tool
-
-    from enji_guard_cli.core import OPERATION_SPECS
-    from enji_guard_cli.mcp_server import create_mcp_server
-except ModuleNotFoundError as exc:
-    if exc.name == "mcp" or (exc.name is not None and exc.name.startswith("mcp.")):
-        pytest.skip("mcp dependencies are not installed", allow_module_level=True)
-    raise
-
+from enji_guard_cli.core import OPERATION_SPECS
+from enji_guard_cli.mcp_server import create_mcp_server
 
 REQUIRED_OPERATION_TOOLS = {
     "access": "enji_access",
