@@ -254,12 +254,12 @@ def wait_for_report_completion(
     next_heartbeat_at = started_at
     while True:
         status = _report_status(repo_id)
-        payload = _report_wait_payload(repo_id, status, started_at, options=options, timed_out=False)
+        payload = _report_wait_payload(repo_id, status, started_at, timed_out=False)
         if payload["complete"] or payload["reason"] == "failed":
             return payload
         now = time.monotonic()
         if now >= deadline:
-            return _report_wait_payload(repo_id, status, started_at, options=options, timed_out=True)
+            return _report_wait_payload(repo_id, status, started_at, timed_out=True)
         if heartbeat is not None and now >= next_heartbeat_at:
             heartbeat(payload)
             next_heartbeat_at += options.heartbeat_seconds

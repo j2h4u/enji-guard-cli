@@ -63,6 +63,7 @@ select = [
     "LOG",
     "G",
     "N818",
+    "ARG",
     "C90",
     "PLR09",
     "PLR17",
@@ -73,6 +74,7 @@ ignore = ["ISC001"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = [
     "DTZ",
+    "ARG",
     "PERF401",
     "PLR2004",
 ]
@@ -144,6 +146,7 @@ source_modules = [
     "enji_guard_cli.auth",
     "enji_guard_cli.auth_impl",
     "enji_guard_cli.enji_api",
+    "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.errors",
     "enji_guard_cli.telemetry",
     "enji_guard_cli.transport",
@@ -170,6 +173,7 @@ layers = [
     "enji_guard_cli.core_impl",
     "enji_guard_cli.audits",
     "enji_guard_cli.enji_api",
+    "enji_guard_cli.enji_api_impl",
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
     "enji_guard_cli.auth_impl",
@@ -206,6 +210,7 @@ source_modules = [
 forbidden_modules = [
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.enji_api",
+    "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.transport",
     "httpx",
     "httpx_retries",
@@ -217,7 +222,7 @@ id = "core-avoids-transport-internals"
 name = "Core uses Enji API adapter instead of transport internals"
 type = "forbidden"
 source_modules = ["enji_guard_cli.core", "enji_guard_cli.core_impl"]
-forbidden_modules = ["enji_guard_cli.transport", "httpx", "httpx_retries"]
+forbidden_modules = ["enji_guard_cli.enji_api_impl", "enji_guard_cli.transport", "httpx", "httpx_retries"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -242,7 +247,7 @@ source_modules = [
     "enji_guard_cli.core_impl.schedules",
     "enji_guard_cli.core_impl.selectors",
 ]
-forbidden_modules = ["enji_guard_cli.enji_api"]
+forbidden_modules = ["enji_guard_cli.enji_api", "enji_guard_cli.enji_api_impl"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -266,6 +271,7 @@ forbidden_modules = [
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
     "enji_guard_cli.enji_api",
+    "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.errors",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.runtime",
@@ -290,6 +296,7 @@ source_modules = [
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
     "enji_guard_cli.enji_api",
+    "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.runtime",
     "enji_guard_cli.settings",
@@ -310,6 +317,7 @@ source_modules = [
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
     "enji_guard_cli.enji_api",
+    "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.errors",
     "enji_guard_cli.settings",
     "enji_guard_cli.telemetry",
@@ -332,6 +340,7 @@ forbidden_modules = [
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
     "enji_guard_cli.enji_api",
+    "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.errors",
     "enji_guard_cli.json_types",
     "enji_guard_cli.mcp_server",
@@ -360,6 +369,7 @@ forbidden_modules = [
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
     "enji_guard_cli.enji_api",
+    "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.errors",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.runtime",
@@ -387,6 +397,7 @@ forbidden_modules = [
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
     "enji_guard_cli.enji_api",
+    "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.errors",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.runtime",

@@ -16,7 +16,6 @@ from enji_guard_cli.enji_api import (
     EnjiApiError,
     RepoTransfer,
     _connect_project_repo,
-    _get_json_object,
     _github_installation_repos,
     _github_installations,
     _project_active_runs,
@@ -43,6 +42,7 @@ from enji_guard_cli.enji_api import (
     runbook,
     start_audit_run,
 )
+from enji_guard_cli.enji_api_impl.client import get_json_object
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse
 
 
@@ -553,8 +553,8 @@ def test_concurrent_auth_invalid_responses_dedupe_cookie_refresh(tmp_path: Path)
 
     async def run() -> tuple[dict[str, object], dict[str, object]]:
         return await asyncio.gather(
-            _get_json_object(session, client, path="/api/ux/me/access", operation="access"),
-            _get_json_object(session, client, path="/api/ux/me/access", operation="access"),
+            get_json_object(session, client, path="/api/ux/me/access", operation="access"),
+            get_json_object(session, client, path="/api/ux/me/access", operation="access"),
         )
 
     payloads = asyncio.run(run())

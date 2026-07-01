@@ -122,7 +122,7 @@ Panel:
     `core_impl/report_reads.py`; the helper module receives snapshot IO as an
     explicit dependency and does not import the adapter directly.
 
-- [ ] Split `enji_api.py` into request mechanics and endpoint wrappers.
+- [x] Split `enji_api.py` into request mechanics and endpoint wrappers.
   - Source: Kaizen / Architecture Simplification.
   - Evidence: `enji_api.py` mixes endpoint specs, session loading, refresh
     retry, response status mapping, parsers, and domain wrappers.
@@ -132,6 +132,8 @@ Panel:
     execution, refresh retry, and response status mapping.
   - Rule: do not generate CLI/MCP from OpenAPI and do not split all endpoints
     in one pass.
+  - Architecture gate: `enji_api_impl` is below the `enji_api` facade; core and
+    entrypoints may not import it directly.
 
 - [x] Split durable auth from temporary cookie machinery.
   - Source: Kaizen / Architecture Simplification.
@@ -226,11 +228,12 @@ Panel:
     production `print()`.
   - Scope: avoid applying to scripts unless desired.
 
-- [ ] Enable Ruff unused-argument lint `ARG` after cleanup.
+- [x] Enable Ruff unused-argument lint `ARG` after cleanup.
   - Source: QA / Static Analysis.
-  - Current blocker: unused `options` parameter in
-    `core_impl/repo_status.py:report_wait_payload`.
-  - Action: remove, use, or rename that parameter, then add `ARG` to hard gate.
+  - Scope: production code only; tests ignore `ARG` because fake callbacks
+    intentionally preserve call signatures.
+  - Action: removed the unused `options` parameter from
+    `core_impl/repo_status.py:report_wait_payload` and added `ARG` to Ruff.
 
 - [x] Expand Vulture paths to include `scripts`.
   - Source: QA / Static Analysis.
@@ -307,5 +310,5 @@ Panel:
 6. [x] Move neutral JSON types out of `enji_api.py` and tighten import-linter.
 7. [ ] Split `core.py` by use case.
 8. [x] Split auth cookie/store responsibilities.
-9. [ ] Split `enji_api.py` request mechanics from endpoint wrappers.
+9. [x] Split `enji_api.py` request mechanics from endpoint wrappers.
 10. [ ] Improve project create/delete partial-state reporting.

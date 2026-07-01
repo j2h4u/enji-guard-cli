@@ -1,10 +1,8 @@
-import asyncio
-from collections.abc import Callable, Collection, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
-from urllib.parse import quote, urlencode
 from uuid import uuid4
 
 from enji_guard_cli._enji_api_contract import (
@@ -36,49 +34,32 @@ from enji_guard_cli._enji_api_contract import (
     RUNBOOK_ENDPOINT_SPEC,
     UX_PROJECT_CREATE_ENDPOINT_SPEC,
     UX_PROJECT_DELETE_ENDPOINT_SPEC,
-    EnjiEndpointSpec,
-    HttpMethod,
 )
-from enji_guard_cli.auth import (
-    AUTH_INVALID_CODE,
-    AUTH_REFRESH_ORIGIN,
-    AUTH_REFRESH_PATH,
-    CredentialType,
-    StoredAuth,
-    auth_headers,
-    default_auth_file,
-    is_auth_invalid_response,
-    load_stored_auth,
-    refresh_cookie_auth,
+from enji_guard_cli.enji_api_impl.client import (
+    ApiEndpoint,
+    EnjiApiSession,
+    run_api_no_content,
+    run_api_request,
+    run_api_request_async,
+)
+from enji_guard_cli.enji_api_impl.client import (
+    load_api_session as _load_api_session_impl,
 )
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
-from enji_guard_cli.transport import (
-    EnjiHttpClient,
-    EnjiHttpError,
-    EnjiHttpRequest,
-    EnjiHttpResponse,
-    EnjiJsonValue,
-    HttpxEnjiHttpClient,
-    raise_for_response_status,
-)
+from enji_guard_cli.transport import EnjiHttpClient, EnjiHttpError, EnjiJsonValue
 
 HTTP_OK = 200
 HTTP_CREATED = 201
 HTTP_NO_CONTENT = 204
-HTTP_UNAUTHORIZED = 401
-HTTP_FORBIDDEN = 403
 REPORTS_LIST_DEFAULT_SELECTOR = "*"
 REPORTS_LIST_DEFAULT_STALE = False
 REPORTS_LIST_DEFAULT_MIN_SEVERITY: str | None = None
-HTTP_OK_ONLY = frozenset({HTTP_OK})
 HTTP_CREATED_ONLY = frozenset({HTTP_CREATED})
 HTTP_NO_CONTENT_ONLY = frozenset({HTTP_NO_CONTENT})
 HTTP_OK_OR_NO_CONTENT = frozenset({HTTP_OK, HTTP_NO_CONTENT})
 
 type JsonObjectParser[T] = Callable[[dict[str, object]], T]
-type ApiPathParams = Mapping[str, str]
-type ApiQueryParams = Mapping[str, str]
 
 
 class AccessLimitsPayload(TypedDict):
@@ -110,58 +91,6 @@ class ProjectOverviewPayload(TypedDict):
 
 class ReportsListPayload(TypedDict):
     projects: list[ProjectOverviewPayload]
-
-
-@dataclass(slots=True)
-class EnjiApiSession:
-    auth_file: Path
-    base_url: str
-    headers: dict[str, str]
-    stored_auth: StoredAuth
-    refresh_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    refresh_epoch: int = 0
-
-    def update_stored_auth(self, stored_auth: StoredAuth) -> None:
-        self.stored_auth = stored_auth
-        self.headers = api_headers(stored_auth)
-        self.refresh_epoch += 1
-
-
-@dataclass(frozen=True, slots=True)
-class ApiRequestSpec[T]:
-    method: HttpMethod
-    path: str
-    operation: str
-    parser: JsonObjectParser[T]
-    json_body: EnjiJsonValue | None = None
-    expected_statuses: Collection[int] = HTTP_OK_ONLY
-
-
-@dataclass(frozen=True, slots=True)
-class ApiEndpoint[T]:
-    spec: EnjiEndpointSpec
-    parser: JsonObjectParser[T]
-    expected_statuses: Collection[int] = HTTP_OK_ONLY
-
-    def request(
-        self,
-        *,
-        path_params: ApiPathParams | None = None,
-        query_params: ApiQueryParams | None = None,
-        json_body: EnjiJsonValue | None = None,
-        parser: JsonObjectParser[T] | None = None,
-    ) -> ApiRequestSpec[T]:
-        path = _render_api_path(self.spec.path_template, path_params)
-        if query_params:
-            path = f"{path}?{urlencode(query_params)}"
-        return ApiRequestSpec(
-            method=self.spec.method,
-            path=path,
-            operation=self.spec.operation,
-            parser=parser if parser is not None else self.parser,
-            json_body=json_body,
-            expected_statuses=self.expected_statuses,
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,7 +158,7 @@ class AuditEmailPreferenceRequest(TypedDict, total=False):
 
 
 def access(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> AccessPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         ACCESS_ENDPOINT.request(),
@@ -237,7 +166,7 @@ def access(auth_file: Path | None = None, client: EnjiHttpClient | None = None) 
 
 
 async def access_async(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> AccessPayload:
-    return await _run_api_request_async(
+    return await run_api_request_async(
         auth_file,
         client,
         ACCESS_ENDPOINT.request(),
@@ -274,7 +203,7 @@ def reports_list(
     min_severity: str | None = REPORTS_LIST_DEFAULT_MIN_SEVERITY,
 ) -> ReportsListPayload:
     _validate_reports_filters(stale=stale, min_severity=min_severity)
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         REPORTS_LIST_ENDPOINT.request(parser=_reports_list_parser(selector)),
@@ -290,7 +219,7 @@ async def reports_list_async(
     min_severity: str | None = REPORTS_LIST_DEFAULT_MIN_SEVERITY,
 ) -> ReportsListPayload:
     _validate_reports_filters(stale=stale, min_severity=min_severity)
-    return await _run_api_request_async(
+    return await run_api_request_async(
         auth_file,
         client,
         REPORTS_LIST_ENDPOINT.request(parser=_reports_list_parser(selector)),
@@ -298,7 +227,7 @@ async def reports_list_async(
 
 
 def projects(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> JsonObjectPayload:
-    return _run_api_request(auth_file, client, PROJECTS_ENDPOINT.request())
+    return run_api_request(auth_file, client, PROJECTS_ENDPOINT.request())
 
 
 def project_detail(
@@ -306,7 +235,7 @@ def project_detail(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         PROJECT_DETAIL_ENDPOINT.request(path_params={"projectId": project_id}),
@@ -319,7 +248,7 @@ def create_project(
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
     fleet_request: FleetProjectCreateRequest = {"name": name}
-    fleet_project = _run_api_request(
+    fleet_project = run_api_request(
         auth_file,
         client,
         FLEET_PROJECT_CREATE_ENDPOINT.request(json_body=cast(EnjiJsonValue, fleet_request)),
@@ -329,7 +258,7 @@ def create_project(
         "name": name,
         "createdAt": datetime.now(UTC).isoformat(),
     }
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         UX_PROJECT_CREATE_ENDPOINT.request(json_body=cast(EnjiJsonValue, ux_request)),
@@ -343,7 +272,7 @@ def rename_project(
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
     patch: ProjectPatchRequest = {"name": name}
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         PROJECT_RENAME_ENDPOINT.request(path_params={"projectId": project_id}, json_body=cast(EnjiJsonValue, patch)),
@@ -355,12 +284,12 @@ def delete_project(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> None:
-    _run_api_no_content(
+    run_api_no_content(
         auth_file,
         client,
         UX_PROJECT_DELETE_ENDPOINT.request(path_params={"projectId": project_id}),
     )
-    _run_api_no_content(
+    run_api_no_content(
         auth_file,
         client,
         FLEET_PROJECT_DELETE_ENDPOINT.request(path_params={"projectId": project_id}),
@@ -375,7 +304,7 @@ def preflight_repo_move(
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
     request: RepoTransferPreflightRequest = {"targetProjectId": target_project_id}
-    return _run_api_no_content(
+    return run_api_no_content(
         auth_file,
         client,
         REPO_TRANSFER_PREFLIGHT_ENDPOINT.request(
@@ -393,7 +322,7 @@ def move_repo(
     json_request: RepoTransferRequest = {"targetProjectId": request.target_project_id}
     if request.schedule_replacements is not None:
         json_request["scheduleReplacements"] = request.schedule_replacements
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         REPO_TRANSFER_ENDPOINT.request(
@@ -404,7 +333,7 @@ def move_repo(
 
 
 def catalog(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> JsonObjectPayload:
-    return _run_api_request(auth_file, client, CATALOG_ENDPOINT.request())
+    return run_api_request(auth_file, client, CATALOG_ENDPOINT.request())
 
 
 def runbook(
@@ -412,7 +341,7 @@ def runbook(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         RUNBOOK_ENDPOINT.request(path_params={"runbookId": runbook_id}),
@@ -420,7 +349,7 @@ def runbook(
 
 
 def _github_installations(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> JsonObjectPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         GITHUB_INSTALLATIONS_ENDPOINT.request(),
@@ -432,7 +361,7 @@ def _github_installation_repos(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         GITHUB_INSTALLATION_REPOS_ENDPOINT.request(path_params={"installationId": installation_id}),
@@ -447,7 +376,7 @@ def _connect_project_repo(
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
     request: RepoConnectRequest = {"githubOwner": github_owner, "githubName": github_name}
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         PROJECT_REPOS_CONNECT_ENDPOINT.request(
@@ -466,7 +395,7 @@ def _update_repo_connection(
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
     request: RepoConnectionRequest = {"connected": connected}
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         PROJECT_REPO_CONNECTION_ENDPOINT.request(
@@ -481,7 +410,7 @@ def _project_active_runs(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         PROJECT_ACTIVE_RUNS_ENDPOINT.request(path_params={"projectId": project_id}),
@@ -493,7 +422,7 @@ def repo_active_runs(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         REPO_ACTIVE_RUNS_ENDPOINT.request(path_params={"repoId": repo_id}),
@@ -505,7 +434,7 @@ def repo_audit_rerun_state(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         REPO_AUDIT_RERUN_STATE_ENDPOINT.request(path_params={"repoId": repo_id}),
@@ -517,7 +446,7 @@ def repo_task_links(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         REPO_TASK_LINKS_ENDPOINT.request(path_params={"repoId": repo_id}),
@@ -529,7 +458,7 @@ def _repo_audit_history(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         REPO_AUDIT_HISTORY_ENDPOINT.request(path_params={"repoId": repo_id}),
@@ -547,7 +476,7 @@ def start_audit_run(
         "fleetTaskBody": request.fleet_task_body,
         "clientRequestId": str(uuid4()),
     }
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         REPO_AUDIT_RUNS_ENDPOINT.request(
@@ -563,7 +492,7 @@ def audit_summary_snapshot(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         REPO_AUDIT_SUMMARY_ENDPOINT.request(
@@ -579,7 +508,7 @@ def audit_email_preferences(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT.request(path_params={"repoId": repo_id, "actionKey": action_key}),
@@ -594,7 +523,7 @@ def put_audit_email_preferences(
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
     request = _audit_email_preference_request(patch)
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT.request(
@@ -609,7 +538,7 @@ def improvement_jobs(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         IMPROVEMENT_JOBS_ENDPOINT.request(path_params={"repoId": repo_id}),
@@ -623,7 +552,7 @@ def put_improvement_job(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    return _run_api_request(
+    return run_api_request(
         auth_file,
         client,
         IMPROVEMENT_JOB_PUT_ENDPOINT.request(
@@ -649,233 +578,7 @@ def _parse_reports_list_payload(payload: dict[str, object], selector: str) -> Re
 
 
 def load_api_session(auth_file: Path | None = None) -> EnjiApiSession:
-    target = auth_file if auth_file is not None else default_auth_file()
-    if not target.exists():
-        raise EnjiApiError("AUTH_REQUIRED", "auth file does not exist")
-
-    stored_auth = load_stored_auth(target)
-    if stored_auth is None:
-        raise EnjiApiError("AUTH_REQUIRED", "auth file is invalid")
-
-    return EnjiApiSession(
-        auth_file=target, base_url=stored_auth["base_url"], headers=api_headers(stored_auth), stored_auth=stored_auth
-    )
-
-
-def api_headers(stored_auth: StoredAuth) -> dict[str, str]:
-    return {**auth_headers(stored_auth), "Origin": AUTH_REFRESH_ORIGIN}
-
-
-def _run_api_request[T](
-    auth_file: Path | None,
-    client: EnjiHttpClient | None,
-    spec: ApiRequestSpec[T],
-) -> T:
-    return asyncio.run(
-        _run_api_request_async(
-            auth_file,
-            client,
-            spec,
-        )
-    )
-
-
-async def _run_api_request_async[T](
-    auth_file: Path | None,
-    client: EnjiHttpClient | None,
-    spec: ApiRequestSpec[T],
-) -> T:
-    try:
-        session = load_api_session(auth_file)
-        if client is not None:
-            return await _request_parsed_json_object(session, client, spec)
-
-        async with HttpxEnjiHttpClient() as owned_client:
-            return await _request_parsed_json_object(session, owned_client, spec)
-    except EnjiHttpError as exc:
-        raise EnjiApiError(exc.code, exc.message) from exc
-
-
-def _run_api_no_content(
-    auth_file: Path | None,
-    client: EnjiHttpClient | None,
-    spec: ApiRequestSpec[JsonObjectPayload],
-) -> JsonObjectPayload:
-    return asyncio.run(_run_api_no_content_async(auth_file, client, spec))
-
-
-async def _run_api_no_content_async(
-    auth_file: Path | None,
-    client: EnjiHttpClient | None,
-    spec: ApiRequestSpec[JsonObjectPayload],
-) -> JsonObjectPayload:
-    try:
-        session = load_api_session(auth_file)
-        if client is not None:
-            return await _request_no_content(session, client, spec)
-
-        async with HttpxEnjiHttpClient() as owned_client:
-            return await _request_no_content(session, owned_client, spec)
-    except EnjiHttpError as exc:
-        raise EnjiApiError(exc.code, exc.message) from exc
-
-
-async def _request_parsed_json_object[T](
-    session: EnjiApiSession,
-    client: EnjiHttpClient,
-    spec: ApiRequestSpec[T],
-) -> T:
-    return spec.parser(await _request_json_object(session, client, spec))
-
-
-async def _request_no_content(
-    session: EnjiApiSession,
-    client: EnjiHttpClient,
-    spec: ApiRequestSpec[JsonObjectPayload],
-) -> JsonObjectPayload:
-    response = await _request_with_refresh(
-        session,
-        client,
-        EnjiHttpRequest(
-            method=spec.method,
-            url=f"{session.base_url}{spec.path}",
-            operation=spec.operation,
-            headers=dict(session.headers),
-            json_body=spec.json_body,
-        ),
-    )
-    _raise_for_api_response_status(response, operation=spec.operation, expected_statuses=spec.expected_statuses)
-    if not response.content:
-        return {}
-    payload = response.json(operation=spec.operation)
-    if not isinstance(payload, dict):
-        raise EnjiHttpError("UPSTREAM", f"{spec.operation} returned unexpected JSON")
-    return _normalize_json_object(payload)
-
-
-async def _get_json_object(
-    session: EnjiApiSession,
-    client: EnjiHttpClient,
-    *,
-    path: str,
-    operation: str,
-) -> dict[str, object]:
-    return await _request_json_object(
-        session,
-        client,
-        ApiRequestSpec(method="GET", path=path, operation=operation, parser=_parse_json_object_payload),
-    )
-
-
-async def _request_json_object[T](
-    session: EnjiApiSession,
-    client: EnjiHttpClient,
-    spec: ApiRequestSpec[T],
-) -> dict[str, object]:
-    response = await _request_with_refresh(
-        session,
-        client,
-        EnjiHttpRequest(
-            method=spec.method,
-            url=f"{session.base_url}{spec.path}",
-            operation=spec.operation,
-            headers=dict(session.headers),
-            json_body=spec.json_body,
-        ),
-    )
-    _raise_for_api_response_status(response, operation=spec.operation, expected_statuses=spec.expected_statuses)
-    payload = response.json(operation=spec.operation)
-    if not isinstance(payload, dict):
-        raise EnjiHttpError("UPSTREAM", f"{spec.operation} returned unexpected JSON")
-    return cast(dict[str, object], payload)
-
-
-async def _request_with_refresh(
-    session: EnjiApiSession,
-    client: EnjiHttpClient,
-    request: EnjiHttpRequest,
-) -> EnjiHttpResponse:
-    refresh_epoch = session.refresh_epoch
-    response = await client.request(request)
-    if not _should_refresh(session, request, response):
-        return response
-
-    await _refresh_session_once(session, client, refresh_epoch)
-    retry_response = await client.request(_request_with_current_headers(request, session))
-    if is_auth_invalid_response(retry_response):
-        raise EnjiHttpError(AUTH_INVALID_CODE, "invalid access token after refresh", status_code=HTTP_UNAUTHORIZED)
-    return retry_response
-
-
-def _should_refresh(session: EnjiApiSession, request: EnjiHttpRequest, response: EnjiHttpResponse) -> bool:
-    if not _is_cookie_session(session):
-        return False
-    if request.url == f"{session.base_url}{AUTH_REFRESH_PATH}":
-        return False
-    return response.status_code in {HTTP_UNAUTHORIZED, HTTP_FORBIDDEN} or is_auth_invalid_response(response)
-
-
-async def _refresh_session_once(
-    session: EnjiApiSession,
-    client: EnjiHttpClient,
-    observed_refresh_epoch: int,
-) -> None:
-    async with session.refresh_lock:
-        if session.refresh_epoch != observed_refresh_epoch:
-            return
-        await _refresh_session(session, client)
-
-
-async def _refresh_session(session: EnjiApiSession, client: EnjiHttpClient) -> None:
-    session.update_stored_auth(await refresh_cookie_auth(session.auth_file, session.stored_auth, client))
-
-
-def _request_with_current_headers(request: EnjiHttpRequest, session: EnjiApiSession) -> EnjiHttpRequest:
-    return EnjiHttpRequest(
-        method=request.method,
-        url=request.url,
-        operation=request.operation,
-        headers=dict(session.headers),
-        json_body=request.json_body,
-        timeout_seconds=request.timeout_seconds,
-    )
-
-
-def _raise_for_api_response_status(
-    response: EnjiHttpResponse,
-    *,
-    operation: str,
-    expected_statuses: Collection[int],
-) -> None:
-    if response.status_code in expected_statuses:
-        return
-    if is_auth_invalid_response(response):
-        raise EnjiHttpError(AUTH_INVALID_CODE, "invalid access token", status_code=HTTP_UNAUTHORIZED)
-    if response.status_code == HTTP_UNAUTHORIZED:
-        raise EnjiHttpError("AUTH_REQUIRED", "stored credential is not authenticated", status_code=response.status_code)
-    api_error = _api_error_from_response(response)
-    if api_error is not None:
-        raise api_error
-    raise_for_response_status(response, operation=operation, expected_statuses=expected_statuses)
-
-
-def _api_error_from_response(response: EnjiHttpResponse) -> EnjiHttpError | None:
-    try:
-        payload = response.json(operation="api error")
-    except EnjiHttpError:
-        return None
-    error = _as_dict(payload)
-    nested_error = _as_dict(error.get("error"))
-    error_payload = nested_error or error
-    code = _optional_str(error_payload.get("code"))
-    if code is None:
-        return None
-    message = _optional_str(error_payload.get("message")) or code
-    return EnjiHttpError(code, message, status_code=response.status_code)
-
-
-def _is_cookie_session(session: EnjiApiSession) -> bool:
-    return session.stored_auth["credential"]["type"] == CredentialType.COOKIE.value
+    return _load_api_session_impl(auth_file)
 
 
 def _validate_reports_filters(*, stale: bool, min_severity: str | None) -> None:
@@ -1044,15 +747,6 @@ IMPROVEMENT_JOB_PUT_ENDPOINT = ApiEndpoint(
 )
 
 
-def _render_api_path(path_template: str, path_params: ApiPathParams | None) -> str:
-    path = path_template
-    for name, value in (path_params or {}).items():
-        path = path.replace(f"{{{name}}}", _quote_path(value))
-    if "{" in path or "}" in path:
-        raise ValueError(f"unresolved API path parameter in {path_template}")
-    return path
-
-
 def _audit_email_preference_request(patch: JsonObjectPayload) -> AuditEmailPreferenceRequest:
     request: AuditEmailPreferenceRequest = {}
     manual = patch.get("manualRunCompletion")
@@ -1110,7 +804,3 @@ def _optional_bool(value: object) -> bool | None:
 
 def _optional_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
-
-
-def _quote_path(value: str) -> str:
-    return quote(value, safe="")
