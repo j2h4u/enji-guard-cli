@@ -23,8 +23,8 @@ Primary nouns:
 - `report`: generated report content.
 - `schedule`: recurring audit settings.
 - `email`: report completion email preferences.
-- `status`: runtime snapshot across projects/repos/tasks.
-- `wait`: blocking readiness check for all report audits in one repo.
+- `status`: snapshot/readiness/freshness across projects/repos/tasks.
+- `wait`: blocking readiness gate for all report audits in one repo.
 
 Canonical report audits:
 
@@ -67,23 +67,20 @@ enji-guard audit start REPO --all
 
 enji-guard wait REPO
 
-enji-guard report list [REPO]
-enji-guard report list [--selector SELECTOR]
 enji-guard report read REPO [AUDIT...] [--all] [--json]
-enji-guard report show REPO AUDIT [--json]
 
 enji-guard schedule list [REPO]
-enji-guard schedule set REPO --enabled on|off|keep [--freq FREQ]
-enji-guard --project PROJECT schedule set --all-repos --enabled on|off|keep [--freq FREQ]
-enji-guard schedule set --all-projects --enabled on|off|keep [--freq FREQ]
-enji-guard schedule auto-time --repo REPO
+enji-guard schedule set REPO [--enabled on|off] [--frequency FREQ] [--timezone TZ]
+enji-guard --project PROJECT schedule set --all-repos [--enabled on|off] [--frequency FREQ] [--timezone TZ]
+enji-guard schedule set --all-projects [--enabled on|off] [--frequency FREQ] [--timezone TZ]
+enji-guard schedule auto-time REPO
 enji-guard --project PROJECT schedule auto-time --all-repos
 enji-guard schedule auto-time --all-projects
 
 enji-guard email list [REPO]
-enji-guard email set REPO [--manual on|off|keep] [--auto on|off|keep]
-enji-guard --project PROJECT email set --all-repos [--manual on|off|keep] [--auto on|off|keep]
-enji-guard email set --all-projects [--manual on|off|keep] [--auto on|off|keep]
+enji-guard email set REPO [--manual on|off] [--scheduled on|off]
+enji-guard --project PROJECT email set --all-repos [--manual on|off] [--scheduled on|off]
+enji-guard email set --all-projects [--manual on|off] [--scheduled on|off]
 ```
 
 Project filtering is a global option:
@@ -91,11 +88,11 @@ Project filtering is a global option:
 ```text
 enji-guard --project NAME_OR_ID status
 enji-guard --project NAME_OR_ID audit start OWNER/NAME --all
-enji-guard --project NAME_OR_ID email set --all-repos --auto off
+enji-guard --project NAME_OR_ID email set --all-repos --scheduled off
 ```
 
-CLI output is human-readable by default. Use `--json` only when automation needs
-the raw machine contract.
+CLI output is human-readable by default. Use `--json` only when automation
+needs the raw machine contract.
 
 ## Resolution Rules
 
@@ -117,15 +114,13 @@ the raw machine contract.
 - Ambiguous targets fail with `BAD_SELECTOR` and include candidates.
 - There is no default project.
 - No fuzzy matching in write commands.
-- `report list` without a repo is compact project inventory.
-- `report list REPO`, `report list --selector OWNER/NAME`, and
-  `report list --selector repo_...` show report-audit status for one repo.
-- `report read` returns report content. With `--json`, it returns compact
-  report metadata by default; use `--full --json` only when the full snapshot
-  body is needed.
+- `status` is the report readiness and freshness surface. `status REPO`
+  shows per-audit readiness for one repo.
+- `report read` returns report content. With `--json`, it returns the machine
+  contract for automation.
 - `report read REPO` defaults to all currently ready reports for that repo.
 - `email` preferences apply to all report audits. `--manual` controls mail
-  after manual runs; `--auto` controls mail after scheduled automatic runs.
+  after manual runs; `--scheduled` controls mail after scheduled automatic runs.
 - Repo inventory/status sorting is optional. `weakest` and `overall` sort lower
   scores first; `latest-report` sorts newer report activity first. Repos
   without the selected signal stay last.
@@ -151,14 +146,14 @@ as raw `scores`, simple `score_grades`, and a compact `score_summary`; there is
 no separate score flag.
 
 `schedule` is the public noun for automatic report audit runs. It exposes domain
-settings (`enabled`, `frequency`, time source, timezone) and hides Enji's
-`improvement-jobs` payload shape. `schedule set` applies enabled/frequency
-changes to all report audits in the selected explicit write scope; it does not
-surface manual run time. Enji-assigned run time is the default model, and
-`schedule auto-time` resets existing schedules back to that model in the same
-explicit write scopes. `schedule list` shows concrete times with their source,
-for example `09:00 (auto)` or `09:00 (manual)`. `schedule timezone` aligns
-timezone. Per-audit schedule controls and manual run-time tuning are
-intentionally not part of the default workflow. `schedule list` should call out
-timezone divergence inside one repo because that often explains stale report
-audits.
+settings (`enabled`, `frequency`, timezone) and hides Enji's
+`improvement-jobs` payload shape. `schedule set` applies enabled/frequency and
+timezone changes to all report audits in the selected explicit write scope; it
+does not surface manual run time. Enji-assigned run time is the default model,
+and `schedule auto-time` resets existing schedules back to that model in the
+same explicit write scopes. `schedule list` shows concrete times with their
+source, for example `09:00 (auto)` or `09:00 (manual)`. Per-audit schedule
+controls and manual run-time tuning are intentionally not part of the default
+workflow. `schedule list` should call out timezone divergence inside one repo
+because that often explains stale report audits. Timezone is stored per
+schedule, and the service/container should run with the host timezone.

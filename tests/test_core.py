@@ -26,12 +26,11 @@ from enji_guard_cli.core import (
 from enji_guard_cli.errors import EnjiApiError
 
 
-def test_operation_catalog_is_one_to_one_across_core_cli_and_mcp_surfaces() -> None:
+def test_operation_catalog_has_unique_operation_and_mcp_tool_names() -> None:
     catalog = operation_catalog()
 
     assert [entry["name"] for entry in catalog] == [spec.name.value for spec in OPERATION_SPECS]
     assert len({entry["name"] for entry in catalog}) == len(catalog)
-    assert len({entry["cli_command"] for entry in catalog}) == len(catalog)
     assert len({entry["mcp_tool"] for entry in catalog}) == len(catalog)
 
 
@@ -57,9 +56,9 @@ def test_operation_catalog_includes_catalog_access_reports_and_auth_specs() -> N
         },
         {
             "name": OperationName.REPORTS_LIST.value,
-            "cli_command": "report list",
+            "cli_command": None,
             "mcp_tool": "enji_reports_list",
-            "summary": "List compact Enji Guard report inventory across repositories.",
+            "summary": "List compact Enji Guard report inventory for MCP.",
         },
         {
             "name": OperationName.AUTH_STATUS.value,
@@ -79,9 +78,9 @@ def test_resolve_operation_returns_new_access_and_reports_specs() -> None:
     }
     assert resolve_operation(OperationName.REPORTS_LIST) == {
         "name": "reports_list",
-        "cli_command": "report list",
+        "cli_command": None,
         "mcp_tool": "enji_reports_list",
-        "summary": "List compact Enji Guard report inventory across repositories.",
+        "summary": "List compact Enji Guard report inventory for MCP.",
     }
 
 
@@ -1049,52 +1048,6 @@ def test_start_report_audits_rejects_invalid_selection(
         core.start_report_audits("j2h4u/enji-guard-cli", None, audits, all_reports=all_reports)
 
 
-def test_list_reports_for_repo_resolves_target_and_returns_report_status(monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        core,
-        "_resolve_single_repo_target",
-        lambda repo, project: {
-            "project_id": "project_1",
-            "project_name": "Pets",
-            "repo_id": "repo_1",
-            "github_owner": "j2h4u",
-            "github_name": "enji-guard-cli",
-            "github_repo": "j2h4u/enji-guard-cli",
-            "connected": True,
-            "recon_done": True,
-        },
-    )
-    monkeypatch.setattr(
-        core,
-        "report_status",
-        lambda repo_id: {
-            "repo_id": repo_id,
-            "current_head_sha": "head_2",
-            "last_report_at": "2026-06-30T12:00:00Z",
-            "complete": True,
-            "ready": ["security"],
-            "running": [],
-            "missing": [],
-            "reports": [{"audit": "security", "state": "ready"}],
-        },
-    )
-
-    payload = core.list_reports_for_repo("j2h4u/enji-guard-cli", "Pets")
-
-    assert payload["target"] == {
-        "project_id": "project_1",
-        "project_name": "Pets",
-        "repo_id": "repo_1",
-        "github_owner": "j2h4u",
-        "github_name": "enji-guard-cli",
-        "github_repo": "j2h4u/enji-guard-cli",
-        "connected": True,
-        "recon_done": True,
-    }
-    assert payload["repo_id"] == "repo_1"
-    assert payload["reports"] == [{"audit": "security", "state": "ready"}]
-
-
 def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatch) -> None:
     captured_audits: list[str] = []
     monkeypatch.setattr(
@@ -1261,7 +1214,7 @@ def test_set_email_preferences_fans_out_over_project_repos_and_report_audits(mon
 
 
 def test_set_email_preferences_rejects_empty_patch() -> None:
-    with pytest.raises(ValueError, match="pass --manual or --auto"):
+    with pytest.raises(ValueError, match="pass --manual or --scheduled"):
         core.set_email_preferences("j2h4u/enji-guard-cli", None, EmailPreferenceUpdate(None, None))
 
 
@@ -1688,46 +1641,6 @@ def test_wait_for_report_completion_succeeds_when_reports_are_ready_but_stale(mo
     assert payload["timed_out"] is False
     assert payload["reason"] == "complete"
     assert payload["counts"]["stale"] == 1
-    assert payload["stale"] == ["security"]
-
-
-def test_wait_for_report_completion_requires_fresh_when_requested(monkeypatch: MonkeyPatch) -> None:
-    class FakeClock:
-        value = 0.0
-
-        def monotonic(self) -> float:
-            self.value += 31.0
-            return self.value
-
-        def sleep(self, seconds: float) -> None:
-            assert seconds >= 0.0
-
-    status = _report_wait_status(
-        complete=True,
-        state="ready",
-        out_of_date=True,
-        run_status="completed",
-    )
-    clock = FakeClock()
-    monkeypatch.setattr(core, "report_status", lambda _repo_id: status)
-    monkeypatch.setattr(core.time, "monotonic", clock.monotonic)
-    monkeypatch.setattr(core.time, "sleep", clock.sleep)
-
-    payload = core.wait_for_report_completion(
-        "repo_1",
-        options=ReportWaitOptions(
-            poll_seconds=30,
-            timeout_seconds=30,
-            heartbeat_seconds=120,
-            require_fresh=True,
-        ),
-        heartbeat=None,
-    )
-
-    assert payload["complete"] is False
-    assert payload["fresh"] is False
-    assert payload["timed_out"] is True
-    assert payload["reason"] == "timeout"
     assert payload["stale"] == ["security"]
 
 

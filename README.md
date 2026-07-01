@@ -22,10 +22,11 @@ move repositories between projects. `project delete` is destructive and
 requires `--yes`.
 
 Recon is baseline discovery. Report audits are separate, slow jobs that produce
-readable reports and scores. Scores are triage hints: use them to sort and
-prioritize repositories, then read the reports before changing code. When a
-report exposes commit hashes, compare them with the current checkout before
-treating the report as fresh.
+readable reports and scores. `status` is the snapshot/readiness/freshness view,
+`wait` is the blocking gate, and `report read` is the content path. Scores are
+triage hints: use them to sort and prioritize repositories, then read the
+reports before changing code. When a report exposes commit hashes, compare them
+with the current checkout before treating the report as fresh.
 
 CLI output is human text and tables by default. Use `--json` only when another
 tool needs structured output.
@@ -79,19 +80,15 @@ For reports:
 ```bash
 docker exec -i enji-guard-cli enji-guard audit start "$REPO" --all
 docker exec -i enji-guard-cli enji-guard wait "$REPO"
-docker exec -i enji-guard-cli enji-guard wait "$REPO" --fresh
 docker exec -i enji-guard-cli enji-guard report read "$REPO"
 ```
 
 Recon and report audits can take tens of minutes. Use `status` for a snapshot,
 `wait` until all report audits have results, and `report read` after reports
-are ready. `wait` reports stale audited commit hashes but does not fail only
-because Enji has not caught up to the current HEAD. Use `wait --fresh` when the
-task requires every report audit to match the current HEAD. `status` shows
-stale audits explicitly and uses `audited=mixed` when report audits were
-generated from different commits. Prefer reading reports through CLI/MCP instead
-of relying on email; disable noisy scheduled mail when it is not part of the
-workflow.
+are ready. `wait` is a blocking gate; `status` shows stale audits explicitly
+and uses `audited=mixed` when report audits were generated from different
+commits. Prefer reading reports through CLI/MCP instead of relying on email;
+disable noisy scheduled mail when it is not part of the workflow.
 
 ## Requirements
 
@@ -144,15 +141,12 @@ docker exec -i enji-guard-cli enji-guard repo move j2h4u/enji-guard-cli --to-pro
 docker exec -i enji-guard-cli enji-guard status j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard audit start j2h4u/enji-guard-cli --all
 docker exec -i enji-guard-cli enji-guard wait j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard wait j2h4u/enji-guard-cli --fresh
 docker exec -i enji-guard-cli enji-guard report read j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard report read j2h4u/enji-guard-cli --json
-docker exec -i enji-guard-cli enji-guard report list j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard --project Pets schedule list
-docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos --enabled on --freq workdays
-docker exec -i enji-guard-cli enji-guard --project Pets schedule timezone Asia/Almaty --all-repos
+docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos --enabled on --frequency workdays --timezone Asia/Almaty
 docker exec -i enji-guard-cli enji-guard --project Pets schedule auto-time --all-repos
-docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --auto off
+docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --scheduled off
 docker exec -i enji-guard-cli enji-guard auth refresh
 ```
 
@@ -166,11 +160,10 @@ disambiguation when needed. `--to-project` selects the destination project.
 `schedule` controls automatic report-audit runs. It shows one row per
 repo/report audit and can batch update all report audits for one repo or one
 explicit batch scope. Use `REPO`, `--project NAME_OR_ID --all-repos`, or
-`--all-projects`. `schedule list` warns when enabled audits for one repo use
-different timezones; `schedule timezone` aligns timezone for the selected
-scope. The `at` column shows the source, for example `09:00 (auto)` or
-`09:00 (manual)`. `schedule auto-time` resets the selected scope to
-Enji-assigned run times, which is the default scheduling model.
+`--all-projects`. Timezone is stored per schedule. The service/container should
+run with the host timezone, while Enji assigns the run time by default.
+`schedule set` updates enabled state, frequency, and timezone for the selected
+scope. `schedule auto-time` resets that scope back to Enji-assigned run times.
 
 ## MCP
 

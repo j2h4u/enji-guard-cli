@@ -24,16 +24,19 @@ EXPECTED_VISIBLE_COMMANDS = {
     ("repo", "list"),
     ("repo", "move"),
     ("repo", "resolve"),
-    ("report", "list"),
     ("report", "read"),
-    ("report", "show"),
     ("run",),
     ("schedule", "list"),
     ("schedule", "auto-time"),
     ("schedule", "set"),
-    ("schedule", "timezone"),
     ("status",),
     ("wait",),
+}
+
+REMOVED_VISIBLE_COMMANDS = {
+    ("report", "list"),
+    ("report", "show"),
+    ("schedule", "timezone"),
 }
 
 RAW_PLUMBING_NAMES = {
@@ -73,6 +76,7 @@ def test_visible_cli_command_inventory_matches_workflow_surface() -> None:
     command = get_command(app)
 
     assert set(_visible_command_paths(command)) == EXPECTED_VISIBLE_COMMANDS
+    assert REMOVED_VISIBLE_COMMANDS.isdisjoint(set(_visible_command_paths(command)))
 
 
 def test_visible_cli_surface_excludes_raw_api_plumbing() -> None:

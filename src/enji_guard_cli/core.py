@@ -299,7 +299,7 @@ class OperationName(StrEnum):
 
 class OperationPayload(TypedDict):
     name: str
-    cli_command: str
+    cli_command: str | None
     mcp_tool: str
     summary: str
 
@@ -307,7 +307,7 @@ class OperationPayload(TypedDict):
 @dataclass(frozen=True, slots=True)
 class OperationSpec:
     name: OperationName
-    cli_command: str
+    cli_command: str | None
     mcp_tool: str
     summary: str
     execute: OperationExecutor
@@ -318,7 +318,6 @@ class ReportWaitOptions:
     poll_seconds: int
     timeout_seconds: int
     heartbeat_seconds: int
-    require_fresh: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,9 +405,9 @@ OPERATION_SPECS: tuple[OperationSpec, ...] = (
     ),
     OperationSpec(
         name=OperationName.REPORTS_LIST,
-        cli_command="report list",
+        cli_command=None,
         mcp_tool="enji_reports_list",
-        summary="List compact Enji Guard report inventory across repositories.",
+        summary="List compact Enji Guard report inventory for MCP.",
         execute=_reports_list_operation,
     ),
     OperationSpec(
@@ -744,11 +743,6 @@ def show_report(repo_id: str, audit: AuditAlias) -> JsonObjectPayload:
     return run_audit_summary_snapshot(repo_id, route_slug)
 
 
-def show_report_for_repo(repo: str, audit: AuditAlias, project: str | None) -> JsonObjectPayload:
-    target = _resolve_single_repo_target(repo, project)
-    return show_report(target["repo_id"], audit)
-
-
 def read_reports_for_repo(
     repo: str,
     project: str | None,
@@ -759,11 +753,6 @@ def read_reports_for_repo(
     target = _resolve_single_repo_target(repo, project)
     selected_audits = _selected_reports_to_read(target["repo_id"], audits, all_reports=all_reports)
     return _targeted_run_payload(target, _read_reports_for_target(target["repo_id"], selected_audits))
-
-
-def list_reports_for_repo(repo: str, project: str | None) -> dict[str, object]:
-    target = _resolve_single_repo_target(repo, project)
-    return _targeted_run_payload(target, report_status(target["repo_id"]))
 
 
 def list_email_preferences(repo: str | None, project: str | None) -> JsonObjectPayload:
@@ -1138,13 +1127,13 @@ def _report_wait_payload(
     stale = _stale_report_audits(status)
     failed = _failed_report_audits(status)
     fresh = not stale
-    complete = status["complete"] and not failed and not timed_out and (fresh or not options.require_fresh)
+    complete = status["complete"] and not failed and not timed_out
     return {
         "repo_id": repo_id,
         "complete": complete,
         "fresh": fresh,
         "timed_out": timed_out,
-        "reason": _report_wait_reason(status, failed=failed, stale=stale, options=options, timed_out=timed_out),
+        "reason": _report_wait_reason(status, failed=failed, timed_out=timed_out),
         "elapsed_seconds": round(time.monotonic() - started_at),
         "current_head_sha": status["current_head_sha"],
         "last_report_at": status["last_report_at"],
@@ -1169,16 +1158,12 @@ def _report_wait_reason(
     status: ReportStatusPayload,
     *,
     failed: list[str],
-    stale: list[str],
-    options: ReportWaitOptions,
     timed_out: bool,
 ) -> ReportWaitReason:
     if failed:
         return "failed"
     if timed_out:
         return "timeout"
-    if status["complete"] and stale and options.require_fresh:
-        return "stale"
     if status["complete"]:
         return "complete"
     return "waiting"
@@ -1781,7 +1766,7 @@ def _email_preferences_patch(update: EmailPreferenceUpdate) -> JsonObjectPayload
     if update.scheduled_run_completion is not None:
         patch["scheduledRunCompletion"] = update.scheduled_run_completion
     if not patch:
-        raise ValueError("pass --manual or --auto")
+        raise ValueError("pass --manual or --scheduled")
     return patch
 
 
@@ -1826,9 +1811,9 @@ def _validate_schedule_settings_update(update: ScheduleSettingsUpdate) -> None:
         and update.schedule_time is None
         and update.timezone is None
     ):
-        raise ValueError("pass --enabled, --freq, --at, or --timezone")
+        raise ValueError("pass --enabled, --frequency, or --timezone")
     if update.days_of_week is not None and update.frequency is None:
-        raise ValueError("pass --freq when overriding --day")
+        raise ValueError("pass --frequency when overriding days")
 
 
 def _set_schedule_setting(

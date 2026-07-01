@@ -2,6 +2,7 @@ import json
 import socket
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, TypeGuard, cast
 
@@ -13,8 +14,6 @@ from enji_guard_cli.core import (
     DEFAULT_REPO_SORT,
     DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS,
     DEFAULT_REPORT_WAIT_POLL_SECONDS,
-    DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS,
-    REPORTS_LIST_DEFAULT_SELECTOR,
     EmailPreferenceUpdate,
     OperationName,
     OperationResult,
@@ -26,7 +25,6 @@ from enji_guard_cli.core import (
     list_email_preferences,
     list_project_inventory,
     list_projects,
-    list_reports_for_repo,
     list_schedule_settings,
     move_repo,
     package_version,
@@ -38,7 +36,6 @@ from enji_guard_cli.core import (
     runtime_status,
     set_email_preferences,
     set_schedule_settings,
-    show_report_for_repo,
     start_recon,
     start_report_audits,
     wait_for_reports,
@@ -66,7 +63,7 @@ project_app = typer.Typer(help="List and manage Enji projects.")
 repo_app = typer.Typer(help="Discover, resolve, connect, and move GitHub repositories.")
 recon_app = typer.Typer(help="Start baseline discovery. Recon is not a report audit.")
 audit_app = typer.Typer(help="Start slow report-producing audits.")
-report_app = typer.Typer(help="List and read generated audit reports.")
+report_app = typer.Typer(help="Read generated audit reports.")
 schedule_app = typer.Typer(help="Manage scheduled report audits.")
 email_app = typer.Typer(help="Manage report completion email preferences.")
 app.add_typer(catalog_app, name="catalog", hidden=True)
@@ -82,15 +79,16 @@ app.add_typer(email_app, name="email")
 CATALOG_AUDITS_OPERATION = resolve_operation_spec(OperationName.CATALOG_AUDITS)
 CATALOG_AUDIT_OPERATION = resolve_operation_spec(OperationName.CATALOG_AUDIT)
 ACCESS_OPERATION = resolve_operation_spec(OperationName.ACCESS)
-REPORTS_LIST_OPERATION = resolve_operation_spec(OperationName.REPORTS_LIST)
 AUTH_STATUS_OPERATION = resolve_operation_spec(OperationName.AUTH_STATUS)
 
 get_access = ACCESS_OPERATION.execute
-get_reports_list = REPORTS_LIST_OPERATION.execute
 auth_status = AUTH_STATUS_OPERATION.execute
 _cli_state: dict[str, object] = {"project": None, "json": False}
 
 type JsonCommandAction = Callable[[], OperationResult]
+type DurationSeconds = int
+type PreferenceSwitch = Literal["on", "off"]
+type ScheduleFrequencyOption = Literal["daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"]
 
 SECONDS_PER_MINUTE = 60
 SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE
@@ -98,6 +96,48 @@ SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR
 SHORT_DURATION_SECONDS_LIMIT = 5 * SECONDS_PER_MINUTE
 HEALTH_READY_TIMEOUT_SECONDS = 2.0
 MIN_TIMEZONE_DIVERGENCE_COUNT = 2
+DEFAULT_REPORT_WAIT_TIMEOUT = "45m"
+WRITE_FLAG_OPTIONS = frozenset({"--all-repos", "--all-projects", "--json"})
+SCHEDULE_SET_VALUE_OPTIONS = frozenset({"--enabled", "--frequency", "--timezone"})
+EMAIL_SET_VALUE_OPTIONS = frozenset({"--manual", "--scheduled"})
+SCHEDULE_SET_EPILOG = """
+Targets: REPO, --project PROJECT --all-repos, or --all-projects.
+Options: --enabled on|off, --frequency daily|workdays|weekly-3x|weekly-2x|weekly|monthly, --timezone TZ, --json.
+"""
+EMAIL_SET_EPILOG = """
+Targets: REPO, --project PROJECT --all-repos, or --all-projects.
+Options: --manual on|off, --scheduled on|off, --json.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedWriteArgs:
+    repo: str | None
+    all_repos: bool
+    all_projects: bool
+    json_output: bool
+    values: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleSetCliArgs:
+    repo: str | None
+    all_repos: bool
+    all_projects: bool
+    json_output: bool
+    enabled: PreferenceSwitch | None
+    frequency: ScheduleFrequencyOption | None
+    timezone: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class EmailSetCliArgs:
+    repo: str | None
+    all_repos: bool
+    all_projects: bool
+    json_output: bool
+    manual: PreferenceSwitch | None
+    scheduled: PreferenceSwitch | None
 
 
 def _echo_json(payload: object) -> None:
@@ -181,6 +221,10 @@ def _echo_repo_status_table(payload: object) -> None:
         [_repo_status_row(project, repo) for project, repo in _payload_repos(payload)],
         "No repositories.",
     )
+    repo = _single_status_repo(payload)
+    if repo is not None:
+        typer.echo("")
+        _echo_status_report_table(repo)
 
 
 def _echo_project_table(payload: object) -> None:
@@ -195,18 +239,10 @@ def _echo_repo_resolve_table(payload: object) -> None:
     _echo_table(headers, rows, "No repositories.")
 
 
-def _echo_report_inventory_table(payload: object) -> None:
-    headers = ("project", "id", "repos", "recon", "score_axes")
-    _echo_table(headers, [_project_row(project) for project in _payload_projects(payload)], "No projects.")
-
-
-def _echo_report_list(payload: object) -> None:
-    data = _object_dict(payload)
-    if "target" not in data:
-        _echo_report_inventory_table(payload)
-        return
+def _echo_status_report_table(repo: dict[str, object]) -> None:
     headers = ("repo", "audit", "state", "run", "completed", "current", "audited", "freshness")
-    rows = [_repo_report_row(data, _object_dict(report)) for report in _object_list(data.get("reports"))]
+    reports = _object_dict(repo.get("reports"))
+    rows = [_status_report_row(repo, _object_dict(report)) for report in _object_list(reports.get("reports"))]
     _echo_table(headers, rows, "No reports.")
 
 
@@ -350,21 +386,90 @@ def _echo_generic_payload(payload: object) -> None:
     _echo_key_values(_object_dict(payload))
 
 
-def _report_list_payload(repo: str | None, selector: str) -> object:
-    project = _selected_project()
-    if repo is not None:
-        if selector != REPORTS_LIST_DEFAULT_SELECTOR:
-            raise ValueError("pass either REPO or --selector, not both")
-        return list_reports_for_repo(repo, project)
-    if _report_selector_targets_repo(selector):
-        return list_reports_for_repo(selector, project)
-    return get_reports_list(selector=selector)
+def _parse_schedule_set_args(raw_args: list[str]) -> ScheduleSetCliArgs:
+    parsed = _parse_write_args(raw_args, value_options=SCHEDULE_SET_VALUE_OPTIONS)
+    return ScheduleSetCliArgs(
+        repo=parsed.repo,
+        all_repos=parsed.all_repos,
+        all_projects=parsed.all_projects,
+        json_output=parsed.json_output,
+        enabled=_optional_switch(parsed.values.get("--enabled"), "--enabled"),
+        frequency=_optional_schedule_frequency(parsed.values.get("--frequency")),
+        timezone=parsed.values.get("--timezone"),
+    )
 
 
-def _report_selector_targets_repo(selector: str) -> bool:
-    if selector.startswith("repo_"):
-        return True
-    return "/" in selector and not selector.endswith("/*")
+def _parse_email_set_args(raw_args: list[str]) -> EmailSetCliArgs:
+    parsed = _parse_write_args(raw_args, value_options=EMAIL_SET_VALUE_OPTIONS)
+    return EmailSetCliArgs(
+        repo=parsed.repo,
+        all_repos=parsed.all_repos,
+        all_projects=parsed.all_projects,
+        json_output=parsed.json_output,
+        manual=_optional_switch(parsed.values.get("--manual"), "--manual"),
+        scheduled=_optional_switch(parsed.values.get("--scheduled"), "--scheduled"),
+    )
+
+
+def _parse_write_args(raw_args: list[str], *, value_options: frozenset[str]) -> ParsedWriteArgs:
+    positional: list[str] = []
+    flags: set[str] = set()
+    values: dict[str, str] = {}
+    index = 0
+    while index < len(raw_args):
+        token = raw_args[index]
+        if token in WRITE_FLAG_OPTIONS:
+            _add_write_flag(flags, token)
+            index += 1
+        elif token in value_options:
+            values[token] = _read_write_option_value(raw_args, index, values)
+            index += 2
+        elif token.startswith("--"):
+            raise ValueError(f"unknown option: {token}")
+        else:
+            positional.append(token)
+            index += 1
+    if len(positional) > 1:
+        raise ValueError("pass at most one REPO")
+    return ParsedWriteArgs(
+        repo=positional[0] if positional else None,
+        all_repos="--all-repos" in flags,
+        all_projects="--all-projects" in flags,
+        json_output="--json" in flags,
+        values=values,
+    )
+
+
+def _add_write_flag(flags: set[str], option: str) -> None:
+    if option in flags:
+        raise ValueError(f"duplicate option: {option}")
+    flags.add(option)
+
+
+def _read_write_option_value(raw_args: list[str], index: int, values: dict[str, str]) -> str:
+    option = raw_args[index]
+    if option in values:
+        raise ValueError(f"duplicate option: {option}")
+    value_index = index + 1
+    if value_index >= len(raw_args) or raw_args[value_index].startswith("--"):
+        raise ValueError(f"{option} requires a value")
+    return raw_args[value_index]
+
+
+def _optional_switch(value: str | None, option: str) -> PreferenceSwitch | None:
+    if value is None:
+        return None
+    if value in {"on", "off"}:
+        return cast(PreferenceSwitch, value)
+    raise ValueError(f"{option} must be on or off")
+
+
+def _optional_schedule_frequency(value: str | None) -> ScheduleFrequencyOption | None:
+    if value is None:
+        return None
+    if value in {"daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"}:
+        return cast(ScheduleFrequencyOption, value)
+    raise ValueError("--frequency is invalid")
 
 
 def _report_read_summary_payload(payload: object) -> dict[str, object]:
@@ -416,6 +521,28 @@ def _duration_cell(value: object) -> str:
     return _format_duration_seconds(value)
 
 
+def _parse_duration_seconds(value: str) -> DurationSeconds:
+    normalized = value.strip().lower()
+    if not normalized:
+        raise ValueError("duration cannot be empty")
+    suffix_multipliers = {
+        "s": 1,
+        "m": SECONDS_PER_MINUTE,
+        "h": SECONDS_PER_HOUR,
+        "d": SECONDS_PER_DAY,
+    }
+    suffix = normalized[-1]
+    if suffix in suffix_multipliers:
+        amount = normalized[:-1]
+        multiplier = suffix_multipliers[suffix]
+    else:
+        amount = normalized
+        multiplier = 1
+    if not amount.isdigit():
+        raise ValueError("duration must be an integer optionally followed by s, m, h, or d")
+    return int(amount) * multiplier
+
+
 def _format_duration_seconds(seconds: int) -> str:
     normalized_seconds = max(seconds, 0)
     days, day_remainder = divmod(normalized_seconds, SECONDS_PER_DAY)
@@ -455,6 +582,13 @@ def _payload_repos(payload: object) -> list[tuple[dict[str, object], dict[str, o
     for project in _payload_projects(payload):
         repos.extend((project, _object_dict(repo_value)) for repo_value in _object_list(project.get("repos")))
     return repos
+
+
+def _single_status_repo(payload: object) -> dict[str, object] | None:
+    repo_pairs = _payload_repos(payload)
+    if len(repo_pairs) != 1:
+        return None
+    return repo_pairs[0][1]
 
 
 def _project_row(project: dict[str, object]) -> tuple[str, ...]:
@@ -499,10 +633,9 @@ def _repo_score_row(project: dict[str, object], repo: dict[str, object]) -> tupl
     )
 
 
-def _repo_report_row(data: dict[str, object], report: dict[str, object]) -> tuple[str, ...]:
-    target = _object_dict(data.get("target"))
+def _status_report_row(repo: dict[str, object], report: dict[str, object]) -> tuple[str, ...]:
     return (
-        _text_cell(target.get("github_repo"), fallback=_text_cell(data.get("repo_id"))),
+        _repo_label(repo),
         _text_cell(report.get("audit")),
         _text_cell(report.get("state")),
         _text_cell(report.get("run_status")),
@@ -833,22 +966,13 @@ def status(
 @app.command(help="Poll until all report audits for a repository have results.")
 def wait(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
-    timeout_seconds: Annotated[
-        int,
+    timeout: Annotated[
+        str,
         typer.Option(
-            "--timeout-seconds",
-            min=DEFAULT_REPORT_WAIT_POLL_SECONDS,
-            help="Maximum wait time in seconds.",
+            "--timeout",
+            help="Maximum wait duration, for example 30m, 2h, or 900s.",
         ),
-    ] = DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS,
-    require_fresh: Annotated[
-        bool,
-        typer.Option(
-            "--fresh",
-            "--current-head",
-            help="Wait until every ready report was audited for the current HEAD.",
-        ),
-    ] = False,
+    ] = DEFAULT_REPORT_WAIT_TIMEOUT,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     payload = _resolve_command_payload(
@@ -857,9 +981,8 @@ def wait(
             _selected_project(),
             options=ReportWaitOptions(
                 poll_seconds=DEFAULT_REPORT_WAIT_POLL_SECONDS,
-                timeout_seconds=timeout_seconds,
+                timeout_seconds=_parse_duration_seconds(timeout),
                 heartbeat_seconds=DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS,
-                require_fresh=require_fresh,
             ),
             heartbeat=_echo_wait_heartbeat,
         )
@@ -908,25 +1031,6 @@ def project_delete(
     _run_human_or_json_command(lambda: delete_project(project), _json_output(json_output))
 
 
-@report_app.command("list", help=REPORTS_LIST_OPERATION.summary)
-def report_list(
-    repo: Annotated[
-        str | None,
-        typer.Argument(help="Optional repo id or owner/name shortcut for --selector."),
-    ] = None,
-    selector: Annotated[
-        str,
-        typer.Option("--selector", help="Repository selector. Defaults to '*'."),
-    ] = REPORTS_LIST_DEFAULT_SELECTOR,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    _run_human_or_json_command(
-        lambda: _report_list_payload(repo, selector),
-        _json_output(json_output),
-        _echo_report_list,
-    )
-
-
 @report_app.command("read", help="Read ready report Markdown for a repository.")
 def report_read(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
@@ -935,37 +1039,16 @@ def report_read(
         typer.Argument(help="Optional report audit aliases. Defaults to ready reports."),
     ] = None,
     all_reports: Annotated[bool, typer.Option("--all", help="Read every report audit.")] = False,
-    full: Annotated[
-        bool,
-        typer.Option("--full", help="With --json, include full report snapshot bodies."),
-    ] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     payload = _resolve_command_payload(
         lambda: read_reports_for_repo(repo, _selected_project(), _report_audits(audits or []), all_reports=all_reports)
     )
     if _json_output(json_output):
-        _echo_json(payload if full else _report_read_summary_payload(payload))
+        _echo_json(_report_read_summary_payload(payload))
         return
     try:
         typer.echo(_reports_markdown(payload))
-    except ValueError as exc:
-        _echo_error("VALIDATION", str(exc))
-        raise typer.Exit(1) from None
-
-
-@report_app.command("show", help="Read one report audit as Markdown.")
-def report_show(
-    repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
-    audit: Annotated[ReportAuditAlias, typer.Argument(help="Canonical report audit alias.")],
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    payload = _resolve_command_payload(lambda: show_report_for_repo(repo, _report_audit(audit), _selected_project()))
-    if _json_output(json_output):
-        _echo_json(payload)
-        return
-    try:
-        typer.echo(_report_markdown(payload))
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
@@ -1057,81 +1140,34 @@ def schedule_list(
     )
 
 
-@schedule_app.command("set", help="Batch update automatic report audit schedules.")
-def schedule_set(
-    repo: Annotated[
-        str | None,
-        typer.Argument(help="Optional repo id or owner/name for a single-repo update."),
-    ] = None,
-    batch_scope: Annotated[
-        bool | None,
-        typer.Option(
-            "--all-projects/--all-repos",
-            help="Batch every repo in every project, or every repo in the selected --project.",
-        ),
-    ] = None,
-    enabled: Annotated[
-        Literal["on", "off", "keep"],
-        typer.Option("--enabled", help="Enable or disable automatic scheduled checks."),
-    ] = "keep",
-    frequency: Annotated[
-        Literal["daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"] | None,
-        typer.Option("--freq", help="Schedule frequency."),
-    ] = None,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    all_repos, all_projects = _batch_scope_flags(batch_scope)
+@schedule_app.command(
+    "set",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    help="Batch update automatic report audit schedules.",
+    epilog=SCHEDULE_SET_EPILOG,
+    options_metavar="[OPTIONS] [REPO]",
+)
+def schedule_set(ctx: typer.Context) -> None:
+    try:
+        args = _parse_schedule_set_args(ctx.args)
+    except ValueError as exc:
+        _echo_error("VALIDATION", str(exc))
+        raise typer.Exit(1) from None
     _run_human_or_json_command(
         lambda: set_schedule_settings(
-            repo,
+            args.repo,
             _selected_project(),
             ScheduleSettingsUpdate(
-                enabled=_preference_switch(enabled),
-                frequency=frequency,
+                enabled=_preference_switch(args.enabled),
+                frequency=args.frequency,
                 days_of_week=None,
                 schedule_time=None,
-                timezone=None,
+                timezone=args.timezone,
             ),
-            all_repos=all_repos,
-            all_projects=all_projects,
+            all_repos=args.all_repos,
+            all_projects=args.all_projects,
         ),
-        _json_output(json_output),
-        _echo_schedule_settings_table,
-    )
-
-
-@schedule_app.command("timezone", help="Batch update automatic report audit timezone.")
-def schedule_timezone(
-    timezone: Annotated[str, typer.Argument(help="Schedule timezone, for example Asia/Almaty or UTC.")],
-    repo: Annotated[
-        str | None,
-        typer.Option("--repo", help="Optional repo id or owner/name for a single-repo update."),
-    ] = None,
-    batch_scope: Annotated[
-        bool | None,
-        typer.Option(
-            "--all-projects/--all-repos",
-            help="Batch every repo in every project, or every repo in the selected --project.",
-        ),
-    ] = None,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    all_repos, all_projects = _batch_scope_flags(batch_scope)
-    _run_human_or_json_command(
-        lambda: set_schedule_settings(
-            repo,
-            _selected_project(),
-            ScheduleSettingsUpdate(
-                enabled=None,
-                frequency=None,
-                days_of_week=None,
-                schedule_time=None,
-                timezone=timezone,
-            ),
-            all_repos=all_repos,
-            all_projects=all_projects,
-        ),
-        _json_output(json_output),
+        _json_output(args.json_output),
         _echo_schedule_settings_table,
     )
 
@@ -1140,18 +1176,12 @@ def schedule_timezone(
 def schedule_auto_time(
     repo: Annotated[
         str | None,
-        typer.Option("--repo", help="Optional repo id or owner/name for a single-repo update."),
+        typer.Argument(help="Optional repo id or owner/name for a single-repo update."),
     ] = None,
-    batch_scope: Annotated[
-        bool | None,
-        typer.Option(
-            "--all-projects/--all-repos",
-            help="Batch every repo in every project, or every repo in the selected --project.",
-        ),
-    ] = None,
+    all_repos: Annotated[bool, typer.Option("--all-repos", help="Batch every repo in the selected --project.")] = False,
+    all_projects: Annotated[bool, typer.Option("--all-projects", help="Batch every repo in every project.")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    all_repos, all_projects = _batch_scope_flags(batch_scope)
     _run_human_or_json_command(
         lambda: set_schedule_settings(
             repo,
@@ -1186,42 +1216,31 @@ def email_list(
     )
 
 
-@email_app.command("set", help="Batch update report email preferences.")
-def email_set(
-    repo: Annotated[
-        str | None,
-        typer.Argument(help="Optional repo id or owner/name for a single-repo update."),
-    ] = None,
-    batch_scope: Annotated[
-        bool | None,
-        typer.Option(
-            "--all-projects/--all-repos",
-            help="Batch every repo in every project, or every repo in the selected --project.",
-        ),
-    ] = None,
-    manual: Annotated[
-        Literal["on", "off", "keep"],
-        typer.Option("--manual", help="Email after manual checks."),
-    ] = "keep",
-    auto: Annotated[
-        Literal["on", "off", "keep"],
-        typer.Option("--auto", help="Email after automatic scheduled checks."),
-    ] = "keep",
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    all_repos, all_projects = _batch_scope_flags(batch_scope)
+@email_app.command(
+    "set",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    help="Batch update report email preferences.",
+    epilog=EMAIL_SET_EPILOG,
+    options_metavar="[OPTIONS] [REPO]",
+)
+def email_set(ctx: typer.Context) -> None:
+    try:
+        args = _parse_email_set_args(ctx.args)
+    except ValueError as exc:
+        _echo_error("VALIDATION", str(exc))
+        raise typer.Exit(1) from None
     _run_human_or_json_command(
         lambda: set_email_preferences(
-            repo,
+            args.repo,
             _selected_project(),
             EmailPreferenceUpdate(
-                manual_run_completion=_preference_switch(manual),
-                scheduled_run_completion=_preference_switch(auto),
+                manual_run_completion=_preference_switch(args.manual),
+                scheduled_run_completion=_preference_switch(args.scheduled),
             ),
-            all_repos=all_repos,
-            all_projects=all_projects,
+            all_repos=args.all_repos,
+            all_projects=args.all_projects,
         ),
-        _json_output(json_output),
+        _json_output(args.json_output),
         _echo_email_preferences_table,
     )
 
@@ -1396,7 +1415,7 @@ def _report_item_markdown(item: object) -> str:
     return f"<!-- enji-report audit={audit} -->\n\n{_report_markdown(item).strip()}"
 
 
-def _preference_switch(value: Literal["on", "off", "keep"]) -> bool | None:
+def _preference_switch(value: Literal["on", "off"] | None) -> bool | None:
     if value == "on":
         return True
     if value == "off":
@@ -1411,10 +1430,6 @@ def _selected_project() -> str | None:
 
 def _json_output(local_json_output: bool = False) -> bool:
     return local_json_output or _cli_state["json"] is True
-
-
-def _batch_scope_flags(batch_scope: bool | None) -> tuple[bool, bool]:
-    return batch_scope is False, batch_scope is True
 
 
 def _report_audit(audit: ReportAuditAlias) -> AuditAlias:
