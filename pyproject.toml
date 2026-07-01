@@ -250,6 +250,7 @@ source_modules = [
     "enji_guard_cli.core_impl.report_reads",
     "enji_guard_cli.core_impl.schedules",
     "enji_guard_cli.core_impl.selectors",
+    "enji_guard_cli.core_impl.status_views",
     "enji_guard_cli.core_impl.targets",
     "enji_guard_cli.core_impl.write_settings",
 ]
