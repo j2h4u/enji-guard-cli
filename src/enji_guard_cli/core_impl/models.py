@@ -234,16 +234,12 @@ class OperationName(StrEnum):
 
 class OperationPayload(TypedDict):
     name: str
-    cli_command: str | None
-    mcp_tool: str
     summary: str
 
 
 @dataclass(frozen=True, slots=True)
 class OperationSpec:
     name: OperationName
-    cli_command: str | None
-    mcp_tool: str
     summary: str
     execute: OperationExecutor
 

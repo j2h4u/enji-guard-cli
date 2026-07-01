@@ -3,7 +3,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Never
 
-from enji_guard_cli.audits import REPORT_AUDITS, AuditAlias, AuditDefinition
+from enji_guard_cli.audits import REPORT_AUDITS, AuditAlias, ReportAuditDefinition
 from enji_guard_cli.audits import require_report_audit as registry_require_report_audit
 from enji_guard_cli.audits import resolve_audit as registry_resolve_audit
 from enji_guard_cli.auth import AuthError as AuthError
@@ -61,7 +61,7 @@ from enji_guard_cli.core_impl.models import (
 )
 from enji_guard_cli.core_impl.models import OperationSpec as OperationSpec
 from enji_guard_cli.core_impl.models import ReportAuditState as ReportAuditState
-from enji_guard_cli.core_impl.operations import OPERATION_SPECS as OPERATION_SPECS
+from enji_guard_cli.core_impl.operations import READ_OPERATION_SPECS as READ_OPERATION_SPECS
 from enji_guard_cli.core_impl.operations import access_async_operation as access_async_operation
 from enji_guard_cli.core_impl.operations import auth_status_async_operation as auth_status_async_operation
 from enji_guard_cli.core_impl.operations import operation_catalog as operation_catalog
@@ -401,11 +401,7 @@ def read_reports_for_repo(
 
 
 def _read_report_snapshot(repo_id: str, audit: AuditAlias) -> JsonObjectPayload:
-    resolved = registry_resolve_audit(audit)
-    route_slug = resolved.route_slug
-    if route_slug is None:
-        raise ValueError("recon does not have an upfront.audit.summary report snapshot")
-    return run_audit_summary_snapshot(repo_id, route_slug)
+    return run_audit_summary_snapshot(repo_id, registry_require_report_audit(audit).route_slug)
 
 
 def list_email_preferences(repo: str | None, project: str | None) -> JsonObjectPayload:
@@ -469,11 +465,9 @@ def _set_schedule(
     audit: AuditAlias,
     payload: object,
 ) -> JsonObjectPayload:
-    resolved = registry_resolve_audit(audit)
-    job_kind = resolved.job_kind
-    if job_kind is None:
-        raise ValueError("recon does not have a schedulable improvement job")
-    return run_put_improvement_job(repo_id, job_kind, _json_object_payload(payload))
+    return run_put_improvement_job(
+        repo_id, registry_require_report_audit(audit).job_kind, _json_object_payload(payload)
+    )
 
 
 def set_schedule_settings(
@@ -720,7 +714,7 @@ def _selected_report_audits(audits: list[AuditAlias], *, all_reports: bool) -> l
 
 def _set_schedule_setting(
     target: RepoTargetPayload,
-    audit: AuditDefinition,
+    audit: ReportAuditDefinition,
     jobs: JsonObjectPayload,
     update: ScheduleSettingsUpdate,
 ) -> dict[str, JsonValue]:
