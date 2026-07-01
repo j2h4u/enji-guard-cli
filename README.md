@@ -27,6 +27,9 @@ readable reports and scores. `status` is the snapshot/readiness/freshness view,
 triage hints: use them to sort and prioritize repositories, then read the
 reports before changing code. When a report exposes commit hashes, compare them
 with the current checkout before treating the report as fresh.
+`report read --all --json` is a batch contract: readable reports include
+summary metadata, and unavailable reports are returned with `available: false`
+plus a reason instead of aborting the whole batch.
 
 CLI output is human text and tables by default. Use `--json` only when another
 tool needs structured output.

@@ -890,6 +890,10 @@ def test_report_read_can_emit_json_for_all_reports(monkeypatch: MonkeyPatch) -> 
                     "current_head_sha": "head_2",
                     "last_audited_head_sha": "head_1",
                     "out_of_date": True,
+                    "available": True,
+                    "state": "ready",
+                    "reason": None,
+                    "message": None,
                     "snapshot": {
                         "content": {
                             "completedAt": "2026-06-30T12:00:00Z",
@@ -897,7 +901,17 @@ def test_report_read_can_emit_json_for_all_reports(monkeypatch: MonkeyPatch) -> 
                             "report": "# Security",
                         }
                     },
-                }
+                },
+                {
+                    "audit": "cognitive-debt",
+                    "current_head_sha": "head_2",
+                    "last_audited_head_sha": None,
+                    "out_of_date": None,
+                    "available": False,
+                    "state": "missing",
+                    "reason": "missing",
+                    "message": "cognitive-debt report is missing",
+                },
             ]
         }
 
@@ -913,13 +927,32 @@ def test_report_read_can_emit_json_for_all_reports(monkeypatch: MonkeyPatch) -> 
         "reports": [
             {
                 "audit": "security",
+                "available": True,
                 "completed_at": "2026-06-30T12:00:00Z",
                 "current_head_sha": "head_2",
+                "error_code": None,
                 "headline": "Security is clean",
                 "last_audited_head_sha": "head_1",
+                "message": None,
                 "out_of_date": True,
+                "reason": None,
                 "score": 98,
-            }
+                "state": "ready",
+            },
+            {
+                "audit": "cognitive-debt",
+                "available": False,
+                "completed_at": None,
+                "current_head_sha": "head_2",
+                "error_code": None,
+                "headline": None,
+                "last_audited_head_sha": None,
+                "message": "cognitive-debt report is missing",
+                "out_of_date": None,
+                "reason": "missing",
+                "score": None,
+                "state": "missing",
+            },
         ]
     }
     assert captured == {
@@ -928,6 +961,39 @@ def test_report_read_can_emit_json_for_all_reports(monkeypatch: MonkeyPatch) -> 
         "audits": [],
         "all_reports": True,
     }
+
+
+def test_report_read_markdown_marks_unavailable_reports(monkeypatch: MonkeyPatch) -> None:
+    def fake_read_reports(
+        repo: str,
+        project: str | None,
+        audits: list[AuditAlias],
+        *,
+        all_reports: bool,
+    ) -> dict[str, object]:
+        return {
+            "reports": [
+                {"audit": "security", "snapshot": {"content": {"report": "# Security\n"}}},
+                {
+                    "audit": "cognitive-debt",
+                    "available": False,
+                    "state": "missing",
+                    "reason": "missing",
+                    "message": "cognitive-debt report is missing",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(cli, "read_reports_for_repo", fake_read_reports)
+
+    result = CliRunner().invoke(app, ["report", "read", "j2h4u/enji-guard-cli", "--all"])
+
+    assert result.exit_code == 0
+    assert result.output == (
+        "<!-- enji-report audit=security -->\n\n# Security\n\n---\n\n"
+        "<!-- enji-report audit=cognitive-debt unavailable=true -->\n\n"
+        "_cognitive-debt report is missing_\n"
+    )
 
 
 def test_report_read_rejects_unknown_option() -> None:

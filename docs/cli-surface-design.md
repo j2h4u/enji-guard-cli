@@ -119,6 +119,9 @@ needs the raw machine contract.
 - `report read` returns report content. With `--json`, it returns the machine
   contract for automation.
 - `report read REPO` defaults to all currently ready reports for that repo.
+- `report read REPO --all --json` returns one item per known report audit.
+  Missing or unreadable reports are explicit `available: false` items instead
+  of failing the whole batch.
 - `email` preferences apply to all report audits. `--manual` controls mail
   after manual runs; `--scheduled` controls mail after scheduled automatic runs.
 - Repo inventory/status sorting is optional. `weakest` and `overall` sort lower
