@@ -3,9 +3,6 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-
-pytest.importorskip("mcp.server.fastmcp")
-
 from mcp.server.fastmcp import FastMCP
 from mcp.types import Tool
 
