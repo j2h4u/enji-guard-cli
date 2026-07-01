@@ -112,6 +112,8 @@ Panel:
       selection.
     - `core_impl/report_reads.py`: report selection and readable/unavailable
       report payloads.
+    - `core_impl/project_admin.py`: project and repo-admin orchestration
+      payloads.
     - `core_impl/audit_runs.py`: recon/report start orchestration and Fleet task
       body assembly.
     - `core_impl/write_settings.py`: schedule/email fanout over explicit write
@@ -123,6 +125,8 @@ Panel:
     explicit dependency and does not import the adapter directly.
   - Progress: project/repo target resolution moved to `core_impl/targets.py`;
     `core.py` still owns write-scope policy and Enji API calls.
+  - Progress: project create/rename/delete and repo connect/move orchestration
+    moved to `core_impl/project_admin.py` with callback-injected dependencies.
 
 - [x] Split `enji_api.py` into request mechanics and endpoint wrappers.
   - Source: Kaizen / Architecture Simplification.
@@ -169,7 +173,7 @@ Panel:
   - Action: separate recon metadata from report audit metadata or introduce a
     report-audit definition with non-null job kind and route slug.
 
-- [ ] Revisit cookie-session 403 refresh behavior.
+- [x] Revisit cookie-session 403 refresh behavior.
   - Source: Adversarial Python Code Reviewer.
   - Evidence: `_should_refresh` refreshes on `401` or `403` for cookie
     sessions, even when the response may be a permission error rather than auth
@@ -180,6 +184,8 @@ Panel:
     bare `403` should refresh.
   - Tests: cookie-session permission 403 does not refresh unless payload is
     auth-invalid/auth-required.
+  - Done: bare cookie-session `403` is surfaced as an authorization error;
+    only auth-coded `403` remains refreshable.
 
 ## Low
 

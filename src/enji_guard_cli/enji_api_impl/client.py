@@ -34,6 +34,8 @@ HTTP_OK = 200
 HTTP_UNAUTHORIZED = 401
 HTTP_FORBIDDEN = 403
 HTTP_OK_ONLY = frozenset({HTTP_OK})
+AUTH_REQUIRED_CODE = "AUTH_REQUIRED"
+REFRESHABLE_FORBIDDEN_CODES = frozenset({AUTH_INVALID_CODE, AUTH_REQUIRED_CODE})
 
 type JsonObjectParser[T] = Callable[[dict[str, object]], T]
 type ApiPathParams = Mapping[str, str]
@@ -253,7 +255,14 @@ def should_refresh(session: EnjiApiSession, request: EnjiHttpRequest, response: 
         return False
     if request.url == f"{session.base_url}{AUTH_REFRESH_PATH}":
         return False
-    return response.status_code in {HTTP_UNAUTHORIZED, HTTP_FORBIDDEN} or is_auth_invalid_response(response)
+    return response.status_code == HTTP_UNAUTHORIZED or is_refreshable_forbidden_response(response)
+
+
+def is_refreshable_forbidden_response(response: EnjiHttpResponse) -> bool:
+    if response.status_code != HTTP_FORBIDDEN:
+        return False
+    api_error = api_error_from_response(response)
+    return api_error is not None and api_error.code in REFRESHABLE_FORBIDDEN_CODES
 
 
 async def refresh_session_once(

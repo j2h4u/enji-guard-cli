@@ -1,7 +1,7 @@
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Never, cast
+from typing import Never
 
 from enji_guard_cli.audits import REPORT_AUDITS, AuditAlias, AuditDefinition
 from enji_guard_cli.audits import require_report_audit as registry_require_report_audit
@@ -77,6 +77,12 @@ from enji_guard_cli.core_impl.payloads import json_object_or_default as _json_ob
 from enji_guard_cli.core_impl.payloads import json_object_payload as _json_object_payload
 from enji_guard_cli.core_impl.payloads import json_str as _json_str
 from enji_guard_cli.core_impl.payloads import required_str as _required_str
+from enji_guard_cli.core_impl.project_admin import MoveRepoDependencies as _MoveRepoDependencies
+from enji_guard_cli.core_impl.project_admin import connect_repo_payload as _connect_repo_payload
+from enji_guard_cli.core_impl.project_admin import create_project_payload as _create_project_payload
+from enji_guard_cli.core_impl.project_admin import delete_project_payload as _delete_project_payload
+from enji_guard_cli.core_impl.project_admin import move_repo_payload as _move_repo_payload
+from enji_guard_cli.core_impl.project_admin import rename_project_payload as _rename_project_payload
 from enji_guard_cli.core_impl.repo_status import active_runs_for_action as _active_runs_for_action
 from enji_guard_cli.core_impl.repo_status import current_active_runs as _current_active_runs
 from enji_guard_cli.core_impl.repo_status import current_head_sha as _current_head_sha
@@ -140,27 +146,29 @@ def list_projects() -> JsonObjectPayload:
 
 
 def create_project(name: str) -> JsonObjectPayload:
-    project_name = _validated_project_name(name)
-    return {
-        "project_name": project_name,
-        "response": run_create_project(project_name),
-    }
+    return _create_project_payload(
+        name,
+        validate_project_name=_validated_project_name,
+        create_project=run_create_project,
+    )
 
 
 def rename_project(project: str, name: str) -> JsonObjectPayload:
-    project_id = _resolve_single_project_id(project)
-    project_name = _validated_project_name(name)
-    return {
-        "project_id": project_id,
-        "project_name": project_name,
-        "response": run_rename_project(project_id, project_name),
-    }
+    return _rename_project_payload(
+        project,
+        name,
+        resolve_single_project_id=_resolve_single_project_id,
+        validate_project_name=_validated_project_name,
+        rename_project=run_rename_project,
+    )
 
 
 def delete_project(project: str) -> JsonObjectPayload:
-    project_id = _resolve_single_project_id(project)
-    run_delete_project(project_id)
-    return {"project_id": project_id, "deleted": True}
+    return _delete_project_payload(
+        project,
+        resolve_single_project_id=_resolve_single_project_id,
+        delete_project=run_delete_project,
+    )
 
 
 def list_project_inventory(project: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:
@@ -172,32 +180,29 @@ def list_project_inventory(project: str | None, sort: RepoSort = DEFAULT_REPO_SO
 
 
 def connect_repo(github_repo: str, project: str | None) -> JsonObjectPayload:
-    project_id = _resolve_single_project_id(project)
-    github_owner, github_name = _parse_github_repo(github_repo)
-    return run_connect_project_repo(project_id, github_owner, github_name)
+    return _connect_repo_payload(
+        github_repo,
+        project,
+        resolve_single_project_id=_resolve_single_project_id,
+        parse_github_repo=_parse_github_repo,
+        connect_project_repo=run_connect_project_repo,
+    )
 
 
 def move_repo(repo: str, source_project: str | None, target_project: str) -> JsonObjectPayload:
-    source = _resolve_single_repo_target(repo, source_project)
-    target_project_id = _resolve_single_project_id(target_project)
-    if source["project_id"] == target_project_id:
-        raise ValueError("repo is already in target project")
-    preflight = run_preflight_repo_move(source["project_id"], source["repo_id"], target_project_id)
-    response = run_move_repo(
-        RepoTransfer(
-            source_project_id=source["project_id"],
-            repo_id=source["repo_id"],
-            target_project_id=target_project_id,
-            schedule_replacements=_transfer_schedule_replacements(preflight),
-        )
+    return _move_repo_payload(
+        repo,
+        source_project,
+        target_project,
+        dependencies=_MoveRepoDependencies(
+            resolve_single_repo_target=_resolve_single_repo_target,
+            resolve_single_project_id=_resolve_single_project_id,
+            preflight_repo_move=run_preflight_repo_move,
+            transfer_schedule_replacements=_transfer_schedule_replacements,
+            make_repo_transfer=RepoTransfer,
+            move_repo=run_move_repo,
+        ),
     )
-    return {
-        "repo": cast(JsonValue, dict(source)),
-        "source_project_id": source["project_id"],
-        "target_project_id": target_project_id,
-        "preflight": preflight,
-        "response": response,
-    }
 
 
 def _list_repo_active_runs(repo_id: str) -> JsonObjectPayload:
