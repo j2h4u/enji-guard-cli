@@ -487,14 +487,22 @@ def _report_read_summary_item(item: object) -> dict[str, object]:
     snapshot = _object_dict(report.get("snapshot"))
     content = _object_dict(snapshot.get("content"))
     summary_payload = _object_dict(_object_dict(content.get("summary")).get("summary"))
+    available = report.get("available")
+    if not isinstance(available, bool):
+        available = bool(snapshot)
     return {
         "audit": report.get("audit"),
+        "available": available,
         "score": _number_or_none(summary_payload.get("score")),
         "headline": _string_or_none(summary_payload.get("headline")),
         "completed_at": _string_or_none(content.get("completedAt")) or _string_or_none(snapshot.get("collectedAt")),
         "current_head_sha": report.get("current_head_sha"),
         "last_audited_head_sha": report.get("last_audited_head_sha"),
         "out_of_date": report.get("out_of_date"),
+        "state": _string_or_none(report.get("state")),
+        "reason": _string_or_none(report.get("reason")),
+        "message": _string_or_none(report.get("message")),
+        "error_code": _string_or_none(report.get("error_code")),
     }
 
 
@@ -1412,6 +1420,9 @@ def _report_item_markdown(item: object) -> str:
     audit = item.get("audit")
     if not isinstance(audit, str):
         raise ValueError("report item does not contain audit")
+    if item.get("available") is False:
+        message = _string_or_none(item.get("message")) or f"{audit} report is unavailable"
+        return f"<!-- enji-report audit={audit} unavailable=true -->\n\n_{message}_"
     return f"<!-- enji-report audit={audit} -->\n\n{_report_markdown(item).strip()}"
 
 

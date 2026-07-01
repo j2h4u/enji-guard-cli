@@ -1048,6 +1048,47 @@ def test_start_report_audits_rejects_invalid_selection(
         core.start_report_audits("j2h4u/enji-guard-cli", None, audits, all_reports=all_reports)
 
 
+def _report_status_item(
+    audit: str,
+    state: str,
+    *,
+    current_head_sha: str | None = "head_2",
+    last_audited_head_sha: str | None = "head_2",
+) -> dict[str, object]:
+    out_of_date = None
+    if current_head_sha is not None and last_audited_head_sha is not None:
+        out_of_date = current_head_sha != last_audited_head_sha
+    return {
+        "audit": audit,
+        "label": audit,
+        "action_key": f"audit.{audit}",
+        "route_slug": audit,
+        "state": state,
+        "ready": state == "ready",
+        "running": state == "running",
+        "fleet_task_id": None,
+        "created_at": None,
+        "started_at": None,
+        "completed_at": "2026-06-30T12:00:00Z" if state == "ready" else None,
+        "run_status": "completed" if state == "ready" else None,
+        "current_head_sha": current_head_sha,
+        "last_audited_head_sha": last_audited_head_sha,
+        "out_of_date": out_of_date,
+    }
+
+
+def _report_status_payload(repo_id: str, reports: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "repo_id": repo_id,
+        "current_head_sha": "head_2",
+        "complete": not any(report["state"] in {"missing", "running"} for report in reports),
+        "ready": [str(report["audit"]) for report in reports if report["ready"] is True],
+        "running": [str(report["audit"]) for report in reports if report["running"] is True],
+        "missing": [str(report["audit"]) for report in reports if report["state"] == "missing"],
+        "reports": reports,
+    }
+
+
 def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatch) -> None:
     captured_audits: list[str] = []
     monkeypatch.setattr(
@@ -1067,28 +1108,15 @@ def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatc
     monkeypatch.setattr(
         core,
         "report_status",
-        lambda repo_id: {
-            "repo_id": repo_id,
-            "current_head_sha": "head_2",
-            "complete": False,
-            "ready": ["security", "tests"],
-            "running": ["deps"],
-            "missing": ["dead-code"],
-            "reports": [],
-        },
-    )
-    monkeypatch.setattr(
-        core,
-        "run_repo_audit_rerun_state",
-        lambda repo_id: {
-            "state": {
-                "currentHeadSha": "head_2",
-                "actions": {
-                    "audit.security": {"lastAuditedHeadSha": "head_2"},
-                    "audit.tests": {"lastAuditedHeadSha": "head_1"},
-                },
-            }
-        },
+        lambda repo_id: _report_status_payload(
+            repo_id,
+            [
+                _report_status_item("security", "ready", last_audited_head_sha="head_2"),
+                _report_status_item("tests", "ready", last_audited_head_sha="head_1"),
+                _report_status_item("deps", "running", last_audited_head_sha=None),
+                _report_status_item("dead-code", "missing", last_audited_head_sha=None),
+            ],
+        ),
     )
 
     def fake_show_report(repo_id: str, audit: AuditAlias) -> dict[str, object]:
@@ -1109,6 +1137,10 @@ def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatc
             "current_head_sha": "head_2",
             "last_audited_head_sha": "head_2",
             "out_of_date": False,
+            "available": True,
+            "state": "ready",
+            "reason": None,
+            "message": None,
             "snapshot": {"content": {"report": "# security"}},
         },
         {
@@ -1116,6 +1148,10 @@ def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatc
             "current_head_sha": "head_2",
             "last_audited_head_sha": "head_1",
             "out_of_date": True,
+            "available": True,
+            "state": "ready",
+            "reason": None,
+            "message": None,
             "snapshot": {"content": {"report": "# tests"}},
         },
     ]
@@ -1140,8 +1176,11 @@ def test_read_reports_for_repo_can_read_all_report_audits(monkeypatch: MonkeyPat
     monkeypatch.setattr(core, "show_report", lambda repo_id, audit: {"snapshot": {"content": {"report": audit.value}}})
     monkeypatch.setattr(
         core,
-        "run_repo_audit_rerun_state",
-        lambda repo_id: {"state": {"currentHeadSha": "head_2", "actions": {}}},
+        "report_status",
+        lambda repo_id: _report_status_payload(
+            repo_id,
+            [_report_status_item(audit.value, "ready", last_audited_head_sha=None) for audit in REPORT_AUDIT_ALIASES],
+        ),
     )
 
     payload = core.read_reports_for_repo("j2h4u/enji-guard-cli", None, [], all_reports=True)
@@ -1158,6 +1197,148 @@ def test_read_reports_for_repo_can_read_all_report_audits(monkeypatch: MonkeyPat
         "dead-code",
     ]
     assert all(report.get("current_head_sha") == "head_2" for report in reports if isinstance(report, dict))
+
+
+def test_read_reports_for_repo_all_marks_missing_reports_unavailable(monkeypatch: MonkeyPatch) -> None:
+    captured_audits: list[str] = []
+    monkeypatch.setattr(
+        core,
+        "_resolve_single_repo_target",
+        lambda repo, project: {
+            "project_id": "project_1",
+            "project_name": "Pets",
+            "repo_id": "repo_1",
+            "github_owner": "j2h4u",
+            "github_name": "mcp-strava",
+            "github_repo": "j2h4u/mcp-strava",
+            "connected": True,
+            "recon_done": True,
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "report_status",
+        lambda repo_id: _report_status_payload(
+            repo_id,
+            [
+                _report_status_item("security", "ready", last_audited_head_sha="head_1"),
+                _report_status_item("cognitive-debt", "missing", last_audited_head_sha=None),
+            ],
+        ),
+    )
+
+    def fake_show_report(repo_id: str, audit: AuditAlias) -> dict[str, object]:
+        captured_audits.append(audit.value)
+        return {"snapshot": {"content": {"report": f"# {audit.value}"}}}
+
+    monkeypatch.setattr(core, "show_report", fake_show_report)
+
+    payload = core.read_reports_for_repo("j2h4u/mcp-strava", None, [], all_reports=True)
+
+    reports = payload["reports"]
+    assert isinstance(reports, list)
+    assert reports == [
+        {
+            "audit": "security",
+            "current_head_sha": "head_2",
+            "last_audited_head_sha": "head_1",
+            "out_of_date": True,
+            "available": True,
+            "state": "ready",
+            "reason": None,
+            "message": None,
+            "snapshot": {"content": {"report": "# security"}},
+        },
+        {
+            "audit": "cognitive-debt",
+            "current_head_sha": "head_2",
+            "last_audited_head_sha": None,
+            "out_of_date": None,
+            "available": False,
+            "state": "missing",
+            "reason": "missing",
+            "message": "cognitive-debt report is missing",
+        },
+    ]
+    assert captured_audits == ["security"]
+
+
+def test_read_reports_for_repo_all_marks_missing_ready_snapshot_unavailable(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        core,
+        "_resolve_single_repo_target",
+        lambda repo, project: {
+            "project_id": "project_1",
+            "project_name": "Pets",
+            "repo_id": "repo_1",
+            "github_owner": "j2h4u",
+            "github_name": "mcp-strava",
+            "github_repo": "j2h4u/mcp-strava",
+            "connected": True,
+            "recon_done": True,
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "report_status",
+        lambda repo_id: _report_status_payload(
+            repo_id,
+            [_report_status_item("security", "ready", last_audited_head_sha="head_1")],
+        ),
+    )
+
+    def fake_show_report(repo_id: str, audit: AuditAlias) -> dict[str, object]:
+        raise EnjiApiError("NOT_FOUND", "snapshot not found")
+
+    monkeypatch.setattr(core, "show_report", fake_show_report)
+
+    payload = core.read_reports_for_repo("j2h4u/mcp-strava", None, [], all_reports=True)
+
+    reports = payload["reports"]
+    assert isinstance(reports, list)
+    assert reports == [
+        {
+            "audit": "security",
+            "current_head_sha": "head_2",
+            "last_audited_head_sha": "head_1",
+            "out_of_date": True,
+            "available": False,
+            "state": "ready",
+            "reason": "snapshot_not_found",
+            "message": "security snapshot not found",
+            "error_code": "NOT_FOUND",
+        }
+    ]
+
+
+def test_read_reports_for_repo_explicit_missing_report_has_precise_error(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        core,
+        "_resolve_single_repo_target",
+        lambda repo, project: {
+            "project_id": "project_1",
+            "project_name": "Pets",
+            "repo_id": "repo_1",
+            "github_owner": "j2h4u",
+            "github_name": "mcp-strava",
+            "github_repo": "j2h4u/mcp-strava",
+            "connected": True,
+            "recon_done": True,
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "report_status",
+        lambda repo_id: _report_status_payload(
+            repo_id,
+            [_report_status_item("cognitive-debt", "missing", last_audited_head_sha=None)],
+        ),
+    )
+
+    with pytest.raises(EnjiApiError, match="cognitive-debt report is missing") as exc_info:
+        core.read_reports_for_repo("j2h4u/mcp-strava", None, [AuditAlias.COGNITIVE_DEBT], all_reports=False)
+
+    assert exc_info.value.code == "NOT_FOUND"
 
 
 def test_set_email_preferences_fans_out_over_project_repos_and_report_audits(monkeypatch: MonkeyPatch) -> None:

@@ -1,7 +1,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from enji_guard_cli.enji_api import JsonObjectPayload, JsonValue
 
@@ -172,7 +172,12 @@ class ReportReadItemPayload(TypedDict):
     current_head_sha: str | None
     last_audited_head_sha: str | None
     out_of_date: bool | None
-    snapshot: JsonObjectPayload
+    available: bool
+    state: ReportAuditState
+    reason: str | None
+    message: str | None
+    error_code: NotRequired[str]
+    snapshot: NotRequired[JsonObjectPayload]
 
 
 class ReportReadPayload(TypedDict):

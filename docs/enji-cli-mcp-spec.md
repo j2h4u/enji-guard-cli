@@ -185,7 +185,9 @@ report audits for that repo have results. It exits nonzero on timeout or failed
 runs, and reports stale audited commit hashes as context instead of treating
 them as failure. `report read REPO` is the main content path after reports
 become ready; it reads all currently ready reports unless explicit audit aliases
-or `--all` are passed. `report read --json` returns the machine contract.
+or `--all` are passed. `report read --all --json` returns readable reports and
+explicit `available: false` items for missing or unreadable reports instead of
+aborting the whole batch. `report read --json` returns the machine contract.
 
 `status` must expose scenario state, not raw API internals:
 
