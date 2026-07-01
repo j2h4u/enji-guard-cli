@@ -109,6 +109,7 @@ enji-guard audit start REPO --all
 
 enji-guard wait REPO
 
+enji-guard report list [REPO]
 enji-guard report list [--selector SELECTOR]
 enji-guard report read REPO [AUDIT...] [--all] [--json]
 enji-guard report show REPO AUDIT [--json]
@@ -175,8 +176,9 @@ audit and warns when enabled audits for one repo use different timezones.
 selected explicit write scope: one `REPO`, `--all-repos` inside `--project`, or
 `--all-projects`. It keeps run time out of the default workflow. Enji-assigned
 run time is the preferred model; `schedule auto-time` resets existing schedules
-back to that model. `schedule timezone` aligns timezone in the same explicit
-scopes. Recon is not schedulable here.
+back to that model. `schedule list` shows concrete times with their source, for
+example `09:00 (auto)` or `09:00 (manual)`. `schedule timezone` aligns timezone
+in the same explicit scopes. Recon is not schedulable here.
 
 ## Long-Running Work
 

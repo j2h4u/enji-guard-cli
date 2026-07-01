@@ -761,6 +761,11 @@ def read_reports_for_repo(
     return _targeted_run_payload(target, _read_reports_for_target(target["repo_id"], selected_audits))
 
 
+def list_reports_for_repo(repo: str, project: str | None) -> dict[str, object]:
+    target = _resolve_single_repo_target(repo, project)
+    return _targeted_run_payload(target, report_status(target["repo_id"]))
+
+
 def list_email_preferences(repo: str | None, project: str | None) -> JsonObjectPayload:
     return _email_preferences_payload(
         [
