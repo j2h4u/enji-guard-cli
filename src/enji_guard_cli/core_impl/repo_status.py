@@ -169,7 +169,6 @@ def report_wait_payload(
     status: ReportStatusPayload,
     started_at: float,
     *,
-    options: ReportWaitOptions,
     timed_out: bool,
 ) -> ReportWaitPayload:
     stale = _stale_report_audits(status)
