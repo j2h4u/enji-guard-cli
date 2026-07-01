@@ -94,17 +94,19 @@ from enji_guard_cli.core_impl.schedules import schedule_setting_row as _schedule
 from enji_guard_cli.core_impl.schedules import schedule_settings_payload as _schedule_settings_payload
 from enji_guard_cli.core_impl.schedules import schedule_settings_payload_for_job as _schedule_settings_payload_for_job
 from enji_guard_cli.core_impl.schedules import validate_schedule_settings_update as _validate_schedule_settings_update
-from enji_guard_cli.core_impl.selectors import ambiguous_project_message as _ambiguous_project_message
-from enji_guard_cli.core_impl.selectors import ambiguous_repo_message as _ambiguous_repo_message
 from enji_guard_cli.core_impl.selectors import parse_github_repo as _parse_github_repo
-from enji_guard_cli.core_impl.selectors import project_candidates as _project_candidates
-from enji_guard_cli.core_impl.selectors import project_ref_matches as _project_ref_matches
 from enji_guard_cli.core_impl.selectors import repo_target as _repo_target
-from enji_guard_cli.core_impl.selectors import repo_target_matches as _repo_target_matches
 from enji_guard_cli.core_impl.selectors import targeted_run_payload as _targeted_run_payload
 from enji_guard_cli.core_impl.selectors import transfer_schedule_replacements as _transfer_schedule_replacements
 from enji_guard_cli.core_impl.selectors import validate_write_scope as _validate_write_scope
 from enji_guard_cli.core_impl.selectors import validated_project_name as _validated_project_name
+from enji_guard_cli.core_impl.targets import matching_repo_targets as _matching_repo_targets_impl
+from enji_guard_cli.core_impl.targets import project_refs as _project_refs_impl
+from enji_guard_cli.core_impl.targets import project_repo_targets as _project_repo_targets_impl
+from enji_guard_cli.core_impl.targets import resolve_single_project_id as _resolve_single_project_id_impl
+from enji_guard_cli.core_impl.targets import resolve_single_repo_target as _resolve_single_repo_target_impl
+from enji_guard_cli.core_impl.targets import selected_project_ids as _selected_project_ids_impl
+from enji_guard_cli.core_impl.targets import selected_repo_targets as _selected_repo_targets_impl
 from enji_guard_cli.enji_api import REPORTS_LIST_DEFAULT_SELECTOR as REPORTS_LIST_DEFAULT_SELECTOR
 from enji_guard_cli.enji_api import (
     AuditRunCreate,
@@ -518,46 +520,25 @@ def wait_for_reports(
 
 
 def _selected_project_ids(project: str | None) -> list[str]:
-    if project is not None:
-        return [_resolve_single_project_id(project)]
-    return [
-        selected_id
-        for project in _json_object_list(list_projects().get("projects"))
-        if (selected_id := _json_str(project.get("id"))) is not None
-    ]
+    return _selected_project_ids_impl(project, list_projects=list_projects, raise_bad_selector=_raise_bad_selector)
 
 
 def _resolve_single_project_id(project: str | None) -> str:
-    project_refs = _project_refs()
-    if project is None:
-        if len(project_refs) == 1:
-            return project_refs[0]["id"]
-        _raise_bad_selector(_ambiguous_project_message(project_refs))
-
-    matches = [project_ref for project_ref in project_refs if _project_ref_matches(project_ref, project)]
-    if not matches:
-        _raise_bad_selector(
-            f"project selector matched no projects: {project}. candidates: {_project_candidates(project_refs)}"
-        )
-    if len(matches) > 1:
-        _raise_bad_selector(_ambiguous_project_message(matches))
-    return matches[0]["id"]
+    return _resolve_single_project_id_impl(project, list_projects=list_projects, raise_bad_selector=_raise_bad_selector)
 
 
 def _project_refs() -> list[ProjectRef]:
-    refs: list[ProjectRef] = []
-    for project in _json_object_list(list_projects().get("projects")):
-        project_id = _json_str(project.get("id"))
-        if project_id is None:
-            continue
-        refs.append({"id": project_id, "name": _json_str(project.get("name"))})
-    return refs
+    return _project_refs_impl(list_projects())
 
 
 def _selected_repo_targets(repo: str | None, project: str | None) -> list[RepoTargetPayload]:
-    if repo is not None:
-        return [_resolve_single_repo_target(repo, project)]
-    return [target for project_id in _selected_project_ids(project) for target in _project_repo_targets(project_id)]
+    return _selected_repo_targets_impl(
+        repo,
+        project,
+        list_projects=list_projects,
+        project_detail=run_project_detail,
+        raise_bad_selector=_raise_bad_selector,
+    )
 
 
 def _selected_write_repo_targets(
@@ -579,30 +560,21 @@ def _selected_write_repo_targets(
 
 
 def _project_repo_targets(project_id: str) -> list[RepoTargetPayload]:
-    project = run_project_detail(project_id)
-    project_payload = _json_dict(project.get("project"))
-    project_name = _json_str(project_payload.get("name"))
-    return [
-        _repo_target(project_id, project_name, repo)
-        for repo in _json_object_list(project.get("repos"))
-        if _json_str(repo.get("id")) is not None
-    ]
+    return _project_repo_targets_impl(project_id, project_detail=run_project_detail)
 
 
 def _matching_repo_targets(selector: str, project_ids: list[str]) -> list[RepoTargetPayload]:
-    matches: list[RepoTargetPayload] = []
-    for project_id in project_ids:
-        matches.extend(target for target in _project_repo_targets(project_id) if _repo_target_matches(target, selector))
-    return matches
+    return _matching_repo_targets_impl(selector, project_ids, project_detail=run_project_detail)
 
 
 def _resolve_single_repo_target(repo: str, project: str | None) -> RepoTargetPayload:
-    matches = _matching_repo_targets(repo, _selected_project_ids(project))
-    if not matches:
-        _raise_bad_selector(f"repo selector matched no repos: {repo}")
-    if len(matches) > 1:
-        _raise_bad_selector(_ambiguous_repo_message(repo, matches))
-    return matches[0]
+    return _resolve_single_repo_target_impl(
+        repo,
+        project,
+        list_projects=list_projects,
+        project_detail=run_project_detail,
+        raise_bad_selector=_raise_bad_selector,
+    )
 
 
 def _project_runtime_status(project_id: str) -> ProjectRuntimeStatusPayload:
