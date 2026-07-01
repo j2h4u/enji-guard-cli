@@ -11,6 +11,7 @@ README.md carries the user-facing CLI model and workflows.
 - Keep runtime tuning in frozen settings dataclasses, not env. Env is for
   credential/security ingress only.
 - Keep mutating batch writes explicit; never infer all-project or all-repo scope.
+- Prefer Enji-assigned schedule times; use `schedule auto-time` to normalize.
 - Surface stale/mixed report freshness explicitly; never hide it behind aggregate status.
 - Cookie auth is temporary. Keep bearer/API-token support first-class.
 - Never print secrets. Store credentials only in the configured auth file.

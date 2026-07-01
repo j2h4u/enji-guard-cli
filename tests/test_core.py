@@ -1485,6 +1485,69 @@ def test_set_schedule_settings_can_update_timezone_without_time(monkeypatch: Mon
     assert schedules[0]["timezone"] == "Asia/Almaty"
 
 
+def test_set_schedule_settings_can_reset_schedule_time_to_auto(monkeypatch: MonkeyPatch) -> None:
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1", "name": "Pets"}]})
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda project_id: {
+            "project": {"id": project_id, "name": "Pets"},
+            "repos": [
+                {
+                    "id": "repo_1",
+                    "githubOwner": "j2h4u",
+                    "githubName": "enji-guard-cli",
+                    "connected": True,
+                    "reconDone": True,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "list_schedules",
+        lambda repo_id: {
+            "jobs": [
+                {
+                    "kind": "vuln-audit",
+                    "enabled": True,
+                    "frequency": "workdays",
+                    "daysOfWeek": ["mon", "tue", "wed", "thu", "fri"],
+                    "scheduleTimeSource": "user",
+                    "scheduleTime": "09:00",
+                    "timezone": "Asia/Almaty",
+                }
+            ]
+        },
+    )
+
+    def fake_set_schedule(_repo_id: str, _audit: AuditAlias, payload: dict[str, object]) -> dict[str, object]:
+        captured.append(payload)
+        return {"job": payload}
+
+    monkeypatch.setattr(core, "set_schedule", fake_set_schedule)
+
+    payload = core.set_schedule_settings(
+        "j2h4u/enji-guard-cli",
+        None,
+        ScheduleSettingsUpdate(
+            enabled=None,
+            frequency=None,
+            days_of_week=None,
+            schedule_time="auto",
+            timezone=None,
+        ),
+    )
+
+    schedules = cast(list[dict[str, object]], payload["schedules"])
+    assert captured[0]["scheduleTimeSource"] == "auto"
+    assert "scheduleTime" not in captured[0]
+    assert captured[0]["timezone"] == "Asia/Almaty"
+    assert schedules[0]["schedule_time_source"] == "auto"
+    assert schedules[0]["schedule_time"] is None
+
+
 def test_set_schedule_settings_requires_explicit_write_scope() -> None:
     with pytest.raises(ValueError, match="schedule set: pass REPO, --all-repos with --project, or --all-projects"):
         core.set_schedule_settings(

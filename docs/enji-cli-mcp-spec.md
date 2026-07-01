@@ -117,6 +117,9 @@ enji-guard schedule list [REPO]
 enji-guard schedule set REPO --enabled on|off|keep [--freq FREQ]
 enji-guard --project PROJECT schedule set --all-repos --enabled on|off|keep [--freq FREQ]
 enji-guard schedule set --all-projects --enabled on|off|keep [--freq FREQ]
+enji-guard schedule auto-time --repo REPO
+enji-guard --project PROJECT schedule auto-time --all-repos
+enji-guard schedule auto-time --all-projects
 
 enji-guard email list [REPO]
 enji-guard email set REPO [--manual on|off|keep] [--auto on|off|keep]
@@ -170,7 +173,9 @@ applies them to all report audits for each selected repo.
 audit and warns when enabled audits for one repo use different timezones.
 `schedule set` updates enabled state and frequency for all report audits in the
 selected explicit write scope: one `REPO`, `--all-repos` inside `--project`, or
-`--all-projects`. `schedule timezone` aligns timezone in the same explicit
+`--all-projects`. It keeps run time out of the default workflow. Enji-assigned
+run time is the preferred model; `schedule auto-time` resets existing schedules
+back to that model. `schedule timezone` aligns timezone in the same explicit
 scopes. Recon is not schedulable here.
 
 ## Long-Running Work

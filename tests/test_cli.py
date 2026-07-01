@@ -1175,6 +1175,45 @@ def test_schedule_timezone_routes_batch_update(monkeypatch: MonkeyPatch) -> None
     }
 
 
+def test_schedule_auto_time_routes_batch_update(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_set(
+        repo: str | None,
+        project: str | None,
+        update: ScheduleSettingsUpdate,
+        *,
+        all_repos: bool = False,
+        all_projects: bool = False,
+    ) -> dict[str, object]:
+        captured["repo"] = repo
+        captured["project"] = project
+        captured["enabled"] = update.enabled
+        captured["frequency"] = update.frequency
+        captured["schedule_time"] = update.schedule_time
+        captured["timezone"] = update.timezone
+        captured["all_repos"] = all_repos
+        captured["all_projects"] = all_projects
+        return {"schedules": [], "summary": {"repo_count": 3, "audit_count": 21}}
+
+    monkeypatch.setattr(cli, "set_schedule_settings", fake_set)
+
+    result = CliRunner().invoke(app, ["schedule", "auto-time", "--all-projects", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["summary"] == {"repo_count": 3, "audit_count": 21}
+    assert captured == {
+        "repo": None,
+        "project": None,
+        "enabled": None,
+        "frequency": None,
+        "schedule_time": "auto",
+        "timezone": None,
+        "all_repos": False,
+        "all_projects": True,
+    }
+
+
 def test_schedule_set_can_emit_json(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 

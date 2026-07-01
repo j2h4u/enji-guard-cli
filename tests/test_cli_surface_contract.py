@@ -29,6 +29,7 @@ EXPECTED_VISIBLE_COMMANDS = {
     ("report", "show"),
     ("run",),
     ("schedule", "list"),
+    ("schedule", "auto-time"),
     ("schedule", "set"),
     ("schedule", "timezone"),
     ("status",),

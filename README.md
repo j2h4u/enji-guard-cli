@@ -151,6 +151,7 @@ docker exec -i enji-guard-cli enji-guard report list j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard --project Pets schedule list
 docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos --enabled on --freq workdays
 docker exec -i enji-guard-cli enji-guard --project Pets schedule timezone Asia/Almaty --all-repos
+docker exec -i enji-guard-cli enji-guard --project Pets schedule auto-time --all-repos
 docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --auto off
 docker exec -i enji-guard-cli enji-guard auth refresh
 ```
@@ -167,7 +168,8 @@ repo/report audit and can batch update all report audits for one repo or one
 explicit batch scope. Use `REPO`, `--project NAME_OR_ID --all-repos`, or
 `--all-projects`. `schedule list` warns when enabled audits for one repo use
 different timezones; `schedule timezone` aligns timezone for the selected
-scope.
+scope. `schedule auto-time` resets the selected scope to Enji-assigned run
+times, which is the default scheduling model.
 
 ## MCP
 
