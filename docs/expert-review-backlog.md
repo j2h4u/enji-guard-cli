@@ -155,16 +155,15 @@ Panel:
   - Architecture gate: `auth_impl` is below the auth facade and has a dedicated
     purity contract.
 
-- [ ] Keep `OPERATION_SPECS` from becoming a universal command registry.
+- [x] Keep the read-operation registry from becoming a universal command registry.
   - Source: Kaizen / Architecture Simplification.
-  - Evidence: it currently mixes CLI names, MCP names, summaries, and
-    sync/async executors.
-  - Impact: one registry can blur CLI and MCP ontology even though their
-    surfaces are intentionally different.
-  - Action: either narrow it to MCP/read-tool capabilities or keep only shared
-    operation metadata that truly belongs to both surfaces.
+  - Evidence: `READ_OPERATION_SPECS` carries only shared read-operation names,
+    summaries, and executors.
+  - Impact: CLI command routing stays on the CLI surface, while MCP tool names
+    stay on the MCP surface.
+  - Action: keep command/tool labels out of shared read-operation metadata.
 
-- [ ] Make report audit definitions non-nullable where possible.
+- [x] Make report audit definitions non-nullable where possible.
   - Source: Kaizen / Architecture Simplification.
   - Evidence: audit ontology uses duplicated enums plus nullable `route_slug`
     and `job_kind` to model recon versus report audits.
@@ -172,6 +171,10 @@ Panel:
     guaranteed on report audits.
   - Action: separate recon metadata from report audit metadata or introduce a
     report-audit definition with non-null job kind and route slug.
+  - Done: added `ReportAuditDefinition` / `ReconAuditDefinition`; report-only
+    status, schedule, and report-read paths now consume the non-nullable report
+    type while the public catalog payload still serializes recon metadata as
+    `null`.
 
 - [x] Revisit cookie-session 403 refresh behavior.
   - Source: Adversarial Python Code Reviewer.

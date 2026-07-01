@@ -1,7 +1,7 @@
 import time
 from datetime import UTC, datetime
 
-from enji_guard_cli.audits import REPORT_AUDITS, AuditDefinition
+from enji_guard_cli.audits import REPORT_AUDITS, ReportAuditDefinition
 from enji_guard_cli.core_impl.models import (
     FAILED_REPORT_WAIT_STATUSES,
     REPORT_ARTIFACT_SCHEMA,
@@ -66,7 +66,7 @@ def _report_links_by_action(payload: JsonObjectPayload) -> dict[str, dict[str, J
 
 
 def _report_audit_status(
-    audit: AuditDefinition,
+    audit: ReportAuditDefinition,
     links_by_action: dict[str, dict[str, JsonValue]],
     active_runs_by_action: dict[str, dict[str, JsonValue]],
     current_sha: str | None,
@@ -77,14 +77,11 @@ def _report_audit_status(
     active_run = active_runs_by_action.get(action_key)
     state = _report_audit_state(link, active_run)
     last_audited_sha = last_audited_head_sha(rerun_state, action_key)
-    route_slug = audit.route_slug
-    if route_slug is None:
-        raise ValueError("report audit status cannot be built for recon")
     return {
         "audit": audit.alias.value,
         "label": audit.label,
         "action_key": action_key,
-        "route_slug": route_slug,
+        "route_slug": audit.route_slug,
         "state": state,
         "ready": state == "ready",
         "running": state == "running",
@@ -380,15 +377,12 @@ def empty_report_status(repo_id: str) -> ReportStatusPayload:
     }
 
 
-def _empty_report_audit_status(audit: AuditDefinition) -> ReportAuditStatusPayload:
-    route_slug = audit.route_slug
-    if route_slug is None:
-        raise ValueError("report audit status cannot be built for recon")
+def _empty_report_audit_status(audit: ReportAuditDefinition) -> ReportAuditStatusPayload:
     return {
         "audit": audit.alias.value,
         "label": audit.label,
         "action_key": audit.action_key,
-        "route_slug": route_slug,
+        "route_slug": audit.route_slug,
         "state": "missing",
         "ready": False,
         "running": False,

@@ -26,6 +26,13 @@ CATALOG_AUDIT_OPERATION = resolve_operation_spec(OperationName.CATALOG_AUDIT)
 ACCESS_OPERATION = resolve_operation_spec(OperationName.ACCESS)
 REPORTS_LIST_OPERATION = resolve_operation_spec(OperationName.REPORTS_LIST)
 AUTH_STATUS_OPERATION = resolve_operation_spec(OperationName.AUTH_STATUS)
+MCP_TOOL_NAMES_BY_OPERATION = {
+    OperationName.CATALOG_AUDITS: "enji_catalog_audits",
+    OperationName.CATALOG_AUDIT: "enji_catalog_audit",
+    OperationName.ACCESS: "enji_access",
+    OperationName.REPORTS_LIST: "enji_reports_list",
+    OperationName.AUTH_STATUS: "enji_auth_status",
+}
 
 get_audit_catalog = CATALOG_AUDITS_OPERATION.execute
 get_resolve_audit = CATALOG_AUDIT_OPERATION.execute
@@ -85,7 +92,7 @@ def create_mcp_server(host: str = DEFAULT_HTTP_HOST, port: int = DEFAULT_HTTP_PO
     )
 
     @server.tool(
-        name=CATALOG_AUDITS_OPERATION.mcp_tool,
+        name=MCP_TOOL_NAMES_BY_OPERATION[OperationName.CATALOG_AUDITS],
         description=CATALOG_AUDITS_OPERATION.summary,
         structured_output=True,
     )
@@ -93,7 +100,7 @@ def create_mcp_server(host: str = DEFAULT_HTTP_HOST, port: int = DEFAULT_HTTP_PO
         return {"audits": cast(list[AuditPayload], resolve_operation_result(get_audit_catalog()))}
 
     @server.tool(
-        name=CATALOG_AUDIT_OPERATION.mcp_tool,
+        name=MCP_TOOL_NAMES_BY_OPERATION[OperationName.CATALOG_AUDIT],
         description=CATALOG_AUDIT_OPERATION.summary,
         structured_output=True,
     )
@@ -101,7 +108,7 @@ def create_mcp_server(host: str = DEFAULT_HTTP_HOST, port: int = DEFAULT_HTTP_PO
         return cast(AuditPayload, resolve_operation_result(get_resolve_audit(audit)))
 
     @server.tool(
-        name=ACCESS_OPERATION.mcp_tool,
+        name=MCP_TOOL_NAMES_BY_OPERATION[OperationName.ACCESS],
         description=ACCESS_OPERATION.summary,
         structured_output=True,
     )
@@ -109,7 +116,7 @@ def create_mcp_server(host: str = DEFAULT_HTTP_HOST, port: int = DEFAULT_HTTP_PO
         return await _resolve_operation_result_async(get_access())
 
     @server.tool(
-        name=REPORTS_LIST_OPERATION.mcp_tool,
+        name=MCP_TOOL_NAMES_BY_OPERATION[OperationName.REPORTS_LIST],
         description=REPORTS_LIST_OPERATION.summary,
         structured_output=True,
     )
@@ -119,7 +126,7 @@ def create_mcp_server(host: str = DEFAULT_HTTP_HOST, port: int = DEFAULT_HTTP_PO
         return await _resolve_operation_result_async(_invoke_reports_list(selector=selector))
 
     @server.tool(
-        name=AUTH_STATUS_OPERATION.mcp_tool,
+        name=MCP_TOOL_NAMES_BY_OPERATION[OperationName.AUTH_STATUS],
         description=AUTH_STATUS_OPERATION.summary,
         structured_output=True,
     )

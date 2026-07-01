@@ -36,71 +36,83 @@ class AuditPayload(TypedDict):
 class AuditDefinition:
     alias: AuditAlias
     label: str
+    action_key: str
     route_slug: str | None
     job_kind: str | None
-    action_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReportAuditDefinition(AuditDefinition):
+    route_slug: str
+    job_kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReconAuditDefinition(AuditDefinition):
+    route_slug: None = None
+    job_kind: None = None
 
 
 AUDITS: tuple[AuditDefinition, ...] = (
-    AuditDefinition(
+    ReportAuditDefinition(
         alias=AuditAlias.SECURITY,
         label="Security",
+        action_key="audit.security",
         route_slug="vulns",
         job_kind="vuln-audit",
-        action_key="audit.security",
     ),
-    AuditDefinition(
+    ReportAuditDefinition(
         alias=AuditAlias.AI_READINESS,
         label="AI readiness",
+        action_key="audit.ai-readiness",
         route_slug="ai-readiness",
         job_kind="ai-maturity",
-        action_key="audit.ai-readiness",
     ),
-    AuditDefinition(
+    ReportAuditDefinition(
         alias=AuditAlias.TESTS,
         label="Tests",
+        action_key="audit.tests",
         route_slug="tests",
         job_kind="test-audit",
-        action_key="audit.tests",
     ),
-    AuditDefinition(
+    ReportAuditDefinition(
         alias=AuditAlias.TECH_HEALTH,
         label="Codebase health",
+        action_key="audit.tech-health",
         route_slug="tech-health",
         job_kind="tech-health",
-        action_key="audit.tech-health",
     ),
-    AuditDefinition(
+    ReportAuditDefinition(
         alias=AuditAlias.DEPS,
         label="Dependency hygiene",
+        action_key="audit.dependency-hygiene",
         route_slug="dependency-hygiene",
         job_kind="dependency-hygiene",
-        action_key="audit.dependency-hygiene",
     ),
-    AuditDefinition(
+    ReportAuditDefinition(
         alias=AuditAlias.COGNITIVE_DEBT,
         label="Cognitive debt",
+        action_key="audit.cognitive-debt",
         route_slug="cognitive-debt",
         job_kind="cognitive-debt",
-        action_key="audit.cognitive-debt",
     ),
-    AuditDefinition(
+    ReportAuditDefinition(
         alias=AuditAlias.DEAD_CODE,
         label="Dead code",
+        action_key="audit.dead-code",
         route_slug="dead-code",
         job_kind="dead-code",
-        action_key="audit.dead-code",
     ),
-    AuditDefinition(
+    ReconAuditDefinition(
         alias=AuditAlias.RECON,
         label="Recon",
-        route_slug=None,
-        job_kind=None,
         action_key="audit.recon",
     ),
 )
 
-REPORT_AUDITS: tuple[AuditDefinition, ...] = tuple(audit for audit in AUDITS if audit.route_slug is not None)
+REPORT_AUDITS: tuple[ReportAuditDefinition, ...] = tuple(
+    audit for audit in AUDITS if isinstance(audit, ReportAuditDefinition)
+)
 REPORT_AUDIT_ALIASES: tuple[AuditAlias, ...] = tuple(audit.alias for audit in REPORT_AUDITS)
 _AUDIT_BY_ALIAS: dict[AuditAlias, AuditDefinition] = {audit.alias: audit for audit in AUDITS}
 
@@ -126,8 +138,8 @@ def resolve_audit(alias: AuditAlias) -> AuditDefinition:
     return audit
 
 
-def require_report_audit(alias: AuditAlias) -> AuditDefinition:
+def require_report_audit(alias: AuditAlias) -> ReportAuditDefinition:
     audit = resolve_audit(alias)
-    if audit.route_slug is None:
+    if not isinstance(audit, ReportAuditDefinition):
         raise ValueError("recon is not a report audit")
     return audit

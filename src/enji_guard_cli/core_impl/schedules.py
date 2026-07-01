@@ -1,6 +1,6 @@
 from typing import cast
 
-from enji_guard_cli.audits import AuditDefinition
+from enji_guard_cli.audits import ReportAuditDefinition
 from enji_guard_cli.core_impl.email_preferences import repo_count
 from enji_guard_cli.core_impl.models import (
     ALL_SCHEDULE_DAYS,
@@ -105,7 +105,7 @@ def selected_schedule_time(existing: JsonObjectPayload | None, update: ScheduleS
 
 def schedule_setting_row(
     target: RepoTargetPayload,
-    audit: AuditDefinition,
+    audit: ReportAuditDefinition,
     job: JsonObjectPayload | None,
     *,
     changed: bool | None = None,
@@ -193,9 +193,7 @@ def schedule_payload(update: ScheduleUpdate) -> JsonObjectPayload:
     return payload
 
 
-def schedule_job_by_kind(payload: JsonObjectPayload, job_kind: str | None) -> JsonObjectPayload | None:
-    if job_kind is None:
-        raise ValueError("recon does not have a schedulable improvement job")
+def schedule_job_by_kind(payload: JsonObjectPayload, job_kind: str) -> JsonObjectPayload | None:
     for job in json_object_list(payload.get("jobs")):
         if json_str(job.get("kind")) == job_kind:
             return job

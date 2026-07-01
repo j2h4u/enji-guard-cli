@@ -61,45 +61,35 @@ async def auth_status_async_operation(auth_file: Path | None = None) -> AuthStat
     return await run_auth_status_async(auth_file)
 
 
-OPERATION_SPECS: tuple[OperationSpec, ...] = (
+READ_OPERATION_SPECS: tuple[OperationSpec, ...] = (
     OperationSpec(
         name=OperationName.CATALOG_AUDITS,
-        cli_command="catalog audits",
-        mcp_tool="enji_catalog_audits",
         summary="List the canonical Enji Guard audit catalog.",
         execute=_catalog_audits_operation,
     ),
     OperationSpec(
         name=OperationName.CATALOG_AUDIT,
-        cli_command="catalog audit",
-        mcp_tool="enji_catalog_audit",
         summary="Resolve one canonical Enji Guard audit alias.",
         execute=_catalog_audit_operation,
     ),
     OperationSpec(
         name=OperationName.ACCESS,
-        cli_command="access",
-        mcp_tool="enji_access",
         summary="Return Enji Guard plan, limits, and schedule access metadata.",
         execute=_access_operation,
     ),
     OperationSpec(
         name=OperationName.REPORTS_LIST,
-        cli_command=None,
-        mcp_tool="enji_reports_list",
-        summary="List compact Enji Guard report inventory for MCP.",
+        summary="List compact Enji Guard report inventory.",
         execute=_reports_list_operation,
     ),
     OperationSpec(
         name=OperationName.AUTH_STATUS,
-        cli_command="auth status",
-        mcp_tool="enji_auth_status",
         summary="Report whether stored Enji Guard credentials are authenticated.",
         execute=_auth_status_operation,
     ),
 )
 
-_OPERATION_BY_NAME: dict[OperationName, OperationSpec] = {spec.name: spec for spec in OPERATION_SPECS}
+_OPERATION_BY_NAME: dict[OperationName, OperationSpec] = {spec.name: spec for spec in READ_OPERATION_SPECS}
 
 
 def package_version() -> str:
@@ -131,14 +121,12 @@ async def reports_list_async_operation(
 def operation_payload(spec: OperationSpec) -> OperationPayload:
     return {
         "name": spec.name.value,
-        "cli_command": spec.cli_command,
-        "mcp_tool": spec.mcp_tool,
         "summary": spec.summary,
     }
 
 
 def operation_catalog() -> list[OperationPayload]:
-    return [operation_payload(spec) for spec in OPERATION_SPECS]
+    return [operation_payload(spec) for spec in READ_OPERATION_SPECS]
 
 
 def resolve_operation_spec(name: OperationName) -> OperationSpec:

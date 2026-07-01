@@ -4,8 +4,8 @@ from typing import cast
 
 from mcp.types import Tool
 
-from enji_guard_cli.core import OPERATION_SPECS
-from enji_guard_cli.mcp_server import create_mcp_server
+from enji_guard_cli.core import READ_OPERATION_SPECS
+from enji_guard_cli.mcp_server import MCP_TOOL_NAMES_BY_OPERATION, create_mcp_server
 
 REQUIRED_OPERATION_TOOLS = {
     "access": "enji_access",
@@ -25,12 +25,12 @@ def test_core_operation_specs_match_registered_mcp_tool_names() -> None:
 
     tools = cast(list[Tool], asyncio.run(server.list_tools()))
 
-    assert [tool.name for tool in tools] == [spec.mcp_tool for spec in OPERATION_SPECS]
-    assert [tool.description for tool in tools] == [spec.summary for spec in OPERATION_SPECS]
+    assert [tool.name for tool in tools] == [MCP_TOOL_NAMES_BY_OPERATION[spec.name] for spec in READ_OPERATION_SPECS]
+    assert [tool.description for tool in tools] == [spec.summary for spec in READ_OPERATION_SPECS]
 
 
 def test_required_operation_specs_include_access_and_report_list() -> None:
-    spec_tools = {spec.name.value: spec.mcp_tool for spec in OPERATION_SPECS}
+    spec_tools = {spec.name.value: MCP_TOOL_NAMES_BY_OPERATION[spec.name] for spec in READ_OPERATION_SPECS}
 
     assert {name: spec_tools.get(name) for name in REQUIRED_OPERATION_TOOLS} == REQUIRED_OPERATION_TOOLS
 
