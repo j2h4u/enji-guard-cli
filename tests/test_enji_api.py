@@ -499,6 +499,53 @@ def test_api_error_payload_is_preserved_for_unexpected_status(tmp_path: Path) ->
         raise AssertionError("expected EnjiApiError")
 
 
+def test_cookie_permission_forbidden_does_not_refresh(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access=old; refresh=long", auth_file)
+    client = FakeEnjiHttpClient(
+        [
+            json_response(
+                {"code": "CLIENT_NOT_ALLOWED", "message": "client is not allowed"},
+                status_code=403,
+            )
+        ]
+    )
+
+    try:
+        _github_installation_repos("42", auth_file, client)
+    except EnjiApiError as exc:
+        assert exc.code == "CLIENT_NOT_ALLOWED"
+        assert exc.message == "client is not allowed"
+    else:
+        raise AssertionError("expected EnjiApiError")
+
+    assert [(request.method, request.url) for request in client.requests] == [
+        ("GET", "https://fleet.enji.ai/api/v1/github/app/installations/42/repos")
+    ]
+
+
+def test_cookie_auth_invalid_forbidden_refreshes(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access=old; refresh=long", auth_file)
+    client = FakeEnjiHttpClient(
+        [
+            json_response({"error": {"code": "AUTH_INVALID"}}, status_code=403),
+            json_response({"message": "token refreshed"}, set_cookie_headers=("access=new; Path=/; HttpOnly",)),
+            json_response({"repos": []}),
+        ]
+    )
+
+    payload = _github_installation_repos("42", auth_file, client)
+
+    assert payload == {"repos": []}
+    assert [(request.method, request.url) for request in client.requests] == [
+        ("GET", "https://fleet.enji.ai/api/v1/github/app/installations/42/repos"),
+        ("POST", "https://fleet.enji.ai/api/v1/auth/refresh"),
+        ("GET", "https://fleet.enji.ai/api/v1/github/app/installations/42/repos"),
+    ]
+    assert client.requests[2].headers == {"Cookie": "access=new; refresh=long", "Origin": AUTH_REFRESH_ORIGIN}
+
+
 def test_access_refreshes_cookie_on_auth_invalid_and_retries_once(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access=old; refresh=long", auth_file)
