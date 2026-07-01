@@ -45,7 +45,7 @@ from enji_guard_cli.enji_api_impl.client import (
 from enji_guard_cli.enji_api_impl.client import (
     load_api_session as _load_api_session_impl,
 )
-from enji_guard_cli.errors import EnjiApiError
+from enji_guard_cli.errors import EnjiApiError, EnjiPartialStateError, PartialStateDetails
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.transport import EnjiHttpClient, EnjiHttpError, EnjiJsonValue
 
@@ -258,11 +258,24 @@ def create_project(
         "name": name,
         "createdAt": datetime.now(UTC).isoformat(),
     }
-    return run_api_request(
-        auth_file,
-        client,
-        UX_PROJECT_CREATE_ENDPOINT.request(json_body=cast(EnjiJsonValue, ux_request)),
-    )
+    try:
+        return run_api_request(
+            auth_file,
+            client,
+            UX_PROJECT_CREATE_ENDPOINT.request(json_body=cast(EnjiJsonValue, ux_request)),
+        )
+    except EnjiApiError as exc:
+        raise EnjiPartialStateError(
+            PartialStateDetails(
+                operation="create_project",
+                completed_step="fleet_create",
+                failed_step="ux_create",
+                project_id=fleet_project["id"],
+                project_name=name,
+                upstream_code=exc.code,
+                upstream_message=exc.message,
+            )
+        ) from exc
 
 
 def rename_project(
@@ -289,11 +302,23 @@ def delete_project(
         client,
         UX_PROJECT_DELETE_ENDPOINT.request(path_params={"projectId": project_id}),
     )
-    run_api_no_content(
-        auth_file,
-        client,
-        FLEET_PROJECT_DELETE_ENDPOINT.request(path_params={"projectId": project_id}),
-    )
+    try:
+        run_api_no_content(
+            auth_file,
+            client,
+            FLEET_PROJECT_DELETE_ENDPOINT.request(path_params={"projectId": project_id}),
+        )
+    except EnjiApiError as exc:
+        raise EnjiPartialStateError(
+            PartialStateDetails(
+                operation="delete_project",
+                completed_step="ux_delete",
+                failed_step="fleet_delete",
+                project_id=project_id,
+                upstream_code=exc.code,
+                upstream_message=exc.message,
+            )
+        ) from exc
 
 
 def preflight_repo_move(

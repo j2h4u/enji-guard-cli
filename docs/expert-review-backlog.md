@@ -81,7 +81,7 @@ Panel:
   - Tests: reject `owner/name/extra`, `/name`, `owner/`, empty strings, and
     empty segments.
 
-- [ ] Improve partial-state reporting for two-step project mutations.
+- [x] Improve partial-state reporting for two-step project mutations.
   - Source: Adversarial Python Code Reviewer.
   - Evidence: project create writes Fleet then UX; project delete removes UX
     then Fleet.
@@ -121,6 +121,8 @@ Panel:
   - Progress: report-read selection and snapshot materialization moved to
     `core_impl/report_reads.py`; the helper module receives snapshot IO as an
     explicit dependency and does not import the adapter directly.
+  - Progress: project/repo target resolution moved to `core_impl/targets.py`;
+    `core.py` still owns write-scope policy and Enji API calls.
 
 - [x] Split `enji_api.py` into request mechanics and endpoint wrappers.
   - Source: Kaizen / Architecture Simplification.
@@ -262,13 +264,14 @@ Panel:
   - Candidate command: `uv run openapi-spec-validator contracts/enji-openapi.json`.
   - Keep existing `scripts/validate_openapi_contract.py`.
 
-- [ ] Consider scoped Ruff security lint.
+- [x] Consider scoped Ruff security lint.
   - Source: QA / Static Analysis.
   - Candidate command:
     `uv run ruff check --preview --select S --ignore S105 src/enji_guard_cli scripts`.
   - Note: full `S` over tests is noisy because pytest assertions trigger `S101`.
-  - Decision needed: whether `S105` should be globally ignored or narrowly
-    suppressed.
+  - Decision: enable production/script `S` lint, ignore noisy `S101`/`S105`,
+    and exclude tests from `S` because fixtures intentionally contain unsafe
+    literals such as `0.0.0.0` and `/tmp`.
 
 ## Current Gate Coverage To Preserve
 
@@ -311,4 +314,4 @@ Panel:
 7. [ ] Split `core.py` by use case.
 8. [x] Split auth cookie/store responsibilities.
 9. [x] Split `enji_api.py` request mechanics from endpoint wrappers.
-10. [ ] Improve project create/delete partial-state reporting.
+10. [x] Improve project create/delete partial-state reporting.

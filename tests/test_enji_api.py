@@ -14,6 +14,7 @@ from enji_guard_cli.auth import (
 from enji_guard_cli.enji_api import (
     AuditRunCreate,
     EnjiApiError,
+    EnjiPartialStateError,
     RepoTransfer,
     _connect_project_repo,
     _github_installation_repos,
@@ -255,6 +256,82 @@ def test_project_admin_and_repo_transfer_operations_use_expected_requests(tmp_pa
     assert client.requests[2].json_body == {"name": "Friends"}
     assert client.requests[5].json_body == {"targetProjectId": "project_2"}
     assert client.requests[6].json_body == {"targetProjectId": "project_2"}
+
+
+def test_create_project_surfaces_partial_state_when_ux_create_fails(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_bearer_token("token-123", auth_file)
+    client = FakeEnjiHttpClient(
+        [
+            json_response({"id": "project_1"}, status_code=201),
+            json_response(
+                {"code": "CLIENT_NOT_ALLOWED", "message": "client is not allowed"},
+                status_code=403,
+            ),
+        ]
+    )
+
+    try:
+        create_project("Pets", auth_file, client)
+    except EnjiPartialStateError as exc:
+        assert exc.code == "PARTIAL_STATE"
+        assert exc.operation == "create_project"
+        assert exc.completed_step == "fleet_create"
+        assert exc.failed_step == "ux_create"
+        assert exc.project_id == "project_1"
+        assert exc.project_name == "Pets"
+        assert exc.upstream_code == "CLIENT_NOT_ALLOWED"
+        assert exc.upstream_message == "client is not allowed"
+        assert exc.message == (
+            "operation=create_project; completed_step=fleet_create; failed_step=ux_create; "
+            "project_id=project_1; project_name=Pets; upstream_code=CLIENT_NOT_ALLOWED; "
+            "upstream_message=client is not allowed"
+        )
+    else:
+        raise AssertionError("expected EnjiPartialStateError")
+
+    assert [(request.method, request.url) for request in client.requests] == [
+        ("POST", "https://fleet.enji.ai/api/v1/projects"),
+        ("POST", "https://fleet.enji.ai/api/ux/projects"),
+    ]
+
+
+def test_delete_project_surfaces_partial_state_when_fleet_delete_fails(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_bearer_token("token-123", auth_file)
+    client = FakeEnjiHttpClient(
+        [
+            empty_response(status_code=204),
+            json_response(
+                {"code": "CLIENT_NOT_ALLOWED", "message": "client is not allowed"},
+                status_code=403,
+            ),
+        ]
+    )
+
+    try:
+        delete_project("project_1", auth_file, client)
+    except EnjiPartialStateError as exc:
+        assert exc.code == "PARTIAL_STATE"
+        assert exc.operation == "delete_project"
+        assert exc.completed_step == "ux_delete"
+        assert exc.failed_step == "fleet_delete"
+        assert exc.project_id == "project_1"
+        assert exc.project_name is None
+        assert exc.upstream_code == "CLIENT_NOT_ALLOWED"
+        assert exc.upstream_message == "client is not allowed"
+        assert exc.message == (
+            "operation=delete_project; completed_step=ux_delete; failed_step=fleet_delete; "
+            "project_id=project_1; upstream_code=CLIENT_NOT_ALLOWED; "
+            "upstream_message=client is not allowed"
+        )
+    else:
+        raise AssertionError("expected EnjiPartialStateError")
+
+    assert [(request.method, request.url) for request in client.requests] == [
+        ("DELETE", "https://fleet.enji.ai/api/ux/projects/project_1"),
+        ("DELETE", "https://fleet.enji.ai/api/v1/projects/project_1"),
+    ]
 
 
 def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_path: Path) -> None:

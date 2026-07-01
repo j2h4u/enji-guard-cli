@@ -64,12 +64,13 @@ select = [
     "G",
     "N818",
     "ARG",
+    "S",
     "C90",
     "PLR09",
     "PLR17",
     "PLR2004",
 ]
-ignore = ["ISC001"]
+ignore = ["ISC001", "S101", "S105"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = [
@@ -77,6 +78,7 @@ ignore = ["ISC001"]
     "ARG",
     "PERF401",
     "PLR2004",
+    "S",
 ]
 
 [tool.ruff.format]
