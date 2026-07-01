@@ -125,7 +125,7 @@ include_external_packages = true
 id = "core-independent-from-entrypoints"
 name = "Core stays independent from CLI and MCP entrypoints"
 type = "forbidden"
-source_modules = ["enji_guard_cli.core"]
+source_modules = ["enji_guard_cli.core", "enji_guard_cli.core_impl"]
 forbidden_modules = ["enji_guard_cli.cli", "enji_guard_cli.runtime", "enji_guard_cli.mcp_server"]
 
 [[tool.importlinter.contracts]]
@@ -140,7 +140,13 @@ source_modules = [
     "enji_guard_cli.telemetry",
     "enji_guard_cli.transport",
 ]
-forbidden_modules = ["enji_guard_cli.core", "enji_guard_cli.cli", "enji_guard_cli.runtime", "enji_guard_cli.mcp_server"]
+forbidden_modules = [
+    "enji_guard_cli.core",
+    "enji_guard_cli.core_impl",
+    "enji_guard_cli.cli",
+    "enji_guard_cli.runtime",
+    "enji_guard_cli.mcp_server",
+]
 
 [[tool.importlinter.contracts]]
 id = "package-dependency-direction"
@@ -151,6 +157,7 @@ layers = [
     "enji_guard_cli.runtime",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.core",
+    "enji_guard_cli.core_impl",
     "enji_guard_cli.audits",
     "enji_guard_cli.enji_api",
     "enji_guard_cli._enji_api_contract",
@@ -160,6 +167,14 @@ layers = [
     "enji_guard_cli.errors",
     "enji_guard_cli.settings",
 ]
+
+[[tool.importlinter.contracts]]
+id = "entrypoints-use-core-facade"
+name = "CLI and MCP entrypoints use the core facade"
+type = "forbidden"
+source_modules = ["enji_guard_cli.cli", "enji_guard_cli.runtime", "enji_guard_cli.mcp_server"]
+forbidden_modules = ["enji_guard_cli.core_impl"]
+allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 id = "entrypoints-avoid-api-transport-and-http-clients"
@@ -179,7 +194,7 @@ allow_indirect_imports = true
 id = "core-avoids-transport-internals"
 name = "Core uses Enji API adapter instead of transport internals"
 type = "forbidden"
-source_modules = ["enji_guard_cli.core"]
+source_modules = ["enji_guard_cli.core", "enji_guard_cli.core_impl"]
 forbidden_modules = ["enji_guard_cli.transport", "httpx", "httpx_retries"]
 allow_indirect_imports = true
 
@@ -187,7 +202,7 @@ allow_indirect_imports = true
 id = "core-avoids-enji-api-contract-internals"
 name = "Core uses Enji API behavior, not endpoint contract metadata"
 type = "forbidden"
-source_modules = ["enji_guard_cli.core"]
+source_modules = ["enji_guard_cli.core", "enji_guard_cli.core_impl"]
 forbidden_modules = ["enji_guard_cli._enji_api_contract"]
 allow_indirect_imports = true
 
@@ -209,6 +224,7 @@ forbidden_modules = [
     "enji_guard_cli.auth",
     "enji_guard_cli.cli",
     "enji_guard_cli.core",
+    "enji_guard_cli.core_impl",
     "enji_guard_cli.enji_api",
     "enji_guard_cli.errors",
     "enji_guard_cli.mcp_server",
@@ -231,6 +247,7 @@ source_modules = [
     "enji_guard_cli.auth",
     "enji_guard_cli.cli",
     "enji_guard_cli.core",
+    "enji_guard_cli.core_impl",
     "enji_guard_cli.enji_api",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.runtime",
@@ -249,6 +266,7 @@ source_modules = [
     "enji_guard_cli.auth",
     "enji_guard_cli.audits",
     "enji_guard_cli.core",
+    "enji_guard_cli.core_impl",
     "enji_guard_cli.enji_api",
     "enji_guard_cli.errors",
     "enji_guard_cli.settings",
@@ -269,6 +287,7 @@ forbidden_modules = [
     "enji_guard_cli.audits",
     "enji_guard_cli.cli",
     "enji_guard_cli.core",
+    "enji_guard_cli.core_impl",
     "enji_guard_cli.enji_api",
     "enji_guard_cli.errors",
     "enji_guard_cli.mcp_server",
