@@ -287,6 +287,9 @@ def start_auto_refresh_task() -> asyncio.Task[None] | None:
     settings = default_settings()
     if not settings.auto_refresh.enabled:
         return None
+    stored_auth = load_stored_auth(settings.auth.auth_file)
+    if stored_auth is not None and stored_auth["credential"]["type"] != CredentialType.COOKIE.value:
+        return None
     return asyncio.create_task(
         _auto_refresh_loop(
             auth_file=settings.auth.auth_file,
