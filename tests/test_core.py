@@ -23,7 +23,6 @@ from enji_guard_cli.core import (
     resolve_operation,
     resolve_operation_spec,
 )
-from enji_guard_cli.core_impl import report_reads
 from enji_guard_cli.core_impl.selectors import parse_github_repo
 from enji_guard_cli.errors import EnjiApiError
 
@@ -1158,7 +1157,7 @@ def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatc
         captured_audits.append(audit.value)
         return {"snapshot": {"content": {"report": f"# {audit.value}"}}}
 
-    monkeypatch.setattr(report_reads, "_show_report", fake_show_report)
+    monkeypatch.setattr(core, "_read_report_snapshot", fake_show_report)
 
     payload = core.read_reports_for_repo("j2h4u/enji-guard-cli", "Pets", [], all_reports=False)
 
@@ -1209,8 +1208,8 @@ def test_read_reports_for_repo_can_read_all_report_audits(monkeypatch: MonkeyPat
         },
     )
     monkeypatch.setattr(
-        report_reads,
-        "_show_report",
+        core,
+        "_read_report_snapshot",
         lambda repo_id, audit: {"snapshot": {"content": {"report": audit.value}}},
     )
     monkeypatch.setattr(
@@ -1270,7 +1269,7 @@ def test_read_reports_for_repo_all_marks_missing_reports_unavailable(monkeypatch
         captured_audits.append(audit.value)
         return {"snapshot": {"content": {"report": f"# {audit.value}"}}}
 
-    monkeypatch.setattr(report_reads, "_show_report", fake_show_report)
+    monkeypatch.setattr(core, "_read_report_snapshot", fake_show_report)
 
     payload = core.read_reports_for_repo("j2h4u/mcp-strava", None, [], all_reports=True)
 
@@ -1329,7 +1328,7 @@ def test_read_reports_for_repo_all_marks_missing_ready_snapshot_unavailable(monk
     def fake_show_report(repo_id: str, audit: AuditAlias) -> dict[str, object]:
         raise EnjiApiError("NOT_FOUND", "snapshot not found")
 
-    monkeypatch.setattr(report_reads, "_show_report", fake_show_report)
+    monkeypatch.setattr(core, "_read_report_snapshot", fake_show_report)
 
     payload = core.read_reports_for_repo("j2h4u/mcp-strava", None, [], all_reports=True)
 

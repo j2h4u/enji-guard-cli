@@ -119,8 +119,8 @@ Panel:
   - Rule: move one responsibility at a time; do not introduce service classes
     or containers.
   - Progress: report-read selection and snapshot materialization moved to
-    `core_impl/report_reads.py`; `core.py` still owns the public facade and
-    selector resolution.
+    `core_impl/report_reads.py`; the helper module receives snapshot IO as an
+    explicit dependency and does not import the adapter directly.
 
 - [ ] Split `enji_api.py` into request mechanics and endpoint wrappers.
   - Source: Kaizen / Architecture Simplification.
@@ -133,7 +133,7 @@ Panel:
   - Rule: do not generate CLI/MCP from OpenAPI and do not split all endpoints
     in one pass.
 
-- [ ] Split durable auth from temporary cookie machinery.
+- [x] Split durable auth from temporary cookie machinery.
   - Source: Kaizen / Architecture Simplification.
   - Evidence: `auth.py` combines credential models, store, status, refresh,
     locks, cookie parsing/deletion, and supervisor loop.
@@ -144,6 +144,8 @@ Panel:
     - `auth_impl/cookies.py`: cookie normalization, Set-Cookie merge,
       deletion/persistability logic.
   - Rule: bearer/API-token support remains first-class.
+  - Architecture gate: `auth_impl` is below the auth facade and has a dedicated
+    purity contract.
 
 - [ ] Keep `OPERATION_SPECS` from becoming a universal command registry.
   - Source: Kaizen / Architecture Simplification.
@@ -304,6 +306,6 @@ Panel:
 5. [x] Move CLI auth commands behind core and tighten import-linter.
 6. [x] Move neutral JSON types out of `enji_api.py` and tighten import-linter.
 7. [ ] Split `core.py` by use case.
-8. [ ] Split auth cookie/store responsibilities.
+8. [x] Split auth cookie/store responsibilities.
 9. [ ] Split `enji_api.py` request mechanics from endpoint wrappers.
 10. [ ] Improve project create/delete partial-state reporting.

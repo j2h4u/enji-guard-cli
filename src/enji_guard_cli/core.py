@@ -112,6 +112,7 @@ from enji_guard_cli.enji_api import (
 )
 from enji_guard_cli.enji_api import _connect_project_repo as run_connect_project_repo
 from enji_guard_cli.enji_api import audit_email_preferences as run_audit_email_preferences
+from enji_guard_cli.enji_api import audit_summary_snapshot as run_audit_summary_snapshot
 from enji_guard_cli.enji_api import catalog as run_catalog
 from enji_guard_cli.enji_api import create_project as run_create_project
 from enji_guard_cli.enji_api import delete_project as run_delete_project
@@ -383,8 +384,21 @@ def read_reports_for_repo(
     selected_reports = _report_reads.selected_reports_to_read(status, audits, all_reports=all_reports)
     return _targeted_run_payload(
         target,
-        _report_reads.read_reports_for_target(target["repo_id"], selected_reports, tolerate_unavailable=not audits),
+        _report_reads.read_reports_for_target(
+            target["repo_id"],
+            selected_reports,
+            snapshot_reader=_read_report_snapshot,
+            tolerate_unavailable=not audits,
+        ),
     )
+
+
+def _read_report_snapshot(repo_id: str, audit: AuditAlias) -> JsonObjectPayload:
+    resolved = registry_resolve_audit(audit)
+    route_slug = resolved.route_slug
+    if route_slug is None:
+        raise ValueError("recon does not have an upfront.audit.summary report snapshot")
+    return run_audit_summary_snapshot(repo_id, route_slug)
 
 
 def list_email_preferences(repo: str | None, project: str | None) -> JsonObjectPayload:

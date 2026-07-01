@@ -142,6 +142,7 @@ type = "forbidden"
 source_modules = [
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
+    "enji_guard_cli.auth_impl",
     "enji_guard_cli.enji_api",
     "enji_guard_cli.errors",
     "enji_guard_cli.telemetry",
@@ -171,6 +172,7 @@ layers = [
     "enji_guard_cli.enji_api",
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
+    "enji_guard_cli.auth_impl",
     "enji_guard_cli.transport",
     "enji_guard_cli.telemetry",
     "enji_guard_cli.errors",
@@ -236,6 +238,7 @@ source_modules = [
     "enji_guard_cli.core_impl.email_preferences",
     "enji_guard_cli.core_impl.payloads",
     "enji_guard_cli.core_impl.repo_status",
+    "enji_guard_cli.core_impl.report_reads",
     "enji_guard_cli.core_impl.schedules",
     "enji_guard_cli.core_impl.selectors",
 ]
@@ -282,6 +285,7 @@ name = "HTTP client dependency stays behind transport"
 type = "forbidden"
 source_modules = [
     "enji_guard_cli.auth",
+    "enji_guard_cli.auth_impl",
     "enji_guard_cli.cli",
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
@@ -301,6 +305,7 @@ type = "forbidden"
 source_modules = [
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
+    "enji_guard_cli.auth_impl",
     "enji_guard_cli.audits",
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
@@ -314,6 +319,34 @@ forbidden_modules = ["typer", "mcp"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
+id = "auth-impl-stays-pure"
+name = "Auth implementation details stay below the auth facade"
+type = "forbidden"
+source_modules = ["enji_guard_cli.auth_impl"]
+forbidden_modules = [
+    "enji_guard_cli._enji_api_contract",
+    "enji_guard_cli.auth",
+    "enji_guard_cli.audits",
+    "enji_guard_cli.cli",
+    "enji_guard_cli.cli_impl",
+    "enji_guard_cli.core",
+    "enji_guard_cli.core_impl",
+    "enji_guard_cli.enji_api",
+    "enji_guard_cli.errors",
+    "enji_guard_cli.json_types",
+    "enji_guard_cli.mcp_server",
+    "enji_guard_cli.runtime",
+    "enji_guard_cli.settings",
+    "enji_guard_cli.telemetry",
+    "enji_guard_cli.transport",
+    "httpx",
+    "httpx_retries",
+    "mcp",
+    "typer",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
 id = "settings-stays-pure"
 name = "Settings stay pure and below application code"
 type = "forbidden"
@@ -321,6 +354,7 @@ source_modules = ["enji_guard_cli.settings"]
 forbidden_modules = [
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
+    "enji_guard_cli.auth_impl",
     "enji_guard_cli.audits",
     "enji_guard_cli.cli",
     "enji_guard_cli.core",
@@ -346,6 +380,7 @@ source_modules = ["enji_guard_cli.json_types"]
 forbidden_modules = [
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
+    "enji_guard_cli.auth_impl",
     "enji_guard_cli.audits",
     "enji_guard_cli.cli",
     "enji_guard_cli.cli_impl",
