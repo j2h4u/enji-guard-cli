@@ -29,6 +29,9 @@ WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
 
+RUN rm -f /etc/localtime \
+    && cp /usr/share/zoneinfo/UTC /etc/localtime
+
 RUN groupadd --gid 1000 app \
     && useradd --uid 1000 --gid 1000 --create-home app
 

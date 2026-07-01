@@ -27,6 +27,10 @@ services:
       retries: 3
     volumes:
       - type: bind
+        source: /etc/localtime
+        target: /etc/localtime
+        read_only: true
+      - type: bind
         source: ${HOME}/.config/enji-guard
         target: /home/app/.config/enji-guard
         bind:
