@@ -184,15 +184,6 @@ class ReportReadPayload(TypedDict):
     reports: list[ReportReadItemPayload]
 
 
-class RepoStatusPayload(TypedDict):
-    repo_id: str
-    active_run_count: int
-    active_runs: list[JsonValue]
-    rerun_state: JsonObjectPayload
-    current_head_sha: str | None
-    reports: ReportStatusPayload
-
-
 class RepoRuntimeStatusPayload(TypedDict):
     project_id: str
     project_name: str | None
@@ -231,14 +222,6 @@ class RepoStatusAllPayload(TypedDict):
     observed_at: str
     summary: RepoStatusSummaryPayload
     projects: list[ProjectRuntimeStatusPayload]
-
-
-class AuditWaitPayload(TypedDict):
-    repo_id: str
-    audit: str | None
-    idle: bool
-    elapsed_seconds: int
-    active_runs: list[JsonValue]
 
 
 class OperationName(StrEnum):

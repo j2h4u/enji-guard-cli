@@ -22,7 +22,6 @@ from enji_guard_cli.core_impl.models import (
     AuditRunBatchPayload,
     AuditRunSkippedItem,
     AuditRunSkippedPayload,
-    AuditWaitPayload,
     EmailPreferenceUpdate,
     ProjectRef,
     ProjectRuntimeStatusPayload,
@@ -37,7 +36,6 @@ from enji_guard_cli.core_impl.models import (
     RepoRuntimeStatusPayload,
     RepoSort,
     RepoStatusAllPayload,
-    RepoStatusPayload,
     RepoStatusSummaryPayload,
     RepoTargetPayload,
     ScheduleSettingsUpdate,
@@ -75,7 +73,6 @@ from enji_guard_cli.core_impl.payloads import json_object_payload as _json_objec
 from enji_guard_cli.core_impl.payloads import json_str as _json_str
 from enji_guard_cli.core_impl.payloads import required_str as _required_str
 from enji_guard_cli.core_impl.repo_status import active_runs_for_action as _active_runs_for_action
-from enji_guard_cli.core_impl.repo_status import audit_wait_payload as _audit_wait_payload
 from enji_guard_cli.core_impl.repo_status import current_active_runs as _current_active_runs
 from enji_guard_cli.core_impl.repo_status import current_head_sha as _current_head_sha
 from enji_guard_cli.core_impl.repo_status import empty_report_status as _empty_report_status
@@ -86,8 +83,6 @@ from enji_guard_cli.core_impl.repo_status import report_status_from_task_links a
 from enji_guard_cli.core_impl.repo_status import report_wait_payload as _report_wait_payload
 from enji_guard_cli.core_impl.repo_status import sort_project_repos as _sort_project_repos
 from enji_guard_cli.core_impl.repo_status import validate_report_wait_options as _validate_report_wait_options
-from enji_guard_cli.core_impl.repo_status import validate_wait_options as _validate_wait_options
-from enji_guard_cli.core_impl.repo_status import watched_active_runs as _watched_active_runs
 from enji_guard_cli.core_impl.schedules import schedule_effective_state as _schedule_effective_state
 from enji_guard_cli.core_impl.schedules import schedule_job_by_kind as _schedule_job_by_kind
 from enji_guard_cli.core_impl.schedules import schedule_setting_row as _schedule_setting_row
@@ -112,30 +107,25 @@ from enji_guard_cli.enji_api import (
     JsonValue,
     RepoTransfer,
 )
+from enji_guard_cli.enji_api import _connect_project_repo as run_connect_project_repo
 from enji_guard_cli.enji_api import audit_email_preferences as run_audit_email_preferences
 from enji_guard_cli.enji_api import audit_summary_snapshot as run_audit_summary_snapshot
 from enji_guard_cli.enji_api import catalog as run_catalog
-from enji_guard_cli.enji_api import connect_project_repo as run_connect_project_repo
 from enji_guard_cli.enji_api import create_project as run_create_project
 from enji_guard_cli.enji_api import delete_project as run_delete_project
-from enji_guard_cli.enji_api import github_installation_repos as run_github_installation_repos
-from enji_guard_cli.enji_api import github_installations as run_github_installations
 from enji_guard_cli.enji_api import improvement_jobs as run_improvement_jobs
 from enji_guard_cli.enji_api import move_repo as run_move_repo
 from enji_guard_cli.enji_api import preflight_repo_move as run_preflight_repo_move
-from enji_guard_cli.enji_api import project_active_runs as run_project_active_runs
 from enji_guard_cli.enji_api import project_detail as run_project_detail
 from enji_guard_cli.enji_api import projects as run_projects
 from enji_guard_cli.enji_api import put_audit_email_preferences as run_put_audit_email_preferences
 from enji_guard_cli.enji_api import put_improvement_job as run_put_improvement_job
 from enji_guard_cli.enji_api import rename_project as run_rename_project
 from enji_guard_cli.enji_api import repo_active_runs as run_repo_active_runs
-from enji_guard_cli.enji_api import repo_audit_history as run_repo_audit_history
 from enji_guard_cli.enji_api import repo_audit_rerun_state as run_repo_audit_rerun_state
 from enji_guard_cli.enji_api import repo_task_links as run_repo_task_links
 from enji_guard_cli.enji_api import runbook as run_runbook
 from enji_guard_cli.enji_api import start_audit_run as run_start_audit_run
-from enji_guard_cli.enji_api import update_repo_connection as run_update_repo_connection
 from enji_guard_cli.errors import EnjiApiError
 
 
@@ -175,18 +165,6 @@ def list_project_inventory(project: str | None, sort: RepoSort = DEFAULT_REPO_SO
     return _repo_status_all_payload(projects)
 
 
-def list_github_installations() -> JsonObjectPayload:
-    return run_github_installations()
-
-
-def list_github_repos(installation_id: str) -> JsonObjectPayload:
-    return run_github_installation_repos(installation_id)
-
-
-def add_repo(project_id: str, github_owner: str, github_name: str) -> JsonObjectPayload:
-    return run_connect_project_repo(project_id, github_owner, github_name)
-
-
 def connect_repo(github_repo: str, project: str | None) -> JsonObjectPayload:
     project_id = _resolve_single_project_id(project)
     github_owner, github_name = _parse_github_repo(github_repo)
@@ -216,47 +194,22 @@ def move_repo(repo: str, source_project: str | None, target_project: str) -> Jso
     }
 
 
-def set_repo_connection(project_id: str, repo_id: str, *, connected: bool) -> JsonObjectPayload:
-    return run_update_repo_connection(project_id, repo_id, connected=connected)
-
-
-def list_project_active_runs(project_id: str) -> JsonObjectPayload:
-    return run_project_active_runs(project_id)
-
-
-def list_repo_active_runs(repo_id: str) -> JsonObjectPayload:
+def _list_repo_active_runs(repo_id: str) -> JsonObjectPayload:
     return run_repo_active_runs(repo_id)
 
 
-def get_repo_rerun_state(repo_id: str) -> JsonObjectPayload:
+def _get_repo_rerun_state(repo_id: str) -> JsonObjectPayload:
     return run_repo_audit_rerun_state(repo_id)
 
 
-def list_repo_task_links(repo_id: str) -> JsonObjectPayload:
+def _list_repo_task_links(repo_id: str) -> JsonObjectPayload:
     return run_repo_task_links(repo_id)
 
 
-def list_repo_audit_history(repo_id: str) -> JsonObjectPayload:
-    return run_repo_audit_history(repo_id)
-
-
-def report_status(repo_id: str) -> ReportStatusPayload:
-    active_runs = _current_active_runs(list_repo_active_runs(repo_id))
-    rerun_state = get_repo_rerun_state(repo_id)
-    return _report_status_from_task_links(repo_id, list_repo_task_links(repo_id), active_runs, rerun_state)
-
-
-def repo_status(repo_id: str) -> RepoStatusPayload:
-    active_runs = _current_active_runs(list_repo_active_runs(repo_id))
-    rerun_state = get_repo_rerun_state(repo_id)
-    return {
-        "repo_id": repo_id,
-        "active_run_count": len(active_runs),
-        "active_runs": active_runs,
-        "rerun_state": rerun_state,
-        "current_head_sha": _current_head_sha(rerun_state),
-        "reports": _report_status_from_task_links(repo_id, list_repo_task_links(repo_id), active_runs, rerun_state),
-    }
+def _report_status(repo_id: str) -> ReportStatusPayload:
+    active_runs = _current_active_runs(_list_repo_active_runs(repo_id))
+    rerun_state = _get_repo_rerun_state(repo_id)
+    return _report_status_from_task_links(repo_id, _list_repo_task_links(repo_id), active_runs, rerun_state)
 
 
 def repo_status_all(project_id: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:
@@ -285,25 +238,6 @@ def resolve_repo(repo: str, project: str | None) -> RepoResolvePayload:
     return {"selector": repo, "resolved": len(matches) == 1, "matches": matches}
 
 
-def wait_for_audit_completion(
-    repo_id: str,
-    audit: AuditAlias | None,
-    poll_seconds: int,
-    timeout_seconds: int,
-) -> AuditWaitPayload:
-    _validate_wait_options(poll_seconds, timeout_seconds)
-    started_at = time.monotonic()
-    deadline = started_at + timeout_seconds
-    action_key = _action_key_for_optional_audit(audit)
-    while True:
-        active_runs = _watched_active_runs(list_repo_active_runs(repo_id), action_key)
-        if not active_runs:
-            return _audit_wait_payload(repo_id, audit, True, started_at, active_runs)
-        if time.monotonic() >= deadline:
-            return _audit_wait_payload(repo_id, audit, False, started_at, active_runs)
-        time.sleep(_next_poll_sleep(deadline, poll_seconds))
-
-
 def wait_for_report_completion(
     repo_id: str,
     *,
@@ -315,7 +249,7 @@ def wait_for_report_completion(
     deadline = started_at + options.timeout_seconds
     next_heartbeat_at = started_at
     while True:
-        status = report_status(repo_id)
+        status = _report_status(repo_id)
         payload = _report_wait_payload(repo_id, status, started_at, options=options, timed_out=False)
         if payload["complete"] or payload["reason"] == "failed":
             return payload
@@ -335,7 +269,7 @@ def start_audit(
 ) -> JsonObjectPayload | AuditRunSkippedPayload:
     resolved = registry_resolve_audit(audit)
     action_key = resolved.action_key
-    active_runs = _active_runs_for_action(_current_active_runs(list_repo_active_runs(repo_id)), action_key)
+    active_runs = _active_runs_for_action(_current_active_runs(_list_repo_active_runs(repo_id)), action_key)
     if active_runs:
         return {
             "skipped": True,
@@ -374,10 +308,6 @@ def start_report_audits(
     )
 
 
-def start_all_report_audits(repo_id: str, project_id: str) -> AuditRunBatchPayload:
-    return _start_report_audits_for_target(repo_id, project_id, [audit.alias for audit in REPORT_AUDITS])
-
-
 def _start_report_audits_for_target(
     repo_id: str,
     project_id: str,
@@ -385,8 +315,8 @@ def _start_report_audits_for_target(
 ) -> AuditRunBatchPayload:
     runs: list[AuditRunBatchItem] = []
     skipped: list[AuditRunSkippedItem] = []
-    active_runs = _current_active_runs(list_repo_active_runs(repo_id))
-    rerun_state = get_repo_rerun_state(repo_id)
+    active_runs = _current_active_runs(_list_repo_active_runs(repo_id))
+    rerun_state = _get_repo_rerun_state(repo_id)
     current_head_sha = _current_head_sha(rerun_state)
     project = run_project_detail(project_id)
     catalog = run_catalog()
@@ -438,7 +368,7 @@ def _start_report_audits_for_target(
     return {"runs": runs, "skipped": skipped}
 
 
-def show_report(repo_id: str, audit: AuditAlias) -> JsonObjectPayload:
+def _show_report(repo_id: str, audit: AuditAlias) -> JsonObjectPayload:
     resolved = registry_resolve_audit(audit)
     route_slug = resolved.route_slug
     if route_slug is None:
@@ -454,7 +384,7 @@ def read_reports_for_repo(
     all_reports: bool,
 ) -> dict[str, object]:
     target = _resolve_single_repo_target(repo, project)
-    status = report_status(target["repo_id"])
+    status = _report_status(target["repo_id"])
     selected_reports = _selected_reports_to_read(status, audits, all_reports=all_reports)
     return _targeted_run_payload(
         target,
@@ -465,14 +395,14 @@ def read_reports_for_repo(
 def list_email_preferences(repo: str | None, project: str | None) -> JsonObjectPayload:
     return _email_preferences_payload(
         [
-            _email_preference_row(target, audit, get_audit_email_preferences(target["repo_id"], audit.action_key))
+            _email_preference_row(target, audit, _get_audit_email_preferences(target["repo_id"], audit.action_key))
             for target in _selected_repo_targets(repo, project)
             for audit in REPORT_AUDITS
         ]
     )
 
 
-def get_audit_email_preferences(repo_id: str, action_key: str) -> JsonObjectPayload:
+def _get_audit_email_preferences(repo_id: str, action_key: str) -> JsonObjectPayload:
     return run_audit_email_preferences(repo_id, action_key)
 
 
@@ -504,7 +434,7 @@ def set_email_preferences(
     )
 
 
-def list_schedules(repo_id: str) -> JsonObjectPayload:
+def _list_schedules(repo_id: str) -> JsonObjectPayload:
     return run_improvement_jobs(repo_id)
 
 
@@ -512,13 +442,13 @@ def list_schedule_settings(repo: str | None, project: str | None) -> JsonObjectP
     rows = [
         _schedule_setting_row(target, audit, _schedule_job_by_kind(jobs, audit.job_kind))
         for target in _selected_repo_targets(repo, project)
-        for jobs in (list_schedules(target["repo_id"]),)
+        for jobs in (_list_schedules(target["repo_id"]),)
         for audit in REPORT_AUDITS
     ]
     return _schedule_settings_payload(rows)
 
 
-def set_schedule(
+def _set_schedule(
     repo_id: str,
     audit: AuditAlias,
     payload: object,
@@ -548,7 +478,7 @@ def set_schedule_settings(
             all_projects=all_projects,
             operation="schedule set",
         )
-        for jobs in (list_schedules(target["repo_id"]),)
+        for jobs in (_list_schedules(target["repo_id"]),)
         for audit in REPORT_AUDITS
     ]
     return _schedule_settings_payload(rows)
@@ -576,25 +506,6 @@ def wait_for_reports(
         heartbeat=targeted_heartbeat,
     )
     return _targeted_run_payload(target, payload)
-
-
-def wait_for_work(
-    repo: str,
-    audit: AuditAlias,
-    project: str | None,
-    *,
-    poll_seconds: int,
-    timeout_seconds: int,
-) -> dict[str, object]:
-    target = _resolve_single_repo_target(repo, project)
-    payload = wait_for_audit_completion(target["repo_id"], audit, poll_seconds, timeout_seconds)
-    return _targeted_run_payload(target, payload)
-
-
-def _action_key_for_optional_audit(audit: AuditAlias | None) -> str | None:
-    if audit is None:
-        return None
-    return registry_resolve_audit(audit).action_key
 
 
 def _selected_project_ids(project: str | None) -> list[str]:
@@ -739,10 +650,10 @@ def _repo_runtime_status(
 
 def _repo_runtime_status_from_target(target: RepoTargetPayload) -> RepoRuntimeStatusPayload:
     repo_id = target["repo_id"]
-    active_runs = _current_active_runs(list_repo_active_runs(repo_id))
-    rerun_state = get_repo_rerun_state(repo_id)
+    active_runs = _current_active_runs(_list_repo_active_runs(repo_id))
+    rerun_state = _get_repo_rerun_state(repo_id)
     current_head_sha = _current_head_sha(rerun_state)
-    reports = _report_status_from_task_links(repo_id, list_repo_task_links(repo_id), active_runs, rerun_state)
+    reports = _report_status_from_task_links(repo_id, _list_repo_task_links(repo_id), active_runs, rerun_state)
     return {
         "project_id": target["project_id"],
         "project_name": target["project_name"],
@@ -875,7 +786,7 @@ def _report_read_item(
 
     audit = AuditAlias(report["audit"])
     try:
-        snapshot = _json_dict(show_report(repo_id, audit).get("snapshot"))
+        snapshot = _json_dict(_show_report(repo_id, audit).get("snapshot"))
     except EnjiApiError as exc:
         if exc.code == "NOT_FOUND" and tolerate_unavailable:
             return _unavailable_report_read_item(
@@ -963,7 +874,7 @@ def _set_schedule_setting(
         return _schedule_setting_row(target, audit, existing, changed=False, status="unchanged")
     if existing is not None and _schedule_effective_state(existing) == _schedule_effective_state(desired):
         return _schedule_setting_row(target, audit, existing, changed=False, status="unchanged")
-    response = set_schedule(target["repo_id"], audit.alias, desired)
+    response = _set_schedule(target["repo_id"], audit.alias, desired)
     job = _json_dict(response.get("job")) or desired
     return _schedule_setting_row(target, audit, job, changed=True, status="changed")
 

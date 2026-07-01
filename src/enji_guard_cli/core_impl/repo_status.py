@@ -1,7 +1,7 @@
 import time
 from datetime import UTC, datetime
 
-from enji_guard_cli.audits import REPORT_AUDITS, AuditAlias, AuditDefinition
+from enji_guard_cli.audits import REPORT_AUDITS, AuditDefinition
 from enji_guard_cli.core_impl.models import (
     FAILED_REPORT_WAIT_STATUSES,
     REPORT_ARTIFACT_SCHEMA,
@@ -10,7 +10,6 @@ from enji_guard_cli.core_impl.models import (
     SCORE_GOOD_THRESHOLD,
     SCORE_POOR_THRESHOLD,
     TERMINAL_RUN_STATUSES,
-    AuditWaitPayload,
     ProjectRuntimeStatusPayload,
     ReportAuditState,
     ReportAuditStatusPayload,
@@ -145,13 +144,6 @@ def _active_run_value(active_run: dict[str, JsonValue] | None, key: str) -> str 
     return json_str(active_run.get(key))
 
 
-def watched_active_runs(payload: JsonObjectPayload, action_key: str | None) -> list[JsonValue]:
-    active_runs = current_active_runs(payload)
-    if action_key is None:
-        return active_runs
-    return active_runs_for_action(active_runs, action_key)
-
-
 def active_runs_for_action(active_runs: list[JsonValue], action_key: str) -> list[JsonValue]:
     return [run for run in active_runs if _active_run_matches_action(run, action_key)]
 
@@ -167,22 +159,6 @@ def _nested_action_key_matches(run: dict[str, JsonValue], action_key: str) -> bo
     if not isinstance(task, dict):
         return False
     return json_str(task.get("actionKey")) == action_key
-
-
-def audit_wait_payload(
-    repo_id: str,
-    audit: AuditAlias | None,
-    idle: bool,
-    started_at: float,
-    active_runs: list[JsonValue],
-) -> AuditWaitPayload:
-    return {
-        "repo_id": repo_id,
-        "audit": audit.value if audit is not None else None,
-        "idle": idle,
-        "elapsed_seconds": round(time.monotonic() - started_at),
-        "active_runs": active_runs,
-    }
 
 
 def report_wait_payload(
