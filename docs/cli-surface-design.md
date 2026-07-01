@@ -95,7 +95,8 @@ the raw machine contract.
 
 ## Resolution Rules
 
-- Global `--project` accepts an Enji project id or an exact project name.
+- Global `--project` accepts an Enji project id or a case-insensitive project
+  name.
 - Repo selectors accept an Enji repo id or `owner/name`.
 - `project create` takes a plain project name.
 - `project rename` and `project delete` accept an exact project selector.
@@ -112,7 +113,11 @@ the raw machine contract.
 - Ambiguous targets fail with `BAD_SELECTOR` and include candidates.
 - There is no default project.
 - No fuzzy matching in write commands.
-- `report list` is compact inventory; `report read` returns report content.
+- `report list [REPO]` is compact inventory; `REPO` is a shortcut for resolving
+  the repo and using it as the selector.
+- `report read` returns report content. With `--json`, it returns compact
+  report metadata by default; use `--full --json` only when the full snapshot
+  body is needed.
 - `report read REPO` defaults to all currently ready reports for that repo.
 - `email` preferences apply to all report audits. `--manual` controls mail
   after manual runs; `--auto` controls mail after scheduled automatic runs.
@@ -133,13 +138,18 @@ These concepts belong in core or debug tooling, not the public CLI:
 - `*-all` command variants
 
 Public commands should expose scenario state such as `ready`, `running`,
-`missing`, `connected`, `recon_done`, `active_run_count`, and report revision
-drift. Repo list and status payloads include Enji scores by default as raw
-`scores`, simple `score_grades`, and a compact `score_summary`; there is no
-separate score flag.
+`missing`, `stale`, `connected`, `recon_done`, `active_run_count`, and report
+revision drift. `status` must avoid implying freshness when report audits were
+generated from different commits: use explicit stale audit names and
+`audited=mixed`. Repo list and status payloads include Enji scores by default
+as raw `scores`, simple `score_grades`, and a compact `score_summary`; there is
+no separate score flag.
 
 `schedule` is the public noun for automatic report audit runs. It exposes
-domain settings (`enabled`, `frequency`, days, time) and hides Enji's
-`improvement-jobs` payload shape. `schedule set` applies to all report audits in
-the selected explicit write scope; per-audit schedule controls are intentionally
-not part of the default workflow.
+domain settings (`enabled`, `frequency`, days, time, timezone) and hides Enji's
+`improvement-jobs` payload shape. `schedule set` applies enabled/frequency
+changes to all report audits in the selected explicit write scope; `schedule
+timezone` aligns timezone in the same explicit scopes. Per-audit schedule
+controls are intentionally not part of the default workflow. `schedule list`
+should call out timezone divergence inside one repo because that often explains
+stale report audits.

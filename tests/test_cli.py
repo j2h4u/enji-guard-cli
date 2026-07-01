@@ -281,7 +281,8 @@ def test_access_defaults_to_text_and_can_emit_json(monkeypatch: MonkeyPatch) -> 
 
     assert text.exit_code == 0
     assert "group: pro" in text.output
-    assert "limits: 3 field(s)" in text.output
+    assert "full_access: yes" in text.output
+    assert "can_use_schedules: yes" in text.output
     assert json_result.exit_code == 0
     assert cast(AccessPayload, json.loads(json_result.output)) == payload
 
@@ -333,6 +334,27 @@ def test_report_list_uses_expected_defaults(monkeypatch: MonkeyPatch) -> None:
 
     assert result.exit_code == 0
     assert captured == {"selector": "*"}
+
+
+def test_report_list_accepts_repo_argument_as_selector_shortcut(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object | None] = {}
+
+    def fake_resolve(repo: str, project: str | None) -> dict[str, object]:
+        captured["repo"] = repo
+        captured["project"] = project
+        return {"resolved": True, "matches": [{"repo_id": "repo_1"}]}
+
+    def fake_reports_list(selector: str = "*") -> ReportsListPayload:
+        captured["selector"] = selector
+        return {"projects": []}
+
+    monkeypatch.setattr(cli, "resolve_repo", fake_resolve)
+    monkeypatch.setattr(cli, "get_reports_list", fake_reports_list)
+
+    result = CliRunner().invoke(app, ["--project", "Pets", "report", "list", "j2h4u/enji-guard-cli", "--json"])
+
+    assert result.exit_code == 0
+    assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets", "selector": "repo_1"}
 
 
 def test_report_list_reports_bad_selector_as_exit_code_four(monkeypatch: MonkeyPatch) -> None:
@@ -556,7 +578,23 @@ def test_status_routes_to_runtime_snapshot(monkeypatch: MonkeyPatch) -> None:
                                 "weakest_score": 49,
                                 "weakest_grade": "poor",
                             },
-                            "reports": {"ready": ["security"], "running": [], "missing": ["tests"], "reports": []},
+                            "reports": {
+                                "ready": ["security", "tests"],
+                                "running": [],
+                                "missing": [],
+                                "reports": [
+                                    {
+                                        "audit": "security",
+                                        "last_audited_head_sha": "0307f239c88a4c761cd2f96cb17b5eb8a4ae8487",
+                                        "out_of_date": False,
+                                    },
+                                    {
+                                        "audit": "tests",
+                                        "last_audited_head_sha": "3249b095c88a4c761cd2f96cb17b5eb8a4ae8487",
+                                        "out_of_date": True,
+                                    },
+                                ],
+                            },
                             "active_run_count": 0,
                             "last_report_at": "2026-06-30T12:00:00Z",
                             "current_head_sha": "0307f239c88a4c761cd2f96cb17b5eb8a4ae8487",
@@ -575,7 +613,9 @@ def test_status_routes_to_runtime_snapshot(monkeypatch: MonkeyPatch) -> None:
 
     assert result.exit_code == 0
     assert "project  repo" in result.output
-    assert "1 ready, 1 missing" in result.output
+    assert "2 ready, 1 stale" in result.output
+    assert "tests" in result.output
+    assert "mixed" in result.output
     assert "2026-06-30" in result.output
     assert "0307f239" in result.output
     assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets", "sort": "overall"}
@@ -674,6 +714,7 @@ def test_wait_routes_to_top_level_workflow(monkeypatch: MonkeyPatch) -> None:
         captured["poll_seconds"] = options.poll_seconds
         captured["timeout_seconds"] = options.timeout_seconds
         captured["heartbeat_seconds"] = options.heartbeat_seconds
+        captured["require_fresh"] = options.require_fresh
         captured["heartbeat"] = callable(heartbeat)
         return {
             "complete": True,
@@ -686,7 +727,7 @@ def test_wait_routes_to_top_level_workflow(monkeypatch: MonkeyPatch) -> None:
 
     result = CliRunner().invoke(
         app,
-        ["--project", "Pets", "wait", "j2h4u/enji-guard-cli", "--timeout-seconds", "30", "--json"],
+        ["--project", "Pets", "wait", "j2h4u/enji-guard-cli", "--timeout-seconds", "30", "--fresh", "--json"],
     )
 
     assert result.exit_code == 0
@@ -697,6 +738,7 @@ def test_wait_routes_to_top_level_workflow(monkeypatch: MonkeyPatch) -> None:
         "poll_seconds": 30,
         "timeout_seconds": 30,
         "heartbeat_seconds": 120,
+        "require_fresh": True,
         "heartbeat": True,
     }
 
@@ -894,7 +936,23 @@ def test_report_read_can_emit_json_for_all_reports(monkeypatch: MonkeyPatch) -> 
         captured["project"] = project
         captured["audits"] = [audit.value for audit in audits]
         captured["all_reports"] = all_reports
-        return {"reports": [{"audit": "security"}]}
+        return {
+            "reports": [
+                {
+                    "audit": "security",
+                    "current_head_sha": "head_2",
+                    "last_audited_head_sha": "head_1",
+                    "out_of_date": True,
+                    "snapshot": {
+                        "content": {
+                            "completedAt": "2026-06-30T12:00:00Z",
+                            "summary": {"summary": {"headline": "Security is clean", "score": 98}},
+                            "report": "# Security",
+                        }
+                    },
+                }
+            ]
+        }
 
     monkeypatch.setattr(cli, "read_reports_for_repo", fake_read_reports)
 
@@ -904,7 +962,19 @@ def test_report_read_can_emit_json_for_all_reports(monkeypatch: MonkeyPatch) -> 
     )
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"reports": [{"audit": "security"}]}
+    assert json.loads(result.output) == {
+        "reports": [
+            {
+                "audit": "security",
+                "completed_at": "2026-06-30T12:00:00Z",
+                "current_head_sha": "head_2",
+                "headline": "Security is clean",
+                "last_audited_head_sha": "head_1",
+                "out_of_date": True,
+                "score": 98,
+            }
+        ]
+    }
     assert captured == {
         "repo": "j2h4u/enji-guard-cli",
         "project": None,
@@ -947,6 +1017,36 @@ def test_schedule_list_defaults_to_text_table(monkeypatch: MonkeyPatch) -> None:
     assert "weekly" in result.output
     assert "auto" in result.output
     assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets"}
+
+
+def test_schedule_list_warns_about_timezone_divergence(monkeypatch: MonkeyPatch) -> None:
+    def fake_list(_repo: str | None, _project: str | None) -> dict[str, object]:
+        return {
+            "schedules": [
+                {
+                    "github_repo": "j2h4u/enji-guard-cli",
+                    "audit": "security",
+                    "enabled": True,
+                    "timezone": "Asia/Almaty",
+                },
+                {
+                    "github_repo": "j2h4u/enji-guard-cli",
+                    "audit": "cognitive-debt",
+                    "enabled": True,
+                    "timezone": "UTC",
+                },
+            ],
+            "summary": {"repo_count": 1, "audit_count": 2},
+        }
+
+    monkeypatch.setattr(cli, "list_schedule_settings", fake_list)
+
+    result = CliRunner().invoke(app, ["schedule", "list", "j2h4u/enji-guard-cli"])
+
+    assert result.exit_code == 0
+    assert "timezone divergence: j2h4u/enji-guard-cli" in result.output
+    assert "Asia/Almaty: security" in result.output
+    assert "UTC: cognitive-debt" in result.output
 
 
 def test_schedule_list_can_emit_json(monkeypatch: MonkeyPatch) -> None:
@@ -1019,6 +1119,57 @@ def test_schedule_set_routes_batch_update(monkeypatch: MonkeyPatch) -> None:
         "project": "Pets",
         "enabled": True,
         "frequency": "weekly-2x",
+        "all_repos": False,
+        "all_projects": False,
+    }
+
+
+def test_schedule_timezone_routes_batch_update(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_set(
+        repo: str | None,
+        project: str | None,
+        update: ScheduleSettingsUpdate,
+        *,
+        all_repos: bool = False,
+        all_projects: bool = False,
+    ) -> dict[str, object]:
+        captured["repo"] = repo
+        captured["project"] = project
+        captured["enabled"] = update.enabled
+        captured["frequency"] = update.frequency
+        captured["schedule_time"] = update.schedule_time
+        captured["timezone"] = update.timezone
+        captured["all_repos"] = all_repos
+        captured["all_projects"] = all_projects
+        return {"schedules": [], "summary": {"repo_count": 1, "audit_count": 7}}
+
+    monkeypatch.setattr(cli, "set_schedule_settings", fake_set)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "--project",
+            "Pets",
+            "schedule",
+            "timezone",
+            "Asia/Almaty",
+            "--repo",
+            "j2h4u/enji-guard-cli",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["summary"] == {"repo_count": 1, "audit_count": 7}
+    assert captured == {
+        "repo": "j2h4u/enji-guard-cli",
+        "project": "Pets",
+        "enabled": None,
+        "frequency": None,
+        "schedule_time": None,
+        "timezone": "Asia/Almaty",
         "all_repos": False,
         "all_projects": False,
     }

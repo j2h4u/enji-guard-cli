@@ -144,6 +144,7 @@ automation.
 - `project delete` is destructive and requires `--yes`.
 - Read commands can omit project and show all projects/repos.
 - Write commands can omit project only when the repo target is unique.
+- Project names are case-insensitive selectors; project ids stay exact.
 - `repo move` uses global `--project` as source project or selector
   disambiguation when needed. `--to-project` selects the destination project.
 - Mutating batch commands require explicit scope. Use `REPO` for one repo,
@@ -166,18 +167,22 @@ applies them to all report audits for each selected repo.
 
 `schedule` controls automatic report-audit runs, not raw Enji
 `improvement-jobs`. `schedule list [REPO]` shows one table row per repo/report
-audit. `schedule set` updates all report audits in the selected explicit write
-scope: one `REPO`, `--all-repos` inside `--project`, or `--all-projects`.
-Recon is not schedulable here.
+audit and warns when enabled audits for one repo use different timezones.
+`schedule set` updates enabled state and frequency for all report audits in the
+selected explicit write scope: one `REPO`, `--all-repos` inside `--project`, or
+`--all-projects`. `schedule timezone` aligns timezone in the same explicit
+scopes. Recon is not schedulable here.
 
 ## Long-Running Work
 
 Recon and report audits can take tens of minutes. `wait REPO` waits until all
 report audits for that repo have results. It exits nonzero on timeout or failed
 runs, and reports stale audited commit hashes as context instead of treating
-them as failure. `report read REPO` is the main content path after reports
-become ready; it reads all currently ready reports unless explicit audit aliases
-or `--all` are passed.
+them as failure. `wait REPO --fresh` waits for every report audit to match the
+current HEAD. `report read REPO` is the main content path after reports become
+ready; it reads all currently ready reports unless explicit audit aliases or
+`--all` are passed. `report read --json` returns compact metadata; full snapshot
+bodies require `--full --json`.
 
 `status` must expose scenario state, not raw API internals:
 
@@ -186,9 +191,10 @@ or `--all` are passed.
 - `recon_done`;
 - repo scores: raw `scores`, simple `score_grades`, and `score_summary`;
 - active runs;
-- repo/report revision: current HEAD, last audited HEAD, out-of-date flag;
+- repo/report revision: current HEAD, last audited HEAD, out-of-date flag,
+  stale audit aliases, and `audited=mixed` when report audits disagree;
 - last observed report activity timestamp;
-- report states: `ready`, `running`, `missing`;
+- report states: `ready`, `running`, `missing`, `stale`;
 - summary counts.
 
 ## Auth And Runtime

@@ -903,7 +903,8 @@ def _filter_projects(projects: list[ProjectOverviewPayload], selector: str) -> l
 
 
 def _matches_project(project: ProjectOverviewPayload, selector: str) -> bool:
-    return project["id"] == selector or project["name"] == selector
+    name = project["name"]
+    return project["id"] == selector or (name is not None and name.casefold() == selector.casefold())
 
 
 def _normalize_project(project: object) -> ProjectOverviewPayload:
