@@ -96,6 +96,7 @@ SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE
 SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR
 SHORT_DURATION_SECONDS_LIMIT = 5 * SECONDS_PER_MINUTE
 HEALTH_READY_TIMEOUT_SECONDS = 2.0
+MIN_TIMEZONE_DIVERGENCE_COUNT = 2
 
 
 def _echo_json(payload: object) -> None:
@@ -168,6 +169,7 @@ def _echo_repo_status_table(payload: object) -> None:
         "overall",
         "weakest",
         "reports",
+        "stale",
         "active",
         "last_report",
         "current",
@@ -217,6 +219,8 @@ def _echo_schedule_settings_table(payload: object) -> None:
     headers = _schedule_settings_headers(schedule_rows)
     rows = [_schedule_settings_row(row, include_status="status" in headers) for row in schedule_rows]
     _echo_table(headers, rows, "No schedules.")
+    for warning in _schedule_timezone_warnings(schedule_rows):
+        typer.echo(warning)
 
 
 def _schedule_settings_headers(rows: list[dict[str, object]]) -> tuple[str, ...]:
@@ -240,6 +244,26 @@ def _schedule_settings_row(row: dict[str, object], *, include_status: bool) -> t
     if include_status:
         return (*base, _text_cell(row.get("status")))
     return base
+
+
+def _schedule_timezone_warnings(rows: list[dict[str, object]]) -> list[str]:
+    by_repo: dict[str, dict[str, list[str]]] = {}
+    for row in rows:
+        if row.get("enabled") is not True:
+            continue
+        timezone = row.get("timezone")
+        audit = row.get("audit")
+        if not isinstance(timezone, str) or not isinstance(audit, str):
+            continue
+        repo = _text_cell(row.get("github_repo"), fallback=_text_cell(row.get("repo_id")))
+        by_repo.setdefault(repo, {}).setdefault(timezone, []).append(audit)
+    warnings: list[str] = []
+    for repo, audits_by_timezone in by_repo.items():
+        if len(audits_by_timezone) < MIN_TIMEZONE_DIVERGENCE_COUNT:
+            continue
+        parts = [f"{timezone}: {', '.join(sorted(audits))}" for timezone, audits in sorted(audits_by_timezone.items())]
+        warnings.append(f"timezone divergence: {repo}: {'; '.join(parts)}")
+    return warnings
 
 
 def _echo_auth_status(payload: object) -> None:
@@ -270,6 +294,7 @@ def _echo_wait_status(payload: object) -> None:
     data = _object_dict(payload)
     complete = "yes" if data.get("complete") is True else "no"
     typer.echo(f"complete: {complete}")
+    typer.echo(f"fresh: {_text_cell(data.get('fresh'))}")
     for key in ("reason", "repo_id", "elapsed_seconds", "current_head_sha", "last_report_at"):
         typer.echo(f"{key}: {_text_cell(data.get(key))}")
         if key == "elapsed_seconds":
@@ -312,6 +337,64 @@ def _echo_wait_heartbeat(payload: dict[str, object]) -> None:
 
 def _echo_generic_payload(payload: object) -> None:
     _echo_key_values(_object_dict(payload))
+
+
+def _report_list_selector(repo: str | None, selector: str) -> str:
+    if repo is None:
+        return selector
+    if selector != REPORTS_LIST_DEFAULT_SELECTOR:
+        raise ValueError("pass either REPO or --selector, not both")
+    resolved = _object_dict(resolve_repo(repo, _selected_project()))
+    matches = [_object_dict(match) for match in _object_list(resolved.get("matches"))]
+    if len(matches) != 1:
+        raise ValueError(f"repo selector must resolve to one repo for report list: {repo}")
+    repo_id = matches[0].get("repo_id")
+    if not isinstance(repo_id, str) or not repo_id:
+        raise ValueError(f"repo selector did not resolve to an Enji repo id: {repo}")
+    return repo_id
+
+
+def _report_read_summary_payload(payload: object) -> dict[str, object]:
+    data = _object_dict(payload)
+    summary: dict[str, object] = {
+        "reports": [_report_read_summary_item(item) for item in _object_list(data.get("reports"))]
+    }
+    if "target" in data:
+        summary["target"] = data["target"]
+    return summary
+
+
+def _report_read_summary_item(item: object) -> dict[str, object]:
+    report = _object_dict(item)
+    snapshot = _object_dict(report.get("snapshot"))
+    content = _object_dict(snapshot.get("content"))
+    summary_payload = _object_dict(_object_dict(content.get("summary")).get("summary"))
+    return {
+        "audit": report.get("audit"),
+        "score": _number_or_none(summary_payload.get("score")),
+        "headline": _string_or_none(summary_payload.get("headline")),
+        "completed_at": _string_or_none(content.get("completedAt")) or _string_or_none(snapshot.get("collectedAt")),
+        "current_head_sha": report.get("current_head_sha"),
+        "last_audited_head_sha": report.get("last_audited_head_sha"),
+        "out_of_date": report.get("out_of_date"),
+    }
+
+
+def _echo_access(payload: object) -> None:
+    data = _object_dict(payload)
+    limits = _object_dict(data.get("limits"))
+    for key in ("group", "full_access"):
+        typer.echo(f"{key}: {_text_cell(data.get(key))}")
+    for key in (
+        "can_use_schedules",
+        "can_add_repo",
+        "can_create_project",
+        "can_run_one_shot_autofix",
+        "can_run_one_shot_pentest",
+    ):
+        typer.echo(f"{key}: {_text_cell(limits.get(key))}")
+    for key in ("audit_runs", "autofix_runs"):
+        typer.echo(f"{key}: {_value_cell(limits.get(key))}")
 
 
 def _duration_cell(value: object) -> str:
@@ -413,6 +496,7 @@ def _repo_status_row(project: dict[str, object], repo: dict[str, object]) -> tup
         _score_cell(score_summary.get("overall_score")),
         _weakest_cell(score_summary),
         _reports_cell(reports),
+        _stale_audits_cell(reports),
         _text_cell(repo.get("active_run_count")),
         _date_cell(repo.get("last_report_at")),
         _sha_cell(repo.get("current_head_sha")),
@@ -481,16 +565,38 @@ def _reports_cell(reports: dict[str, object]) -> str:
         parts.append(f"{running} running")
     if missing:
         parts.append(f"{missing} missing")
+    stale = len(_stale_audits(reports))
+    if stale:
+        parts.append(f"{stale} stale")
     return ", ".join(parts) if parts else "-"
 
 
 def _audited_head(reports: dict[str, object]) -> object | None:
+    audited_heads: set[str] = set()
     for report_value in _object_list(reports.get("reports")):
         report = _object_dict(report_value)
         audited_head = report.get("last_audited_head_sha")
         if isinstance(audited_head, str) and audited_head:
-            return audited_head
-    return None
+            audited_heads.add(audited_head)
+    if not audited_heads:
+        return None
+    if len(audited_heads) > 1:
+        return "mixed"
+    return next(iter(audited_heads))
+
+
+def _stale_audits_cell(reports: dict[str, object]) -> str:
+    stale = _stale_audits(reports)
+    return ", ".join(stale) if stale else "-"
+
+
+def _stale_audits(reports: dict[str, object]) -> list[str]:
+    stale: list[str] = []
+    for report_value in _object_list(reports.get("reports")):
+        report = _object_dict(report_value)
+        if report.get("out_of_date") is True and isinstance(report.get("audit"), str):
+            stale.append(cast(str, report["audit"]))
+    return stale
 
 
 def _sha_cell(value: object) -> str:
@@ -556,6 +662,14 @@ def _object_list(value: object) -> list[object]:
     return value if isinstance(value, list) else []
 
 
+def _string_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _number_or_none(value: object) -> int | float | None:
+    return value if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
 def _resolve_command_payload(action: JsonCommandAction) -> object:
     try:
         return resolve_operation_result(action())
@@ -619,7 +733,7 @@ def _check_local_listener(host: str, port: int) -> None:
 def access(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_human_or_json_command(get_access, _json_output(json_output))
+    _run_human_or_json_command(get_access, _json_output(json_output), _echo_access)
 
 
 @app.command(help="Run MCP plus background auth refresh under one supervisor.")
@@ -684,6 +798,14 @@ def wait(
             help="Maximum wait time in seconds.",
         ),
     ] = DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS,
+    require_fresh: Annotated[
+        bool,
+        typer.Option(
+            "--fresh",
+            "--current-head",
+            help="Wait until every ready report was audited for the current HEAD.",
+        ),
+    ] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     payload = _resolve_command_payload(
@@ -694,6 +816,7 @@ def wait(
                 poll_seconds=DEFAULT_REPORT_WAIT_POLL_SECONDS,
                 timeout_seconds=timeout_seconds,
                 heartbeat_seconds=DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS,
+                require_fresh=require_fresh,
             ),
             heartbeat=_echo_wait_heartbeat,
         )
@@ -744,6 +867,10 @@ def project_delete(
 
 @report_app.command("list", help=REPORTS_LIST_OPERATION.summary)
 def report_list(
+    repo: Annotated[
+        str | None,
+        typer.Argument(help="Optional repo id or owner/name shortcut for --selector."),
+    ] = None,
     selector: Annotated[
         str,
         typer.Option("--selector", help="Repository selector. Defaults to '*'."),
@@ -751,7 +878,7 @@ def report_list(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     _run_human_or_json_command(
-        lambda: get_reports_list(selector=selector),
+        lambda: get_reports_list(selector=_report_list_selector(repo, selector)),
         _json_output(json_output),
         _echo_report_inventory_table,
     )
@@ -765,13 +892,17 @@ def report_read(
         typer.Argument(help="Optional report audit aliases. Defaults to ready reports."),
     ] = None,
     all_reports: Annotated[bool, typer.Option("--all", help="Read every report audit.")] = False,
+    full: Annotated[
+        bool,
+        typer.Option("--full", help="With --json, include full report snapshot bodies."),
+    ] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     payload = _resolve_command_payload(
         lambda: read_reports_for_repo(repo, _selected_project(), _report_audits(audits or []), all_reports=all_reports)
     )
     if _json_output(json_output):
-        _echo_json(payload)
+        _echo_json(payload if full else _report_read_summary_payload(payload))
         return
     try:
         typer.echo(_reports_markdown(payload))
@@ -917,6 +1048,42 @@ def schedule_set(
                 days_of_week=None,
                 schedule_time=None,
                 timezone=None,
+            ),
+            all_repos=all_repos,
+            all_projects=all_projects,
+        ),
+        _json_output(json_output),
+        _echo_schedule_settings_table,
+    )
+
+
+@schedule_app.command("timezone", help="Batch update automatic report audit timezone.")
+def schedule_timezone(
+    timezone: Annotated[str, typer.Argument(help="Schedule timezone, for example Asia/Almaty or UTC.")],
+    repo: Annotated[
+        str | None,
+        typer.Option("--repo", help="Optional repo id or owner/name for a single-repo update."),
+    ] = None,
+    batch_scope: Annotated[
+        bool | None,
+        typer.Option(
+            "--all-projects/--all-repos",
+            help="Batch every repo in every project, or every repo in the selected --project.",
+        ),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    all_repos, all_projects = _batch_scope_flags(batch_scope)
+    _run_human_or_json_command(
+        lambda: set_schedule_settings(
+            repo,
+            _selected_project(),
+            ScheduleSettingsUpdate(
+                enabled=None,
+                frequency=None,
+                days_of_week=None,
+                schedule_time=None,
+                timezone=timezone,
             ),
             all_repos=all_repos,
             all_projects=all_projects,

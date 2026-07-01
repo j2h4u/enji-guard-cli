@@ -432,12 +432,12 @@ def test_project_admin_operations_resolve_selectors_and_validate_names(monkeypat
         "project_name": "Friends",
         "response": {"project": {"id": "project_2", "name": "Friends"}},
     }
-    assert core.rename_project("Pets", " Work ") == {
+    assert core.rename_project("pets", " Work ") == {
         "project_id": "project_1",
         "project_name": "Work",
         "response": {"project": {"id": "project_1", "name": "Work"}},
     }
-    assert core.delete_project("Pets") == {"project_id": "project_1", "deleted": True}
+    assert core.delete_project("PETS") == {"project_id": "project_1", "deleted": True}
     assert captured == {
         "created_name": "Friends",
         "renamed_project_id": "project_1",
@@ -1424,6 +1424,67 @@ def test_set_schedule_settings_skips_unchanged_existing_jobs(monkeypatch: Monkey
     assert schedules[0]["status"] == "unchanged"
 
 
+def test_set_schedule_settings_can_update_timezone_without_time(monkeypatch: MonkeyPatch) -> None:
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1", "name": "Pets"}]})
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda project_id: {
+            "project": {"id": project_id, "name": "Pets"},
+            "repos": [
+                {
+                    "id": "repo_1",
+                    "githubOwner": "j2h4u",
+                    "githubName": "enji-guard-cli",
+                    "connected": True,
+                    "reconDone": True,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "list_schedules",
+        lambda repo_id: {
+            "jobs": [
+                {
+                    "kind": "vuln-audit",
+                    "enabled": True,
+                    "frequency": "weekly",
+                    "daysOfWeek": ["mon"],
+                    "scheduleTimeSource": "user",
+                    "scheduleTime": "09:00",
+                    "timezone": "UTC",
+                }
+            ]
+        },
+    )
+
+    def fake_set_schedule(_repo_id: str, _audit: AuditAlias, payload: dict[str, object]) -> dict[str, object]:
+        captured.append(payload)
+        return {"job": payload}
+
+    monkeypatch.setattr(core, "set_schedule", fake_set_schedule)
+
+    payload = core.set_schedule_settings(
+        "j2h4u/enji-guard-cli",
+        None,
+        ScheduleSettingsUpdate(
+            enabled=None,
+            frequency=None,
+            days_of_week=None,
+            schedule_time=None,
+            timezone="Asia/Almaty",
+        ),
+    )
+
+    schedules = cast(list[dict[str, object]], payload["schedules"])
+    assert captured[0]["timezone"] == "Asia/Almaty"
+    assert captured[0]["scheduleTime"] == "09:00"
+    assert schedules[0]["timezone"] == "Asia/Almaty"
+
+
 def test_set_schedule_settings_requires_explicit_write_scope() -> None:
     with pytest.raises(ValueError, match="schedule set: pass REPO, --all-repos with --project, or --all-projects"):
         core.set_schedule_settings(
@@ -1518,6 +1579,46 @@ def test_wait_for_report_completion_succeeds_when_reports_are_ready_but_stale(mo
     assert payload["timed_out"] is False
     assert payload["reason"] == "complete"
     assert payload["counts"]["stale"] == 1
+    assert payload["stale"] == ["security"]
+
+
+def test_wait_for_report_completion_requires_fresh_when_requested(monkeypatch: MonkeyPatch) -> None:
+    class FakeClock:
+        value = 0.0
+
+        def monotonic(self) -> float:
+            self.value += 31.0
+            return self.value
+
+        def sleep(self, seconds: float) -> None:
+            assert seconds >= 0.0
+
+    status = _report_wait_status(
+        complete=True,
+        state="ready",
+        out_of_date=True,
+        run_status="completed",
+    )
+    clock = FakeClock()
+    monkeypatch.setattr(core, "report_status", lambda _repo_id: status)
+    monkeypatch.setattr(core.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(core.time, "sleep", clock.sleep)
+
+    payload = core.wait_for_report_completion(
+        "repo_1",
+        options=ReportWaitOptions(
+            poll_seconds=30,
+            timeout_seconds=30,
+            heartbeat_seconds=120,
+            require_fresh=True,
+        ),
+        heartbeat=None,
+    )
+
+    assert payload["complete"] is False
+    assert payload["fresh"] is False
+    assert payload["timed_out"] is True
+    assert payload["reason"] == "timeout"
     assert payload["stale"] == ["security"]
 
 

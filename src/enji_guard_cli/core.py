@@ -155,7 +155,7 @@ class ProjectRef(TypedDict):
 
 
 type ReportAuditState = Literal["missing", "ready", "running"]
-type ReportWaitReason = Literal["complete", "waiting", "timeout", "failed"]
+type ReportWaitReason = Literal["complete", "waiting", "timeout", "failed", "stale"]
 type ReportWaitCallback = Callable[[dict[str, object]], None]
 
 DEFAULT_REPORT_WAIT_POLL_SECONDS = 30
@@ -205,6 +205,7 @@ class ReportWaitCountsPayload(TypedDict):
 class ReportWaitPayload(TypedDict):
     repo_id: str
     complete: bool
+    fresh: bool
     timed_out: bool
     reason: ReportWaitReason
     elapsed_seconds: int
@@ -317,6 +318,7 @@ class ReportWaitOptions:
     poll_seconds: int
     timeout_seconds: int
     heartbeat_seconds: int
+    require_fresh: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -612,12 +614,12 @@ def wait_for_report_completion(
     next_heartbeat_at = started_at
     while True:
         status = report_status(repo_id)
-        payload = _report_wait_payload(repo_id, status, started_at, timed_out=False)
+        payload = _report_wait_payload(repo_id, status, started_at, options=options, timed_out=False)
         if payload["complete"] or payload["reason"] == "failed":
             return payload
         now = time.monotonic()
         if now >= deadline:
-            return _report_wait_payload(repo_id, status, started_at, timed_out=True)
+            return _report_wait_payload(repo_id, status, started_at, options=options, timed_out=True)
         if heartbeat is not None and now >= next_heartbeat_at:
             heartbeat(payload)
             next_heartbeat_at += options.heartbeat_seconds
@@ -1125,16 +1127,19 @@ def _report_wait_payload(
     status: ReportStatusPayload,
     started_at: float,
     *,
+    options: ReportWaitOptions,
     timed_out: bool,
 ) -> ReportWaitPayload:
     stale = _stale_report_audits(status)
     failed = _failed_report_audits(status)
-    complete = status["complete"] and not failed and not timed_out
+    fresh = not stale
+    complete = status["complete"] and not failed and not timed_out and (fresh or not options.require_fresh)
     return {
         "repo_id": repo_id,
         "complete": complete,
+        "fresh": fresh,
         "timed_out": timed_out,
-        "reason": _report_wait_reason(status, failed=failed, timed_out=timed_out),
+        "reason": _report_wait_reason(status, failed=failed, stale=stale, options=options, timed_out=timed_out),
         "elapsed_seconds": round(time.monotonic() - started_at),
         "current_head_sha": status["current_head_sha"],
         "last_report_at": status["last_report_at"],
@@ -1159,12 +1164,16 @@ def _report_wait_reason(
     status: ReportStatusPayload,
     *,
     failed: list[str],
+    stale: list[str],
+    options: ReportWaitOptions,
     timed_out: bool,
 ) -> ReportWaitReason:
     if failed:
         return "failed"
     if timed_out:
         return "timeout"
+    if status["complete"] and stale and options.require_fresh:
+        return "stale"
     if status["complete"]:
         return "complete"
     return "waiting"
@@ -1359,7 +1368,9 @@ def _resolve_single_project_id(project: str | None) -> str:
 
     matches = [project_ref for project_ref in project_refs if _project_ref_matches(project_ref, project)]
     if not matches:
-        _raise_bad_selector(f"project selector matched no projects: {project}")
+        _raise_bad_selector(
+            f"project selector matched no projects: {project}. candidates: {_project_candidates(project_refs)}"
+        )
     if len(matches) > 1:
         _raise_bad_selector(_ambiguous_project_message(matches))
     return matches[0]["id"]
@@ -1376,12 +1387,16 @@ def _project_refs() -> list[ProjectRef]:
 
 
 def _project_ref_matches(project_ref: ProjectRef, selector: str) -> bool:
-    return project_ref["id"] == selector or project_ref["name"] == selector
+    name = project_ref["name"]
+    return project_ref["id"] == selector or (name is not None and name.casefold() == selector.casefold())
 
 
 def _ambiguous_project_message(project_refs: list[ProjectRef]) -> str:
-    candidates = ", ".join(_project_candidate(project_ref) for project_ref in project_refs)
-    return f"project selector is ambiguous; pass --project. candidates: {candidates}"
+    return f"project selector is ambiguous; pass --project. candidates: {_project_candidates(project_refs)}"
+
+
+def _project_candidates(project_refs: list[ProjectRef]) -> str:
+    return ", ".join(_project_candidate(project_ref) for project_ref in project_refs)
 
 
 def _project_candidate(project_ref: ProjectRef) -> str:
@@ -1804,12 +1819,11 @@ def _validate_schedule_settings_update(update: ScheduleSettingsUpdate) -> None:
         and update.frequency is None
         and update.days_of_week is None
         and update.schedule_time is None
+        and update.timezone is None
     ):
-        raise ValueError("pass --enabled or --freq")
+        raise ValueError("pass --enabled, --freq, --at, or --timezone")
     if update.days_of_week is not None and update.frequency is None:
         raise ValueError("pass --freq when overriding --day")
-    if update.timezone is not None and update.schedule_time is None:
-        raise ValueError("pass --at when setting timezone")
 
 
 def _set_schedule_setting(

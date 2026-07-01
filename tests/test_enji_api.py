@@ -199,7 +199,7 @@ def test_reports_list_filters_project_selector(tmp_path: Path) -> None:
         ]
     )
 
-    payload = reports_list(auth_file, client, selector="Pets/*")
+    payload = reports_list(auth_file, client, selector="pets/*")
 
     assert payload["projects"] == [
         {
