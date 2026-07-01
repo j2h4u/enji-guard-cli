@@ -244,10 +244,13 @@ source_modules = [
     "enji_guard_cli.core_impl.audit_tasks",
     "enji_guard_cli.core_impl.email_preferences",
     "enji_guard_cli.core_impl.payloads",
+    "enji_guard_cli.core_impl.project_admin",
     "enji_guard_cli.core_impl.repo_status",
     "enji_guard_cli.core_impl.report_reads",
     "enji_guard_cli.core_impl.schedules",
     "enji_guard_cli.core_impl.selectors",
+    "enji_guard_cli.core_impl.targets",
+    "enji_guard_cli.core_impl.write_settings",
 ]
 forbidden_modules = ["enji_guard_cli.enji_api", "enji_guard_cli.enji_api_impl"]
 allow_indirect_imports = true

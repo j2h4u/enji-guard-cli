@@ -127,6 +127,9 @@ Panel:
     `core.py` still owns write-scope policy and Enji API calls.
   - Progress: project create/rename/delete and repo connect/move orchestration
     moved to `core_impl/project_admin.py` with callback-injected dependencies.
+  - Progress: schedule/email settings fanout and explicit write-scope targeting
+    moved to `core_impl/write_settings.py`; API calls remain callback-injected
+    from the core facade.
 
 - [x] Split `enji_api.py` into request mechanics and endpoint wrappers.
   - Source: Kaizen / Architecture Simplification.
