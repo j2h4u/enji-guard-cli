@@ -26,6 +26,7 @@ from enji_guard_cli.core import (
     list_email_preferences,
     list_project_inventory,
     list_projects,
+    list_reports_for_repo,
     list_schedule_settings,
     move_repo,
     package_version,
@@ -199,6 +200,16 @@ def _echo_report_inventory_table(payload: object) -> None:
     _echo_table(headers, [_project_row(project) for project in _payload_projects(payload)], "No projects.")
 
 
+def _echo_report_list(payload: object) -> None:
+    data = _object_dict(payload)
+    if "target" not in data:
+        _echo_report_inventory_table(payload)
+        return
+    headers = ("repo", "audit", "state", "run", "completed", "current", "audited", "freshness")
+    rows = [_repo_report_row(data, _object_dict(report)) for report in _object_list(data.get("reports"))]
+    _echo_table(headers, rows, "No reports.")
+
+
 def _echo_email_preferences_table(payload: object) -> None:
     headers = ("project", "repo", "audit", "manual", "auto")
     rows = [
@@ -339,19 +350,21 @@ def _echo_generic_payload(payload: object) -> None:
     _echo_key_values(_object_dict(payload))
 
 
-def _report_list_selector(repo: str | None, selector: str) -> str:
-    if repo is None:
-        return selector
-    if selector != REPORTS_LIST_DEFAULT_SELECTOR:
-        raise ValueError("pass either REPO or --selector, not both")
-    resolved = _object_dict(resolve_repo(repo, _selected_project()))
-    matches = [_object_dict(match) for match in _object_list(resolved.get("matches"))]
-    if len(matches) != 1:
-        raise ValueError(f"repo selector must resolve to one repo for report list: {repo}")
-    repo_id = matches[0].get("repo_id")
-    if not isinstance(repo_id, str) or not repo_id:
-        raise ValueError(f"repo selector did not resolve to an Enji repo id: {repo}")
-    return repo_id
+def _report_list_payload(repo: str | None, selector: str) -> object:
+    project = _selected_project()
+    if repo is not None:
+        if selector != REPORTS_LIST_DEFAULT_SELECTOR:
+            raise ValueError("pass either REPO or --selector, not both")
+        return list_reports_for_repo(repo, project)
+    if _report_selector_targets_repo(selector):
+        return list_reports_for_repo(selector, project)
+    return get_reports_list(selector=selector)
+
+
+def _report_selector_targets_repo(selector: str) -> bool:
+    if selector.startswith("repo_"):
+        return True
+    return "/" in selector and not selector.endswith("/*")
 
 
 def _report_read_summary_payload(payload: object) -> dict[str, object]:
@@ -484,6 +497,28 @@ def _repo_score_row(project: dict[str, object], repo: dict[str, object]) -> tupl
         _score_cell(scores.get("cognitive-debt")),
         _score_cell(scores.get("dead-code")),
     )
+
+
+def _repo_report_row(data: dict[str, object], report: dict[str, object]) -> tuple[str, ...]:
+    target = _object_dict(data.get("target"))
+    return (
+        _text_cell(target.get("github_repo"), fallback=_text_cell(data.get("repo_id"))),
+        _text_cell(report.get("audit")),
+        _text_cell(report.get("state")),
+        _text_cell(report.get("run_status")),
+        _date_cell(report.get("completed_at")),
+        _sha_cell(report.get("current_head_sha")),
+        _sha_cell(report.get("last_audited_head_sha")),
+        _freshness_cell(report.get("out_of_date")),
+    )
+
+
+def _freshness_cell(value: object) -> str:
+    if value is True:
+        return "stale"
+    if value is False:
+        return "fresh"
+    return "-"
 
 
 def _repo_status_row(project: dict[str, object], repo: dict[str, object]) -> tuple[str, ...]:
@@ -619,9 +654,17 @@ def _days_cell(value: object) -> str:
 
 
 def _schedule_at_cell(row: dict[str, object]) -> str:
-    if row.get("schedule_time_source") == "auto":
-        return "auto"
-    return _text_cell(row.get("schedule_time"))
+    schedule_time = _text_cell(row.get("schedule_time"))
+    source = row.get("schedule_time_source")
+    if source == "auto":
+        if schedule_time == "-":
+            return "auto"
+        return f"{schedule_time} (auto)"
+    if source == "user":
+        if schedule_time == "-":
+            return "manual"
+        return f"{schedule_time} (manual)"
+    return schedule_time
 
 
 def _score_cell(value: object) -> str:
@@ -878,9 +921,9 @@ def report_list(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     _run_human_or_json_command(
-        lambda: get_reports_list(selector=_report_list_selector(repo, selector)),
+        lambda: _report_list_payload(repo, selector),
         _json_output(json_output),
-        _echo_report_inventory_table,
+        _echo_report_list,
     )
 
 

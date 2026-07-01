@@ -67,6 +67,7 @@ enji-guard audit start REPO --all
 
 enji-guard wait REPO
 
+enji-guard report list [REPO]
 enji-guard report list [--selector SELECTOR]
 enji-guard report read REPO [AUDIT...] [--all] [--json]
 enji-guard report show REPO AUDIT [--json]
@@ -116,8 +117,9 @@ the raw machine contract.
 - Ambiguous targets fail with `BAD_SELECTOR` and include candidates.
 - There is no default project.
 - No fuzzy matching in write commands.
-- `report list [REPO]` is compact inventory; `REPO` is a shortcut for resolving
-  the repo and using it as the selector.
+- `report list` without a repo is compact project inventory.
+- `report list REPO`, `report list --selector OWNER/NAME`, and
+  `report list --selector repo_...` show report-audit status for one repo.
 - `report read` returns report content. With `--json`, it returns compact
   report metadata by default; use `--full --json` only when the full snapshot
   body is needed.
@@ -154,7 +156,9 @@ settings (`enabled`, `frequency`, time source, timezone) and hides Enji's
 changes to all report audits in the selected explicit write scope; it does not
 surface manual run time. Enji-assigned run time is the default model, and
 `schedule auto-time` resets existing schedules back to that model in the same
-explicit write scopes. `schedule timezone` aligns timezone. Per-audit schedule
-controls and manual run-time tuning are intentionally not part of the default
-workflow. `schedule list` should call out timezone divergence inside one repo
-because that often explains stale report audits.
+explicit write scopes. `schedule list` shows concrete times with their source,
+for example `09:00 (auto)` or `09:00 (manual)`. `schedule timezone` aligns
+timezone. Per-audit schedule controls and manual run-time tuning are
+intentionally not part of the default workflow. `schedule list` should call out
+timezone divergence inside one repo because that often explains stale report
+audits.

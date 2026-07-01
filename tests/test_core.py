@@ -1049,6 +1049,52 @@ def test_start_report_audits_rejects_invalid_selection(
         core.start_report_audits("j2h4u/enji-guard-cli", None, audits, all_reports=all_reports)
 
 
+def test_list_reports_for_repo_resolves_target_and_returns_report_status(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        core,
+        "_resolve_single_repo_target",
+        lambda repo, project: {
+            "project_id": "project_1",
+            "project_name": "Pets",
+            "repo_id": "repo_1",
+            "github_owner": "j2h4u",
+            "github_name": "enji-guard-cli",
+            "github_repo": "j2h4u/enji-guard-cli",
+            "connected": True,
+            "recon_done": True,
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "report_status",
+        lambda repo_id: {
+            "repo_id": repo_id,
+            "current_head_sha": "head_2",
+            "last_report_at": "2026-06-30T12:00:00Z",
+            "complete": True,
+            "ready": ["security"],
+            "running": [],
+            "missing": [],
+            "reports": [{"audit": "security", "state": "ready"}],
+        },
+    )
+
+    payload = core.list_reports_for_repo("j2h4u/enji-guard-cli", "Pets")
+
+    assert payload["target"] == {
+        "project_id": "project_1",
+        "project_name": "Pets",
+        "repo_id": "repo_1",
+        "github_owner": "j2h4u",
+        "github_name": "enji-guard-cli",
+        "github_repo": "j2h4u/enji-guard-cli",
+        "connected": True,
+        "recon_done": True,
+    }
+    assert payload["repo_id"] == "repo_1"
+    assert payload["reports"] == [{"audit": "security", "state": "ready"}]
+
+
 def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatch) -> None:
     captured_audits: list[str] = []
     monkeypatch.setattr(

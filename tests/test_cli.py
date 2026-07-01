@@ -339,22 +339,70 @@ def test_report_list_uses_expected_defaults(monkeypatch: MonkeyPatch) -> None:
 def test_report_list_accepts_repo_argument_as_selector_shortcut(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object | None] = {}
 
-    def fake_resolve(repo: str, project: str | None) -> dict[str, object]:
+    def fake_list_reports_for_repo(repo: str, project: str | None) -> dict[str, object]:
         captured["repo"] = repo
         captured["project"] = project
-        return {"resolved": True, "matches": [{"repo_id": "repo_1"}]}
+        return {
+            "target": {"github_repo": "j2h4u/enji-guard-cli"},
+            "repo_id": "repo_1",
+            "reports": [
+                {
+                    "audit": "security",
+                    "state": "ready",
+                    "run_status": "completed",
+                    "completed_at": "2026-06-30T12:00:00Z",
+                    "current_head_sha": "0307f239c88a4c761cd2f96cb17b5eb8a4ae8487",
+                    "last_audited_head_sha": "0307f239c88a4c761cd2f96cb17b5eb8a4ae8487",
+                    "out_of_date": False,
+                }
+            ],
+        }
 
-    def fake_reports_list(selector: str = "*") -> ReportsListPayload:
-        captured["selector"] = selector
-        return {"projects": []}
+    monkeypatch.setattr(cli, "list_reports_for_repo", fake_list_reports_for_repo)
 
-    monkeypatch.setattr(cli, "resolve_repo", fake_resolve)
-    monkeypatch.setattr(cli, "get_reports_list", fake_reports_list)
-
-    result = CliRunner().invoke(app, ["--project", "Pets", "report", "list", "j2h4u/enji-guard-cli", "--json"])
+    result = CliRunner().invoke(app, ["--project", "Pets", "report", "list", "j2h4u/enji-guard-cli"])
 
     assert result.exit_code == 0
-    assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets", "selector": "repo_1"}
+    assert "repo" in result.output
+    assert "audit" in result.output
+    assert "freshness" in result.output
+    assert "security" in result.output
+    assert "fresh" in result.output
+    assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets"}
+
+
+def test_report_list_selector_can_target_repo(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object | None] = {}
+
+    def fake_list_reports_for_repo(repo: str, project: str | None) -> dict[str, object]:
+        captured["repo"] = repo
+        captured["project"] = project
+        return {"target": {"github_repo": "j2h4u/enji-guard-cli"}, "reports": []}
+
+    monkeypatch.setattr(cli, "list_reports_for_repo", fake_list_reports_for_repo)
+
+    result = CliRunner().invoke(app, ["report", "list", "--selector", "j2h4u/enji-guard-cli", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {"target": {"github_repo": "j2h4u/enji-guard-cli"}, "reports": []}
+    assert captured == {"repo": "j2h4u/enji-guard-cli", "project": None}
+
+
+def test_report_list_repo_id_selector_targets_repo(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object | None] = {}
+
+    def fake_list_reports_for_repo(repo: str, project: str | None) -> dict[str, object]:
+        captured["repo"] = repo
+        captured["project"] = project
+        return {"target": {"repo_id": "repo_1"}, "reports": []}
+
+    monkeypatch.setattr(cli, "list_reports_for_repo", fake_list_reports_for_repo)
+
+    result = CliRunner().invoke(app, ["report", "list", "--selector", "repo_1", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {"target": {"repo_id": "repo_1"}, "reports": []}
+    assert captured == {"repo": "repo_1", "project": None}
 
 
 def test_report_list_reports_bad_selector_as_exit_code_four(monkeypatch: MonkeyPatch) -> None:
@@ -999,7 +1047,7 @@ def test_schedule_list_defaults_to_text_table(monkeypatch: MonkeyPatch) -> None:
                     "frequency": "weekly",
                     "days_of_week": ["mon"],
                     "schedule_time_source": "auto",
-                    "schedule_time": None,
+                    "schedule_time": "09:00",
                     "timezone": "UTC",
                 }
             ],
@@ -1015,7 +1063,7 @@ def test_schedule_list_defaults_to_text_table(monkeypatch: MonkeyPatch) -> None:
     assert "Pets     j2h4u/enji-guard-cli" in result.output
     assert "security" in result.output
     assert "weekly" in result.output
-    assert "auto" in result.output
+    assert "09:00 (auto)" in result.output
     assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets"}
 
 
@@ -1114,6 +1162,7 @@ def test_schedule_set_routes_batch_update(monkeypatch: MonkeyPatch) -> None:
     assert result.exit_code == 0
     assert "status" in result.output
     assert "changed" in result.output
+    assert "09:30 (manual)" in result.output
     assert captured == {
         "repo": "j2h4u/enji-guard-cli",
         "project": "Pets",

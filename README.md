@@ -168,8 +168,9 @@ repo/report audit and can batch update all report audits for one repo or one
 explicit batch scope. Use `REPO`, `--project NAME_OR_ID --all-repos`, or
 `--all-projects`. `schedule list` warns when enabled audits for one repo use
 different timezones; `schedule timezone` aligns timezone for the selected
-scope. `schedule auto-time` resets the selected scope to Enji-assigned run
-times, which is the default scheduling model.
+scope. The `at` column shows the source, for example `09:00 (auto)` or
+`09:00 (manual)`. `schedule auto-time` resets the selected scope to
+Enji-assigned run times, which is the default scheduling model.
 
 ## MCP
 
