@@ -1,8 +1,8 @@
+from collections.abc import Callable
 from typing import Never
 
 from enji_guard_cli.audits import AuditAlias
 from enji_guard_cli.audits import require_report_audit as registry_require_report_audit
-from enji_guard_cli.audits import resolve_audit as registry_resolve_audit
 from enji_guard_cli.core_impl.models import (
     ReportAuditStatusPayload,
     ReportReadItemPayload,
@@ -11,17 +11,10 @@ from enji_guard_cli.core_impl.models import (
 )
 from enji_guard_cli.core_impl.payloads import json_dict
 from enji_guard_cli.core_impl.repo_status import out_of_date
-from enji_guard_cli.enji_api import audit_summary_snapshot as run_audit_summary_snapshot
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload
 
-
-def _show_report(repo_id: str, audit: AuditAlias) -> JsonObjectPayload:
-    resolved = registry_resolve_audit(audit)
-    route_slug = resolved.route_slug
-    if route_slug is None:
-        raise ValueError("recon does not have an upfront.audit.summary report snapshot")
-    return run_audit_summary_snapshot(repo_id, route_slug)
+SnapshotReader = Callable[[str, AuditAlias], JsonObjectPayload]
 
 
 def selected_reports_to_read(
@@ -58,10 +51,19 @@ def read_reports_for_target(
     repo_id: str,
     reports: list[ReportAuditStatusPayload],
     *,
+    snapshot_reader: SnapshotReader,
     tolerate_unavailable: bool,
 ) -> ReportReadPayload:
     return {
-        "reports": [_report_read_item(repo_id, report, tolerate_unavailable=tolerate_unavailable) for report in reports]
+        "reports": [
+            _report_read_item(
+                repo_id,
+                report,
+                snapshot_reader=snapshot_reader,
+                tolerate_unavailable=tolerate_unavailable,
+            )
+            for report in reports
+        ]
     }
 
 
@@ -69,6 +71,7 @@ def _report_read_item(
     repo_id: str,
     report: ReportAuditStatusPayload,
     *,
+    snapshot_reader: SnapshotReader,
     tolerate_unavailable: bool,
 ) -> ReportReadItemPayload:
     if not report["ready"]:
@@ -78,7 +81,7 @@ def _report_read_item(
 
     audit = AuditAlias(report["audit"])
     try:
-        snapshot = json_dict(_show_report(repo_id, audit).get("snapshot"))
+        snapshot = json_dict(snapshot_reader(repo_id, audit).get("snapshot"))
     except EnjiApiError as exc:
         if exc.code == "NOT_FOUND" and tolerate_unavailable:
             return _unavailable_report_read_item(
