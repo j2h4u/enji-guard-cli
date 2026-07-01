@@ -7,7 +7,6 @@ from typing import Annotated, Literal, TypeGuard, cast
 import typer
 
 from enji_guard_cli.audits import AuditAlias, ReportAuditAlias
-from enji_guard_cli.auth import AuthError, AuthStatusPayload, import_bearer_token, import_cookie, refresh_auth
 from enji_guard_cli.cli_impl.durations import parse_duration_seconds
 from enji_guard_cli.cli_impl.rendering import (
     echo_access,
@@ -35,6 +34,8 @@ from enji_guard_cli.core import (
     DEFAULT_REPO_SORT,
     DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS,
     DEFAULT_REPORT_WAIT_POLL_SECONDS,
+    AuthError,
+    AuthStatusPayload,
     EmailPreferenceUpdate,
     OperationName,
     OperationResult,
@@ -43,6 +44,8 @@ from enji_guard_cli.core import (
     connect_repo,
     create_project,
     delete_project,
+    import_bearer_token,
+    import_cookie,
     list_email_preferences,
     list_project_inventory,
     list_projects,
@@ -50,6 +53,7 @@ from enji_guard_cli.core import (
     move_repo,
     package_version,
     read_reports_for_repo,
+    refresh_auth,
     rename_project,
     resolve_operation_result,
     resolve_operation_spec,

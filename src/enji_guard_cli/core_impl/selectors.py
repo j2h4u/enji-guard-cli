@@ -3,7 +3,7 @@ from typing import cast
 from enji_guard_cli.core_impl.models import OWNER_NAME_SLUG_PARTS, ProjectRef, RepoTargetPayload
 from enji_guard_cli.core_impl.payloads import json_bool, json_dict, json_str, required_str
 from enji_guard_cli.core_impl.repo_status import score_grades, score_summary
-from enji_guard_cli.enji_api import JsonObjectPayload, JsonValue
+from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 
 def owner_name_from_slug(slug: str) -> tuple[str | None, str | None]:

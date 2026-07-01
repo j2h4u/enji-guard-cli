@@ -52,6 +52,7 @@ from enji_guard_cli.auth import (
     refresh_cookie_auth,
 )
 from enji_guard_cli.errors import EnjiApiError
+from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.transport import (
     EnjiHttpClient,
     EnjiHttpError,
@@ -75,10 +76,7 @@ HTTP_CREATED_ONLY = frozenset({HTTP_CREATED})
 HTTP_NO_CONTENT_ONLY = frozenset({HTTP_NO_CONTENT})
 HTTP_OK_OR_NO_CONTENT = frozenset({HTTP_OK, HTTP_NO_CONTENT})
 
-type JsonScalar = None | bool | int | float | str
-type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
 type JsonObjectParser[T] = Callable[[dict[str, object]], T]
-type JsonObjectPayload = dict[str, JsonValue]
 type ApiPathParams = Mapping[str, str]
 type ApiQueryParams = Mapping[str, str]
 

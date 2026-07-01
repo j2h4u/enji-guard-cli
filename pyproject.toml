@@ -174,6 +174,7 @@ layers = [
     "enji_guard_cli.transport",
     "enji_guard_cli.telemetry",
     "enji_guard_cli.errors",
+    "enji_guard_cli.json_types",
     "enji_guard_cli.settings",
 ]
 
@@ -226,10 +227,26 @@ forbidden_modules = ["enji_guard_cli._enji_api_contract"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
-id = "mcp-uses-core-for-auth"
-name = "MCP server uses core operations for auth status"
+id = "core-impl-avoids-enji-api"
+name = "Core implementation helpers keep JSON typing out of the adapter"
 type = "forbidden"
-source_modules = ["enji_guard_cli.mcp_server"]
+source_modules = [
+    "enji_guard_cli.core_impl.models",
+    "enji_guard_cli.core_impl.audit_tasks",
+    "enji_guard_cli.core_impl.email_preferences",
+    "enji_guard_cli.core_impl.payloads",
+    "enji_guard_cli.core_impl.repo_status",
+    "enji_guard_cli.core_impl.schedules",
+    "enji_guard_cli.core_impl.selectors",
+]
+forbidden_modules = ["enji_guard_cli.enji_api"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "entrypoints-use-core-for-auth"
+name = "CLI and MCP entrypoints use core operations for auth"
+type = "forbidden"
+source_modules = ["enji_guard_cli.cli", "enji_guard_cli.mcp_server"]
 forbidden_modules = ["enji_guard_cli.auth"]
 allow_indirect_imports = true
 
@@ -312,6 +329,33 @@ forbidden_modules = [
     "enji_guard_cli.errors",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.runtime",
+    "enji_guard_cli.telemetry",
+    "enji_guard_cli.transport",
+    "httpx",
+    "httpx_retries",
+    "mcp",
+    "typer",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "json-types-stays-pure"
+name = "JSON type aliases stay pure and below application code"
+type = "forbidden"
+source_modules = ["enji_guard_cli.json_types"]
+forbidden_modules = [
+    "enji_guard_cli._enji_api_contract",
+    "enji_guard_cli.auth",
+    "enji_guard_cli.audits",
+    "enji_guard_cli.cli",
+    "enji_guard_cli.cli_impl",
+    "enji_guard_cli.core",
+    "enji_guard_cli.core_impl",
+    "enji_guard_cli.enji_api",
+    "enji_guard_cli.errors",
+    "enji_guard_cli.mcp_server",
+    "enji_guard_cli.runtime",
+    "enji_guard_cli.settings",
     "enji_guard_cli.telemetry",
     "enji_guard_cli.transport",
     "httpx",
