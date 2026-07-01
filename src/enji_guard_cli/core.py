@@ -1,6 +1,5 @@
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
 from typing import Never
 
 from enji_guard_cli.audits import AuditAlias, ReportAuditDefinition
@@ -59,10 +58,7 @@ from enji_guard_cli.core_impl.operations import reports_list_async_operation as 
 from enji_guard_cli.core_impl.operations import resolve_operation as resolve_operation
 from enji_guard_cli.core_impl.operations import resolve_operation_result as resolve_operation_result
 from enji_guard_cli.core_impl.operations import resolve_operation_spec as resolve_operation_spec
-from enji_guard_cli.core_impl.payloads import json_dict as _json_dict
-from enji_guard_cli.core_impl.payloads import json_object_list as _json_object_list
 from enji_guard_cli.core_impl.payloads import json_object_payload as _json_object_payload
-from enji_guard_cli.core_impl.payloads import json_str as _json_str
 from enji_guard_cli.core_impl.project_admin import MoveRepoDependencies as _MoveRepoDependencies
 from enji_guard_cli.core_impl.project_admin import connect_repo_payload as _connect_repo_payload
 from enji_guard_cli.core_impl.project_admin import create_project_payload as _create_project_payload
@@ -83,6 +79,17 @@ from enji_guard_cli.core_impl.selectors import targeted_run_payload as _targeted
 from enji_guard_cli.core_impl.selectors import transfer_schedule_replacements as _transfer_schedule_replacements
 from enji_guard_cli.core_impl.selectors import validate_write_scope as _validate_write_scope
 from enji_guard_cli.core_impl.selectors import validated_project_name as _validated_project_name
+from enji_guard_cli.core_impl.status_views import RuntimeStatusDependencies as _RuntimeStatusDependencies
+from enji_guard_cli.core_impl.status_views import project_inventory_status as _project_inventory_status_impl
+from enji_guard_cli.core_impl.status_views import project_runtime_status as _project_runtime_status_impl
+from enji_guard_cli.core_impl.status_views import project_statuses_for_repo as _project_statuses_for_repo_impl
+from enji_guard_cli.core_impl.status_views import repo_inventory_status as _repo_inventory_status_impl
+from enji_guard_cli.core_impl.status_views import repo_runtime_status as _repo_runtime_status_impl
+from enji_guard_cli.core_impl.status_views import (
+    repo_runtime_status_from_target as _repo_runtime_status_from_target_impl,
+)
+from enji_guard_cli.core_impl.status_views import repo_status_all_payload as _repo_status_all_payload_impl
+from enji_guard_cli.core_impl.status_views import repo_status_summary as _repo_status_summary_impl
 from enji_guard_cli.core_impl.targets import matching_repo_targets as _matching_repo_targets_impl
 from enji_guard_cli.core_impl.targets import project_refs as _project_refs_impl
 from enji_guard_cli.core_impl.targets import project_repo_targets as _project_repo_targets_impl
@@ -515,47 +522,29 @@ def _resolve_single_repo_target(repo: str, project: str | None) -> RepoTargetPay
 
 
 def _project_runtime_status(project_id: str) -> ProjectRuntimeStatusPayload:
-    project = run_project_detail(project_id)
-    project_payload = _json_dict(project.get("project"))
-    project_name = _json_str(project_payload.get("name"))
-    return {
-        "project_id": project_id,
-        "project_name": project_name,
-        "repos": [
-            _repo_runtime_status(project_id, project_name, repo)
-            for repo in _json_object_list(project.get("repos"))
-            if _json_str(repo.get("id")) is not None
-        ],
-    }
+    return _project_runtime_status_impl(
+        project_id,
+        project_detail=run_project_detail,
+        repo_runtime_status=_repo_runtime_status,
+    )
 
 
 def _project_inventory_status(project_id: str) -> ProjectRuntimeStatusPayload:
-    project = run_project_detail(project_id)
-    project_payload = _json_dict(project.get("project"))
-    project_name = _json_str(project_payload.get("name"))
-    return {
-        "project_id": project_id,
-        "project_name": project_name,
-        "repos": [
-            _repo_inventory_status(project_id, project_name, repo)
-            for repo in _json_object_list(project.get("repos"))
-            if _json_str(repo.get("id")) is not None
-        ],
-    }
+    return _project_inventory_status_impl(
+        project_id,
+        project_detail=run_project_detail,
+        repo_inventory_status=_repo_inventory_status,
+    )
 
 
 def _project_statuses_for_repo(repo: str, project: str | None) -> list[ProjectRuntimeStatusPayload]:
-    grouped: dict[str, ProjectRuntimeStatusPayload] = {}
-    for target in _matching_repo_targets(repo, _selected_project_ids(project)):
-        project_id = target["project_id"]
-        if project_id not in grouped:
-            grouped[project_id] = {
-                "project_id": project_id,
-                "project_name": target["project_name"],
-                "repos": [],
-            }
-        grouped[project_id]["repos"].append(_repo_runtime_status_from_target(target))
-    return list(grouped.values())
+    return _project_statuses_for_repo_impl(
+        repo,
+        project,
+        matching_repo_targets=_matching_repo_targets,
+        selected_project_ids=_selected_project_ids,
+        repo_runtime_status_from_target=_repo_runtime_status_from_target,
+    )
 
 
 def _repo_runtime_status(
@@ -563,33 +552,27 @@ def _repo_runtime_status(
     project_name: str | None,
     repo: dict[str, JsonValue],
 ) -> RepoRuntimeStatusPayload:
-    return _repo_runtime_status_from_target(_repo_target(project_id, project_name, repo))
+    return _repo_runtime_status_impl(
+        project_id,
+        project_name,
+        repo,
+        repo_target=_repo_target,
+        repo_runtime_status_from_target=_repo_runtime_status_from_target,
+    )
 
 
 def _repo_runtime_status_from_target(target: RepoTargetPayload) -> RepoRuntimeStatusPayload:
-    repo_id = target["repo_id"]
-    active_runs = _current_active_runs(_list_repo_active_runs(repo_id))
-    rerun_state = _get_repo_rerun_state(repo_id)
-    current_head_sha = _current_head_sha(rerun_state)
-    reports = _report_status_from_task_links(repo_id, _list_repo_task_links(repo_id), active_runs, rerun_state)
-    return {
-        "project_id": target["project_id"],
-        "project_name": target["project_name"],
-        "repo_id": repo_id,
-        "github_owner": target["github_owner"],
-        "github_name": target["github_name"],
-        "github_repo": target["github_repo"],
-        "connected": target["connected"],
-        "recon_done": target["recon_done"],
-        "scores": target["scores"],
-        "score_grades": target["score_grades"],
-        "score_summary": target["score_summary"],
-        "active_run_count": len(active_runs),
-        "active_runs": active_runs,
-        "current_head_sha": current_head_sha,
-        "last_report_at": reports["last_report_at"],
-        "reports": reports,
-    }
+    return _repo_runtime_status_from_target_impl(
+        target,
+        dependencies=_RuntimeStatusDependencies(
+            list_repo_active_runs=_list_repo_active_runs,
+            get_repo_rerun_state=_get_repo_rerun_state,
+            list_repo_task_links=_list_repo_task_links,
+            current_active_runs=_current_active_runs,
+            current_head_sha=_current_head_sha,
+            report_status_from_task_links=_report_status_from_task_links,
+        ),
+    )
 
 
 def _repo_inventory_status(
@@ -597,45 +580,21 @@ def _repo_inventory_status(
     project_name: str | None,
     repo: dict[str, JsonValue],
 ) -> RepoRuntimeStatusPayload:
-    target = _repo_target(project_id, project_name, repo)
-    return {
-        "project_id": target["project_id"],
-        "project_name": target["project_name"],
-        "repo_id": target["repo_id"],
-        "github_owner": target["github_owner"],
-        "github_name": target["github_name"],
-        "github_repo": target["github_repo"],
-        "connected": target["connected"],
-        "recon_done": target["recon_done"],
-        "scores": target["scores"],
-        "score_grades": target["score_grades"],
-        "score_summary": target["score_summary"],
-        "active_run_count": 0,
-        "active_runs": [],
-        "current_head_sha": None,
-        "last_report_at": None,
-        "reports": _empty_report_status(target["repo_id"]),
-    }
+    return _repo_inventory_status_impl(
+        project_id,
+        project_name,
+        repo,
+        repo_target=_repo_target,
+        empty_report_status=_empty_report_status,
+    )
 
 
 def _repo_status_all_payload(projects: list[ProjectRuntimeStatusPayload]) -> RepoStatusAllPayload:
-    return {
-        "observed_at": datetime.now(UTC).isoformat(),
-        "summary": _repo_status_summary(projects),
-        "projects": projects,
-    }
+    return _repo_status_all_payload_impl(projects)
 
 
 def _repo_status_summary(projects: list[ProjectRuntimeStatusPayload]) -> RepoStatusSummaryPayload:
-    repos = [repo for project in projects for repo in project["repos"]]
-    return {
-        "project_count": len(projects),
-        "repo_count": len(repos),
-        "connected_repo_count": sum(1 for repo in repos if repo["connected"] is True),
-        "active_run_count": sum(repo["active_run_count"] for repo in repos),
-        "recon_done_count": sum(1 for repo in repos if repo["recon_done"] is True),
-        "report_complete_count": sum(1 for repo in repos if repo["reports"]["complete"]),
-    }
+    return _repo_status_summary_impl(projects)
 
 
 def _selected_report_audits(audits: list[AuditAlias], *, all_reports: bool) -> list[AuditAlias]:

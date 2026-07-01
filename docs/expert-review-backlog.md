@@ -134,6 +134,9 @@ Panel:
     duplicate-start checks, report-audit selection, batch skip/run decisions,
     and Fleet task-body assembly; `core.py` remains the public facade and keeps
     Enji API calls injected at the boundary.
+  - Progress: repo/project runtime and inventory status-view assembly moved to
+    `core_impl/status_views.py`; `core.py` remains the public facade and keeps
+    Enji API reads injected through existing private wrappers.
 
 - [x] Split `enji_api.py` into request mechanics and endpoint wrappers.
   - Source: Kaizen / Architecture Simplification.
