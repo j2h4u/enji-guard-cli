@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     image: enji-guard-cli:local
     container_name: enji-guard-cli
+    command: ["run", "--transport", "streamable-http", "--host", "0.0.0.0", "--allow-external-host"]
     restart: unless-stopped
     init: true
     ports:
