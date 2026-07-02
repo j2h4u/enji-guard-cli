@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -28,6 +29,9 @@ def test_json_logging_keeps_structured_safe_fields_and_drops_objects(capsys: pyt
     assert captured.out == ""
     payload = cast(object, json.loads(captured.err))
     assert isinstance(payload, dict)
+    timestamp = payload.pop("timestamp")
+    assert isinstance(timestamp, str)
+    datetime.fromisoformat(timestamp)
 
     assert payload == {
         "elapsed_ms": 12,
@@ -53,6 +57,9 @@ def test_configure_logging_can_write_json_lines_to_file(
     assert captured.err == ""
     payload = cast(object, json.loads(log_file.read_text(encoding="utf-8")))
     assert isinstance(payload, dict)
+    timestamp = payload.pop("timestamp")
+    assert isinstance(timestamp, str)
+    datetime.fromisoformat(timestamp)
     assert payload == {
         "elapsed_ms": 12,
         "level": "info",

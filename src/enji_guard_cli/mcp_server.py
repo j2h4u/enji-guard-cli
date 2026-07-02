@@ -84,7 +84,7 @@ def create_mcp_server(host: str = DEFAULT_HTTP_HOST, port: int = DEFAULT_HTTP_PO
     server = FastMCP(
         name="enji-guard-cli",
         instructions=(
-            "Thin MCP surface for local Enji Guard catalog metadata, report access, report listings, "
+            "Thin MCP surface for local Enji Guard catalog metadata, report access, report readiness metadata, "
             "and stored authentication status."
         ),
         host=host,

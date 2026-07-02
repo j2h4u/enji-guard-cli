@@ -2,6 +2,7 @@ import json
 import logging
 import sys
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from typing import TypeGuard
 
@@ -13,6 +14,7 @@ type LogFieldValue = None | bool | int | float | str
 class EnjiJsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, LogFieldValue] = {
+            "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(),
             "level": record.levelname.lower(),
             "logger": record.name,
             "message": record.getMessage(),
