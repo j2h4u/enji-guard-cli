@@ -816,7 +816,7 @@ def test_wait_routes_transport_info_logs_to_file_not_operator_stderr(
         return {"complete": True, "reason": "complete", "counts": {"ready": 7, "running": 0, "missing": 0, "stale": 0}}
 
     monkeypatch.setattr(cli, "wait_for_reports", fake_wait)
-    log_file = tmp_path / "logs" / "enji-guard.jsonl"
+    log_file = tmp_path / "logs" / "telemetry.jsonl"
 
     def configure_logging_to_file() -> None:
         configure_test_logging(

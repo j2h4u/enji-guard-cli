@@ -46,7 +46,7 @@ def test_configure_logging_can_write_json_lines_to_file(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    log_file = tmp_path / "logs" / "enji-guard.jsonl"
+    log_file = tmp_path / "logs" / "telemetry.jsonl"
     configure_logging(_telemetry_settings(log_file=log_file, log_format="json"))
     logger = logging.getLogger("enji_guard_cli.test")
 

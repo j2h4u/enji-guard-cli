@@ -10,7 +10,7 @@ APP_CONFIG_PARENT_DIR_NAME = ".config"
 APP_CONFIG_DIR_NAME = "enji-guard"
 AUTH_FILE_NAME = "auth.json"
 LOG_DIR_NAME = "logs"
-LOG_FILE_NAME = "enji-guard.jsonl"
+LOG_FILE_NAME = "telemetry.jsonl"
 
 DEFAULT_BASE_URL = "https://fleet.enji.ai"
 DEFAULT_AUTO_REFRESH_ENABLED = True
