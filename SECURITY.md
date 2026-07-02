@@ -2,7 +2,8 @@
 
 ## Supported Versions
 
-This project is pre-release. Use the current `main` branch only.
+Use the latest published release for normal deployment. The current `main`
+branch is acceptable for local development and active prototyping.
 
 ## Credentials
 

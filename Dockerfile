@@ -11,6 +11,10 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
+ARG PACKAGE_VERSION=0.0.0+local
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${PACKAGE_VERSION} \
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ENJI_GUARD_CLI=${PACKAGE_VERSION}
+
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --no-install-project --no-dev

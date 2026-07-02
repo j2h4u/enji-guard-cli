@@ -247,7 +247,7 @@ def test_version_flag_reports_package_version() -> None:
     result = CliRunner().invoke(app, ["--version"])
 
     assert result.exit_code == 0
-    assert "0.1.0" in result.output
+    assert result.output.strip()
 
 
 def test_top_level_help_explains_agent_model() -> None:

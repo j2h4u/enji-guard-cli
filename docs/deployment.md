@@ -7,10 +7,13 @@ deployments should pull the published GHCR image instead.
 
 ```text
 ghcr.io/j2h4u/enji-guard-cli:latest
+ghcr.io/j2h4u/enji-guard-cli:v<version>
+ghcr.io/j2h4u/enji-guard-cli:<version>
 ghcr.io/j2h4u/enji-guard-cli:sha-<commit>
 ```
 
-Images are published after the `CI` workflow succeeds on `main`.
+Images are published after the `CI` workflow succeeds on `main`. Version tags
+are also published when a GitHub Release is published.
 
 ## Host Layout
 
