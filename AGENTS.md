@@ -31,7 +31,7 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 - Local development compose builds `enji-guard-cli:local`; deployment should
   pull `ghcr.io/j2h4u/enji-guard-cli` with `deploy/docker-compose.ghcr.yml`.
 - Recreate the service after runtime, env, image, or auth-mount changes.
-- Application logs live in `~/.config/enji-guard/logs/enji-guard.jsonl`;
+- Application telemetry lives in `~/.config/enji-guard/logs/telemetry.jsonl`;
   stdout/stderr belong to CLI results, progress, and CLI errors.
 - The container runs `enji-guard run`: supervisor owns background cookie
   refresh and MCP as sibling tasks. MCP must not own refresh.

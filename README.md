@@ -43,14 +43,14 @@ container instead of installing or running this Python package on the host:
 docker exec -i enji-guard-cli enji-guard --help
 ```
 
-Application logs are persisted outside the container at:
+Application telemetry is persisted outside the container at:
 
 ```text
-~/.config/enji-guard/logs/enji-guard.jsonl
+~/.config/enji-guard/logs/telemetry.jsonl
 ```
 
 CLI stdout/stderr are reserved for command results, progress, and CLI errors.
-Use the log file for HTTP/auth/runtime telemetry.
+Use the telemetry file for HTTP/auth/runtime events.
 
 When working on another repository, pass the repository as `OWNER/NAME`. If an
 agent is already in a GitHub checkout and wants to derive it from `origin`, it
