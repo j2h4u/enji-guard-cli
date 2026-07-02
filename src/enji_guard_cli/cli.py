@@ -1,6 +1,7 @@
 import socket
 import sys
 from collections.abc import Callable
+from ipaddress import IPv6Address, ip_address
 from pathlib import Path
 from typing import Annotated, Literal, TypeGuard, cast
 
@@ -112,6 +113,9 @@ _cli_state: dict[str, object] = {"project": None, "json": False}
 
 type JsonCommandAction = Callable[[], OperationResult]
 HEALTH_READY_TIMEOUT_SECONDS = 2.0
+ANY_IPV4_HOST = str(ip_address(0))
+ANY_IPV6_HOST = str(IPv6Address(0))
+LOCALHOST_NAME = "localhost"
 DEFAULT_REPORT_WAIT_TIMEOUT = "45m"
 SCHEDULE_SET_EPILOG = """
 Targets: REPO, --project PROJECT --all-repos, or --all-projects.
@@ -199,6 +203,28 @@ def _check_local_listener(host: str, port: int) -> None:
         pass
 
 
+def _validate_http_bind(host: str, transport: str, *, allow_external_host: bool) -> None:
+    if transport == "stdio" or allow_external_host or _is_loopback_host(host):
+        return
+    _echo_error(
+        "VALIDATION",
+        "HTTP MCP transports may only bind to loopback by default; pass --allow-external-host to bind externally",
+    )
+    raise typer.Exit(1)
+
+
+def _is_loopback_host(host: str) -> bool:
+    normalized = host.strip().lower()
+    if normalized == LOCALHOST_NAME:
+        return True
+    if normalized in {ANY_IPV4_HOST, ANY_IPV6_HOST}:
+        return False
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
 @app.command(help=ACCESS_OPERATION.summary)
 def access(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
@@ -218,7 +244,15 @@ def run(
         str | None,
         typer.Option(help="Optional mount path for SSE transport."),
     ] = None,
+    allow_external_host: Annotated[
+        bool,
+        typer.Option(
+            "--allow-external-host",
+            help="Allow HTTP MCP transports to bind outside loopback. Use only behind a trusted boundary.",
+        ),
+    ] = False,
 ) -> None:
+    _validate_http_bind(host, transport, allow_external_host=allow_external_host)
     run_service(transport=transport, host=host, port=port, mount_path=mount_path)
 
 
@@ -234,7 +268,15 @@ def serve(
         str | None,
         typer.Option(help="Optional mount path for SSE transport."),
     ] = None,
+    allow_external_host: Annotated[
+        bool,
+        typer.Option(
+            "--allow-external-host",
+            help="Allow HTTP MCP transports to bind outside loopback. Use only behind a trusted boundary.",
+        ),
+    ] = False,
 ) -> None:
+    _validate_http_bind(host, transport, allow_external_host=allow_external_host)
     run_mcp_server(create_mcp_server(host=host, port=port), transport=transport, mount_path=mount_path)
 
 

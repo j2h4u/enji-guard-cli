@@ -113,37 +113,12 @@ RUNBOOK_ENDPOINT_SPEC = EnjiEndpointSpec(
     operation_id="getRunbook",
     operation="runbook",
 )
-GITHUB_INSTALLATIONS_ENDPOINT_SPEC = EnjiEndpointSpec(
-    method="GET",
-    path_template="/api/ux/github-installations",
-    operation_id="listGitHubInstallations",
-    operation="repo github installations",
-)
-GITHUB_INSTALLATION_REPOS_ENDPOINT_SPEC = EnjiEndpointSpec(
-    method="GET",
-    path_template="/api/v1/github/app/installations/{installationId}/repos",
-    operation_id="listGitHubInstallationRepos",
-    operation="repo github repos",
-)
 PROJECT_REPOS_CONNECT_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="POST",
     path_template="/api/ux/projects/{projectId}/repos",
     operation_id="connectProjectRepo",
     operation="repo add",
     request_body_ref="#/components/requestBodies/GitHubRepoConnect",
-)
-PROJECT_REPO_CONNECTION_ENDPOINT_SPEC = EnjiEndpointSpec(
-    method="PUT",
-    path_template="/api/ux/projects/{projectId}/repos/{repoId}/connection",
-    operation_id="putProjectRepoConnection",
-    operation="repo connection",
-    request_body_ref="#/components/requestBodies/RepoConnectionUpdate",
-)
-PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC = EnjiEndpointSpec(
-    method="GET",
-    path_template="/api/ux/projects/{projectId}/active-runs",
-    operation_id="listProjectActiveRuns",
-    operation="project active runs",
 )
 REPO_ACTIVE_RUNS_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="GET",
@@ -162,12 +137,6 @@ REPO_TASK_LINKS_ENDPOINT_SPEC = EnjiEndpointSpec(
     path_template="/api/ux/repos/{repoId}/task-links",
     operation_id="listRepoTaskLinks",
     operation="repo task links",
-)
-REPO_AUDIT_HISTORY_ENDPOINT_SPEC = EnjiEndpointSpec(
-    method="GET",
-    path_template="/api/ux/repos/{repoId}/audit-history",
-    operation_id="listRepoAuditHistory",
-    operation="repo audit history",
 )
 REPO_AUDIT_RUNS_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="POST",
@@ -223,15 +192,10 @@ IMPLEMENTED_ENJI_ENDPOINTS = (
     REPO_TRANSFER_ENDPOINT_SPEC,
     CATALOG_ENDPOINT_SPEC,
     RUNBOOK_ENDPOINT_SPEC,
-    GITHUB_INSTALLATIONS_ENDPOINT_SPEC,
-    GITHUB_INSTALLATION_REPOS_ENDPOINT_SPEC,
     PROJECT_REPOS_CONNECT_ENDPOINT_SPEC,
-    PROJECT_REPO_CONNECTION_ENDPOINT_SPEC,
-    PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC,
     REPO_ACTIVE_RUNS_ENDPOINT_SPEC,
     REPO_AUDIT_RERUN_STATE_ENDPOINT_SPEC,
     REPO_TASK_LINKS_ENDPOINT_SPEC,
-    REPO_AUDIT_HISTORY_ENDPOINT_SPEC,
     REPO_AUDIT_RUNS_ENDPOINT_SPEC,
     REPO_AUDIT_SUMMARY_ENDPOINT_SPEC,
     AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT_SPEC,

@@ -10,11 +10,6 @@ from enji_guard_cli.enji_api import (
     AuditRunCreate,
     RepoTransfer,
     _connect_project_repo,
-    _github_installation_repos,
-    _github_installations,
-    _project_active_runs,
-    _repo_audit_history,
-    _update_repo_connection,
     access,
     audit_summary_snapshot,
     catalog,
@@ -56,8 +51,6 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
         [
             json_response({"limits": {}}),
             json_response({"projects": []}),
-            json_response({"installations": []}),
-            json_response({"repositories": []}),
             json_response({"project": {"id": "project_1"}, "repos": [], "webResources": []}),
             json_response({"id": "project_1"}, status_code=201),
             json_response({"project": {"id": "project_1"}}, status_code=201),
@@ -69,12 +62,9 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
             json_response({"curatedActions": []}),
             json_response({"id": "runbook_1", "suggested_flow": "single"}),
             json_response({"repo": {"id": "repo_1"}}, status_code=201),
-            json_response({"connected": True}),
-            json_response({"activeRuns": []}),
             json_response({"activeRuns": []}),
             json_response({"state": {}}),
             json_response({"links": []}),
-            json_response({"history": {}}),
             json_response({"task": {"id": "task_1"}}, status_code=201),
             json_response({"snapshot": {"content": {"report": "ok"}}}),
             json_response({"jobs": []}),
@@ -84,8 +74,6 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
 
     access(auth_file, client)
     reports_list(auth_file, client)
-    _github_installations(auth_file, client)
-    _github_installation_repos("42", auth_file, client)
     project_detail("project_1", auth_file, client)
     create_project("Pets", auth_file, client)
     rename_project("project_1", "Friends", auth_file, client)
@@ -95,12 +83,9 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
     catalog(auth_file, client)
     runbook("runbook_1", auth_file, client)
     _connect_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client)
-    _update_repo_connection("project_1", "repo_1", connected=True, auth_file=auth_file, client=client)
-    _project_active_runs("project_1", auth_file, client)
     repo_active_runs("repo_1", auth_file, client)
     repo_audit_rerun_state("repo_1", auth_file, client)
     repo_task_links("repo_1", auth_file, client)
-    _repo_audit_history("repo_1", auth_file, client)
     start_audit_run(
         AuditRunCreate(
             repo_id="repo_1",

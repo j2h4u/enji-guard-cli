@@ -130,7 +130,18 @@ def test_serve_passes_transport_options_to_mcp_server(monkeypatch: MonkeyPatch) 
 
     result = CliRunner().invoke(
         app,
-        ["serve", "--transport", "sse", "--host", "0.0.0.0", "--port", "9000", "--mount-path", "/events"],
+        [
+            "serve",
+            "--transport",
+            "sse",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9000",
+            "--mount-path",
+            "/events",
+            "--allow-external-host",
+        ],
     )
 
     assert result.exit_code == 0
@@ -160,7 +171,7 @@ def test_run_passes_transport_options_to_supervised_runtime(monkeypatch: MonkeyP
 
     result = CliRunner().invoke(
         app,
-        ["run", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "9000"],
+        ["run", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "9000", "--allow-external-host"],
     )
 
     assert result.exit_code == 0
@@ -170,6 +181,30 @@ def test_run_passes_transport_options_to_supervised_runtime(monkeypatch: MonkeyP
         "port": 9000,
         "mount_path": None,
     }
+
+
+def test_run_rejects_external_http_bind_without_explicit_allow(monkeypatch: MonkeyPatch) -> None:
+    def fake_run_service(
+        *,
+        transport: str = "stdio",
+        host: str = "127.0.0.1",
+        port: int = 8000,
+        mount_path: str | None = None,
+    ) -> None:
+        raise AssertionError("external HTTP bind should be rejected before runtime starts")
+
+    monkeypatch.setattr(cli, "run_service", fake_run_service)
+
+    result = CliRunner().invoke(
+        app,
+        ["run", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "9000"],
+    )
+
+    assert result.exit_code == 1
+    assert result.stderr == (
+        "VALIDATION: HTTP MCP transports may only bind to loopback by default; "
+        "pass --allow-external-host to bind externally\n"
+    )
 
 
 def test_health_ready_checks_local_mcp_listener(monkeypatch: MonkeyPatch) -> None:
