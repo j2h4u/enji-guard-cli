@@ -247,6 +247,7 @@ source_modules = [
     "enji_guard_cli.core_impl.payloads",
     "enji_guard_cli.core_impl.project_admin",
     "enji_guard_cli.core_impl.repo_status",
+    "enji_guard_cli.core_impl.report_wait",
     "enji_guard_cli.core_impl.report_reads",
     "enji_guard_cli.core_impl.schedules",
     "enji_guard_cli.core_impl.selectors",

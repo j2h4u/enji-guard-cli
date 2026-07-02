@@ -13,6 +13,7 @@ from enji_guard_cli.auth import import_cookie as import_cookie
 from enji_guard_cli.auth import refresh_auth as refresh_auth
 from enji_guard_cli.core_impl import audit_runs as _audit_runs
 from enji_guard_cli.core_impl import report_reads as _report_reads
+from enji_guard_cli.core_impl import report_wait as _report_wait
 from enji_guard_cli.core_impl.models import (
     DEFAULT_REPO_SORT,
     AuditRunBatchPayload,
@@ -68,11 +69,8 @@ from enji_guard_cli.core_impl.project_admin import rename_project_payload as _re
 from enji_guard_cli.core_impl.repo_status import current_active_runs as _current_active_runs
 from enji_guard_cli.core_impl.repo_status import current_head_sha as _current_head_sha
 from enji_guard_cli.core_impl.repo_status import empty_report_status as _empty_report_status
-from enji_guard_cli.core_impl.repo_status import next_poll_sleep as _next_poll_sleep
 from enji_guard_cli.core_impl.repo_status import report_status_from_task_links as _report_status_from_task_links
-from enji_guard_cli.core_impl.repo_status import report_wait_payload as _report_wait_payload
 from enji_guard_cli.core_impl.repo_status import sort_project_repos as _sort_project_repos
-from enji_guard_cli.core_impl.repo_status import validate_report_wait_options as _validate_report_wait_options
 from enji_guard_cli.core_impl.selectors import parse_github_repo as _parse_github_repo
 from enji_guard_cli.core_impl.selectors import repo_target as _repo_target
 from enji_guard_cli.core_impl.selectors import targeted_run_payload as _targeted_run_payload
@@ -250,22 +248,16 @@ def wait_for_report_completion(
     options: ReportWaitOptions,
     heartbeat: Callable[[ReportWaitPayload], None] | None,
 ) -> ReportWaitPayload:
-    _validate_report_wait_options(options)
-    started_at = time.monotonic()
-    deadline = started_at + options.timeout_seconds
-    next_heartbeat_at = started_at
-    while True:
-        status = _report_status(repo_id)
-        payload = _report_wait_payload(repo_id, status, started_at, timed_out=False)
-        if payload["complete"] or payload["reason"] == "failed":
-            return payload
-        now = time.monotonic()
-        if now >= deadline:
-            return _report_wait_payload(repo_id, status, started_at, timed_out=True)
-        if heartbeat is not None and now >= next_heartbeat_at:
-            heartbeat(payload)
-            next_heartbeat_at += options.heartbeat_seconds
-        time.sleep(_next_poll_sleep(deadline, options.poll_seconds))
+    return _report_wait.wait_for_report_completion(
+        repo_id,
+        options=options,
+        heartbeat=heartbeat,
+        dependencies=_report_wait.ReportWaitDependencies(
+            read_status=_report_status,
+            monotonic=time.monotonic,
+            sleep=time.sleep,
+        ),
+    )
 
 
 def start_audit(
