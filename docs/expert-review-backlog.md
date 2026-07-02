@@ -101,7 +101,7 @@ Panel:
   - Architecture gate: add import-linter contract keeping pure `core_impl`
     helpers away from `enji_api` after the move.
 
-- [ ] Split `core.py` by use case while keeping `core.py` as the public facade.
+- [x] Split `core.py` by use case while keeping `core.py` as the public facade.
   - Sources: System Architect, Kaizen / Architecture Simplification.
   - Evidence: `core.py` owns selector resolution, repo status orchestration,
     report reads, schedule/email mutation, and audit task-body construction.
@@ -140,6 +140,9 @@ Panel:
   - Progress: report wait/poll completion loop moved to
     `core_impl/report_wait.py`; `core.py` still owns the public facade and
     injects repo-status reads and clock primitives at the boundary.
+  - Done: remaining `core.py` code is public facade composition,
+    selector/error translation, and dependency wiring; no substantial
+    use-case algorithms remain there.
 
 - [x] Split `enji_api.py` into request mechanics and endpoint wrappers.
   - Source: Kaizen / Architecture Simplification.
@@ -333,7 +336,7 @@ Panel:
 4. [x] Add the cheap hard-gate improvements that already pass.
 5. [x] Move CLI auth commands behind core and tighten import-linter.
 6. [x] Move neutral JSON types out of `enji_api.py` and tighten import-linter.
-7. [ ] Split `core.py` by use case.
+7. [x] Split `core.py` by use case.
 8. [x] Split auth cookie/store responsibilities.
 9. [x] Split `enji_api.py` request mechanics from endpoint wrappers.
 10. [x] Improve project create/delete partial-state reporting.
