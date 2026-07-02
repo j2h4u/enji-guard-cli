@@ -114,6 +114,9 @@ Compose binds MCP to loopback, defines the service healthcheck, and limits the
 container to 512 MiB memory. HTTP MCP transports may bind outside loopback only
 with explicit `--allow-external-host`; use that only behind a trusted boundary.
 
+For registry-based deployment, use the GHCR image and compose example in
+`docs/deployment.md`.
+
 ## Authentication
 
 Preferred future path is an Enji API token:
