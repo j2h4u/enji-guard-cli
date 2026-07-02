@@ -99,6 +99,18 @@ disable noisy scheduled mail when it is not part of the workflow.
 - just
 - uv, only for repository development and QA
 
+## Releases
+
+Package versions come from git tags. GitHub Release `v0.1.0` produces Python
+version `0.1.0`; untagged checkouts report a development version derived from
+the nearest tag and commit.
+
+Release automation is handled by release-please. It opens a release PR from
+conventional commits, updates `CHANGELOG.md`, and creates the GitHub Release
+after that PR is merged. Use `feat:` and `fix:` only for changes that should be
+visible in release notes; keep internal churn under `chore:`, `refactor:`,
+`test:`, `ci:`, or `docs:`.
+
 ## Runtime
 
 ```bash
