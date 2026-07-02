@@ -28,6 +28,8 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 ## Ops
 
 - Docker is the runtime. Verify the running container, not just source.
+- Local development compose builds `enji-guard-cli:local`; deployment should
+  pull `ghcr.io/j2h4u/enji-guard-cli` with `deploy/docker-compose.ghcr.yml`.
 - Recreate the service after runtime, env, image, or auth-mount changes.
 - Application logs live in `~/.config/enji-guard/logs/enji-guard.jsonl`;
   stdout/stderr belong to CLI results, progress, and CLI errors.
