@@ -20,7 +20,8 @@ API tokens once Enji provides them.
 
 MCP HTTP transports are unauthenticated by this service. Keep Docker port
 bindings on `127.0.0.1` unless you put the service behind your own trusted
-network/auth boundary.
+network/auth boundary. CLI commands reject external HTTP binds by default; pass
+`--allow-external-host` only when that trusted boundary already exists.
 
 ## Reporting
 

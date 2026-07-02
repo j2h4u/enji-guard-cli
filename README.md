@@ -111,7 +111,8 @@ docker exec -i enji-guard-cli enji-guard --help
 ```
 
 Compose binds MCP to loopback, defines the service healthcheck, and limits the
-container to 512 MiB memory.
+container to 512 MiB memory. HTTP MCP transports may bind outside loopback only
+with explicit `--allow-external-host`; use that only behind a trusted boundary.
 
 ## Authentication
 
@@ -195,6 +196,8 @@ just verify
 The completion gate includes Ruff, basedpyright, import-linter, Vulture,
 deptry, OpenAPI contract validation, CRAP <= 30 per function, tests, and Docker
 build.
+
+Use `CONTRIBUTING.md` for change intake, acceptance criteria, and handoff rules.
 
 ## Security Notes
 

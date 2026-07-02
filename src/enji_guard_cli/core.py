@@ -2,7 +2,7 @@ import time
 from collections.abc import Callable
 from typing import Never
 
-from enji_guard_cli.audits import AuditAlias, ReportAuditDefinition
+from enji_guard_cli.audits import AuditAlias
 from enji_guard_cli.audits import require_report_audit as registry_require_report_audit
 from enji_guard_cli.auth import AuthError as AuthError
 from enji_guard_cli.auth import AuthRefreshPayload as AuthRefreshPayload
@@ -29,7 +29,6 @@ from enji_guard_cli.core_impl.models import (
     RepoRuntimeStatusPayload,
     RepoSort,
     RepoStatusAllPayload,
-    RepoStatusSummaryPayload,
     RepoTargetPayload,
     ScheduleSettingsUpdate,
 )
@@ -87,7 +86,6 @@ from enji_guard_cli.core_impl.status_views import (
     repo_runtime_status_from_target as _repo_runtime_status_from_target_impl,
 )
 from enji_guard_cli.core_impl.status_views import repo_status_all_payload as _repo_status_all_payload_impl
-from enji_guard_cli.core_impl.status_views import repo_status_summary as _repo_status_summary_impl
 from enji_guard_cli.core_impl.targets import matching_repo_targets as _matching_repo_targets_impl
 from enji_guard_cli.core_impl.targets import project_refs as _project_refs_impl
 from enji_guard_cli.core_impl.targets import project_repo_targets as _project_repo_targets_impl
@@ -104,7 +102,6 @@ from enji_guard_cli.core_impl.write_settings import list_email_preferences as _l
 from enji_guard_cli.core_impl.write_settings import list_schedule_settings as _list_schedule_settings
 from enji_guard_cli.core_impl.write_settings import selected_write_repo_targets as _selected_write_repo_targets_impl
 from enji_guard_cli.core_impl.write_settings import set_email_preferences as _set_email_preferences
-from enji_guard_cli.core_impl.write_settings import set_schedule_setting as _set_schedule_setting_impl
 from enji_guard_cli.core_impl.write_settings import set_schedule_settings as _set_schedule_settings
 from enji_guard_cli.enji_api import REPORTS_LIST_DEFAULT_SELECTOR as REPORTS_LIST_DEFAULT_SELECTOR
 from enji_guard_cli.enji_api import (
@@ -585,21 +582,8 @@ def _repo_status_all_payload(projects: list[ProjectRuntimeStatusPayload]) -> Rep
     return _repo_status_all_payload_impl(projects)
 
 
-def _repo_status_summary(projects: list[ProjectRuntimeStatusPayload]) -> RepoStatusSummaryPayload:
-    return _repo_status_summary_impl(projects)
-
-
 def _selected_report_audits(audits: list[AuditAlias], *, all_reports: bool) -> list[AuditAlias]:
     return _audit_runs.selected_report_audits(audits, all_reports=all_reports)
-
-
-def _set_schedule_setting(
-    target: RepoTargetPayload,
-    audit: ReportAuditDefinition,
-    jobs: JsonObjectPayload,
-    update: ScheduleSettingsUpdate,
-) -> dict[str, JsonValue]:
-    return _set_schedule_setting_impl(target, audit, jobs, update, set_schedule=_set_schedule)
 
 
 def _raise_bad_selector(message: str) -> Never:

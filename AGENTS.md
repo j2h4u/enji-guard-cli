@@ -2,6 +2,7 @@
 
 Python 3.14 Docker service exposing Enji Guard through core code, CLI, and MCP.
 README.md carries the user-facing CLI model and workflows.
+CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 
 ## Development
 

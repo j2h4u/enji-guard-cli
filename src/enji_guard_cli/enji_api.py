@@ -12,18 +12,13 @@ from enji_guard_cli._enji_api_contract import (
     CATALOG_ENDPOINT_SPEC,
     FLEET_PROJECT_CREATE_ENDPOINT_SPEC,
     FLEET_PROJECT_DELETE_ENDPOINT_SPEC,
-    GITHUB_INSTALLATION_REPOS_ENDPOINT_SPEC,
-    GITHUB_INSTALLATIONS_ENDPOINT_SPEC,
     IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC,
     IMPROVEMENT_JOBS_ENDPOINT_SPEC,
-    PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC,
     PROJECT_DETAIL_ENDPOINT_SPEC,
     PROJECT_RENAME_ENDPOINT_SPEC,
-    PROJECT_REPO_CONNECTION_ENDPOINT_SPEC,
     PROJECT_REPOS_CONNECT_ENDPOINT_SPEC,
     PROJECTS_ENDPOINT_SPEC,
     REPO_ACTIVE_RUNS_ENDPOINT_SPEC,
-    REPO_AUDIT_HISTORY_ENDPOINT_SPEC,
     REPO_AUDIT_RERUN_STATE_ENDPOINT_SPEC,
     REPO_AUDIT_RUNS_ENDPOINT_SPEC,
     REPO_AUDIT_SUMMARY_ENDPOINT_SPEC,
@@ -139,10 +134,6 @@ class RepoTransferRequest(TypedDict):
 class RepoConnectRequest(TypedDict):
     githubOwner: str
     githubName: str
-
-
-class RepoConnectionRequest(TypedDict):
-    connected: bool
 
 
 class AuditRunCreateRequest(TypedDict):
@@ -373,26 +364,6 @@ def runbook(
     )
 
 
-def _github_installations(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> JsonObjectPayload:
-    return run_api_request(
-        auth_file,
-        client,
-        GITHUB_INSTALLATIONS_ENDPOINT.request(),
-    )
-
-
-def _github_installation_repos(
-    installation_id: str,
-    auth_file: Path | None = None,
-    client: EnjiHttpClient | None = None,
-) -> JsonObjectPayload:
-    return run_api_request(
-        auth_file,
-        client,
-        GITHUB_INSTALLATION_REPOS_ENDPOINT.request(path_params={"installationId": installation_id}),
-    )
-
-
 def _connect_project_repo(
     project_id: str,
     github_owner: str,
@@ -408,37 +379,6 @@ def _connect_project_repo(
             path_params={"projectId": project_id},
             json_body=cast(EnjiJsonValue, request),
         ),
-    )
-
-
-def _update_repo_connection(
-    project_id: str,
-    repo_id: str,
-    *,
-    connected: bool,
-    auth_file: Path | None = None,
-    client: EnjiHttpClient | None = None,
-) -> JsonObjectPayload:
-    request: RepoConnectionRequest = {"connected": connected}
-    return run_api_request(
-        auth_file,
-        client,
-        PROJECT_REPO_CONNECTION_ENDPOINT.request(
-            path_params={"projectId": project_id, "repoId": repo_id},
-            json_body=cast(EnjiJsonValue, request),
-        ),
-    )
-
-
-def _project_active_runs(
-    project_id: str,
-    auth_file: Path | None = None,
-    client: EnjiHttpClient | None = None,
-) -> JsonObjectPayload:
-    return run_api_request(
-        auth_file,
-        client,
-        PROJECT_ACTIVE_RUNS_ENDPOINT.request(path_params={"projectId": project_id}),
     )
 
 
@@ -475,18 +415,6 @@ def repo_task_links(
         auth_file,
         client,
         REPO_TASK_LINKS_ENDPOINT.request(path_params={"repoId": repo_id}),
-    )
-
-
-def _repo_audit_history(
-    repo_id: str,
-    auth_file: Path | None = None,
-    client: EnjiHttpClient | None = None,
-) -> JsonObjectPayload:
-    return run_api_request(
-        auth_file,
-        client,
-        REPO_AUDIT_HISTORY_ENDPOINT.request(path_params={"repoId": repo_id}),
     )
 
 
@@ -708,26 +636,10 @@ RUNBOOK_ENDPOINT = ApiEndpoint(
     spec=RUNBOOK_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
-GITHUB_INSTALLATIONS_ENDPOINT = ApiEndpoint(
-    spec=GITHUB_INSTALLATIONS_ENDPOINT_SPEC,
-    parser=_parse_json_object_payload,
-)
-GITHUB_INSTALLATION_REPOS_ENDPOINT = ApiEndpoint(
-    spec=GITHUB_INSTALLATION_REPOS_ENDPOINT_SPEC,
-    parser=_parse_json_object_payload,
-)
 PROJECT_REPOS_CONNECT_ENDPOINT = ApiEndpoint(
     spec=PROJECT_REPOS_CONNECT_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
     expected_statuses=HTTP_CREATED_ONLY,
-)
-PROJECT_REPO_CONNECTION_ENDPOINT = ApiEndpoint(
-    spec=PROJECT_REPO_CONNECTION_ENDPOINT_SPEC,
-    parser=_parse_json_object_payload,
-)
-PROJECT_ACTIVE_RUNS_ENDPOINT = ApiEndpoint(
-    spec=PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC,
-    parser=_parse_json_object_payload,
 )
 REPO_ACTIVE_RUNS_ENDPOINT = ApiEndpoint(
     spec=REPO_ACTIVE_RUNS_ENDPOINT_SPEC,
@@ -739,10 +651,6 @@ REPO_AUDIT_RERUN_STATE_ENDPOINT = ApiEndpoint(
 )
 REPO_TASK_LINKS_ENDPOINT = ApiEndpoint(
     spec=REPO_TASK_LINKS_ENDPOINT_SPEC,
-    parser=_parse_json_object_payload,
-)
-REPO_AUDIT_HISTORY_ENDPOINT = ApiEndpoint(
-    spec=REPO_AUDIT_HISTORY_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 REPO_AUDIT_RUNS_ENDPOINT = ApiEndpoint(
