@@ -10,6 +10,7 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
+import enji_guard_cli.auth as auth_module
 from enji_guard_cli.auth import (
     AUTH_REFRESH_USER_AGENT,
     AuthError,
@@ -79,6 +80,47 @@ def test_import_bearer_token_stores_token_credential(tmp_path: Path) -> None:
     assert result["credential_type"] == "bearer_token"
     assert stored["credential"] == {"type": "bearer_token", "token": "token-123"}
     assert auth_headers(cast(RuntimeStoredAuth, stored)) == {"Authorization": "Bearer token-123"}
+
+
+def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    slept_with: list[int] = []
+
+    class FakeHttpxEnjiHttpClient:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
+            return None
+
+    def fake_sleep_seconds(*, auth_file: Path, refresh_settings: AutoRefreshSettings) -> int:
+        raise ValueError("invalid auth state")
+
+    async def fake_sleep(seconds: int) -> None:
+        slept_with.append(seconds)
+        raise asyncio.CancelledError
+
+    def fake_log_event(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(auth_module, "log_event", fake_log_event)
+    monkeypatch.setattr(auth_module, "HttpxEnjiHttpClient", FakeHttpxEnjiHttpClient)
+    monkeypatch.setattr(auth_module, "_auto_refresh_sleep_seconds", fake_sleep_seconds)
+    monkeypatch.setattr(auth_module.asyncio, "sleep", fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            auth_module._auto_refresh_loop(
+                auth_file=Path("auth.json"),
+                refresh_settings=AutoRefreshSettings(
+                    enabled=True,
+                    lead_seconds=300,
+                    fallback_seconds=900,
+                    retry_seconds=60,
+                ),
+            )
+        )
+
+    assert slept_with == [60]
 
 
 def test_merge_set_cookie_headers_updates_existing_cookie_without_keeping_attributes() -> None:

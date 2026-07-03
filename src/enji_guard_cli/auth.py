@@ -291,18 +291,18 @@ async def _auto_refresh_loop(
 ) -> None:
     async with HttpxEnjiHttpClient() as client:
         while True:
-            sleep_seconds = _auto_refresh_sleep_seconds(
-                auth_file=auth_file,
-                refresh_settings=refresh_settings,
-            )
-            log_event(
-                _LOGGER,
-                logging.INFO,
-                "enji_auth_auto_refresh_scheduled",
-                {"sleep_seconds": sleep_seconds, "auth_file": str(auth_file)},
-            )
-            await asyncio.sleep(sleep_seconds)
             try:
+                sleep_seconds = _auto_refresh_sleep_seconds(
+                    auth_file=auth_file,
+                    refresh_settings=refresh_settings,
+                )
+                log_event(
+                    _LOGGER,
+                    logging.INFO,
+                    "enji_auth_auto_refresh_scheduled",
+                    {"sleep_seconds": sleep_seconds, "auth_file": str(auth_file)},
+                )
+                await asyncio.sleep(sleep_seconds)
                 refreshed_auth = await refresh_stored_cookie_auth(auth_file, client)
             except EnjiHttpError as exc:
                 log_event(
@@ -312,6 +312,18 @@ async def _auto_refresh_loop(
                     {
                         "code": exc.code,
                         "status_code": exc.status_code,
+                        "retry_seconds": refresh_settings.retry_seconds,
+                    },
+                )
+                await asyncio.sleep(refresh_settings.retry_seconds)
+            except (OSError, ValueError) as exc:
+                log_event(
+                    _LOGGER,
+                    logging.ERROR,
+                    "enji_auth_auto_refresh_crashed",
+                    {
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
                         "retry_seconds": refresh_settings.retry_seconds,
                     },
                 )

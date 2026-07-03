@@ -75,7 +75,10 @@ def start_backend_readiness_task() -> asyncio.Task[None] | None:
 async def _backend_readiness_loop(*, settings: ReadinessSettings) -> None:
     state = INITIAL_BACKEND_READINESS_STATE
     while True:
-        state = await _run_backend_readiness_probe(settings=settings, previous=state)
+        try:
+            state = await _run_backend_readiness_probe(settings=settings, previous=state)
+        except (OSError, RuntimeError, ValueError) as exc:
+            state = _state_after_readiness_crash(settings=settings, previous=state, exc=exc)
         await asyncio.sleep(settings.heartbeat_interval_seconds)
 
 
@@ -128,6 +131,41 @@ def _log_backend_readiness_probe(state: BackendReadinessState, probe: BackendRea
             "elapsed_ms": probe.elapsed_ms,
         },
     )
+
+
+def _state_after_readiness_crash(
+    *,
+    settings: ReadinessSettings,
+    previous: BackendReadinessState,
+    exc: OSError | RuntimeError | ValueError,
+) -> BackendReadinessState:
+    probe = BackendReadinessProbe(
+        ready=False,
+        failure_kind="internal",
+        failure_code=type(exc).__name__,
+        failure_message=str(exc),
+    )
+    state = backend_readiness_state_after_probe(previous, probe, checked_at=datetime.now(UTC))
+    try:
+        write_backend_readiness_state(settings.state_file, state)
+    except OSError as write_exc:
+        log_event(
+            _LOGGER,
+            logging.WARNING,
+            "enji_backend_readiness_state_write_failed",
+            {"code": "STORAGE", "message": str(write_exc), "state_file": str(settings.state_file)},
+        )
+    log_event(
+        _LOGGER,
+        logging.ERROR,
+        "enji_backend_readiness_probe_crashed",
+        {
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+            "consecutive_failures": state.consecutive_failures,
+        },
+    )
+    return state
 
 
 async def _cancel_tasks(tasks: set[asyncio.Task[None]]) -> None:

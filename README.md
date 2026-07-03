@@ -122,6 +122,7 @@ chmod 700 ~/.config/enji-guard
 
 docker compose up -d --force-recreate --remove-orphans --wait
 docker exec -i enji-guard-cli enji-guard --help
+docker exec -i enji-guard-cli enji-guard health --ready
 ```
 
 Compose binds MCP to loopback, defines the service healthcheck, and limits the
@@ -134,7 +135,8 @@ loopback.
 Docker health is full service readiness: local MCP plus cached authenticated
 Enji backend readiness. The supervisor refreshes cookie auth and probes backend
 readiness as separate sibling tasks; the probe records failures but does not
-perform refresh itself.
+perform refresh itself. Repeated auth/backend failures make the container
+`unhealthy`, so `docker ps` is a passive dashboard for Enji connectivity.
 
 For registry-based deployment, use the GHCR image and compose example in
 `docs/deployment.md`.
@@ -151,12 +153,17 @@ Until API tokens are available, cookie auth is supported as a temporary
 compatibility path:
 
 ```bash
+# In the browser, trigger Enji refresh first, then copy a current Fleet
+# request Cookie header from DevTools Network.
 pbpaste | docker exec -i enji-guard-cli enji-guard auth import-cookie --stdin
 docker exec -i enji-guard-cli enji-guard auth status
+docker exec -i enji-guard-cli enji-guard health --ready
 ```
 
 Do not paste credentials directly into shell history. The auth file defaults to
 `~/.config/enji-guard/auth.json` and is written with private file permissions.
+Keep that directory writable by the container user because Enji rotates refresh
+cookies.
 
 ## CLI
 
