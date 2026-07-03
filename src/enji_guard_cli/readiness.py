@@ -84,6 +84,20 @@ def backend_readiness_state_after_probe(
     )
 
 
+def backend_readiness_starting_state(*, checked_at: datetime) -> BackendReadinessState:
+    return BackendReadinessState(
+        ready=False,
+        checked_at=checked_at.astimezone(UTC).isoformat(),
+        last_success_at=None,
+        failure_kind="startup",
+        failure_code="STARTING",
+        failure_message="backend readiness has not succeeded yet",
+        failure_status_code=None,
+        credential_type=None,
+        consecutive_failures=0,
+    )
+
+
 def write_backend_readiness_state(path: Path, state: BackendReadinessState) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as temp_file:
@@ -115,16 +129,29 @@ def readiness_verdict(
     state = read_backend_readiness_state(readiness_settings.state_file)
     if state is None:
         return ReadinessVerdict(ready=False, reason="backend readiness state is missing", state=None)
+    unavailable_verdict = _unavailable_state_verdict(state, readiness_settings, now)
+    if unavailable_verdict is not None:
+        return unavailable_verdict
+    return ReadinessVerdict(ready=True, reason=None, state=_state_with_effective_ready(state, readiness_settings))
+
+
+def _unavailable_state_verdict(
+    state: BackendReadinessState,
+    settings: ReadinessSettings,
+    now: datetime | None,
+) -> ReadinessVerdict | None:
     checked_at = _parse_datetime(state.checked_at)
     if checked_at is None:
         return ReadinessVerdict(ready=False, reason="backend readiness state is invalid", state=state)
     current_time = now if now is not None else datetime.now(UTC)
     age_seconds = int((current_time.astimezone(UTC) - checked_at).total_seconds())
-    if age_seconds > readiness_settings.state_stale_after_seconds:
+    if age_seconds > settings.state_stale_after_seconds:
         return ReadinessVerdict(ready=False, reason="backend readiness state is stale", state=state)
-    if state.consecutive_failures >= readiness_settings.failure_threshold:
+    if state.last_success_at is None:
+        return ReadinessVerdict(ready=False, reason="backend readiness has not succeeded yet", state=state)
+    if state.consecutive_failures >= settings.failure_threshold:
         return ReadinessVerdict(ready=False, reason="backend readiness failure threshold reached", state=state)
-    return ReadinessVerdict(ready=True, reason=None, state=_state_with_effective_ready(state, readiness_settings))
+    return None
 
 
 def _state_with_effective_ready(

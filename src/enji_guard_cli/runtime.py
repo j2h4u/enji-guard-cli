@@ -6,9 +6,9 @@ from datetime import UTC, datetime
 from enji_guard_cli.auth import backend_readiness_probe_async, start_auto_refresh_task
 from enji_guard_cli.mcp_server import McpTransport, create_mcp_server, run_mcp_server_async
 from enji_guard_cli.readiness import (
-    INITIAL_BACKEND_READINESS_STATE,
     BackendReadinessProbe,
     BackendReadinessState,
+    backend_readiness_starting_state,
     backend_readiness_state_after_probe,
     write_backend_readiness_state,
 )
@@ -66,14 +66,16 @@ def start_backend_readiness_task() -> asyncio.Task[None] | None:
     settings = default_settings().readiness
     if not settings.enabled:
         return None
+    initial_state = backend_readiness_starting_state(checked_at=datetime.now(UTC))
+    _write_backend_readiness_state(settings, initial_state)
     return asyncio.create_task(
-        _backend_readiness_loop(settings=settings),
+        _backend_readiness_loop(settings=settings, initial_state=initial_state),
         name="enji-guard-backend-readiness",
     )
 
 
-async def _backend_readiness_loop(*, settings: ReadinessSettings) -> None:
-    state = INITIAL_BACKEND_READINESS_STATE
+async def _backend_readiness_loop(*, settings: ReadinessSettings, initial_state: BackendReadinessState) -> None:
+    state = initial_state
     while True:
         try:
             state = await _run_backend_readiness_probe(settings=settings, previous=state)
@@ -90,6 +92,12 @@ async def _run_backend_readiness_probe(
     checked_at = datetime.now(UTC)
     probe = await backend_readiness_probe_async()
     state = backend_readiness_state_after_probe(previous, probe, checked_at=checked_at)
+    _write_backend_readiness_state(settings, state)
+    _log_backend_readiness_probe(state, probe)
+    return state
+
+
+def _write_backend_readiness_state(settings: ReadinessSettings, state: BackendReadinessState) -> None:
     try:
         write_backend_readiness_state(settings.state_file, state)
     except OSError as exc:
@@ -99,8 +107,6 @@ async def _run_backend_readiness_probe(
             "enji_backend_readiness_state_write_failed",
             {"code": "STORAGE", "message": str(exc), "state_file": str(settings.state_file)},
         )
-    _log_backend_readiness_probe(state, probe)
-    return state
 
 
 def _log_backend_readiness_probe(state: BackendReadinessState, probe: BackendReadinessProbe) -> None:
