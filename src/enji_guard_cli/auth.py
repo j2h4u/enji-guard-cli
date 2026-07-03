@@ -17,6 +17,7 @@ from enji_guard_cli.auth_impl.cookies import (
     jwt_expires_at,
     merge_set_cookie_headers,
     normalize_cookie_header,
+    set_cookie_names,
     should_persist_transient_refresh_cookies,
 )
 from enji_guard_cli.auth_impl.store import (
@@ -518,11 +519,35 @@ async def _refresh_cookie_auth_unlocked(path: Path, stored_auth: StoredAuth, cli
         raise EnjiHttpError(
             "AUTH_REQUIRED", "stored refresh cookie is not authenticated", status_code=response.status_code
         )
+    _log_refresh_set_cookie_names(response)
+    _validate_successful_refresh_cookie_rotation(response)
     refreshed_auth = _persist_refresh_response_cookies(path, stored_auth, response)
     raise_for_response_status(response, operation="auth refresh", expected_statuses={HTTP_OK})
     if not response.set_cookie_headers:
         raise EnjiHttpError("UPSTREAM", "auth refresh did not return Set-Cookie")
     return refreshed_auth
+
+
+def _validate_successful_refresh_cookie_rotation(response: EnjiHttpResponse) -> None:
+    if response.status_code != HTTP_OK:
+        return
+    names = set_cookie_names(response.set_cookie_headers)
+    if "access_token" not in names:
+        raise EnjiHttpError("UPSTREAM", "auth refresh did not return access_token Set-Cookie")
+    if "refresh_token" not in names:
+        raise EnjiHttpError("UPSTREAM", "auth refresh did not return refresh_token Set-Cookie")
+
+
+def _log_refresh_set_cookie_names(response: EnjiHttpResponse) -> None:
+    if response.status_code != HTTP_OK:
+        return
+    names = set_cookie_names(response.set_cookie_headers)
+    log_event(
+        _LOGGER,
+        logging.INFO,
+        "enji_auth_refresh_set_cookie_received",
+        {"set_cookie_names": ",".join(names), "set_cookie_count": len(names)},
+    )
 
 
 def _persist_refresh_response_cookies(
