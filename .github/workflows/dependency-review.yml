@@ -38,13 +38,18 @@ jobs:
 
   dependency-review:
     needs: [changes]
-    if: needs.changes.outputs.requires-dependency-review == 'true'
     runs-on: ubuntu-latest
     steps:
+      - name: Skip docs-only change
+        if: needs.changes.outputs.requires-dependency-review != 'true'
+        run: echo "No dependency review required."
+
       - name: Checkout
+        if: needs.changes.outputs.requires-dependency-review == 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Dependency review
+        if: needs.changes.outputs.requires-dependency-review == 'true'
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: moderate

@@ -59,93 +59,126 @@ jobs:
 
   quality:
     needs: [changes]
-    if: needs.changes.outputs.requires-code-checks == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Skip docs-only change
+        if: needs.changes.outputs.requires-code-checks != 'true'
+        run: echo "No code quality checks required."
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: needs.changes.outputs.requires-code-checks == 'true'
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        if: needs.changes.outputs.requires-code-checks == 'true'
         with:
           python-version: "3.14"
 
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        if: needs.changes.outputs.requires-code-checks == 'true'
         with:
           enable-cache: true
 
       - uses: taiki-e/install-action@ace6ebe54a6a0c86dfb5f7764b17f793b6925bc3 # v2.82.3
+        if: needs.changes.outputs.requires-code-checks == 'true'
         with:
           tool: just
 
       - name: Install dependencies
+        if: needs.changes.outputs.requires-code-checks == 'true'
         run: uv sync --locked
 
       - name: Static quality gate
+        if: needs.changes.outputs.requires-code-checks == 'true'
         run: just check
 
   test:
     needs: [changes]
-    if: needs.changes.outputs.requires-code-checks == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Skip docs-only change
+        if: needs.changes.outputs.requires-code-checks != 'true'
+        run: echo "No tests required."
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: needs.changes.outputs.requires-code-checks == 'true'
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        if: needs.changes.outputs.requires-code-checks == 'true'
         with:
           python-version: "3.14"
 
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        if: needs.changes.outputs.requires-code-checks == 'true'
         with:
           enable-cache: true
 
       - uses: taiki-e/install-action@ace6ebe54a6a0c86dfb5f7764b17f793b6925bc3 # v2.82.3
+        if: needs.changes.outputs.requires-code-checks == 'true'
         with:
           tool: just
 
       - name: Install dependencies
+        if: needs.changes.outputs.requires-code-checks == 'true'
         run: uv sync --locked
 
       - name: Unit tests
+        if: needs.changes.outputs.requires-code-checks == 'true'
         run: just unit
 
   crap:
     needs: [changes]
-    if: needs.changes.outputs.requires-code-checks == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Skip docs-only change
+        if: needs.changes.outputs.requires-code-checks != 'true'
+        run: echo "No CRAP check required."
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: needs.changes.outputs.requires-code-checks == 'true'
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        if: needs.changes.outputs.requires-code-checks == 'true'
         with:
           python-version: "3.14"
 
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        if: needs.changes.outputs.requires-code-checks == 'true'
         with:
           enable-cache: true
 
       - uses: taiki-e/install-action@ace6ebe54a6a0c86dfb5f7764b17f793b6925bc3 # v2.82.3
+        if: needs.changes.outputs.requires-code-checks == 'true'
         with:
           tool: just
 
       - name: Install dependencies
+        if: needs.changes.outputs.requires-code-checks == 'true'
         run: uv sync --locked
 
       - name: CRAP gate
+        if: needs.changes.outputs.requires-code-checks == 'true'
         run: just crap-check
 
   docker-build:
     needs: [changes]
-    if: needs.changes.outputs.requires-code-checks == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Skip docs-only change
+        if: needs.changes.outputs.requires-code-checks != 'true'
+        run: echo "No Docker build required."
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: needs.changes.outputs.requires-code-checks == 'true'
 
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        if: needs.changes.outputs.requires-code-checks == 'true'
 
       - name: Build Docker image
+        if: needs.changes.outputs.requires-code-checks == 'true'
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .

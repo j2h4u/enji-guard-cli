@@ -49,7 +49,6 @@ jobs:
   analyze:
     name: Analyze Python
     needs: [changes]
-    if: needs.changes.outputs.requires-codeql == 'true'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -57,16 +56,23 @@ jobs:
       security-events: write
 
     steps:
+      - name: Skip docs-only change
+        if: needs.changes.outputs.requires-codeql != 'true'
+        run: echo "No CodeQL analysis required."
+
       - name: Checkout
+        if: needs.changes.outputs.requires-codeql == 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Initialize CodeQL
+        if: needs.changes.outputs.requires-codeql == 'true'
         uses: github/codeql-action/init@1a818fd5f97ed0ee9a823421bd5b171add01227f # v4.36.2
         with:
           languages: python
           queries: security-extended
 
       - name: Perform CodeQL Analysis
+        if: needs.changes.outputs.requires-codeql == 'true'
         uses: github/codeql-action/analyze@1a818fd5f97ed0ee9a823421bd5b171add01227f # v4.36.2
         with:
           category: "/language:python"
