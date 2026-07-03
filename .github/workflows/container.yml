@@ -71,6 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          fetch-depth: 0
           ref: ${{ github.event.release.tag_name || github.event.workflow_run.head_sha || github.sha }}
 
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
@@ -81,11 +82,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve release metadata
+        id: release-metadata
+        env:
+          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          release_tag="${EVENT_RELEASE_TAG}"
+          if [ -z "${release_tag}" ]; then
+            release_tag="$(git tag --points-at "${SOURCE_SHA}" --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n 1)"
+          fi
+          echo "release-tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "source-sha=${SOURCE_SHA}" >> "${GITHUB_OUTPUT}"
+
       - name: Resolve image tags
         id: image-tags
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          RELEASE_TAG: ${{ steps.release-metadata.outputs.release-tag }}
+          SOURCE_SHA: ${{ steps.release-metadata.outputs.source-sha }}
         run: |
           {
             echo "tags<<EOF"
@@ -101,8 +115,8 @@ jobs:
       - name: Resolve package version
         id: package-version
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          RELEASE_TAG: ${{ steps.release-metadata.outputs.release-tag }}
+          SOURCE_SHA: ${{ steps.release-metadata.outputs.source-sha }}
         run: |
           if [[ "${RELEASE_TAG}" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
             version="${RELEASE_TAG#v}"
