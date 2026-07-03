@@ -49,6 +49,13 @@ def merge_set_cookie_headers(cookie_header: str, set_cookie_headers: Iterable[st
     return CookieHeader(value=normalized, count=len(cookie))
 
 
+def set_cookie_names(set_cookie_headers: Iterable[str]) -> tuple[str, ...]:
+    cookie = SimpleCookie()
+    for set_cookie_header in set_cookie_headers:
+        cookie.load(set_cookie_header)
+    return tuple(sorted(cookie))
+
+
 def should_persist_transient_refresh_cookies(
     status_code: int, transient_status_codes: frozenset[int], set_cookie_headers: Iterable[str]
 ) -> bool:

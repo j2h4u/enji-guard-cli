@@ -26,6 +26,7 @@ from enji_guard_cli.auth import (
     load_stored_auth,
     merge_set_cookie_headers,
     refresh_auth_async,
+    set_cookie_names,
     start_auto_refresh_task,
 )
 from enji_guard_cli.auth import StoredAuth as RuntimeStoredAuth
@@ -133,6 +134,15 @@ def test_merge_set_cookie_headers_updates_existing_cookie_without_keeping_attrib
     assert updated.count == 2
 
 
+def test_set_cookie_names_returns_only_cookie_names() -> None:
+    assert set_cookie_names(
+        [
+            "access_token=secret; Path=/; HttpOnly",
+            "refresh_token=also-secret; Path=/api/v1/auth; HttpOnly",
+        ]
+    ) == ("access_token", "refresh_token")
+
+
 def test_cookie_access_expires_at_reads_access_token_jwt_expiration(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     expires_at = datetime(2026, 6, 29, 12, 15, tzinfo=UTC)
@@ -221,7 +231,7 @@ def test_auth_status_returns_rate_limit_payload(tmp_path: Path) -> None:
 
 def test_auth_status_refreshes_cookie_on_auth_invalid(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
-    import_cookie("access=old; refresh=long", auth_file)
+    import_cookie("access_token=old; refresh_token=long", auth_file)
     captured: list[tuple[str, str, str | None]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -235,7 +245,10 @@ def test_auth_status_refreshes_cookie_on_auth_invalid(tmp_path: Path) -> None:
             return httpx.Response(
                 200,
                 json={"message": "token refreshed"},
-                headers={"Set-Cookie": "access=new; Path=/; HttpOnly"},
+                headers=[
+                    ("Set-Cookie", "access_token=new; Path=/; HttpOnly"),
+                    ("Set-Cookie", "refresh_token=new-refresh; Path=/api/v1/auth; HttpOnly"),
+                ],
                 request=request,
             )
         return httpx.Response(
@@ -253,13 +266,16 @@ def test_auth_status_refreshes_cookie_on_auth_invalid(tmp_path: Path) -> None:
     assert status["authenticated"] is True
     assert status["email"] == "user@example.com"
     assert captured == [
-        ("GET", "/api/v1/auth/me", "access=old; refresh=long"),
-        ("POST", "/api/v1/auth/refresh", "access=old; refresh=long"),
-        ("GET", "/api/v1/auth/me", "access=new; refresh=long"),
+        ("GET", "/api/v1/auth/me", "access_token=old; refresh_token=long"),
+        ("POST", "/api/v1/auth/refresh", "access_token=old; refresh_token=long"),
+        ("GET", "/api/v1/auth/me", "access_token=new; refresh_token=new-refresh"),
     ]
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
-    assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access=new; refresh=long"}
+    assert stored_auth["credential"] == {
+        "type": "cookie",
+        "cookie_header": "access_token=new; refresh_token=new-refresh",
+    }
 
 
 def test_backend_readiness_probe_does_not_refresh_on_auth_invalid(tmp_path: Path) -> None:
@@ -312,7 +328,7 @@ def test_auth_status_reports_auth_required_when_refresh_cookie_is_invalid(tmp_pa
 
 def test_auth_status_preserves_rate_limit_after_refresh(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
-    import_cookie("access=old; refresh=long", auth_file)
+    import_cookie("access_token=old; refresh_token=long", auth_file)
     captured: list[tuple[str, str]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -323,7 +339,10 @@ def test_auth_status_preserves_rate_limit_after_refresh(tmp_path: Path) -> None:
             return httpx.Response(
                 200,
                 json={"message": "token refreshed"},
-                headers={"Set-Cookie": "access=new; Path=/; HttpOnly"},
+                headers=[
+                    ("Set-Cookie", "access_token=new; Path=/; HttpOnly"),
+                    ("Set-Cookie", "refresh_token=new-refresh; Path=/api/v1/auth; HttpOnly"),
+                ],
                 request=request,
             )
         return httpx.Response(429, headers={"Retry-After": "7"}, request=request)
@@ -341,7 +360,7 @@ def test_auth_status_preserves_rate_limit_after_refresh(tmp_path: Path) -> None:
 
 def test_auth_status_reports_repeated_auth_invalid_after_refresh(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
-    import_cookie("access=old; refresh=long", auth_file)
+    import_cookie("access_token=old; refresh_token=long", auth_file)
     captured: list[tuple[str, str]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -350,7 +369,10 @@ def test_auth_status_reports_repeated_auth_invalid_after_refresh(tmp_path: Path)
             return httpx.Response(
                 200,
                 json={"message": "token refreshed"},
-                headers={"Set-Cookie": "access=new; Path=/; HttpOnly"},
+                headers=[
+                    ("Set-Cookie", "access_token=new; Path=/; HttpOnly"),
+                    ("Set-Cookie", "refresh_token=new-refresh; Path=/api/v1/auth; HttpOnly"),
+                ],
                 request=request,
             )
         return httpx.Response(401, json={"error": {"code": "AUTH_INVALID"}}, request=request)
@@ -401,6 +423,32 @@ def test_refresh_auth_updates_rotated_access_and_refresh_cookies(tmp_path: Path)
         "type": "cookie",
         "cookie_header": f"access_token={unsigned_jwt({'exp': int(expires_at.timestamp())})}; refresh_token=new",
     }
+
+
+def test_refresh_auth_rejects_success_response_without_refresh_cookie(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"message": "token refreshed"},
+            headers=[("Set-Cookie", f"access_token={unsigned_jwt({'exp': 1782744000})}; Path=/; HttpOnly")],
+            request=request,
+        )
+
+    async def run_refresh() -> AuthRefreshPayload:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await refresh_auth_async(auth_file, HttpxEnjiHttpClient(client))
+
+    with pytest.raises(AuthError) as exc_info:
+        asyncio.run(run_refresh())
+
+    assert exc_info.value.code == "UPSTREAM"
+    assert exc_info.value.message == "auth refresh did not return refresh_token Set-Cookie"
+    stored_auth = load_stored_auth(auth_file)
+    assert stored_auth is not None
+    assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}
 
 
 def test_refresh_auth_persists_rotated_cookies_before_transient_error(tmp_path: Path) -> None:
