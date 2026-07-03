@@ -6,6 +6,8 @@ This repository is an early prototype. It supports a shared core, a Typer CLI,
 and a FastMCP server that can expose Enji Guard access and compact report
 metadata to local tools.
 
+See [ROADMAP.md](ROADMAP.md) for the product status and remaining scope.
+
 ## Mental Model
 
 Enji Guard groups GitHub repositories into projects. Most workflows should use

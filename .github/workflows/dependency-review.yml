@@ -9,7 +9,36 @@ permissions:
   pull-requests: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      requires-dependency-review: ${{ steps.classify.outputs.requires-dependency-review }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed files
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed_files="$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")"
+          if [ -z "${changed_files}" ]; then
+            echo "requires-dependency-review=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if echo "${changed_files}" | grep -Ev '^(\.planning/|docs/|README[.]md$|AGENTS[.]md$|CHANGELOG[.]md$|ROADMAP[.]md$|SECURITY[.]md$|.*[.]md$)' >/dev/null; then
+            echo "requires-dependency-review=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "requires-dependency-review=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   dependency-review:
+    needs: [changes]
+    if: needs.changes.outputs.requires-dependency-review == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
