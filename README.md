@@ -225,6 +225,24 @@ Cookie auth is temporary and will be removed when API-token support is available
 from Enji. MCP HTTP transports do not add their own authentication; keep them
 bound to loopback or behind an explicit trusted boundary.
 
+## Documentation
+
+- [ROADMAP.md](ROADMAP.md): product status, remaining MCP scope, and modular
+  install notes.
+- [CONTRIBUTING.md](CONTRIBUTING.md): change intake, acceptance, and handoff
+  rules.
+- [AGENTS.md](AGENTS.md): concise development, QA, and ops rules for coding
+  agents.
+- [SECURITY.md](SECURITY.md): credential handling, supported versions, and MCP
+  exposure notes.
+- [CHANGELOG.md](CHANGELOG.md): release history.
+- [docs/cli-surface-design.md](docs/cli-surface-design.md): CLI ontology and
+  command-shape decisions.
+- [docs/enji-cli-mcp-spec.md](docs/enji-cli-mcp-spec.md): product surface model
+  for core, CLI, and MCP.
+- [docs/deployment.md](docs/deployment.md): GHCR image and production-style
+  Docker deployment.
+
 ## License
 
 PolyForm Noncommercial License 1.0.0. Commercial use requires separate

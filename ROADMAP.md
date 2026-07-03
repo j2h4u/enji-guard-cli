@@ -31,6 +31,23 @@ supported runtime.
   report summaries, and focused report reading.
 - Validate the MCP surface with real agents and adjust only where the workflow
   is unclear or noisy.
+- Explore modular install modes so the tool can be used as CLI-only when API
+  tokens make background cookie refresh unnecessary.
 
 After that, the project should move into maintenance mode rather than broad
 feature development.
+
+## Appendix: Modular Install Notes
+
+The product should remain one project with multiple ways to run it, not a split
+between separate CLI and service products.
+
+- Base install: CLI and core only, suitable for API-token auth and direct agent
+  use through `uv`, `uvx`, or a host wrapper in `/usr/local/bin`.
+- MCP install: optional MCP dependencies and tools for agents that need a
+  curated read-mostly service surface.
+- Docker service: full runtime for MCP plus temporary cookie refresh while
+  browser-cookie auth is still needed.
+
+When Enji API tokens are available, CLI-only usage should not require Docker,
+MCP, supervisor tasks, or background refresh.
