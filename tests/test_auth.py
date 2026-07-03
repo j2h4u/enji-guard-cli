@@ -11,14 +11,13 @@ import pytest
 from typer.testing import CliRunner
 
 from enji_guard_cli.auth import (
-    AUTH_REFRESH_ORIGIN,
-    AUTH_REFRESH_REFERER,
     AUTH_REFRESH_USER_AGENT,
     AuthError,
     AuthRefreshPayload,
     AuthStatusPayload,
     auth_headers,
     auth_status_async,
+    backend_readiness_probe_async,
     cookie_access_expires_at,
     cookie_refresh_sleep_seconds,
     import_bearer_token,
@@ -30,8 +29,12 @@ from enji_guard_cli.auth import (
 )
 from enji_guard_cli.auth import StoredAuth as RuntimeStoredAuth
 from enji_guard_cli.cli import app
-from enji_guard_cli.settings import AutoRefreshSettings
+from enji_guard_cli.readiness import BackendReadinessProbe
+from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER, AutoRefreshSettings
 from enji_guard_cli.transport import HttpxEnjiHttpClient
+
+AUTH_REFRESH_ORIGIN = DEFAULT_GUARD_ORIGIN
+AUTH_REFRESH_REFERER = DEFAULT_GUARD_REFERER
 
 
 class ImportPayload(TypedDict):
@@ -215,6 +218,31 @@ def test_auth_status_refreshes_cookie_on_auth_invalid(tmp_path: Path) -> None:
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access=new; refresh=long"}
+
+
+def test_backend_readiness_probe_does_not_refresh_on_auth_invalid(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access=old; refresh=long", auth_file)
+    captured: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append((request.method, request.url.path))
+        return httpx.Response(401, json={"error": {"code": "AUTH_INVALID"}}, request=request)
+
+    async def run_probe() -> BackendReadinessProbe:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await backend_readiness_probe_async(auth_file, HttpxEnjiHttpClient(client))
+
+    probe = asyncio.run(run_probe())
+
+    assert probe.ready is False
+    assert probe.failure_kind == "auth"
+    assert probe.failure_code == "AUTH_INVALID"
+    assert probe.credential_type == "cookie"
+    assert captured == [("GET", "/api/v1/auth/me")]
+    stored_auth = load_stored_auth(auth_file)
+    assert stored_auth is not None
+    assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access=old; refresh=long"}
 
 
 def test_auth_status_reports_auth_required_when_refresh_cookie_is_invalid(tmp_path: Path) -> None:

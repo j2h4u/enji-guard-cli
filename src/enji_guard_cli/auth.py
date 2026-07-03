@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import fcntl
 import logging
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +29,7 @@ from enji_guard_cli.auth_impl.store import (
 from enji_guard_cli.auth_impl.store import (
     replace_cookie_credential as store_replace_cookie_credential,
 )
+from enji_guard_cli.readiness import BackendReadinessProbe
 from enji_guard_cli.settings import DEFAULT_BASE_URL, AutoRefreshSettings, default_settings
 from enji_guard_cli.telemetry import log_event
 from enji_guard_cli.transport import (
@@ -41,8 +43,6 @@ from enji_guard_cli.transport import (
 
 AUTH_REFRESH_PATH = "/api/v1/auth/refresh"
 AUTH_INVALID_CODE = "AUTH_INVALID"
-AUTH_REFRESH_ORIGIN = "https://guard.enji.ai"
-AUTH_REFRESH_REFERER = "https://guard.enji.ai/"
 AUTH_REFRESH_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
 )
@@ -190,6 +190,12 @@ def refresh_auth(auth_file: Path | None = None, client: EnjiHttpClient | None = 
     return asyncio.run(refresh_auth_async(auth_file, client))
 
 
+def backend_readiness_probe(
+    auth_file: Path | None = None, client: EnjiHttpClient | None = None
+) -> BackendReadinessProbe:
+    return asyncio.run(backend_readiness_probe_async(auth_file, client))
+
+
 async def auth_status_async(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> AuthStatusPayload:
     target = auth_file if auth_file is not None else default_auth_file()
     if not target.exists():
@@ -218,6 +224,48 @@ async def refresh_auth_async(auth_file: Path | None = None, client: EnjiHttpClie
             return _auth_refresh_payload(target, refreshed_auth)
     except EnjiHttpError as exc:
         raise AuthError(exc.code, exc.message) from exc
+
+
+async def backend_readiness_probe_async(
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> BackendReadinessProbe:
+    started_at = time.monotonic()
+    target = auth_file if auth_file is not None else default_auth_file()
+    if not target.exists():
+        return _backend_readiness_failure(
+            started_at,
+            BackendReadinessProbe(
+                ready=False,
+                failure_kind="storage",
+                failure_code="AUTH_REQUIRED",
+                failure_message="auth file does not exist",
+            ),
+        )
+
+    stored_auth = load_auth_file(target)
+    if stored_auth is None:
+        return _backend_readiness_failure(
+            started_at,
+            BackendReadinessProbe(
+                ready=False,
+                failure_kind="storage",
+                failure_code="AUTH_REQUIRED",
+                failure_message="auth file is invalid",
+            ),
+        )
+
+    if client is not None:
+        return await _backend_readiness_probe_with_client(stored_auth, client, started_at=started_at)
+
+    settings = default_settings()
+    async with HttpxEnjiHttpClient() as owned_client:
+        return await _backend_readiness_probe_with_client(
+            stored_auth,
+            owned_client,
+            started_at=started_at,
+            timeout_seconds=settings.readiness.heartbeat_timeout_seconds,
+        )
 
 
 def start_auto_refresh_task() -> asyncio.Task[None] | None:
@@ -355,6 +403,77 @@ async def _auth_status_after_refresh(
     )
 
 
+async def _backend_readiness_probe_with_client(
+    stored_auth: StoredAuth,
+    client: EnjiHttpClient,
+    *,
+    started_at: float,
+    timeout_seconds: float | None = None,
+) -> BackendReadinessProbe:
+    credential_type = stored_auth["credential"]["type"]
+    try:
+        response = await _request_auth_status(stored_auth, client, timeout_seconds=timeout_seconds)
+    except EnjiHttpError as exc:
+        return _backend_readiness_failure(
+            started_at,
+            BackendReadinessProbe(
+                ready=False,
+                failure_kind="upstream",
+                failure_code=exc.code,
+                failure_message=exc.message,
+                failure_status_code=exc.status_code,
+                credential_type=credential_type,
+            ),
+        )
+    if response.status_code == HTTP_OK:
+        return BackendReadinessProbe(
+            ready=True,
+            credential_type=credential_type,
+            elapsed_ms=_elapsed_ms(started_at),
+        )
+    if response.status_code in HTTP_AUTH_FAILURE_CODES or is_auth_invalid_response(response):
+        return _backend_readiness_failure(
+            started_at,
+            BackendReadinessProbe(
+                ready=False,
+                failure_kind="auth",
+                failure_code=AUTH_INVALID_CODE if is_auth_invalid_response(response) else "AUTH_REQUIRED",
+                failure_message="stored credential is not authenticated",
+                failure_status_code=response.status_code,
+                credential_type=credential_type,
+            ),
+        )
+    try:
+        raise_for_response_status(
+            response,
+            operation="backend readiness",
+            expected_statuses=HTTP_AUTH_FAILURE_CODES | {HTTP_OK},
+        )
+    except EnjiHttpError as exc:
+        return _backend_readiness_failure(
+            started_at,
+            BackendReadinessProbe(
+                ready=False,
+                failure_kind="upstream",
+                failure_code=exc.code,
+                failure_message=exc.message,
+                failure_status_code=exc.status_code,
+                credential_type=credential_type,
+            ),
+        )
+    return _backend_readiness_failure(
+        started_at,
+        BackendReadinessProbe(
+            ready=False,
+            failure_kind="upstream",
+            failure_code="UPSTREAM",
+            failure_message="backend readiness failed",
+            failure_status_code=response.status_code,
+            credential_type=credential_type,
+        ),
+    )
+
+
 async def refresh_cookie_auth(path: Path, stored_auth: StoredAuth, client: EnjiHttpClient) -> StoredAuth:
     async with _COOKIE_REFRESH_LOCK:
         with _cookie_refresh_file_lock(path):
@@ -468,11 +587,12 @@ def is_auth_invalid_response(response: EnjiHttpResponse) -> bool:
 
 
 def _auth_refresh_headers(stored_auth: StoredAuth) -> dict[str, str]:
+    settings = default_settings().auth
     headers = auth_headers(stored_auth)
     headers.update(
         {
-            "Origin": AUTH_REFRESH_ORIGIN,
-            "Referer": AUTH_REFRESH_REFERER,
+            "Origin": settings.guard_origin,
+            "Referer": settings.guard_referer,
             "User-Agent": AUTH_REFRESH_USER_AGENT,
         }
     )
@@ -493,16 +613,38 @@ def _auth_refresh_payload(auth_file: Path, stored_auth: StoredAuth) -> AuthRefre
     }
 
 
-async def _request_auth_status(stored_auth: StoredAuth, client: EnjiHttpClient) -> EnjiHttpResponse:
+async def _request_auth_status(
+    stored_auth: StoredAuth,
+    client: EnjiHttpClient,
+    *,
+    timeout_seconds: float | None = None,
+) -> EnjiHttpResponse:
+    request_timeout = timeout_seconds if timeout_seconds is not None else default_settings().transport.timeout_seconds
     return await client.request(
         EnjiHttpRequest(
             method="GET",
             url=f"{stored_auth['base_url']}/api/v1/auth/me",
             headers=auth_headers(stored_auth),
-            timeout_seconds=20.0,
+            timeout_seconds=request_timeout,
             operation="auth status",
         )
     )
+
+
+def _backend_readiness_failure(started_at: float, probe: BackendReadinessProbe) -> BackendReadinessProbe:
+    return BackendReadinessProbe(
+        ready=False,
+        failure_kind=probe.failure_kind,
+        failure_code=probe.failure_code,
+        failure_message=probe.failure_message,
+        failure_status_code=probe.failure_status_code,
+        credential_type=probe.credential_type,
+        elapsed_ms=_elapsed_ms(started_at),
+    )
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return int((time.monotonic() - started_at) * 1000)
 
 
 def _profile_from_response(response: EnjiHttpResponse) -> AuthenticatedProfile:

@@ -33,8 +33,12 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 - Recreate the service after runtime, env, image, or auth-mount changes.
 - Application telemetry lives in `~/.config/enji-guard/logs/telemetry.jsonl`;
   stdout/stderr belong to CLI results, progress, and CLI errors.
-- The container runs `enji-guard run`: supervisor owns background cookie
-  refresh and MCP as sibling tasks. MCP must not own refresh.
+- The container runs `enji-guard run`: supervisor owns MCP, background cookie
+  refresh, and backend readiness heartbeat as sibling tasks. MCP must not own
+  refresh.
+- Docker health is service readiness: local MCP plus cached authenticated Enji
+  backend readiness. Heartbeat records auth/backend failures; it must not call
+  refresh directly.
 - The host auth file must stay writable because Enji rotates refresh cookies.
 - Cookie bootstrap is one-time: refresh in the browser first, then import the
   current cookie state. Prefer a `Cookie` header from any Fleet request made

@@ -131,6 +131,11 @@ The image default stays loopback-safe; the compose files explicitly bind inside
 the container to all interfaces only because they publish the port on host
 loopback.
 
+Docker health is full service readiness: local MCP plus cached authenticated
+Enji backend readiness. The supervisor refreshes cookie auth and probes backend
+readiness as separate sibling tasks; the probe records failures but does not
+perform refresh itself.
+
 For registry-based deployment, use the GHCR image and compose example in
 `docs/deployment.md`.
 

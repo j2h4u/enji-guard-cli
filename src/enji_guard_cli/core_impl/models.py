@@ -4,6 +4,18 @@ from enum import StrEnum
 from typing import Literal, NotRequired, TypedDict
 
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
+from enji_guard_cli.settings import (
+    DEFAULT_REPO_SORT as SETTINGS_DEFAULT_REPO_SORT,
+)
+from enji_guard_cli.settings import (
+    DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS as SETTINGS_DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS,
+)
+from enji_guard_cli.settings import (
+    DEFAULT_REPORT_WAIT_POLL_SECONDS as SETTINGS_DEFAULT_REPORT_WAIT_POLL_SECONDS,
+)
+from enji_guard_cli.settings import (
+    DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS as SETTINGS_DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS,
+)
 
 type OperationResult = object | Awaitable[object]
 type OperationExecutor = Callable[..., OperationResult]
@@ -16,7 +28,7 @@ RECON_REPORT_SCHEMA = "upfront.recon.report"
 AUDIT_REPORT_SCHEMA = "upfront.audit.report"
 DEFAULT_EXECUTION_FLOW = "single"
 DEFAULT_FLOW_CONFIG: JsonObjectPayload = {}
-DEFAULT_REPO_SORT: RepoSort = "default"
+DEFAULT_REPO_SORT: RepoSort = SETTINGS_DEFAULT_REPO_SORT
 TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "canceled", "cancelled", "skipped"})
 WORKDAY_SCHEDULE_DAYS = ("mon", "tue", "wed", "thu", "fri")
 ALL_SCHEDULE_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -105,9 +117,9 @@ type ReportAuditState = Literal["missing", "ready", "running"]
 type ReportWaitReason = Literal["complete", "waiting", "timeout", "failed", "stale"]
 type ReportWaitCallback = Callable[[dict[str, object]], None]
 
-DEFAULT_REPORT_WAIT_POLL_SECONDS = 30
-DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS = 2700
-DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS = 120
+DEFAULT_REPORT_WAIT_POLL_SECONDS = SETTINGS_DEFAULT_REPORT_WAIT_POLL_SECONDS
+DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS = SETTINGS_DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS
+DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS = SETTINGS_DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS
 FAILED_REPORT_WAIT_STATUSES = frozenset({"failed", "canceled", "cancelled"})
 
 

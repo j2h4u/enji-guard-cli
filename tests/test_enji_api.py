@@ -4,8 +4,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from enji_guard_cli.auth import (
-    AUTH_REFRESH_ORIGIN,
-    AUTH_REFRESH_REFERER,
     AUTH_REFRESH_USER_AGENT,
     import_bearer_token,
     import_cookie,
@@ -39,7 +37,11 @@ from enji_guard_cli.enji_api import (
     start_audit_run,
 )
 from enji_guard_cli.enji_api_impl.client import get_json_object
+from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse
+
+AUTH_REFRESH_ORIGIN = DEFAULT_GUARD_ORIGIN
+AUTH_REFRESH_REFERER = DEFAULT_GUARD_REFERER
 
 
 @dataclass

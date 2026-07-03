@@ -32,9 +32,6 @@ from enji_guard_cli.cli_impl.write_targets import (
     parse_schedule_set_args,
 )
 from enji_guard_cli.core import (
-    DEFAULT_REPO_SORT,
-    DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS,
-    DEFAULT_REPORT_WAIT_POLL_SECONDS,
     AuthError,
     AuthStatusPayload,
     EmailPreferenceUpdate,
@@ -68,8 +65,9 @@ from enji_guard_cli.core import (
 )
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.mcp_server import create_mcp_server, run_mcp_server
+from enji_guard_cli.readiness import readiness_verdict
 from enji_guard_cli.runtime import run_service
-from enji_guard_cli.settings import DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT, DEFAULT_MCP_TRANSPORT
+from enji_guard_cli.settings import DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT, DEFAULT_MCP_TRANSPORT, default_settings
 from enji_guard_cli.telemetry import configure_logging
 
 MAIN_HELP = """Agent-oriented CLI for Enji Guard repository audits.
@@ -110,13 +108,12 @@ AUTH_STATUS_OPERATION = resolve_operation_spec(OperationName.AUTH_STATUS)
 get_access = ACCESS_OPERATION.execute
 auth_status = AUTH_STATUS_OPERATION.execute
 _cli_state: dict[str, object] = {"project": None, "json": False}
+_DEFAULT_CLI_SETTINGS = default_settings()
 
 type JsonCommandAction = Callable[[], OperationResult]
-HEALTH_READY_TIMEOUT_SECONDS = 2.0
 ANY_IPV4_HOST = str(ip_address(0))
 ANY_IPV6_HOST = str(IPv6Address(0))
 LOCALHOST_NAME = "localhost"
-DEFAULT_REPORT_WAIT_TIMEOUT = "45m"
 SCHEDULE_SET_EPILOG = """
 Targets: REPO, --project PROJECT --all-repos, or --all-projects.
 Options: --enabled on|off, --frequency daily|workdays|weekly-3x|weekly-2x|weekly|monthly, --timezone TZ, --json.
@@ -180,11 +177,11 @@ def main(
         raise typer.Exit
 
 
-@app.command(help="Return local process liveness.")
+@app.command(help="Return process liveness or full service readiness.")
 def health(
     ready: Annotated[
         bool,
-        typer.Option("--ready", help="Also check the local MCP listener."),
+        typer.Option("--ready", help="Also check local MCP and cached Enji backend readiness."),
     ] = False,
 ) -> None:
     if ready:
@@ -193,14 +190,30 @@ def health(
         except OSError as exc:
             _echo_error("UNREADY", f"MCP listener is not ready at {DEFAULT_HTTP_HOST}:{DEFAULT_HTTP_PORT}: {exc}")
             raise typer.Exit(1) from None
+        _check_backend_readiness()
         typer.echo("ready")
         return
     typer.echo("ok")
 
 
 def _check_local_listener(host: str, port: int) -> None:
-    with socket.create_connection((host, port), timeout=HEALTH_READY_TIMEOUT_SECONDS):
+    with socket.create_connection(
+        (host, port),
+        timeout=default_settings().service.local_readiness_timeout_seconds,
+    ):
         pass
+
+
+def _check_backend_readiness() -> None:
+    verdict = readiness_verdict()
+    if verdict.ready:
+        return
+    reason = verdict.reason if verdict.reason is not None else "backend readiness failed"
+    state = verdict.state
+    if state is not None and state.failure_code is not None:
+        reason = f"{reason}: {state.failure_code}"
+    _echo_error("UNREADY", reason)
+    raise typer.Exit(1) from None
 
 
 def _validate_http_bind(host: str, transport: str, *, allow_external_host: bool) -> None:
@@ -289,7 +302,7 @@ def status(
             "--sort",
             help="Sort repos by default order, name, weakest score, overall score, or latest report date.",
         ),
-    ] = DEFAULT_REPO_SORT,
+    ] = _DEFAULT_CLI_SETTINGS.repo.default_sort,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     _run_human_or_json_command(
@@ -308,7 +321,7 @@ def wait(
             "--timeout",
             help="Maximum wait duration, for example 30m, 2h, or 900s.",
         ),
-    ] = DEFAULT_REPORT_WAIT_TIMEOUT,
+    ] = _DEFAULT_CLI_SETTINGS.report_wait.timeout_text,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     payload = _resolve_command_payload(
@@ -316,9 +329,9 @@ def wait(
             repo,
             _selected_project(),
             options=ReportWaitOptions(
-                poll_seconds=DEFAULT_REPORT_WAIT_POLL_SECONDS,
+                poll_seconds=default_settings().report_wait.poll_seconds,
                 timeout_seconds=parse_duration_seconds(timeout),
-                heartbeat_seconds=DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS,
+                heartbeat_seconds=default_settings().report_wait.heartbeat_seconds,
             ),
             heartbeat=echo_wait_heartbeat,
         )
@@ -398,7 +411,7 @@ def repo_list(
             "--sort",
             help="Sort repos by default order, name, weakest score, overall score, or latest report date.",
         ),
-    ] = DEFAULT_REPO_SORT,
+    ] = _DEFAULT_CLI_SETTINGS.repo.default_sort,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     _run_human_or_json_command(
