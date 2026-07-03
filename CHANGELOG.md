@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/j2h4u/enji-guard-cli/compare/v0.1.0...v0.2.0) (2026-07-03)
+
+
+### Features
+
+* add backend readiness health ([bf82b2e](https://github.com/j2h4u/enji-guard-cli/commit/bf82b2ecc4caf129625eb6b49041776956732305))
+
+
+### Fixes
+
+* keep background task failures contained ([ebe2fcc](https://github.com/j2h4u/enji-guard-cli/commit/ebe2fcc3d264c32679a7b0485a31ba193146d418))
+
 ## [0.1.0] - 2026-07-03
 
 ### Features
