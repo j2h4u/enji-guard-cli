@@ -21,8 +21,51 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      requires-image-publish: ${{ steps.classify.outputs.requires-image-publish }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Classify changed files
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          if [ "${EVENT_NAME}" = "release" ] || [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "requires-image-publish=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          BASE_SHA="$(git show -s --format=%P "${HEAD_SHA}" | awk '{print $1}')"
+          if [ -z "${BASE_SHA}" ] || [[ "${BASE_SHA}" =~ ^0+$ ]]; then
+            BASE_SHA="$(git rev-list --max-parents=0 "${HEAD_SHA}")"
+          fi
+
+          changed_files="$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")"
+          if [ -z "${changed_files}" ]; then
+            echo "requires-image-publish=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if echo "${changed_files}" | grep -Ev '^(\.planning/|docs/|README[.]md$|AGENTS[.]md$|CHANGELOG[.]md$|ROADMAP[.]md$|SECURITY[.]md$|.*[.]md$)' >/dev/null; then
+            echo "requires-image-publish=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "requires-image-publish=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   publish:
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    needs: [changes]
+    if: >-
+      ${{
+        (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') &&
+        needs.changes.outputs.requires-image-publish == 'true'
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
