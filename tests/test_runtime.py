@@ -1,9 +1,12 @@
 import asyncio
+from pathlib import Path
 
 import pytest
 
 import enji_guard_cli.runtime as runtime
 from enji_guard_cli.mcp_server import McpTransport
+from enji_guard_cli.readiness import read_backend_readiness_state
+from enji_guard_cli.settings import ReadinessSettings
 
 
 def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -105,3 +108,49 @@ def test_run_service_async_runs_without_refresh_when_disabled(monkeypatch: pytes
         "transport": "sse",
         "mount_path": "/events",
     }
+
+
+def test_backend_readiness_loop_records_probe_crash_without_propagating(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    slept = False
+
+    async def fake_run_backend_readiness_probe(
+        *,
+        settings: ReadinessSettings,
+        previous: runtime.BackendReadinessState,
+    ) -> runtime.BackendReadinessState:
+        raise ValueError("broken probe")
+
+    async def fake_sleep(seconds: float) -> None:
+        nonlocal slept
+
+        slept = True
+        raise asyncio.CancelledError
+
+    settings = ReadinessSettings(
+        enabled=True,
+        state_file=tmp_path / "readiness.json",
+        heartbeat_interval_seconds=30,
+        heartbeat_timeout_seconds=2.0,
+        failure_threshold=3,
+        state_stale_after_seconds=60,
+    )
+
+    def fake_log_event(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(runtime, "log_event", fake_log_event)
+    monkeypatch.setattr(runtime, "_run_backend_readiness_probe", fake_run_backend_readiness_probe)
+    monkeypatch.setattr(runtime.asyncio, "sleep", fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(runtime._backend_readiness_loop(settings=settings))
+
+    state = read_backend_readiness_state(settings.state_file)
+    assert slept is True
+    assert state is not None
+    assert state.ready is False
+    assert state.failure_kind == "internal"
+    assert state.failure_code == "ValueError"
