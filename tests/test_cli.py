@@ -14,6 +14,7 @@ from enji_guard_cli.cli import app
 from enji_guard_cli.cli_impl.durations import format_duration_seconds
 from enji_guard_cli.core import EmailPreferenceUpdate, ReportWaitOptions, ScheduleSettingsUpdate
 from enji_guard_cli.enji_api import EnjiApiError
+from enji_guard_cli.readiness import ReadinessVerdict
 from enji_guard_cli.settings import TelemetrySettings
 from enji_guard_cli.telemetry import configure_logging as configure_test_logging
 from enji_guard_cli.telemetry import log_event
@@ -223,6 +224,7 @@ def test_health_ready_checks_local_mcp_listener(monkeypatch: MonkeyPatch) -> Non
         return FakeSocket()
 
     monkeypatch.setattr(cli.socket, "create_connection", fake_create_connection)
+    monkeypatch.setattr(cli, "readiness_verdict", lambda: ReadinessVerdict(ready=True, reason=None, state=None))
 
     result = CliRunner().invoke(app, ["health", "--ready"])
 
@@ -241,6 +243,30 @@ def test_health_ready_fails_when_local_mcp_listener_is_down(monkeypatch: MonkeyP
 
     assert result.exit_code == 1
     assert result.stderr == "UNREADY: MCP listener is not ready at 127.0.0.1:8000: connection refused\n"
+
+
+def test_health_ready_fails_when_backend_readiness_is_down(monkeypatch: MonkeyPatch) -> None:
+    class FakeSocket:
+        def __enter__(self) -> None:
+            return None
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def fake_create_connection(_address: tuple[str, int], *, timeout: float) -> FakeSocket:
+        return FakeSocket()
+
+    monkeypatch.setattr(cli.socket, "create_connection", fake_create_connection)
+    monkeypatch.setattr(
+        cli,
+        "readiness_verdict",
+        lambda: ReadinessVerdict(ready=False, reason="backend readiness failure threshold reached", state=None),
+    )
+
+    result = CliRunner().invoke(app, ["health", "--ready"])
+
+    assert result.exit_code == 1
+    assert result.stderr == "UNREADY: backend readiness failure threshold reached\n"
 
 
 def test_version_flag_reports_package_version() -> None:

@@ -11,13 +11,12 @@ from urllib.parse import urlsplit
 import httpx
 from httpx_retries import Retry, RetryTransport
 
+from enji_guard_cli.settings import default_settings
 from enji_guard_cli.telemetry import log_event
 
-DEFAULT_TIMEOUT_SECONDS = 20.0
 RATE_LIMIT_STATUS_CODE = 429
-DEFAULT_RETRYABLE_METHODS = ("GET", "HEAD", "OPTIONS")
-DEFAULT_RETRYABLE_STATUS_CODES = (429, 500, 502, 503, 504)
 _LOGGER = logging.getLogger(__name__)
+_TRANSPORT_SETTINGS = default_settings().transport
 
 type EnjiJsonScalar = None | bool | int | float | str
 type EnjiJsonValue = EnjiJsonScalar | list[EnjiJsonValue] | dict[str, EnjiJsonValue]
@@ -25,11 +24,11 @@ type EnjiJsonValue = EnjiJsonScalar | list[EnjiJsonValue] | dict[str, EnjiJsonVa
 
 @dataclass(frozen=True, slots=True)
 class RetryConfig:
-    total: int = 0
-    backoff_factor: float = 0.0
-    allowed_methods: tuple[str, ...] = DEFAULT_RETRYABLE_METHODS
-    status_forcelist: tuple[int, ...] = DEFAULT_RETRYABLE_STATUS_CODES
-    respect_retry_after_header: bool = True
+    total: int = _TRANSPORT_SETTINGS.retry.total
+    backoff_factor: float = _TRANSPORT_SETTINGS.retry.backoff_factor
+    allowed_methods: tuple[str, ...] = _TRANSPORT_SETTINGS.retry.retryable_methods
+    status_forcelist: tuple[int, ...] = _TRANSPORT_SETTINGS.retry.retryable_status_codes
+    respect_retry_after_header: bool = _TRANSPORT_SETTINGS.retry.respect_retry_after_header
 
     def build(self) -> Retry:
         return Retry(
@@ -48,7 +47,7 @@ class EnjiHttpRequest:
     operation: str
     headers: Mapping[str, str]
     json_body: EnjiJsonValue | None = None
-    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    timeout_seconds: float = _TRANSPORT_SETTINGS.timeout_seconds
 
 
 @dataclass(frozen=True, slots=True)

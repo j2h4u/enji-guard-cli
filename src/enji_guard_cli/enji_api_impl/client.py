@@ -8,7 +8,6 @@ from urllib.parse import quote, urlencode
 from enji_guard_cli._enji_api_contract import EnjiEndpointSpec, HttpMethod
 from enji_guard_cli.auth import (
     AUTH_INVALID_CODE,
-    AUTH_REFRESH_ORIGIN,
     AUTH_REFRESH_PATH,
     CredentialType,
     StoredAuth,
@@ -20,6 +19,7 @@ from enji_guard_cli.auth import (
 )
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
+from enji_guard_cli.settings import default_settings
 from enji_guard_cli.transport import (
     EnjiHttpClient,
     EnjiHttpError,
@@ -112,7 +112,7 @@ def load_api_session(auth_file: Path | None = None) -> EnjiApiSession:
 
 
 def api_headers(stored_auth: StoredAuth) -> dict[str, str]:
-    return {**auth_headers(stored_auth), "Origin": AUTH_REFRESH_ORIGIN}
+    return {**auth_headers(stored_auth), "Origin": default_settings().auth.guard_origin}
 
 
 def run_api_request[T](

@@ -29,8 +29,11 @@ example `/opt/docker/enji-guard-cli/docker-compose.yml`, then run:
 ```bash
 docker compose pull
 docker compose up -d --remove-orphans --wait
-docker exec -i enji-guard-cli enji-guard health
+docker exec -i enji-guard-cli enji-guard health --ready
 docker exec -i enji-guard-cli enji-guard auth status
 ```
 
 Keep the auth directory writable by uid `1000`; Enji rotates refresh cookies.
+Docker health uses cached readiness from the supervisor heartbeat: local MCP
+must listen, backend readiness state must be fresh, and authenticated Enji
+checks must not fail repeatedly.
