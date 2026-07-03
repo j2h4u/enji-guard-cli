@@ -32,11 +32,39 @@ def test_backend_readiness_state_tracks_success(tmp_path: Path) -> None:
     assert read_backend_readiness_state(state_file) == state
 
 
-def test_readiness_verdict_tolerates_failures_below_threshold(tmp_path: Path) -> None:
+def test_readiness_verdict_fails_before_first_success(tmp_path: Path) -> None:
     settings = readiness_settings(tmp_path)
     now = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)
     first_failure = backend_readiness_state_after_probe(
         INITIAL_BACKEND_READINESS_STATE,
+        BackendReadinessProbe(
+            ready=False,
+            failure_kind="auth",
+            failure_code="AUTH_INVALID",
+            failure_message="stored credential is not authenticated",
+            failure_status_code=401,
+            credential_type="cookie",
+        ),
+        checked_at=now,
+    )
+    write_backend_readiness_state(settings.state_file, first_failure)
+
+    verdict = readiness_verdict(settings, now=now)
+
+    assert verdict.ready is False
+    assert verdict.reason == "backend readiness has not succeeded yet"
+
+
+def test_readiness_verdict_tolerates_failures_below_threshold_after_success(tmp_path: Path) -> None:
+    settings = readiness_settings(tmp_path)
+    now = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)
+    success = backend_readiness_state_after_probe(
+        INITIAL_BACKEND_READINESS_STATE,
+        BackendReadinessProbe(ready=True, credential_type="cookie", elapsed_ms=12),
+        checked_at=now - timedelta(seconds=1),
+    )
+    first_failure = backend_readiness_state_after_probe(
+        success,
         BackendReadinessProbe(
             ready=False,
             failure_kind="auth",
@@ -60,7 +88,11 @@ def test_readiness_verdict_tolerates_failures_below_threshold(tmp_path: Path) ->
 def test_readiness_verdict_fails_at_threshold(tmp_path: Path) -> None:
     settings = readiness_settings(tmp_path)
     now = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)
-    state = INITIAL_BACKEND_READINESS_STATE
+    state = backend_readiness_state_after_probe(
+        INITIAL_BACKEND_READINESS_STATE,
+        BackendReadinessProbe(ready=True, credential_type="cookie", elapsed_ms=12),
+        checked_at=now - timedelta(seconds=1),
+    )
     for offset in range(settings.failure_threshold):
         state = backend_readiness_state_after_probe(
             state,

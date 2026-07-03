@@ -5,7 +5,7 @@ import pytest
 
 import enji_guard_cli.runtime as runtime
 from enji_guard_cli.mcp_server import McpTransport
-from enji_guard_cli.readiness import read_backend_readiness_state
+from enji_guard_cli.readiness import backend_readiness_starting_state, read_backend_readiness_state
 from enji_guard_cli.settings import ReadinessSettings
 
 
@@ -145,8 +145,10 @@ def test_backend_readiness_loop_records_probe_crash_without_propagating(
     monkeypatch.setattr(runtime, "_run_backend_readiness_probe", fake_run_backend_readiness_probe)
     monkeypatch.setattr(runtime.asyncio, "sleep", fake_sleep)
 
+    initial_state = backend_readiness_starting_state(checked_at=runtime.datetime.now(runtime.UTC))
+
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(runtime._backend_readiness_loop(settings=settings))
+        asyncio.run(runtime._backend_readiness_loop(settings=settings, initial_state=initial_state))
 
     state = read_backend_readiness_state(settings.state_file)
     assert slept is True
@@ -154,3 +156,47 @@ def test_backend_readiness_loop_records_probe_crash_without_propagating(
     assert state.ready is False
     assert state.failure_kind == "internal"
     assert state.failure_code == "ValueError"
+
+
+def test_start_backend_readiness_task_writes_starting_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    settings = ReadinessSettings(
+        enabled=True,
+        state_file=tmp_path / "readiness.json",
+        heartbeat_interval_seconds=30,
+        heartbeat_timeout_seconds=2.0,
+        failure_threshold=3,
+        state_stale_after_seconds=60,
+    )
+    captured_initial_state: list[runtime.BackendReadinessState] = []
+
+    async def fake_backend_readiness_loop(
+        *,
+        settings: ReadinessSettings,
+        initial_state: runtime.BackendReadinessState,
+    ) -> None:
+        captured_initial_state.append(initial_state)
+        await asyncio.Future[None]()
+
+    monkeypatch.setattr(runtime, "default_settings", lambda: type("Settings", (), {"readiness": settings})())
+    monkeypatch.setattr(runtime, "_backend_readiness_loop", fake_backend_readiness_loop)
+
+    async def run_start() -> None:
+        task = runtime.start_backend_readiness_task()
+        assert task is not None
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(run_start())
+
+    state = read_backend_readiness_state(settings.state_file)
+    assert state is not None
+    assert state.ready is False
+    assert state.failure_kind == "startup"
+    assert state.failure_code == "STARTING"
+    assert state.last_success_at is None
+    assert captured_initial_state == [state]
