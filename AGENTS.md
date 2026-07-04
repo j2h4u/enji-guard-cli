@@ -15,8 +15,14 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 - Keep schedule timezone stored per schedule, run the container with the host
   timezone, and use `schedule auto-time` to restore Enji-assigned run times.
 - Surface stale/mixed report freshness explicitly; never hide it behind aggregate status.
+- Before starting fresh audits, save/read every currently available report you
+  may need. Starting audits can temporarily hide old snapshots behind running state.
 - When reports are stale, compare audited and current git SHAs before judging
-  relevance. If useful, read stale reports and start fresh audits in parallel.
+  relevance. Use relevant stale or partial-ready reports immediately while fresh
+  audits run in parallel.
+- Enji audits are slow. Do not treat `wait` as a barrier before analysis. After
+  `audit start`, run `status`; read and summarize ready reports immediately,
+  then check running reports later with sparse polling.
 - Cookie auth is temporary. Keep bearer/API-token support first-class.
 - Never print secrets. Store credentials only in the configured auth file.
 
