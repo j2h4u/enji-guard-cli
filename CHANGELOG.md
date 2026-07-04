@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.4...v0.3.5) (2026-07-04)
+
+
+### Fixes
+
+* clarify repo add and remove surface ([#75](https://github.com/j2h4u/enji-guard-cli/issues/75)) ([545645c](https://github.com/j2h4u/enji-guard-cli/commit/545645ca9015ba05c7ed74529814773675256366))
+
 ## [0.3.4](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.3...v0.3.4) (2026-07-04)
 
 
