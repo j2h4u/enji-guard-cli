@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.9](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.8...v0.3.9) (2026-07-04)
+
+
+### Fixes
+
+* avoid duplicate audit starts from task links ([#83](https://github.com/j2h4u/enji-guard-cli/issues/83)) ([1f73b0e](https://github.com/j2h4u/enji-guard-cli/commit/1f73b0ebe37f1cf9b198ec468b1f4e393d674481))
+
 ## [0.3.8](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.7...v0.3.8) (2026-07-04)
 
 
