@@ -776,6 +776,42 @@ def test_resolve_repo_reports_ambiguous_owner_repo_candidates(monkeypatch: Monke
     assert [match["project_id"] for match in payload["matches"]] == ["project_1", "project_2"]
 
 
+def test_connect_repo_rejects_existing_visible_repo_before_post(monkeypatch: MonkeyPatch) -> None:
+    posted: list[object] = []
+    monkeypatch.setattr(
+        core,
+        "run_projects",
+        lambda: {
+            "projects": [
+                {"id": "project_1", "name": "Pets"},
+                {"id": "project_2", "name": "MCP Integrations"},
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda project_id: {
+            "project": {"id": project_id, "name": "Pets" if project_id == "project_1" else "MCP Integrations"},
+            "repos": [
+                {
+                    "id": f"repo_{project_id}",
+                    "githubOwner": "j2h4u",
+                    "githubName": "enji-guard-cli",
+                    "connected": project_id == "project_1",
+                    "reconDone": project_id == "project_1",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(core, "run_connect_project_repo", lambda *_args: posted.append(_args))
+
+    with pytest.raises(ValueError, match="repo is already present in Enji Guard"):
+        core.connect_repo("j2h4u/enji-guard-cli", "MCP Integrations")
+
+    assert posted == []
+
+
 def test_start_recon_rejects_ambiguous_owner_repo_selector(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(
         core,
