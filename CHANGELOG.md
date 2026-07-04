@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.0...v0.3.1) (2026-07-04)
+
+
+### Fixes
+
+* prevent duplicate repo connects ([#67](https://github.com/j2h4u/enji-guard-cli/issues/67)) ([4d3b2d5](https://github.com/j2h4u/enji-guard-cli/commit/4d3b2d507da7c27b9f828a1ebd02ccebccc30e98))
+
 ## [0.3.0](https://github.com/j2h4u/enji-guard-cli/compare/v0.2.0...v0.3.0) (2026-07-04)
 
 
