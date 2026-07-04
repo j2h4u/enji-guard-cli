@@ -30,7 +30,8 @@ bootstrap, and operational commands. CLI should stay task-oriented, but it is
 allowed to be broad.
 
 CLI stdout/stderr are command I/O. Application telemetry belongs only in the
-configured persistent log file, not interleaved with command output.
+configured persistent log file, not interleaved with command output. CLI and
+MCP agent journey events use the same shared telemetry layer.
 
 MCP is the curated read-mostly agent surface. It is for a tech-lead or project
 manager agent that needs the Enji picture: project/repo overview, scores,

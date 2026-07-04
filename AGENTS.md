@@ -40,7 +40,8 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
   pull `ghcr.io/j2h4u/enji-guard-cli` with `deploy/docker-compose.ghcr.yml`.
 - Recreate the service after runtime, env, image, or auth-mount changes.
 - Application telemetry lives in `~/.config/enji-guard/logs/telemetry.jsonl`;
-  stdout/stderr belong to CLI results, progress, and CLI errors.
+  CLI/MCP agent journey events use the shared telemetry layer. stdout/stderr
+  belong to CLI results, progress, and CLI errors.
 - The container runs `enji-guard run`: supervisor owns MCP, background cookie
   refresh, and backend readiness heartbeat as sibling tasks. MCP must not own
   refresh.

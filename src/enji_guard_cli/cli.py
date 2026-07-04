@@ -1,11 +1,8 @@
-import logging
 import socket
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
 from ipaddress import IPv6Address, ip_address
 from pathlib import Path
-from time import monotonic
 from typing import Annotated, Literal, TypeGuard, cast
 
 import typer
@@ -70,11 +67,12 @@ from enji_guard_cli.core import (
     wait_for_reports,
 )
 from enji_guard_cli.errors import EnjiApiError
+from enji_guard_cli.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.mcp_server import create_mcp_server, run_mcp_server
 from enji_guard_cli.readiness import readiness_verdict
 from enji_guard_cli.runtime import run_service
 from enji_guard_cli.settings import DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT, DEFAULT_MCP_TRANSPORT, default_settings
-from enji_guard_cli.telemetry import configure_logging, log_event
+from enji_guard_cli.telemetry import configure_logging
 
 MAIN_HELP = """Agent-oriented CLI for Enji Guard repository audits.
 
@@ -115,18 +113,10 @@ get_access = ACCESS_OPERATION.execute
 auth_status = AUTH_STATUS_OPERATION.execute
 _cli_state: dict[str, object] = {"project": None, "json": False}
 _DEFAULT_CLI_SETTINGS = default_settings()
-_CLI_LOGGER = logging.getLogger(__name__)
 _CLI_COMMAND_ROOT = "enji-guard"
 
 type JsonCommandAction = Callable[[], OperationResult]
 type CommandBody = Callable[[], object]
-
-
-@dataclass(frozen=True, slots=True)
-class CliJourney:
-    command_path: str
-    selector_kind: str = "unknown"
-    all_flag: bool | None = None
 
 
 ANY_IPV4_HOST = str(ip_address(0))
@@ -151,7 +141,7 @@ def _run_human_or_json_command(
     json_output: bool,
     human_renderer: Callable[[object], None] | None = None,
     *,
-    journey: CliJourney,
+    journey: AgentJourney,
 ) -> None:
     def _body() -> object:
         payload = _resolve_command_payload(action)
@@ -164,7 +154,7 @@ def _run_human_or_json_command(
 
     _run_cli_journey(
         _body,
-        command_path=journey.command_path,
+        command_path=journey.operation,
         json_output=json_output,
         selector_kind=journey.selector_kind,
         all_flag=journey.all_flag,
@@ -193,83 +183,45 @@ def _exit_code_for_error(code: str) -> int:
 def _run_cli_journey(
     body: CommandBody,
     *,
-    json_output: bool,
-    selector_kind: str,
-    all_flag: bool | None = None,
     command_path: str | None = None,
+    json_output: bool | None = None,
+    selector_kind: str = "unknown",
+    all_flag: bool | None = None,
 ) -> object:
-    resolved_command_path = command_path if command_path is not None else _CLI_COMMAND_ROOT
-    started_at = monotonic()
-    exit_code = 0
-    result: object | None = None
-    log_event(
-        _CLI_LOGGER,
-        logging.INFO,
-        "cli_command_started",
-        _cli_command_fields(
-            resolved_command_path,
-            json_output=json_output,
-            selector_kind=selector_kind,
-            all_flag=all_flag,
-        ),
+    resolved_journey = _cli_journey(
+        command_path if command_path is not None else _CLI_COMMAND_ROOT,
+        json_output=_json_output() if json_output is None else json_output,
+        selector_kind=selector_kind,
+        all_flag=all_flag,
     )
-    try:
-        result = body()
-    except typer.Exit as exc:
-        exit_code = int(exc.exit_code) if exc.exit_code is not None else 0
-        raise
-    except Exception:
-        exit_code = 1
-        raise
-    else:
-        return result
-    finally:
-        finished_fields: dict[str, object] = {
-            **_cli_command_fields(
-                resolved_command_path,
-                json_output=json_output,
-                selector_kind=selector_kind,
-                all_flag=all_flag,
-            ),
-            "duration_ms": int((monotonic() - started_at) * 1000),
-            "exit_code": exit_code,
-        }
-        result_count = _command_result_count(result)
-        if result_count is not None:
-            finished_fields["result_count"] = result_count
-        log_event(_CLI_LOGGER, logging.INFO, "cli_command_finished", finished_fields)
+    return run_agent_journey(body, resolved_journey, exit_code_for_exception=_cli_exit_code_for_exception)
 
 
-def _cli_command_fields(
+def _cli_journey(
     command_path: str,
     *,
-    json_output: bool,
-    selector_kind: str,
+    json_output: bool = False,
+    selector_kind: str = "unknown",
     all_flag: bool | None = None,
-) -> dict[str, object]:
-    fields: dict[str, object] = {
-        "command_path": command_path,
-        "json": json_output,
-        "selector_kind": selector_kind,
-    }
-    if all_flag is not None:
-        fields["all"] = all_flag
-    return fields
+) -> AgentJourney:
+    return AgentJourney(
+        event_prefix="cli_command",
+        operation=command_path,
+        surface="cli",
+        json_output=json_output,
+        selector_kind=selector_kind,
+        all_flag=all_flag,
+    )
+
+
+def _cli_exit_code_for_exception(exc: Exception) -> int:
+    if isinstance(exc, typer.Exit):
+        return int(exc.exit_code) if exc.exit_code is not None else 0
+    return 1
 
 
 def _command_path(*parts: str) -> str:
     return " ".join((_CLI_COMMAND_ROOT, *parts))
-
-
-def _command_result_count(result: object | None) -> int | None:
-    if isinstance(result, dict):
-        for key in ("projects", "reports", "runs", "items", "schedules", "preferences"):
-            value = result.get(key)
-            if isinstance(value, list):
-                return len(value)
-    if isinstance(result, list):
-        return len(result)
-    return None
 
 
 def _selector_kind_for_repo(repo: str | None, *, project: str | None = None, all_flag: bool = False) -> str:
@@ -391,7 +343,7 @@ def access(
         get_access,
         _json_output(json_output),
         echo_access,
-        journey=CliJourney(command_path=_command_path("access")),
+        journey=_cli_journey(command_path=_command_path("access")),
     )
 
 
@@ -491,7 +443,7 @@ def status(
         lambda: runtime_status(repo, _selected_project(), sort),
         _json_output(json_output),
         echo_repo_status_table,
-        journey=CliJourney(
+        journey=_cli_journey(
             command_path=_command_path("status"),
             selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
         ),
@@ -548,7 +500,7 @@ def project_list(
         list_projects,
         _json_output(json_output),
         echo_project_table,
-        journey=CliJourney(
+        journey=_cli_journey(
             command_path=_command_path("project", "list"),
             selector_kind=_selector_kind_for_repo(None, project=_selected_project()),
         ),
@@ -563,7 +515,7 @@ def project_create(
     _run_human_or_json_command(
         lambda: create_project(name),
         _json_output(json_output),
-        journey=CliJourney(command_path=_command_path("project", "create"), selector_kind="project"),
+        journey=_cli_journey(command_path=_command_path("project", "create"), selector_kind="project"),
     )
 
 
@@ -576,7 +528,7 @@ def project_rename(
     _run_human_or_json_command(
         lambda: rename_project(project, name),
         _json_output(json_output),
-        journey=CliJourney(command_path=_command_path("project", "rename"), selector_kind="project"),
+        journey=_cli_journey(command_path=_command_path("project", "rename"), selector_kind="project"),
     )
 
 
@@ -661,7 +613,7 @@ def repo_list(
         lambda: list_project_inventory(_selected_project(), sort),
         _json_output(json_output),
         echo_repo_score_table,
-        journey=CliJourney(
+        journey=_cli_journey(
             command_path=_command_path("repo", "list"),
             selector_kind=_selector_kind_for_repo(None, project=_selected_project()),
         ),
@@ -677,7 +629,7 @@ def repo_resolve(
         lambda: resolve_repo(repo, _selected_project()),
         _json_output(json_output),
         echo_repo_resolve_table,
-        journey=CliJourney(
+        journey=_cli_journey(
             command_path=_command_path("repo", "resolve"),
             selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
         ),
@@ -692,7 +644,7 @@ def repo_connect(
     _run_human_or_json_command(
         lambda: connect_repo(github_repo, _selected_project()),
         _json_output(json_output),
-        journey=CliJourney(
+        journey=_cli_journey(
             command_path=_command_path("repo", "connect"),
             selector_kind=_selector_kind_for_github_repo(github_repo),
         ),
@@ -708,7 +660,7 @@ def repo_move(
     _run_human_or_json_command(
         lambda: move_repo(repo, _selected_project(), to_project),
         _json_output(json_output),
-        journey=CliJourney(
+        journey=_cli_journey(
             command_path=_command_path("repo", "move"),
             selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
         ),
@@ -723,7 +675,7 @@ def recon_start(
     _run_human_or_json_command(
         lambda: start_recon(repo, _selected_project()),
         _json_output(json_output),
-        journey=CliJourney(
+        journey=_cli_journey(
             command_path=_command_path("recon", "start"),
             selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
         ),
@@ -778,7 +730,7 @@ def schedule_list(
         lambda: list_schedule_settings(repo, _selected_project()),
         _json_output(json_output),
         echo_schedule_settings_table,
-        journey=CliJourney(
+        journey=_cli_journey(
             command_path=_command_path("schedule", "list"),
             selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
         ),
@@ -858,7 +810,7 @@ def schedule_auto_time(
         ),
         _json_output(json_output),
         echo_schedule_settings_table,
-        journey=CliJourney(
+        journey=_cli_journey(
             command_path=_command_path("schedule", "auto-time"),
             selector_kind=_selector_kind_for_repo(
                 repo, project=_selected_project(), all_flag=all_repos or all_projects
@@ -880,7 +832,7 @@ def email_list(
         lambda: list_email_preferences(repo, _selected_project()),
         _json_output(json_output),
         echo_email_preferences_table,
-        journey=CliJourney(
+        journey=_cli_journey(
             command_path=_command_path("email", "list"),
             selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
         ),
