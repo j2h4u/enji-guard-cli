@@ -15,6 +15,8 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 - Keep schedule timezone stored per schedule, run the container with the host
   timezone, and use `schedule auto-time` to restore Enji-assigned run times.
 - Surface stale/mixed report freshness explicitly; never hide it behind aggregate status.
+- When reports are stale, compare audited and current git SHAs before judging
+  relevance. If useful, read stale reports and start fresh audits in parallel.
 - Cookie auth is temporary. Keep bearer/API-token support first-class.
 - Never print secrets. Store credentials only in the configured auth file.
 
