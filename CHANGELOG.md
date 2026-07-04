@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.3...v0.3.4) (2026-07-04)
+
+
+### Fixes
+
+* label supervisor telemetry provenance ([#73](https://github.com/j2h4u/enji-guard-cli/issues/73)) ([7136771](https://github.com/j2h4u/enji-guard-cli/commit/7136771c600ef7356b6e10b4ce3e895f32c91dc1))
+
 ## [0.3.3](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.2...v0.3.3) (2026-07-04)
 
 
