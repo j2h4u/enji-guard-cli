@@ -156,7 +156,7 @@ def test_reports_list_tool_writes_agent_journey_without_raw_selector(
     tmp_path: Path,
 ) -> None:
     log_file = tmp_path / "logs" / "telemetry.jsonl"
-    configure_logging(_telemetry_settings(log_file=log_file, log_format="json"), provenance="service")
+    configure_logging(_telemetry_settings(log_file=log_file, log_format="json"), provenance="supervisor")
     server = create_mcp_server()
     payload: dict[str, object] = {
         "projects": [{"id": "project_1", "name": "Pets", "repo_ids": ["repo_1"], "scores": {}}],
