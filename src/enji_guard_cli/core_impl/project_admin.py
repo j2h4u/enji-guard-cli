@@ -12,6 +12,7 @@ type ParseGithubRepo = Callable[[str], tuple[str, str]]
 type TransferScheduleReplacements = Callable[[JsonObjectPayload], JsonObjectPayload | None]
 type CreateProject = Callable[[str], JsonObjectPayload]
 type RenameProject = Callable[[str, str], JsonObjectPayload]
+type ProjectDetail = Callable[[str], JsonObjectPayload]
 type DeleteProject = Callable[[str], None]
 type ConnectProjectRepo = Callable[[str, str, str], JsonObjectPayload]
 type PreflightRepoMove = Callable[[str, str, str], JsonObjectPayload]
@@ -57,11 +58,30 @@ def rename_project_payload(
 
 
 def delete_project_payload(
-    project: str, *, resolve_single_project_id: ResolveSingleProjectId, delete_project: DeleteProject
+    project: str,
+    *,
+    resolve_single_project_id: ResolveSingleProjectId,
+    project_detail: ProjectDetail,
+    delete_project: DeleteProject,
 ) -> JsonObjectPayload:
     project_id = resolve_single_project_id(project)
+    repo_count = _project_repo_count(project_detail(project_id))
+    if repo_count > 0:
+        raise ValueError(f"project is not empty: {repo_count} repo(s)")
     delete_project(project_id)
     return {"project_id": project_id, "deleted": True}
+
+
+def _project_repo_count(project: JsonObjectPayload) -> int:
+    repos = project.get("repos")
+    if isinstance(repos, list):
+        return len(repos)
+    project_payload = project.get("project")
+    if isinstance(project_payload, dict):
+        repo_ids = project_payload.get("repoIds")
+        if isinstance(repo_ids, list):
+            return len(repo_ids)
+    return 0
 
 
 def connect_repo_payload(

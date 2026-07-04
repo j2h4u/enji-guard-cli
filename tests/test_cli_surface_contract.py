@@ -55,19 +55,19 @@ RAW_PLUMBING_NAMES = {
 PROJECT_ADMIN_COMMANDS = (
     "enji-guard project create NAME",
     "enji-guard project rename PROJECT NAME",
-    "enji-guard project delete PROJECT --yes",
+    "enji-guard project delete PROJECT",
     "enji-guard repo move REPO --to-project PROJECT",
 )
 
 README_PROJECT_ADMIN_EXAMPLES = (
     "docker exec -i enji-guard-cli enji-guard project create Pets",
     "docker exec -i enji-guard-cli enji-guard project rename Pets Friends",
-    "docker exec -i enji-guard-cli enji-guard project delete Pets --yes",
+    "docker exec -i enji-guard-cli enji-guard project delete Pets",
     "docker exec -i enji-guard-cli enji-guard repo move j2h4u/enji-guard-cli --to-project Friends",
 )
 
 PROJECT_ADMIN_RULES = (
-    "project delete is destructive and requires --yes",
+    "project delete succeeds only for empty projects",
     "repo move uses global --project as source project or selector disambiguation when needed",
 )
 

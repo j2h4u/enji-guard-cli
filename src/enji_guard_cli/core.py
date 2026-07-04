@@ -158,6 +158,7 @@ def delete_project(project: str) -> JsonObjectPayload:
     return _delete_project_payload(
         project,
         resolve_single_project_id=_resolve_single_project_id,
+        project_detail=run_project_detail,
         delete_project=run_delete_project,
     )
 

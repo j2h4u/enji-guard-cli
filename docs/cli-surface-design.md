@@ -52,7 +52,7 @@ enji-guard auth import-token --stdin
 enji-guard project list
 enji-guard project create NAME
 enji-guard project rename PROJECT NAME
-enji-guard project delete PROJECT --yes
+enji-guard project delete PROJECT
 
 enji-guard repo list [--sort default|name|weakest|overall|latest-report]
 enji-guard repo resolve REPO
@@ -101,7 +101,7 @@ needs the raw machine contract.
 - Repo selectors accept an Enji repo id or `owner/name`.
 - `project create` takes a plain project name.
 - `project rename` and `project delete` accept an exact project selector.
-- `project delete` is destructive and requires `--yes`.
+- `project delete` succeeds only for empty projects.
 - Read commands may omit `--project`; they show all projects or all matching
   repos.
 - Write commands may omit `--project` only when the target repo is unambiguous.

@@ -429,7 +429,7 @@ def test_project_rename_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
     assert captured == {"project": "Pets", "name": "Work"}
 
 
-def test_project_delete_requires_yes_and_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
+def test_project_delete_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, str] = {}
 
     def fake_delete(project: str) -> dict[str, object]:
@@ -438,11 +438,8 @@ def test_project_delete_requires_yes_and_routes_to_core_facade(monkeypatch: Monk
 
     monkeypatch.setattr(cli, "delete_project", fake_delete)
 
-    rejected = CliRunner().invoke(app, ["project", "delete", "Pets", "--json"])
-    result = CliRunner().invoke(app, ["project", "delete", "Pets", "--yes", "--json"])
+    result = CliRunner().invoke(app, ["project", "delete", "Pets", "--json"])
 
-    assert rejected.exit_code == 1
-    assert rejected.stderr == "VALIDATION: project delete requires --yes\n"
     assert result.exit_code == 0
     assert json.loads(result.output) == {"project_id": "project_1", "deleted": True}
     assert captured == {"project": "Pets"}
@@ -1054,11 +1051,13 @@ def test_cli_journey_telemetry_logs_validation_failures_to_finish_event(
         ),
     )
 
+    monkeypatch.setattr(cli, "delete_project", lambda project: {"project_id": "project_1", "deleted": True})
+
     result = CliRunner().invoke(app, ["project", "delete", "Pets"])
 
-    assert result.exit_code == 1
-    assert result.output == "VALIDATION: project delete requires --yes\n"
-    assert result.stderr == "VALIDATION: project delete requires --yes\n"
+    assert result.exit_code == 0
+    assert result.output == "project_id: project_1\ndeleted: yes\n"
+    assert result.stderr == ""
 
     started, finished = _telemetry_log_lines(log_file)
     assert started["message"] == "cli_command_started"
@@ -1070,7 +1069,7 @@ def test_cli_journey_telemetry_logs_validation_failures_to_finish_event(
     assert finished["command_path"] == started["command_path"]
     assert finished["json"] is False
     assert finished["selector_kind"] == "project"
-    assert finished["exit_code"] == 1
+    assert finished["exit_code"] == 0
     assert "Pets" not in log_file.read_text(encoding="utf-8")
 
 
