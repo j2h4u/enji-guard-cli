@@ -1,30 +1,42 @@
 import logging
-from collections.abc import Mapping
+import os
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import TypeGuard
 
 from enji_guard_cli.settings import TelemetrySettings, default_settings
 from enji_guard_cli.telemetry_sink import (
     LogFieldValue,
+    NoopTelemetrySink,
     TelemetryEvent,
     TelemetrySink,
     build_telemetry_sink,
 )
 
 _ACTIVE_SINK: TelemetrySink | None = None
+_ACTIVE_PROVENANCE = "runtime"
+_CONTEXT_PROVENANCE: ContextVar[str | None] = ContextVar("enji_guard_telemetry_provenance", default=None)
 
 
-def configure_logging(settings: TelemetrySettings | None = None) -> None:
-    telemetry_settings = settings if settings is not None else default_settings().telemetry
+def configure_logging(settings: TelemetrySettings | None = None, *, provenance: str | None = None) -> None:
     global _ACTIVE_SINK
+    global _ACTIVE_PROVENANCE
     if _ACTIVE_SINK is not None:
         _ACTIVE_SINK.close()
-    _ACTIVE_SINK = build_telemetry_sink(
-        log_file=telemetry_settings.log_file,
-        json_format=telemetry_settings.log_format == "json",
-        max_bytes=telemetry_settings.max_bytes,
-        backup_count=telemetry_settings.backup_count,
-        text_formatter=lambda event: f"{event.level.upper()} {event.logger}: {event.message}",
+    _ACTIVE_PROVENANCE = provenance or _default_provenance()
+    telemetry_settings = settings if settings is not None else default_settings().telemetry
+    _ACTIVE_SINK = (
+        NoopTelemetrySink()
+        if settings is None and _ACTIVE_PROVENANCE == "test"
+        else build_telemetry_sink(
+            log_file=telemetry_settings.log_file,
+            json_format=telemetry_settings.log_format == "json",
+            max_bytes=telemetry_settings.max_bytes,
+            backup_count=telemetry_settings.backup_count,
+            text_formatter=lambda event: f"{event.level.upper()} {event.logger}: {event.message}",
+        )
     )
     logger = logging.getLogger("enji_guard_cli")
     for handler in logger.handlers:
@@ -51,9 +63,32 @@ def log_event(
                 level=logging.getLevelName(level).lower(),
                 logger=logger.name,
                 message=event,
+                provenance=_event_provenance(),
                 fields=dict(_safe_log_fields(fields)),
             )
         )
+
+
+@contextmanager
+def telemetry_provenance(provenance: str | None) -> Iterator[None]:
+    if provenance is None:
+        yield
+        return
+    token = _CONTEXT_PROVENANCE.set(provenance)
+    try:
+        yield
+    finally:
+        _CONTEXT_PROVENANCE.reset(token)
+
+
+def _event_provenance() -> str:
+    return _CONTEXT_PROVENANCE.get() or _ACTIVE_PROVENANCE
+
+
+def _default_provenance() -> str:
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return "test"
+    return "runtime"
 
 
 def _parse_log_level(raw_level: str) -> int:

@@ -87,13 +87,14 @@ def test_serve_runs_mcp_server_with_stdio_defaults(monkeypatch: MonkeyPatch) -> 
 
 
 def test_serve_uses_project_logging_settings(monkeypatch: MonkeyPatch) -> None:
-    captured: dict[str, bool] = {}
+    captured: dict[str, object] = {}
 
     class FakeServer:
         pass
 
-    def fake_configure_logging() -> None:
+    def fake_configure_logging(*, provenance: str | None = None) -> None:
         captured["called"] = True
+        captured["provenance"] = provenance
 
     monkeypatch.setattr(cli, "configure_logging", fake_configure_logging)
     monkeypatch.setattr(cli, "create_mcp_server", lambda host="127.0.0.1", port=8000: FakeServer())
@@ -102,7 +103,7 @@ def test_serve_uses_project_logging_settings(monkeypatch: MonkeyPatch) -> None:
     result = CliRunner().invoke(app, ["serve"])
 
     assert result.exit_code == 0
-    assert captured == {"called": True}
+    assert captured == {"called": True, "provenance": "mcp"}
 
 
 def test_serve_passes_transport_options_to_mcp_server(monkeypatch: MonkeyPatch) -> None:
@@ -943,7 +944,7 @@ def test_wait_routes_transport_info_logs_to_file_not_operator_stderr(
     monkeypatch.setattr(cli, "wait_for_reports", fake_wait)
     log_file = tmp_path / "logs" / "telemetry.jsonl"
 
-    def configure_logging_to_file() -> None:
+    def configure_logging_to_file(*, provenance: str | None = None) -> None:
         configure_test_logging(
             TelemetrySettings(
                 level_name="INFO",
@@ -951,7 +952,8 @@ def test_wait_routes_transport_info_logs_to_file_not_operator_stderr(
                 log_file=log_file,
                 max_bytes=10_000,
                 backup_count=1,
-            )
+            ),
+            provenance=provenance,
         )
 
     monkeypatch.setattr(cli, "configure_logging", configure_logging_to_file)
@@ -973,7 +975,8 @@ def test_wait_routes_transport_info_logs_to_file_not_operator_stderr(
         "current_head_sha=abc123\n"
     )
     assert "enji_http_response" not in result.stderr
-    assert any(line["message"] == "enji_http_response" for line in _telemetry_log_lines(log_file))
+    transport_log = next(line for line in _telemetry_log_lines(log_file) if line["message"] == "enji_http_response")
+    assert transport_log["provenance"] == "cli"
 
 
 def test_cli_journey_telemetry_logs_start_and_finish_for_all_flagged_command(
@@ -999,14 +1002,15 @@ def test_cli_journey_telemetry_logs_start_and_finish_for_all_flagged_command(
     monkeypatch.setattr(
         cli,
         "configure_logging",
-        lambda: configure_test_logging(
+        lambda *, provenance=None: configure_test_logging(
             TelemetrySettings(
                 level_name="INFO",
                 log_format="json",
                 log_file=log_file,
                 max_bytes=10_000,
                 backup_count=1,
-            )
+            ),
+            provenance=provenance,
         ),
     )
 
@@ -1017,6 +1021,7 @@ def test_cli_journey_telemetry_logs_start_and_finish_for_all_flagged_command(
 
     started, finished = _telemetry_log_lines(log_file)
     assert started["message"] == "cli_command_started"
+    assert started["provenance"] == "cli"
     assert isinstance(started["command_path"], str)
     assert started["command_path"] == "enji-guard audit start"
     assert started["json"] is True
@@ -1040,14 +1045,15 @@ def test_cli_journey_telemetry_logs_validation_failures_to_finish_event(
     monkeypatch.setattr(
         cli,
         "configure_logging",
-        lambda: configure_test_logging(
+        lambda *, provenance=None: configure_test_logging(
             TelemetrySettings(
                 level_name="INFO",
                 log_format="json",
                 log_file=log_file,
                 max_bytes=10_000,
                 backup_count=1,
-            )
+            ),
+            provenance=provenance,
         ),
     )
 
@@ -1061,6 +1067,7 @@ def test_cli_journey_telemetry_logs_validation_failures_to_finish_event(
 
     started, finished = _telemetry_log_lines(log_file)
     assert started["message"] == "cli_command_started"
+    assert started["provenance"] == "cli"
     assert isinstance(started["command_path"], str)
     assert started["command_path"] == "enji-guard project delete"
     assert started["json"] is False

@@ -18,6 +18,7 @@ class TelemetryEvent:
     level: str
     logger: str
     message: str
+    provenance: str
     fields: dict[str, LogFieldValue]
 
     def to_jsonl_payload(self) -> dict[str, LogFieldValue]:
@@ -26,6 +27,7 @@ class TelemetryEvent:
             "level": self.level,
             "logger": self.logger,
             "message": self.message,
+            "provenance": self.provenance,
         }
         payload.update(self.fields)
         return payload

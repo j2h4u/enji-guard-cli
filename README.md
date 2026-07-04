@@ -61,7 +61,11 @@ CLI stdout/stderr are reserved for command results, progress, and CLI errors.
 Use the telemetry file for HTTP/auth/runtime events and CLI/MCP agent journey
 events. It is the minimal foundation for future external sinks and
 OpenTelemetry-style export; there is no Prometheus or OpenTelemetry exporter
-yet. Keep stdout/stderr for CLI results, progress, and errors only.
+yet. Each record includes `provenance` (`cli`, `mcp`, `service`, `runtime`, or
+`test`) so operational traffic can be separated from test traffic. Tests do not
+write to the persistent telemetry file unless they explicitly configure a
+temporary log path. Keep stdout/stderr for CLI results, progress, and errors
+only.
 
 When working on another repository, pass the repository as `OWNER/NAME`. If an
 agent is already in a GitHub checkout and wants to derive it from `origin`, it
