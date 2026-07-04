@@ -542,6 +542,7 @@ def test_repo_add_human_output_suggests_next_steps(monkeypatch: MonkeyPatch) -> 
         return {
             "added": True,
             "connected": False,
+            "recon": {"task": {"id": "task_1", "status": "pending"}},
             "repo": {"repo": {"githubOwner": "j2h4u", "githubName": "enji-guard-cli"}},
         }
 
@@ -550,8 +551,8 @@ def test_repo_add_human_output_suggests_next_steps(monkeypatch: MonkeyPatch) -> 
     result = CliRunner().invoke(app, ["repo", "add", "j2h4u/enji-guard-cli"])
 
     assert result.exit_code == 0
+    assert "recon:" in result.output
     assert "next: enji-guard status REPO" in result.output
-    assert "next: if recon_done=false, run enji-guard recon start REPO" in result.output
 
 
 def test_repo_remove_uses_global_project_filter(monkeypatch: MonkeyPatch) -> None:

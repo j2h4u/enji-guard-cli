@@ -798,9 +798,11 @@ def test_resolve_repo_reports_ambiguous_owner_repo_candidates(monkeypatch: Monke
     assert [match["project_id"] for match in payload["matches"]] == ["project_1", "project_2"]
 
 
-def test_add_repo_activates_existing_disconnected_repo(monkeypatch: MonkeyPatch) -> None:
+def test_add_repo_is_idempotent_for_existing_repo(monkeypatch: MonkeyPatch) -> None:
     posted: list[object] = []
     connected: list[tuple[str, str]] = []
+    started: list[core.AuditRunCreate] = []
+    connected_projects = {"project_1"}
     monkeypatch.setattr(
         core,
         "run_projects",
@@ -821,7 +823,7 @@ def test_add_repo_activates_existing_disconnected_repo(monkeypatch: MonkeyPatch)
                     "id": f"repo_{project_id}",
                     "githubOwner": "j2h4u",
                     "githubName": "enji-guard-cli",
-                    "connected": project_id == "project_1",
+                    "connected": project_id in connected_projects,
                     "reconDone": project_id == "project_1",
                 }
             ],
@@ -831,15 +833,42 @@ def test_add_repo_activates_existing_disconnected_repo(monkeypatch: MonkeyPatch)
     monkeypatch.setattr(
         core,
         "run_connect_project_repo",
-        lambda project_id, repo_id: connected.append((project_id, repo_id)) or {"repo": {"connected": True}},
+        lambda project_id, repo_id: (
+            connected_projects.add(project_id)
+            or connected.append((project_id, repo_id))
+            or {"repo": {"connected": True}}
+        ),
+    )
+    monkeypatch.setattr(core, "run_repo_active_runs", lambda _repo_id: {"activeRuns": []})
+    monkeypatch.setattr(
+        core,
+        "run_catalog",
+        lambda: {
+            "curatedActions": [
+                {
+                    "actionKey": "audit.recon",
+                    "title": "Run recon",
+                    "fleetRunbookId": "runbook_1",
+                    "artifactSchemaName": "upfront.recon.summary",
+                    "artifactSchemaVersion": "v1",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(core, "run_runbook", lambda _runbook_id: {"suggested_flow": "single"})
+    monkeypatch.setattr(
+        core, "run_start_audit_run", lambda request: started.append(request) or {"task": {"id": "task_1"}}
     )
 
     payload = core.add_repo("j2h4u/enji-guard-cli", "MCP Integrations")
 
     assert payload["added"] is False
+    assert payload["already_present"] is True
     assert payload["connected"] is True
+    assert payload["recon"] == {"task": {"id": "task_1"}}
     assert posted == []
     assert connected == [("project_2", "repo_project_2")]
+    assert [request.action_key for request in started] == ["audit.recon"]
 
 
 def test_remove_repo_deletes_resolved_project_repo(monkeypatch: MonkeyPatch) -> None:
