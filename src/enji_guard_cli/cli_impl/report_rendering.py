@@ -1,4 +1,12 @@
+import re
+
 from enji_guard_cli.cli_impl.rendering_support import number_or_none, object_dict, object_list, string_or_none
+
+_ANSI_CSI_RE = re.compile(r"(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]")
+_ANSI_OSC_RE = re.compile(r"(?:\x1b\]|\x9d).*?(?:\x07|\x1b\\)", re.DOTALL)
+_CONTROL_CHARS = dict.fromkeys(
+    codepoint for codepoint in (*range(0x09), *range(0x0B, 0x0D), *range(0x0E, 0x20), *range(0x7F, 0xA0))
+)
 
 
 def report_read_summary_payload(payload: object) -> dict[str, object]:
@@ -60,6 +68,12 @@ def reports_markdown(payload: object) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def safe_terminal_markdown(markdown: str) -> str:
+    without_osc = _ANSI_OSC_RE.sub("", markdown)
+    without_csi = _ANSI_CSI_RE.sub("", without_osc)
+    return without_csi.translate(_CONTROL_CHARS)
+
+
 def report_item_markdown(item: object) -> str:
     if not isinstance(item, dict):
         raise ValueError("report item is not an object")
@@ -68,5 +82,5 @@ def report_item_markdown(item: object) -> str:
         raise ValueError("report item does not contain audit")
     if item.get("available") is False:
         message = string_or_none(item.get("message")) or f"{audit} report is unavailable"
-        return f"<!-- enji-report audit={audit} unavailable=true -->\n\n_{message}_"
-    return f"<!-- enji-report audit={audit} -->\n\n{report_markdown(item).strip()}"
+        return f"<!-- enji-report audit={audit} unavailable=true -->\n\n_{safe_terminal_markdown(message)}_"
+    return f"<!-- enji-report audit={audit} -->\n\n{safe_terminal_markdown(report_markdown(item)).strip()}"
