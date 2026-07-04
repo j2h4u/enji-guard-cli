@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.6](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.5...v0.3.6) (2026-07-04)
+
+
+### Fixes
+
+* activate existing repos before recon ([#77](https://github.com/j2h4u/enji-guard-cli/issues/77)) ([fe12c73](https://github.com/j2h4u/enji-guard-cli/commit/fe12c738f0cf7565227cd47b829f54531e522868))
+
 ## [0.3.5](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.4...v0.3.5) (2026-07-04)
 
 
