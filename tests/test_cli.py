@@ -537,6 +537,23 @@ def test_repo_add_uses_global_project_filter(monkeypatch: MonkeyPatch) -> None:
     assert captured == {"github_repo": "j2h4u/enji-guard-cli", "project": "Pets"}
 
 
+def test_repo_add_human_output_suggests_next_steps(monkeypatch: MonkeyPatch) -> None:
+    def fake_add(_github_repo: str, _project: str | None) -> dict[str, object]:
+        return {
+            "added": True,
+            "connected": False,
+            "repo": {"repo": {"githubOwner": "j2h4u", "githubName": "enji-guard-cli"}},
+        }
+
+    monkeypatch.setattr(cli, "add_repo", fake_add)
+
+    result = CliRunner().invoke(app, ["repo", "add", "j2h4u/enji-guard-cli"])
+
+    assert result.exit_code == 0
+    assert "next: enji-guard status REPO" in result.output
+    assert "next: if recon_done=false, run enji-guard recon start REPO" in result.output
+
+
 def test_repo_remove_uses_global_project_filter(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, str | None] = {}
 

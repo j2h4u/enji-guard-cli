@@ -60,6 +60,7 @@ from enji_guard_cli.core_impl.operations import resolve_operation_spec as resolv
 from enji_guard_cli.core_impl.payloads import json_object_payload as _json_object_payload
 from enji_guard_cli.core_impl.preflight import report_start_preflight_payload as _report_start_preflight_payload
 from enji_guard_cli.core_impl.project_admin import MoveRepoDependencies as _MoveRepoDependencies
+from enji_guard_cli.core_impl.project_admin import activate_existing_repo_payload as _activate_existing_repo_payload
 from enji_guard_cli.core_impl.project_admin import add_repo_payload as _add_repo_payload
 from enji_guard_cli.core_impl.project_admin import create_project_payload as _create_project_payload
 from enji_guard_cli.core_impl.project_admin import delete_project_payload as _delete_project_payload
@@ -114,6 +115,7 @@ from enji_guard_cli.enji_api import add_project_repo as run_add_project_repo
 from enji_guard_cli.enji_api import audit_email_preferences as run_audit_email_preferences
 from enji_guard_cli.enji_api import audit_summary_snapshot as run_audit_summary_snapshot
 from enji_guard_cli.enji_api import catalog as run_catalog
+from enji_guard_cli.enji_api import connect_project_repo as run_connect_project_repo
 from enji_guard_cli.enji_api import create_project as run_create_project
 from enji_guard_cli.enji_api import delete_project as run_delete_project
 from enji_guard_cli.enji_api import delete_project_repo as run_delete_project_repo
@@ -176,6 +178,9 @@ def list_project_inventory(project: str | None, sort: RepoSort = DEFAULT_REPO_SO
 def add_repo(github_repo: str, project: str | None) -> JsonObjectPayload:
     existing = _matching_repo_targets(github_repo, _selected_project_ids(None))
     if existing:
+        disconnected = [target for target in existing if target.get("connected") is not True]
+        if len(disconnected) == 1:
+            return _activate_existing_repo_payload(disconnected[0], connect_project_repo=run_connect_project_repo)
         candidates = ", ".join(_repo_candidate(match) for match in existing)
         raise ValueError(f"repo is already present in Enji Guard: {github_repo}. candidates: {candidates}")
     return _add_repo_payload(

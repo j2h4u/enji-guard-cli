@@ -16,6 +16,7 @@ type ProjectDetail = Callable[[str], JsonObjectPayload]
 type DeleteProject = Callable[[str], None]
 type AddProjectRepo = Callable[[str, str, str], JsonObjectPayload]
 type DeleteProjectRepo = Callable[[str, str], None]
+type ConnectProjectRepo = Callable[[str, str], JsonObjectPayload]
 type PreflightRepoMove = Callable[[str, str, str], JsonObjectPayload]
 type MoveRepo[TRepoTransfer] = Callable[[TRepoTransfer], JsonObjectPayload]
 type MakeRepoTransfer[TRepoTransfer] = Callable[[str, str, str, JsonObjectPayload | None], TRepoTransfer]
@@ -95,7 +96,40 @@ def add_repo_payload(
 ) -> JsonObjectPayload:
     project_id = resolve_single_project_id(project)
     github_owner, github_name = parse_github_repo(github_repo)
-    return add_project_repo(project_id, github_owner, github_name)
+    response = add_project_repo(project_id, github_owner, github_name)
+    return {
+        "added": True,
+        "connected": _repo_connected(response),
+        "repo": response,
+        "next_step": "status",
+    }
+
+
+def activate_existing_repo_payload(
+    target: RepoTargetPayload,
+    *,
+    connect_project_repo: ConnectProjectRepo,
+) -> JsonObjectPayload:
+    response = connect_project_repo(target["project_id"], target["repo_id"])
+    return {
+        "added": False,
+        "connected": True,
+        "repo": cast(JsonValue, dict(target)),
+        "response": response,
+        "next_step": "status",
+    }
+
+
+def _repo_connected(payload: JsonObjectPayload) -> bool | None:
+    repo = payload.get("repo")
+    if isinstance(repo, dict):
+        connected = repo.get("connected")
+        if isinstance(connected, bool):
+            return connected
+    connected = payload.get("connected")
+    if isinstance(connected, bool):
+        return connected
+    return None
 
 
 def remove_repo_payload(

@@ -19,6 +19,7 @@ from enji_guard_cli.cli_impl.rendering import (
     echo_json,
     echo_key_values,
     echo_project_table,
+    echo_repo_add,
     echo_repo_resolve_table,
     echo_repo_score_table,
     echo_repo_status_table,
@@ -650,6 +651,7 @@ def repo_add(
     _run_human_or_json_command(
         lambda: add_repo(github_repo, _selected_project()),
         _json_output(json_output),
+        echo_repo_add,
         journey=_cli_journey(
             command_path=_command_path("repo", "add"),
             selector_kind=_selector_kind_for_github_repo(github_repo),

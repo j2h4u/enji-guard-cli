@@ -19,6 +19,7 @@ from enji_guard_cli.enji_api import (
     audit_email_preferences,
     audit_summary_snapshot,
     catalog,
+    connect_project_repo,
     create_project,
     delete_project,
     delete_project_repo,
@@ -223,6 +224,7 @@ def test_project_admin_and_repo_transfer_operations_use_expected_requests(tmp_pa
             empty_response(status_code=204),
             empty_response(status_code=204),
             json_response({"repo": {"id": "repo_1", "projectId": "project_2"}}),
+            json_response({"repo": {"id": "repo_1", "connected": True}}),
         ]
     )
 
@@ -231,11 +233,13 @@ def test_project_admin_and_repo_transfer_operations_use_expected_requests(tmp_pa
     delete_project("project_1", auth_file, client)
     preflight = preflight_repo_move("project_1", "repo_1", "project_2", auth_file, client)
     moved = move_repo(RepoTransfer("project_1", "repo_1", "project_2"), auth_file, client)
+    connected = connect_project_repo("project_1", "repo_1", auth_file, client)
 
     assert created == {"project": {"id": "project_1", "name": "Pets"}}
     assert renamed == {"project": {"id": "project_1", "name": "Friends"}}
     assert preflight == {}
     assert moved == {"repo": {"id": "repo_1", "projectId": "project_2"}}
+    assert connected == {"repo": {"id": "repo_1", "connected": True}}
     assert [(request.method, request.url) for request in client.requests] == [
         ("POST", "https://fleet.enji.ai/api/v1/projects"),
         ("POST", "https://fleet.enji.ai/api/ux/projects"),
@@ -244,6 +248,7 @@ def test_project_admin_and_repo_transfer_operations_use_expected_requests(tmp_pa
         ("DELETE", "https://fleet.enji.ai/api/v1/projects/project_1"),
         ("POST", "https://fleet.enji.ai/api/ux/projects/project_1/repos/repo_1/transfer/preflight"),
         ("POST", "https://fleet.enji.ai/api/ux/projects/project_1/repos/repo_1/transfer"),
+        ("PUT", "https://fleet.enji.ai/api/ux/projects/project_1/repos/repo_1/connection"),
     ]
     assert client.requests[0].json_body == {"name": "Pets"}
     ux_create_body = client.requests[1].json_body
@@ -254,6 +259,10 @@ def test_project_admin_and_repo_transfer_operations_use_expected_requests(tmp_pa
     assert client.requests[2].json_body == {"name": "Friends"}
     assert client.requests[5].json_body == {"targetProjectId": "project_2"}
     assert client.requests[6].json_body == {"targetProjectId": "project_2"}
+    connection_body = client.requests[7].json_body
+    assert isinstance(connection_body, dict)
+    assert connection_body["connected"] is True
+    assert isinstance(connection_body["lastVerifiedAt"], str)
 
 
 def test_create_project_surfaces_partial_state_when_ux_create_fails(tmp_path: Path) -> None:

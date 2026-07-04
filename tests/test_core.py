@@ -798,8 +798,9 @@ def test_resolve_repo_reports_ambiguous_owner_repo_candidates(monkeypatch: Monke
     assert [match["project_id"] for match in payload["matches"]] == ["project_1", "project_2"]
 
 
-def test_add_repo_rejects_existing_visible_repo_before_post(monkeypatch: MonkeyPatch) -> None:
+def test_add_repo_activates_existing_disconnected_repo(monkeypatch: MonkeyPatch) -> None:
     posted: list[object] = []
+    connected: list[tuple[str, str]] = []
     monkeypatch.setattr(
         core,
         "run_projects",
@@ -827,11 +828,18 @@ def test_add_repo_rejects_existing_visible_repo_before_post(monkeypatch: MonkeyP
         },
     )
     monkeypatch.setattr(core, "run_add_project_repo", lambda *_args: posted.append(_args))
+    monkeypatch.setattr(
+        core,
+        "run_connect_project_repo",
+        lambda project_id, repo_id: connected.append((project_id, repo_id)) or {"repo": {"connected": True}},
+    )
 
-    with pytest.raises(ValueError, match="repo is already present in Enji Guard"):
-        core.add_repo("j2h4u/enji-guard-cli", "MCP Integrations")
+    payload = core.add_repo("j2h4u/enji-guard-cli", "MCP Integrations")
 
+    assert payload["added"] is False
+    assert payload["connected"] is True
     assert posted == []
+    assert connected == [("project_2", "repo_project_2")]
 
 
 def test_remove_repo_deletes_resolved_project_repo(monkeypatch: MonkeyPatch) -> None:

@@ -13,6 +13,7 @@ from enji_guard_cli.enji_api import (
     add_project_repo,
     audit_summary_snapshot,
     catalog,
+    connect_project_repo,
     create_project,
     delete_project,
     delete_project_repo,
@@ -64,6 +65,7 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
             json_response({"id": "runbook_1", "suggested_flow": "single"}),
             json_response({"repo": {"id": "repo_1"}}, status_code=201),
             empty_response(status_code=204),
+            json_response({"repo": {"id": "repo_1", "connected": True}}),
             json_response({"activeRuns": []}),
             json_response({"state": {}}),
             json_response({"links": []}),
@@ -86,6 +88,7 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
     runbook("runbook_1", auth_file, client)
     add_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client)
     delete_project_repo("project_1", "repo_1", auth_file, client)
+    connect_project_repo("project_1", "repo_1", auth_file, client)
     repo_active_runs("repo_1", auth_file, client)
     repo_audit_rerun_state("repo_1", auth_file, client)
     repo_task_links("repo_1", auth_file, client)
