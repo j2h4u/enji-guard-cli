@@ -14,13 +14,14 @@ from enji_guard_cli.enji_api import (
     EnjiApiError,
     EnjiPartialStateError,
     RepoTransfer,
-    _connect_project_repo,
     access,
+    add_project_repo,
     audit_email_preferences,
     audit_summary_snapshot,
     catalog,
     create_project,
     delete_project,
+    delete_project_repo,
     improvement_jobs,
     load_api_session,
     move_repo,
@@ -340,6 +341,7 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
             json_response({"curatedActions": []}),
             json_response({"id": "runbook_1", "suggested_flow": "single"}),
             json_response({"repo": {"id": "repo_1"}}, status_code=201),
+            empty_response(status_code=204),
             json_response({"activeRuns": []}),
             json_response({"state": {"currentHeadSha": "abc"}}),
             json_response({"links": []}),
@@ -353,7 +355,8 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
     project_detail("project_1", auth_file, client)
     catalog(auth_file, client)
     runbook("runbook_1", auth_file, client)
-    _connect_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client)
+    add_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client)
+    delete_project_repo("project_1", "repo_1", auth_file, client)
     repo_active_runs("repo_1", auth_file, client)
     repo_audit_rerun_state("repo_1", auth_file, client)
     repo_task_links("repo_1", auth_file, client)
@@ -376,6 +379,7 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
         ("GET", "https://fleet.enji.ai/api/ux/catalog"),
         ("GET", "https://fleet.enji.ai/api/v1/runbooks/runbook_1"),
         ("POST", "https://fleet.enji.ai/api/ux/projects/project_1/repos"),
+        ("DELETE", "https://fleet.enji.ai/api/ux/projects/project_1/repos/repo_1"),
         ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/active-runs"),
         ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/audit-rerun-state"),
         ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/task-links"),
@@ -385,13 +389,13 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
         ("PUT", "https://fleet.enji.ai/api/ux/improvement-jobs/repo_1/vuln-audit"),
     ]
     assert client.requests[3].json_body == {"githubOwner": "j2h4u", "githubName": "enji-guard-cli"}
-    audit_body = client.requests[7].json_body
+    audit_body = client.requests[8].json_body
     assert isinstance(audit_body, dict)
     assert audit_body["projectId"] == "project_1"
     assert audit_body["actionKey"] == "audit.recon"
     assert audit_body["fleetTaskBody"] == {"title": "Run recon"}
     assert isinstance(audit_body["clientRequestId"], str)
-    assert client.requests[10].json_body == {"enabled": True}
+    assert client.requests[11].json_body == {"enabled": True}
 
 
 def test_audit_email_preferences_use_expected_requests(tmp_path: Path) -> None:

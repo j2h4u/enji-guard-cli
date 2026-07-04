@@ -14,7 +14,8 @@ type CreateProject = Callable[[str], JsonObjectPayload]
 type RenameProject = Callable[[str, str], JsonObjectPayload]
 type ProjectDetail = Callable[[str], JsonObjectPayload]
 type DeleteProject = Callable[[str], None]
-type ConnectProjectRepo = Callable[[str, str, str], JsonObjectPayload]
+type AddProjectRepo = Callable[[str, str, str], JsonObjectPayload]
+type DeleteProjectRepo = Callable[[str, str], None]
 type PreflightRepoMove = Callable[[str, str, str], JsonObjectPayload]
 type MoveRepo[TRepoTransfer] = Callable[[TRepoTransfer], JsonObjectPayload]
 type MakeRepoTransfer[TRepoTransfer] = Callable[[str, str, str, JsonObjectPayload | None], TRepoTransfer]
@@ -84,17 +85,34 @@ def _project_repo_count(project: JsonObjectPayload) -> int:
     return 0
 
 
-def connect_repo_payload(
+def add_repo_payload(
     github_repo: str,
     project: str | None,
     *,
     resolve_single_project_id: ResolveSingleProjectId,
     parse_github_repo: ParseGithubRepo,
-    connect_project_repo: ConnectProjectRepo,
+    add_project_repo: AddProjectRepo,
 ) -> JsonObjectPayload:
     project_id = resolve_single_project_id(project)
     github_owner, github_name = parse_github_repo(github_repo)
-    return connect_project_repo(project_id, github_owner, github_name)
+    return add_project_repo(project_id, github_owner, github_name)
+
+
+def remove_repo_payload(
+    repo: str,
+    project: str | None,
+    *,
+    resolve_single_repo_target: ResolveSingleRepoTarget,
+    delete_project_repo: DeleteProjectRepo,
+) -> JsonObjectPayload:
+    target = resolve_single_repo_target(repo, project)
+    delete_project_repo(target["project_id"], target["repo_id"])
+    return {
+        "repo": cast(JsonValue, dict(target)),
+        "project_id": target["project_id"],
+        "repo_id": target["repo_id"],
+        "removed": True,
+    }
 
 
 def move_repo_payload[TRepoTransfer](

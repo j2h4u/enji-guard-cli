@@ -60,10 +60,11 @@ from enji_guard_cli.core_impl.operations import resolve_operation_spec as resolv
 from enji_guard_cli.core_impl.payloads import json_object_payload as _json_object_payload
 from enji_guard_cli.core_impl.preflight import report_start_preflight_payload as _report_start_preflight_payload
 from enji_guard_cli.core_impl.project_admin import MoveRepoDependencies as _MoveRepoDependencies
-from enji_guard_cli.core_impl.project_admin import connect_repo_payload as _connect_repo_payload
+from enji_guard_cli.core_impl.project_admin import add_repo_payload as _add_repo_payload
 from enji_guard_cli.core_impl.project_admin import create_project_payload as _create_project_payload
 from enji_guard_cli.core_impl.project_admin import delete_project_payload as _delete_project_payload
 from enji_guard_cli.core_impl.project_admin import move_repo_payload as _move_repo_payload
+from enji_guard_cli.core_impl.project_admin import remove_repo_payload as _remove_repo_payload
 from enji_guard_cli.core_impl.project_admin import rename_project_payload as _rename_project_payload
 from enji_guard_cli.core_impl.repo_status import current_active_runs as _current_active_runs
 from enji_guard_cli.core_impl.repo_status import current_head_sha as _current_head_sha
@@ -109,12 +110,13 @@ from enji_guard_cli.enji_api import (
     AuditRunCreate,
     RepoTransfer,
 )
-from enji_guard_cli.enji_api import _connect_project_repo as run_connect_project_repo
+from enji_guard_cli.enji_api import add_project_repo as run_add_project_repo
 from enji_guard_cli.enji_api import audit_email_preferences as run_audit_email_preferences
 from enji_guard_cli.enji_api import audit_summary_snapshot as run_audit_summary_snapshot
 from enji_guard_cli.enji_api import catalog as run_catalog
 from enji_guard_cli.enji_api import create_project as run_create_project
 from enji_guard_cli.enji_api import delete_project as run_delete_project
+from enji_guard_cli.enji_api import delete_project_repo as run_delete_project_repo
 from enji_guard_cli.enji_api import improvement_jobs as run_improvement_jobs
 from enji_guard_cli.enji_api import move_repo as run_move_repo
 from enji_guard_cli.enji_api import preflight_repo_move as run_preflight_repo_move
@@ -171,17 +173,26 @@ def list_project_inventory(project: str | None, sort: RepoSort = DEFAULT_REPO_SO
     return _repo_status_all_payload(projects)
 
 
-def connect_repo(github_repo: str, project: str | None) -> JsonObjectPayload:
+def add_repo(github_repo: str, project: str | None) -> JsonObjectPayload:
     existing = _matching_repo_targets(github_repo, _selected_project_ids(None))
     if existing:
         candidates = ", ".join(_repo_candidate(match) for match in existing)
         raise ValueError(f"repo is already present in Enji Guard: {github_repo}. candidates: {candidates}")
-    return _connect_repo_payload(
+    return _add_repo_payload(
         github_repo,
         project,
         resolve_single_project_id=_resolve_single_project_id,
         parse_github_repo=_parse_github_repo,
-        connect_project_repo=run_connect_project_repo,
+        add_project_repo=run_add_project_repo,
+    )
+
+
+def remove_repo(repo: str, project: str | None) -> JsonObjectPayload:
+    return _remove_repo_payload(
+        repo,
+        project,
+        resolve_single_repo_target=_resolve_single_repo_target,
+        delete_project_repo=run_delete_project_repo,
     )
 
 

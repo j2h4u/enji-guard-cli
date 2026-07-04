@@ -42,7 +42,7 @@ from enji_guard_cli.core import (
     OperationResult,
     ReportWaitOptions,
     ScheduleSettingsUpdate,
-    connect_repo,
+    add_repo,
     create_project,
     delete_project,
     import_bearer_token,
@@ -55,6 +55,7 @@ from enji_guard_cli.core import (
     package_version,
     read_reports_for_repo,
     refresh_auth,
+    remove_repo,
     rename_project,
     resolve_operation_result,
     resolve_operation_spec,
@@ -88,7 +89,7 @@ app = typer.Typer(help=MAIN_HELP)
 catalog_app = typer.Typer(help="Local audit aliases and metadata.")
 auth_app = typer.Typer(help="Credential bootstrap, refresh, and status.")
 project_app = typer.Typer(help="List and manage Enji projects.")
-repo_app = typer.Typer(help="Discover, resolve, connect, and move GitHub repositories.")
+repo_app = typer.Typer(help="Discover, resolve, add, remove, and move GitHub repositories.")
 recon_app = typer.Typer(help="Start baseline discovery. Recon is not a report audit.")
 audit_app = typer.Typer(help="Start slow report-producing audits.")
 report_app = typer.Typer(help="Read generated audit reports.")
@@ -641,17 +642,32 @@ def repo_resolve(
     )
 
 
-@repo_app.command("connect", help="Connect a GitHub owner/name repository to Enji Guard.")
-def repo_connect(
+@repo_app.command("add", help="Add a GitHub owner/name repository to an Enji project.")
+def repo_add(
     github_repo: Annotated[str, typer.Argument(help="GitHub owner/name repository slug.")],
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     _run_human_or_json_command(
-        lambda: connect_repo(github_repo, _selected_project()),
+        lambda: add_repo(github_repo, _selected_project()),
         _json_output(json_output),
         journey=_cli_journey(
-            command_path=_command_path("repo", "connect"),
+            command_path=_command_path("repo", "add"),
             selector_kind=_selector_kind_for_github_repo(github_repo),
+        ),
+    )
+
+
+@repo_app.command("remove", help="Remove a repository from an Enji project.")
+def repo_remove(
+    repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    _run_human_or_json_command(
+        lambda: remove_repo(repo, _selected_project()),
+        _json_output(json_output),
+        journey=_cli_journey(
+            command_path=_command_path("repo", "remove"),
+            selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
         ),
     )
 

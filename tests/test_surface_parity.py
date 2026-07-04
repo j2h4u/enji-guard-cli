@@ -16,6 +16,7 @@ PROJECT_ADMIN_COMMANDS = (
     "enji-guard project create NAME",
     "enji-guard project rename PROJECT NAME",
     "enji-guard project delete PROJECT",
+    "enji-guard repo remove REPO",
     "enji-guard repo move REPO --to-project PROJECT",
 )
 

@@ -103,7 +103,8 @@ enji-guard project delete PROJECT
 
 enji-guard repo list [--sort default|name|weakest|overall|latest-report]
 enji-guard repo resolve REPO
-enji-guard repo connect OWNER/NAME
+enji-guard repo add OWNER/NAME
+enji-guard repo remove REPO
 enji-guard repo move REPO --to-project PROJECT
 
 enji-guard status [REPO] [--sort default|name|weakest|overall|latest-report]

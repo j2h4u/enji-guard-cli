@@ -291,9 +291,10 @@ def test_command_help_summarizes_workflow_groups() -> None:
     result = CliRunner().invoke(app, ["repo", "--help"])
 
     assert result.exit_code == 0
-    assert "Discover, resolve, connect, and move GitHub repositories." in result.output
+    assert "Discover, resolve, add, remove, and move GitHub repositories." in result.output
     assert "List connected repositories with triage scores." in result.output
-    assert "Connect a GitHub owner/name repository to Enji Guard." in result.output
+    assert "Add a GitHub owner/name repository to an Enji project." in result.output
+    assert "Remove a repository from an Enji project." in result.output
 
 
 def test_manual_write_command_help_documents_explicit_scope_flags() -> None:
@@ -519,21 +520,38 @@ def test_repo_resolve_requires_explicit_selector(monkeypatch: MonkeyPatch) -> No
     assert captured == {"repo": "j2h4u/enji-guard-cli", "project": None}
 
 
-def test_repo_connect_uses_global_project_filter(monkeypatch: MonkeyPatch) -> None:
+def test_repo_add_uses_global_project_filter(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, str | None] = {}
 
-    def fake_connect(github_repo: str, project: str | None) -> dict[str, object]:
+    def fake_add(github_repo: str, project: str | None) -> dict[str, object]:
         captured["github_repo"] = github_repo
         captured["project"] = project
         return {"repo": {"id": "repo_1"}}
 
-    monkeypatch.setattr(cli, "connect_repo", fake_connect)
+    monkeypatch.setattr(cli, "add_repo", fake_add)
 
-    result = CliRunner().invoke(app, ["--project", "Pets", "repo", "connect", "j2h4u/enji-guard-cli", "--json"])
+    result = CliRunner().invoke(app, ["--project", "Pets", "repo", "add", "j2h4u/enji-guard-cli", "--json"])
 
     assert result.exit_code == 0
     assert json.loads(result.output) == {"repo": {"id": "repo_1"}}
     assert captured == {"github_repo": "j2h4u/enji-guard-cli", "project": "Pets"}
+
+
+def test_repo_remove_uses_global_project_filter(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, str | None] = {}
+
+    def fake_remove(repo: str, project: str | None) -> dict[str, object]:
+        captured["repo"] = repo
+        captured["project"] = project
+        return {"repo_id": "repo_1", "removed": True}
+
+    monkeypatch.setattr(cli, "remove_repo", fake_remove)
+
+    result = CliRunner().invoke(app, ["--project", "Pets", "repo", "remove", "j2h4u/enji-guard-cli", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {"repo_id": "repo_1", "removed": True}
+    assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets"}
 
 
 def test_repo_move_uses_global_source_project_and_destination_option(monkeypatch: MonkeyPatch) -> None:
