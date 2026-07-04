@@ -161,6 +161,8 @@ Use the local release status check after merges and releases:
 just release-status
 ```
 
+It needs `gh` and Docker buildx available for release checks; those are only
+required for this command, not for normal runtime use.
 It reports git state, open PRs, the latest GitHub Release, GHCR image
 publication, and recent GitHub Actions.
 
@@ -214,7 +216,8 @@ docker exec -i enji-guard-cli enji-guard health --ready
 Do not paste credentials directly into shell history. The auth file defaults to
 `~/.config/enji-guard/auth.json` and is written with private file permissions.
 Keep that directory writable by the container user because Enji rotates refresh
-cookies.
+cookies. Credentials belong in the configured auth file, not in checked-in env
+templates or persistent `.env` files.
 
 ## CLI
 

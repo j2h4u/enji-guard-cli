@@ -7,8 +7,8 @@ branch is acceptable for local development and active prototyping.
 
 ## Credentials
 
-Never commit auth files, cookies, bearer tokens, or `.env` files. Credentials
-belong in the configured auth file, which defaults to:
+Never commit auth files, cookies, bearer tokens, or persistent `.env` files.
+Credentials belong in the configured auth file, which defaults to:
 
 ```text
 ~/.config/enji-guard/auth.json

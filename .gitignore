@@ -17,7 +17,6 @@ venv/
 # Local environment files
 .env
 .env.*
-!.env.example
 
 # Build artifacts
 build/

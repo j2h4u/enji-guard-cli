@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, TypedDict, cast
@@ -285,6 +286,33 @@ def test_top_level_help_explains_agent_model() -> None:
     assert "Recon is" in result.output
     assert "baseline discovery" in result.output
     assert "Text tables are the default" in result.output
+
+
+def test_installed_cli_entrypoint_smoke_runs_version_and_help() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+
+    version_result = subprocess.run(
+        ["uv", "run", "enji-guard", "--version"],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    help_result = subprocess.run(
+        ["uv", "run", "enji-guard", "--help"],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert version_result.returncode == 0
+    assert version_result.stderr == ""
+    assert version_result.stdout.strip()
+    assert help_result.returncode == 0
+    assert help_result.stderr == ""
+    assert "Usage:" in help_result.stdout
+    assert "projects group GitHub repositories" in help_result.stdout
 
 
 def test_command_help_summarizes_workflow_groups() -> None:

@@ -18,6 +18,8 @@ from enji_guard_cli.core_impl.models import (
     AuditRunBatchPayload,
     AuditRunBatchResultItem,
     AuditRunSkippedPayload,
+    ReportAuditStatusPayload,
+    ReportStatusPayload,
 )
 from enji_guard_cli.core_impl.payloads import json_object_or_default, json_str, required_str
 from enji_guard_cli.core_impl.repo_status import (
@@ -185,6 +187,52 @@ def selected_report_audits(audits: list[AuditAlias], *, all_reports: bool) -> li
     for audit in audits:
         registry_require_report_audit(audit)
     return audits
+
+
+def linked_running_report_results(
+    status: ReportStatusPayload,
+    audits: list[AuditAlias],
+) -> dict[str, AuditRunBatchResultItem]:
+    items_by_action = {item["action_key"]: item for item in status["items"]}
+    results: dict[str, AuditRunBatchResultItem] = {}
+    for audit in audits:
+        action_key = registry_require_report_audit(audit).action_key
+        item = items_by_action.get(action_key)
+        if item is None or not has_running_report_link(item):
+            continue
+        report = item["report"]
+        results[action_key] = {
+            "audit": audit.value,
+            "action_key": action_key,
+            "state": "already_running",
+            "current_head_sha": report["current_head_sha"],
+            "last_audited_head_sha": report["audited_head_sha"],
+            "task_id": report["fleet_task_id"],
+            "task_status": report["run_status"],
+        }
+    return results
+
+
+def has_running_report_link(item: ReportAuditStatusPayload) -> bool:
+    report = item["report"]
+    task = item["task"]
+    return (
+        task["active"] is False
+        and report["can_read"] is True
+        and report["fleet_task_id"] is not None
+        and report["audited_head_sha"] is None
+        and report["completed_at"] is None
+    )
+
+
+def ordered_audit_results(
+    audits: list[AuditAlias],
+    linked_results: dict[str, AuditRunBatchResultItem],
+    started_results: list[AuditRunBatchResultItem],
+) -> list[AuditRunBatchResultItem]:
+    results_by_action = {result["action_key"]: result for result in started_results}
+    results_by_action.update(linked_results)
+    return [results_by_action[registry_require_report_audit(audit).action_key] for audit in audits]
 
 
 def skipped_audit_payload(audit: str, action_key: str, active_runs: list[JsonValue]) -> AuditRunSkippedPayload:
