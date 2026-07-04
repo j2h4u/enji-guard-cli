@@ -1131,7 +1131,12 @@ def test_start_report_audits_selects_all_report_audits(monkeypatch: MonkeyPatch)
         captured["repo_id"] = repo_id
         captured["project_id"] = project_id
         captured["audits"] = [audit.value for audit in audits]
-        return {"results": []}
+        return {
+            "results": [
+                {"audit": audit.value, "action_key": resolve_audit(audit).action_key, "state": "started"}
+                for audit in audits
+            ]
+        }
 
     monkeypatch.setattr(core, "_start_report_audits_for_target", fake_start_report_audits_for_target)
 
@@ -1143,7 +1148,7 @@ def test_start_report_audits_selects_all_report_audits(monkeypatch: MonkeyPatch)
         "repo_id": "repo_1",
         "github_repo": "j2h4u/enji-guard-cli",
     }
-    assert payload["results"] == []
+    assert len(cast(list[dict[str, object]], payload["results"])) == 7
     assert captured == {
         "repo_id": "repo_1",
         "project_id": "project_1",
@@ -1220,6 +1225,47 @@ def test_start_report_audits_includes_deterministic_preflight_before_start(monke
     }
     results = cast(list[dict[str, object]], payload["results"])
     assert [result["audit"] for result in results] == ["security"]
+
+
+def test_start_report_audits_skips_task_link_without_active_run(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        core,
+        "_resolve_single_repo_target",
+        lambda repo, project: {
+            "project_id": "project_1",
+            "project_name": "Pets",
+            "repo_id": "repo_1",
+            "github_repo": "j2h4u/enji-guard-cli",
+        },
+    )
+    linked_report = _report_status_item("security", "ready", last_audited_head_sha=None)
+    linked_report["report"]["fleet_task_id"] = "task_security"
+    linked_report["report"]["created_at"] = "2026-07-04T17:44:13.795Z"
+    linked_report["report"]["completed_at"] = None
+    linked_report["report"]["run_status"] = None
+    monkeypatch.setattr(core, "_report_status", lambda repo_id: _report_status_payload(repo_id, [linked_report]))
+
+    def fail_start_report_audits_for_target(
+        repo_id: str, project_id: str, audits: list[AuditAlias]
+    ) -> dict[str, object]:
+        assert audits == []
+        return {"results": []}
+
+    monkeypatch.setattr(core, "_start_report_audits_for_target", fail_start_report_audits_for_target)
+
+    payload = core.start_report_audits("j2h4u/enji-guard-cli", "Pets", [AuditAlias.SECURITY], all_reports=False)
+
+    assert payload["results"] == [
+        {
+            "audit": "security",
+            "action_key": "audit.security",
+            "state": "already_running",
+            "current_head_sha": "head_2",
+            "last_audited_head_sha": None,
+            "task_id": "task_security",
+            "task_status": None,
+        }
+    ]
 
 
 def test_start_all_report_audits_skips_already_running_audits(monkeypatch: MonkeyPatch) -> None:
