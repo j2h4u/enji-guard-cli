@@ -29,7 +29,7 @@ administration, repository moves, schedule changes, email preferences, auth
 bootstrap, and operational commands. CLI should stay task-oriented, but it is
 allowed to be broad.
 
-CLI stdout/stderr are command I/O. Application telemetry belongs in the
+CLI stdout/stderr are command I/O. Application telemetry belongs only in the
 configured persistent log file, not interleaved with command output.
 
 MCP is the curated read-mostly agent surface. It is for a tech-lead or project
@@ -64,7 +64,7 @@ request body references. OpenAPI must not generate CLI or MCP surfaces directly.
 - `recon`: preliminary diagnostics, separate from report audits.
 - `audit`: report-producing checks.
 - `report`: generated report content.
-- `wait`: blocking readiness gate for all report audits in one repo.
+- `wait`: follow-up completion check for all report audits in one repo.
 - `schedule`: recurring audit settings.
 - `email`: report completion email preferences.
 
@@ -180,14 +180,17 @@ host timezone. Recon is not schedulable here.
 
 ## Long-Running Work
 
-Recon and report audits can take tens of minutes. `wait REPO` blocks until all
-report audits for that repo have results. It exits nonzero on timeout or failed
-runs, and reports stale audited commit hashes as context instead of treating
-them as failure. `report read REPO` is the main content path after reports
-become ready; it reads all currently ready reports unless explicit audit aliases
-or `--all` are passed. `report read --all --json` returns readable reports and
-explicit `available: false` items for missing or unreadable reports instead of
-aborting the whole batch. `report read --json` returns the machine contract.
+Recon and report audits can take tens of minutes. `wait REPO` is a follow-up
+completion check after `status`, not the primary analysis gate. It exits
+nonzero on timeout or failed runs, and reports stale audited commit hashes as
+context instead of treating them as failure. `report read REPO` is the main
+content path after reports become ready; it reads all currently ready reports
+unless explicit audit aliases or `--all` are passed. `report read --all --json`
+returns readable reports and explicit `available: false` items for missing or
+unreadable reports instead of aborting the whole batch. `report read --json`
+returns the machine contract. Starting a new audit can temporarily hide older
+snapshots behind the running state, so read needed snapshots before kicking off
+fresh audits.
 
 `status` must expose scenario state, not raw API internals:
 

@@ -186,6 +186,20 @@ def echo_audit_catalog(payload: object) -> None:
     echo_table(headers, rows, "No audits.")
 
 
+def echo_audit_start(payload: object) -> None:
+    data = object_dict(payload)
+    preflight = object_dict(data.get("preflight"))
+    counts = object_dict(preflight.get("counts"))
+    warning = object_dict(preflight.get("warning"))
+    typer.echo(
+        "preflight: "
+        f"{text_cell(counts.get('ready'))} ready, "
+        f"{text_cell(counts.get('running'))} running, "
+        f"{text_cell(counts.get('stale'))} stale"
+    )
+    typer.echo(f"warning: {text_cell(warning.get('code'))} {text_cell(warning.get('message'))}")
+
+
 def echo_wait_status(payload: object) -> None:
     data = object_dict(payload)
     complete = "yes" if data.get("complete") is True else "no"

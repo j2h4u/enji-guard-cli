@@ -873,6 +873,25 @@ def test_start_report_audits_selects_all_report_audits(monkeypatch: MonkeyPatch)
             "github_repo": "j2h4u/enji-guard-cli",
         },
     )
+    monkeypatch.setattr(
+        core,
+        "_report_status",
+        lambda repo_id: {
+            "repo_id": repo_id,
+            "current_head_sha": "head_2",
+            "last_report_at": "2026-06-30T12:00:00Z",
+            "complete": False,
+            "ready": ["security"],
+            "running": [],
+            "missing": ["tests"],
+            "reports": [
+                {
+                    "audit": "security",
+                    "out_of_date": False,
+                }
+            ],
+        },
+    )
 
     def fake_start_report_audits_for_target(
         repo_id: str, project_id: str, audits: list[AuditAlias]
@@ -898,6 +917,78 @@ def test_start_report_audits_selects_all_report_audits(monkeypatch: MonkeyPatch)
         "project_id": "project_1",
         "audits": ["security", "ai-readiness", "tests", "tech-health", "deps", "cognitive-debt", "dead-code"],
     }
+
+
+def test_start_report_audits_includes_deterministic_preflight_before_start(monkeypatch: MonkeyPatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        core,
+        "_resolve_single_repo_target",
+        lambda repo, project: {
+            "project_id": "project_1",
+            "project_name": "Pets",
+            "repo_id": "repo_1",
+            "github_repo": "j2h4u/enji-guard-cli",
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "_report_status",
+        lambda repo_id: (
+            calls.append(f"status:{repo_id}"),
+            {
+                "repo_id": repo_id,
+                "current_head_sha": "head_2",
+                "last_report_at": "2026-06-30T12:00:00Z",
+                "complete": False,
+                "ready": ["security", "tests"],
+                "running": ["deps"],
+                "missing": ["dead-code"],
+                "reports": [
+                    {
+                        "audit": "security",
+                        "out_of_date": False,
+                    },
+                    {
+                        "audit": "tests",
+                        "out_of_date": True,
+                    },
+                    {
+                        "audit": "deps",
+                        "out_of_date": None,
+                    },
+                    {
+                        "audit": "dead-code",
+                        "out_of_date": True,
+                    },
+                ],
+            },
+        )[1],
+    )
+
+    def fake_start_report_audits_for_target(
+        repo_id: str, project_id: str, audits: list[AuditAlias]
+    ) -> dict[str, object]:
+        calls.append(f"start:{repo_id}")
+        return {"runs": [{"audit": audit.value} for audit in audits], "skipped": []}
+
+    monkeypatch.setattr(core, "_start_report_audits_for_target", fake_start_report_audits_for_target)
+
+    payload = core.start_report_audits("j2h4u/enji-guard-cli", "Pets", [AuditAlias.SECURITY], all_reports=False)
+
+    assert calls == ["status:repo_1", "start:repo_1"]
+    assert payload["preflight"] == {
+        "warning": {
+            "code": "SNAPSHOT_VISIBILITY_RISK",
+            "message": "starting report audits can temporarily hide older snapshots",
+        },
+        "counts": {"ready": 2, "running": 1, "stale": 2},
+        "lists": {"ready": ["security", "tests"], "running": ["deps"], "stale": ["tests", "dead-code"]},
+        "current_head_sha": "head_2",
+        "last_report_at": "2026-06-30T12:00:00Z",
+    }
+    runs = cast(list[dict[str, object]], payload["runs"])
+    assert [run["audit"] for run in runs] == ["security"]
 
 
 def test_start_all_report_audits_skips_already_running_audits(monkeypatch: MonkeyPatch) -> None:
