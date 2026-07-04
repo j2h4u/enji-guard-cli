@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0](https://github.com/j2h4u/enji-guard-cli/compare/v0.2.0...v0.3.0) (2026-07-04)
+
+
+### Features
+
+* add audit preflight and CLI telemetry ([#61](https://github.com/j2h4u/enji-guard-cli/issues/61)) ([3b8ad5a](https://github.com/j2h4u/enji-guard-cli/commit/3b8ad5a8fda70fcbb44b1ddd121eca25bda99441))
+* add telemetry sink foundation ([#63](https://github.com/j2h4u/enji-guard-cli/issues/63)) ([d4c5f60](https://github.com/j2h4u/enji-guard-cli/commit/d4c5f60fd75938adda3da87aff66fe14f3771e06))
+* share agent journey telemetry ([#62](https://github.com/j2h4u/enji-guard-cli/issues/62)) ([1c516c2](https://github.com/j2h4u/enji-guard-cli/commit/1c516c22f5519e8c4b66297732b385981e2594c6))
+* split report and audit task status ([#64](https://github.com/j2h4u/enji-guard-cli/issues/64)) ([d2231ac](https://github.com/j2h4u/enji-guard-cli/commit/d2231acdf2d51e679699b191f5c484adce70e9bd))
+
+
+### Fixes
+
+* fail closed before backend readiness succeeds ([#57](https://github.com/j2h4u/enji-guard-cli/issues/57)) ([c05551c](https://github.com/j2h4u/enji-guard-cli/commit/c05551c0e6e3e4787f6a459ffadde41aeba294d0))
+* harden refresh cookie rotation ([#55](https://github.com/j2h4u/enji-guard-cli/issues/55)) ([b42d47a](https://github.com/j2h4u/enji-guard-cli/commit/b42d47aca8d35208aa44f619812103d08d7eaa51))
+* sanitize report markdown terminal output ([#59](https://github.com/j2h4u/enji-guard-cli/issues/59)) ([84ba55e](https://github.com/j2h4u/enji-guard-cli/commit/84ba55e81f22d279324fdc0af2fcfce1ca860b42))
+
 ## [0.2.0](https://github.com/j2h4u/enji-guard-cli/compare/v0.1.0...v0.2.0) (2026-07-03)
 
 
