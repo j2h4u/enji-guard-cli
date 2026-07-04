@@ -16,7 +16,8 @@ from enji_guard_cli._enji_api_contract import (
     IMPROVEMENT_JOBS_ENDPOINT_SPEC,
     PROJECT_DETAIL_ENDPOINT_SPEC,
     PROJECT_RENAME_ENDPOINT_SPEC,
-    PROJECT_REPOS_CONNECT_ENDPOINT_SPEC,
+    PROJECT_REPO_DELETE_ENDPOINT_SPEC,
+    PROJECT_REPOS_ADD_ENDPOINT_SPEC,
     PROJECTS_ENDPOINT_SPEC,
     REPO_ACTIVE_RUNS_ENDPOINT_SPEC,
     REPO_AUDIT_RERUN_STATE_ENDPOINT_SPEC,
@@ -131,7 +132,7 @@ class RepoTransferRequest(TypedDict):
     scheduleReplacements: NotRequired[dict[str, JsonValue]]
 
 
-class RepoConnectRequest(TypedDict):
+class RepoAddRequest(TypedDict):
     githubOwner: str
     githubName: str
 
@@ -364,21 +365,34 @@ def runbook(
     )
 
 
-def _connect_project_repo(
+def add_project_repo(
     project_id: str,
     github_owner: str,
     github_name: str,
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
 ) -> JsonObjectPayload:
-    request: RepoConnectRequest = {"githubOwner": github_owner, "githubName": github_name}
+    request: RepoAddRequest = {"githubOwner": github_owner, "githubName": github_name}
     return run_api_request(
         auth_file,
         client,
-        PROJECT_REPOS_CONNECT_ENDPOINT.request(
+        PROJECT_REPOS_ADD_ENDPOINT.request(
             path_params={"projectId": project_id},
             json_body=cast(EnjiJsonValue, request),
         ),
+    )
+
+
+def delete_project_repo(
+    project_id: str,
+    repo_id: str,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> None:
+    run_api_no_content(
+        auth_file,
+        client,
+        PROJECT_REPO_DELETE_ENDPOINT.request(path_params={"projectId": project_id, "repoId": repo_id}),
     )
 
 
@@ -636,10 +650,15 @@ RUNBOOK_ENDPOINT = ApiEndpoint(
     spec=RUNBOOK_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
-PROJECT_REPOS_CONNECT_ENDPOINT = ApiEndpoint(
-    spec=PROJECT_REPOS_CONNECT_ENDPOINT_SPEC,
+PROJECT_REPOS_ADD_ENDPOINT = ApiEndpoint(
+    spec=PROJECT_REPOS_ADD_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
     expected_statuses=HTTP_CREATED_ONLY,
+)
+PROJECT_REPO_DELETE_ENDPOINT = ApiEndpoint(
+    spec=PROJECT_REPO_DELETE_ENDPOINT_SPEC,
+    parser=_parse_json_object_payload,
+    expected_statuses=HTTP_NO_CONTENT_ONLY,
 )
 REPO_ACTIVE_RUNS_ENDPOINT = ApiEndpoint(
     spec=REPO_ACTIVE_RUNS_ENDPOINT_SPEC,

@@ -798,7 +798,7 @@ def test_resolve_repo_reports_ambiguous_owner_repo_candidates(monkeypatch: Monke
     assert [match["project_id"] for match in payload["matches"]] == ["project_1", "project_2"]
 
 
-def test_connect_repo_rejects_existing_visible_repo_before_post(monkeypatch: MonkeyPatch) -> None:
+def test_add_repo_rejects_existing_visible_repo_before_post(monkeypatch: MonkeyPatch) -> None:
     posted: list[object] = []
     monkeypatch.setattr(
         core,
@@ -826,12 +826,49 @@ def test_connect_repo_rejects_existing_visible_repo_before_post(monkeypatch: Mon
             ],
         },
     )
-    monkeypatch.setattr(core, "run_connect_project_repo", lambda *_args: posted.append(_args))
+    monkeypatch.setattr(core, "run_add_project_repo", lambda *_args: posted.append(_args))
 
     with pytest.raises(ValueError, match="repo is already present in Enji Guard"):
-        core.connect_repo("j2h4u/enji-guard-cli", "MCP Integrations")
+        core.add_repo("j2h4u/enji-guard-cli", "MCP Integrations")
 
     assert posted == []
+
+
+def test_remove_repo_deletes_resolved_project_repo(monkeypatch: MonkeyPatch) -> None:
+    deleted: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        core,
+        "run_projects",
+        lambda: {"projects": [{"id": "project_1", "name": "Pets"}]},
+    )
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda _project_id: {
+            "project": {"id": "project_1", "name": "Pets"},
+            "repos": [
+                {
+                    "id": "repo_1",
+                    "githubOwner": "j2h4u",
+                    "githubName": "presentations",
+                    "connected": False,
+                    "reconDone": False,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_delete_project_repo",
+        lambda project_id, repo_id: deleted.append((project_id, repo_id)),
+    )
+
+    payload = core.remove_repo("j2h4u/presentations", "Pets")
+
+    assert payload["removed"] is True
+    assert payload["project_id"] == "project_1"
+    assert payload["repo_id"] == "repo_1"
+    assert deleted == [("project_1", "repo_1")]
 
 
 def test_start_recon_rejects_ambiguous_owner_repo_selector(monkeypatch: MonkeyPatch) -> None:

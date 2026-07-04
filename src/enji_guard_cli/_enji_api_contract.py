@@ -113,12 +113,18 @@ RUNBOOK_ENDPOINT_SPEC = EnjiEndpointSpec(
     operation_id="getRunbook",
     operation="runbook",
 )
-PROJECT_REPOS_CONNECT_ENDPOINT_SPEC = EnjiEndpointSpec(
+PROJECT_REPOS_ADD_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="POST",
     path_template="/api/ux/projects/{projectId}/repos",
-    operation_id="connectProjectRepo",
+    operation_id="addProjectRepo",
     operation="repo add",
     request_body_ref="#/components/requestBodies/GitHubRepoConnect",
+)
+PROJECT_REPO_DELETE_ENDPOINT_SPEC = EnjiEndpointSpec(
+    method="DELETE",
+    path_template="/api/ux/projects/{projectId}/repos/{repoId}",
+    operation_id="deleteProjectRepo",
+    operation="repo remove",
 )
 REPO_ACTIVE_RUNS_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="GET",
@@ -192,7 +198,8 @@ IMPLEMENTED_ENJI_ENDPOINTS = (
     REPO_TRANSFER_ENDPOINT_SPEC,
     CATALOG_ENDPOINT_SPEC,
     RUNBOOK_ENDPOINT_SPEC,
-    PROJECT_REPOS_CONNECT_ENDPOINT_SPEC,
+    PROJECT_REPOS_ADD_ENDPOINT_SPEC,
+    PROJECT_REPO_DELETE_ENDPOINT_SPEC,
     REPO_ACTIVE_RUNS_ENDPOINT_SPEC,
     REPO_AUDIT_RERUN_STATE_ENDPOINT_SPEC,
     REPO_TASK_LINKS_ENDPOINT_SPEC,

@@ -20,9 +20,10 @@ EXPECTED_VISIBLE_COMMANDS = {
     ("project", "list"),
     ("project", "rename"),
     ("recon", "start"),
-    ("repo", "connect"),
+    ("repo", "add"),
     ("repo", "list"),
     ("repo", "move"),
+    ("repo", "remove"),
     ("repo", "resolve"),
     ("report", "read"),
     ("run",),
@@ -36,6 +37,7 @@ EXPECTED_VISIBLE_COMMANDS = {
 REMOVED_VISIBLE_COMMANDS = {
     ("report", "list"),
     ("report", "show"),
+    ("repo", "connect"),
     ("schedule", "timezone"),
 }
 
@@ -56,6 +58,7 @@ PROJECT_ADMIN_COMMANDS = (
     "enji-guard project create NAME",
     "enji-guard project rename PROJECT NAME",
     "enji-guard project delete PROJECT",
+    "enji-guard repo remove REPO",
     "enji-guard repo move REPO --to-project PROJECT",
 )
 

@@ -83,7 +83,7 @@ docker exec -i enji-guard-cli enji-guard status "$REPO"
 If the repository is absent from Enji:
 
 ```bash
-docker exec -i enji-guard-cli enji-guard repo connect "$REPO"
+docker exec -i enji-guard-cli enji-guard repo add "$REPO"
 ```
 
 For triage across all visible repositories:
