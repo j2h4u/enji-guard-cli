@@ -23,6 +23,11 @@ from enji_guard_cli.core import (
     resolve_operation,
     resolve_operation_spec,
 )
+from enji_guard_cli.core_impl.models import (
+    ReportAuditStatusPayload,
+    ReportReadState,
+    ReportTaskLifecycleState,
+)
 from enji_guard_cli.core_impl.selectors import parse_github_repo
 from enji_guard_cli.errors import EnjiApiError
 
@@ -178,25 +183,40 @@ def test_report_status_derives_ready_and_missing_reports_from_task_links(monkeyp
     payload = core._report_status("repo_1")
 
     assert payload["complete"] is False
-    assert payload["ready"] == ["security"]
-    assert payload["running"] == []
-    assert payload["missing"] == ["ai-readiness", "tests", "tech-health", "deps", "cognitive-debt", "dead-code"]
-    assert payload["reports"][0] == {
+    assert payload["readable"] is True
+    assert payload["active"] is False
+    assert payload["running"] is False
+    assert payload["missing"] is True
+    assert payload["counts"]["readable"] == 1
+    assert payload["counts"]["missing"] == 6
+    assert payload["items"][0] == {
         "audit": "security",
         "label": "Security",
         "action_key": "audit.security",
         "route_slug": "vulns",
-        "state": "ready",
-        "ready": True,
-        "running": False,
-        "fleet_task_id": "task_security",
-        "created_at": "2026-06-29T12:00:00Z",
-        "started_at": None,
-        "completed_at": None,
-        "run_status": None,
-        "current_head_sha": "head_2",
-        "last_audited_head_sha": "head_2",
-        "out_of_date": False,
+        "report": {
+            "readability_state": "readable",
+            "can_read": True,
+            "freshness_state": "fresh",
+            "current_head_sha": "head_2",
+            "audited_head_sha": "head_2",
+            "created_at": "2026-06-29T12:00:00Z",
+            "started_at": None,
+            "completed_at": None,
+            "run_status": None,
+            "fleet_task_id": "task_security",
+            "stale": False,
+        },
+        "task": {
+            "lifecycle_state": "none",
+            "active": False,
+            "fleet_task_id": None,
+            "run_status": None,
+            "created_at": None,
+            "started_at": None,
+            "completed_at": None,
+        },
+        "agent_action": "audit.security",
     }
 
 
@@ -259,25 +279,40 @@ def test_report_status_marks_started_report_runs_as_running(monkeypatch: MonkeyP
     payload = core._report_status("repo_1")
 
     assert payload["complete"] is False
-    assert payload["ready"] == []
-    assert payload["running"] == ["security"]
-    assert payload["missing"] == ["ai-readiness", "tests", "tech-health", "deps", "cognitive-debt", "dead-code"]
-    assert payload["reports"][0] == {
+    assert payload["readable"] is True
+    assert payload["active"] is True
+    assert payload["running"] is True
+    assert payload["stale"] is True
+    assert payload["counts"]["running"] == 1
+    assert payload["counts"]["stale"] == 1
+    assert payload["items"][0] == {
         "audit": "security",
         "label": "Security",
         "action_key": "audit.security",
         "route_slug": "vulns",
-        "state": "running",
-        "ready": False,
-        "running": True,
-        "fleet_task_id": "task_security",
-        "created_at": "2026-06-29T12:00:00Z",
-        "started_at": "2026-06-29T12:00:01Z",
-        "completed_at": None,
-        "run_status": "in_progress",
-        "current_head_sha": "head_2",
-        "last_audited_head_sha": "head_1",
-        "out_of_date": True,
+        "report": {
+            "readability_state": "readable",
+            "can_read": True,
+            "freshness_state": "stale",
+            "current_head_sha": "head_2",
+            "audited_head_sha": "head_1",
+            "created_at": "2026-06-29T12:00:00Z",
+            "started_at": None,
+            "completed_at": None,
+            "run_status": None,
+            "fleet_task_id": "task_security",
+            "stale": True,
+        },
+        "task": {
+            "lifecycle_state": "running",
+            "active": True,
+            "fleet_task_id": "task_security",
+            "run_status": "in_progress",
+            "created_at": "2026-06-29T12:00:00Z",
+            "started_at": "2026-06-29T12:00:01Z",
+            "completed_at": None,
+        },
+        "agent_action": "audit.security",
     }
 
 
@@ -326,11 +361,11 @@ def test_report_status_marks_nested_task_action_key_runs_as_running(monkeypatch:
     payload = core._report_status("repo_1")
 
     assert payload["complete"] is False
-    assert payload["ready"] == []
-    assert payload["running"] == ["security"]
-    assert payload["missing"] == ["ai-readiness", "tests", "tech-health", "deps", "cognitive-debt", "dead-code"]
-    assert payload["reports"][0]["state"] == "running"
-    assert payload["reports"][0]["run_status"] == "in_progress"
+    assert payload["active"] is True
+    assert payload["running"] is True
+    assert payload["items"][0]["report"]["readability_state"] == "readable"
+    assert payload["items"][0]["task"]["lifecycle_state"] == "running"
+    assert payload["items"][0]["task"]["run_status"] == "in_progress"
 
 
 def test_repo_status_all_summarizes_projects_repos_runs_and_reports(monkeypatch: MonkeyPatch) -> None:
@@ -876,21 +911,13 @@ def test_start_report_audits_selects_all_report_audits(monkeypatch: MonkeyPatch)
     monkeypatch.setattr(
         core,
         "_report_status",
-        lambda repo_id: {
-            "repo_id": repo_id,
-            "current_head_sha": "head_2",
-            "last_report_at": "2026-06-30T12:00:00Z",
-            "complete": False,
-            "ready": ["security"],
-            "running": [],
-            "missing": ["tests"],
-            "reports": [
-                {
-                    "audit": "security",
-                    "out_of_date": False,
-                }
+        lambda repo_id: _report_status_payload(
+            repo_id,
+            [
+                _report_status_item("security", "ready", last_audited_head_sha="head_2"),
+                _report_status_item("tests", "missing", last_audited_head_sha=None),
             ],
-        },
+        ),
     )
 
     def fake_start_report_audits_for_target(
@@ -899,7 +926,7 @@ def test_start_report_audits_selects_all_report_audits(monkeypatch: MonkeyPatch)
         captured["repo_id"] = repo_id
         captured["project_id"] = project_id
         captured["audits"] = [audit.value for audit in audits]
-        return {"runs": []}
+        return {"results": []}
 
     monkeypatch.setattr(core, "_start_report_audits_for_target", fake_start_report_audits_for_target)
 
@@ -911,7 +938,7 @@ def test_start_report_audits_selects_all_report_audits(monkeypatch: MonkeyPatch)
         "repo_id": "repo_1",
         "github_repo": "j2h4u/enji-guard-cli",
     }
-    assert payload["runs"] == []
+    assert payload["results"] == []
     assert captured == {
         "repo_id": "repo_1",
         "project_id": "project_1",
@@ -936,33 +963,20 @@ def test_start_report_audits_includes_deterministic_preflight_before_start(monke
         "_report_status",
         lambda repo_id: (
             calls.append(f"status:{repo_id}"),
-            {
-                "repo_id": repo_id,
-                "current_head_sha": "head_2",
-                "last_report_at": "2026-06-30T12:00:00Z",
-                "complete": False,
-                "ready": ["security", "tests"],
-                "running": ["deps"],
-                "missing": ["dead-code"],
-                "reports": [
-                    {
-                        "audit": "security",
-                        "out_of_date": False,
-                    },
-                    {
-                        "audit": "tests",
-                        "out_of_date": True,
-                    },
-                    {
-                        "audit": "deps",
-                        "out_of_date": None,
-                    },
-                    {
-                        "audit": "dead-code",
-                        "out_of_date": True,
-                    },
+            _report_status_payload(
+                repo_id,
+                [
+                    _report_status_item("security", "ready", last_audited_head_sha="head_2"),
+                    _report_status_item("tests", "ready", last_audited_head_sha="head_1"),
+                    _report_status_item(
+                        "deps",
+                        "ready",
+                        last_audited_head_sha=None,
+                        task=("running", "in_progress"),
+                    ),
+                    _report_status_item("dead-code", "missing", last_audited_head_sha="head_1"),
                 ],
-            },
+            ),
         )[1],
     )
 
@@ -970,7 +984,11 @@ def test_start_report_audits_includes_deterministic_preflight_before_start(monke
         repo_id: str, project_id: str, audits: list[AuditAlias]
     ) -> dict[str, object]:
         calls.append(f"start:{repo_id}")
-        return {"runs": [{"audit": audit.value} for audit in audits], "skipped": []}
+        return {
+            "results": [
+                {"audit": audit.value, "action_key": f"audit.{audit.value}", "state": "started"} for audit in audits
+            ]
+        }
 
     monkeypatch.setattr(core, "_start_report_audits_for_target", fake_start_report_audits_for_target)
 
@@ -982,13 +1000,21 @@ def test_start_report_audits_includes_deterministic_preflight_before_start(monke
             "code": "SNAPSHOT_VISIBILITY_RISK",
             "message": "starting report audits can temporarily hide older snapshots",
         },
-        "counts": {"ready": 2, "running": 1, "stale": 2},
-        "lists": {"ready": ["security", "tests"], "running": ["deps"], "stale": ["tests", "dead-code"]},
+        "counts": {"readable": 3, "active": 1, "queued": 0, "running": 1, "stale": 2, "ready": 3, "missing": 1},
+        "lists": {
+            "readable": ["security", "tests", "deps"],
+            "active": ["deps"],
+            "queued": [],
+            "running": ["deps"],
+            "stale": ["tests", "dead-code"],
+            "ready": ["security", "tests", "deps"],
+            "missing": ["dead-code"],
+        },
         "current_head_sha": "head_2",
         "last_report_at": "2026-06-30T12:00:00Z",
     }
-    runs = cast(list[dict[str, object]], payload["runs"])
-    assert [run["audit"] for run in runs] == ["security"]
+    results = cast(list[dict[str, object]], payload["results"])
+    assert [result["audit"] for result in results] == ["security"]
 
 
 def test_start_all_report_audits_skips_already_running_audits(monkeypatch: MonkeyPatch) -> None:
@@ -1009,6 +1035,7 @@ def test_start_all_report_audits_skips_already_running_audits(monkeypatch: Monke
                     "fleetTaskId": "task_tests",
                     "status": "in_progress",
                     "completedAt": None,
+                    "startedAt": "2026-06-29T12:00:00Z",
                 },
                 {
                     "actionKey": "audit.dead-code",
@@ -1089,37 +1116,42 @@ def test_start_all_report_audits_skips_already_running_audits(monkeypatch: Monke
     )
 
     assert captured_action_keys == ["audit.ai-readiness", "audit.dead-code"]
-    assert [run["audit"] for run in payload["runs"]] == ["ai-readiness", "dead-code"]
-    assert payload["skipped"] == [
+    assert payload["results"] == [
         {
             "audit": "security",
             "action_key": "audit.security",
-            "reason": "already_running",
-            "active_runs": [
-                {
-                    "actionKey": "audit.security",
-                    "fleetTaskId": "task_security",
-                    "status": "pending",
-                    "completedAt": None,
-                }
-            ],
+            "state": "queued",
             "current_head_sha": "head_2",
             "last_audited_head_sha": "head_1",
+            "task_id": "task_security",
+            "task_status": "pending",
+        },
+        {
+            "audit": "ai-readiness",
+            "action_key": "audit.ai-readiness",
+            "state": "started",
+            "current_head_sha": "head_2",
+            "last_audited_head_sha": None,
+            "task_id": "task_audit.ai-readiness",
+            "task_status": "pending",
         },
         {
             "audit": "tests",
             "action_key": "audit.tests",
-            "reason": "already_running",
-            "active_runs": [
-                {
-                    "task": {"actionKey": "audit.tests"},
-                    "fleetTaskId": "task_tests",
-                    "status": "in_progress",
-                    "completedAt": None,
-                }
-            ],
+            "state": "already_running",
             "current_head_sha": "head_2",
             "last_audited_head_sha": "head_1",
+            "task_id": "task_tests",
+            "task_status": "in_progress",
+        },
+        {
+            "audit": "dead-code",
+            "action_key": "audit.dead-code",
+            "state": "started",
+            "current_head_sha": "head_2",
+            "last_audited_head_sha": "head_1",
+            "task_id": "task_audit.dead-code",
+            "task_status": "pending",
         },
     ]
 
@@ -1146,13 +1178,11 @@ def test_start_report_audits_skips_up_to_date_audits(monkeypatch: MonkeyPatch) -
     payload = core._start_report_audits_for_target("repo_1", "project_1", [AuditAlias.SECURITY])
 
     assert payload == {
-        "runs": [],
-        "skipped": [
+        "results": [
             {
                 "audit": "security",
                 "action_key": "audit.security",
-                "reason": "up_to_date",
-                "active_runs": [],
+                "state": "up_to_date",
                 "current_head_sha": "head_2",
                 "last_audited_head_sha": "head_2",
             }
@@ -1193,40 +1223,78 @@ def _report_status_item(
     audit: str,
     state: str,
     *,
-    current_head_sha: str | None = "head_2",
+    task: tuple[ReportTaskLifecycleState | None, str | None] | None = None,
     last_audited_head_sha: str | None = "head_2",
-) -> dict[str, object]:
-    out_of_date = None
-    if current_head_sha is not None and last_audited_head_sha is not None:
-        out_of_date = current_head_sha != last_audited_head_sha
+) -> ReportAuditStatusPayload:
+    stale = None
+    if last_audited_head_sha is not None:
+        stale = last_audited_head_sha != "head_2"
+    task_lifecycle_state, task_run_status = task or (None, None)
+    lifecycle_state: ReportTaskLifecycleState = task_lifecycle_state or ("running" if state == "running" else "none")
     return {
         "audit": audit,
         "label": audit,
         "action_key": f"audit.{audit}",
         "route_slug": audit,
-        "state": state,
-        "ready": state == "ready",
-        "running": state == "running",
-        "fleet_task_id": None,
-        "created_at": None,
-        "started_at": None,
-        "completed_at": "2026-06-30T12:00:00Z" if state == "ready" else None,
-        "run_status": "completed" if state == "ready" else None,
-        "current_head_sha": current_head_sha,
-        "last_audited_head_sha": last_audited_head_sha,
-        "out_of_date": out_of_date,
+        "report": {
+            "readability_state": "readable" if state != "missing" else "unavailable",
+            "can_read": state != "missing",
+            "freshness_state": "unknown" if stale is None else ("stale" if stale else "fresh"),
+            "current_head_sha": "head_2",
+            "audited_head_sha": last_audited_head_sha,
+            "created_at": None,
+            "started_at": None,
+            "completed_at": "2026-06-30T12:00:00Z" if state != "missing" else None,
+            "run_status": "completed" if state != "missing" else None,
+            "fleet_task_id": None,
+            "stale": stale,
+        },
+        "task": {
+            "lifecycle_state": lifecycle_state,
+            "active": lifecycle_state in {"queued", "running"},
+            "fleet_task_id": None,
+            "run_status": task_run_status,
+            "created_at": None,
+            "started_at": None,
+            "completed_at": None,
+        },
+        "agent_action": None,
     }
 
 
-def _report_status_payload(repo_id: str, reports: list[dict[str, object]]) -> dict[str, object]:
+def _report_status_payload(repo_id: str, reports: list[ReportAuditStatusPayload]) -> core.ReportStatusPayload:
+    readable = [str(report["audit"]) for report in reports if report["report"]["can_read"] is True]
+    active = [str(report["audit"]) for report in reports if report["task"]["active"] is True]
+    queued = [str(report["audit"]) for report in reports if report["task"]["lifecycle_state"] == "queued"]
+    running = [str(report["audit"]) for report in reports if report["task"]["lifecycle_state"] == "running"]
+    missing = [str(report["audit"]) for report in reports if report["report"]["can_read"] is False]
+    stale = [str(report["audit"]) for report in reports if report["report"]["stale"] is True]
+    failed = [str(report["audit"]) for report in reports if report["task"]["lifecycle_state"] == "failed"]
     return {
+        "schema_version": 2,
         "repo_id": repo_id,
         "current_head_sha": "head_2",
-        "complete": not any(report["state"] in {"missing", "running"} for report in reports),
-        "ready": [str(report["audit"]) for report in reports if report["ready"] is True],
-        "running": [str(report["audit"]) for report in reports if report["running"] is True],
-        "missing": [str(report["audit"]) for report in reports if report["state"] == "missing"],
-        "reports": reports,
+        "last_report_at": "2026-06-30T12:00:00Z",
+        "complete": not active and not missing and not failed,
+        "fresh": not stale,
+        "readable": bool(readable),
+        "active": bool(active),
+        "queued": bool(queued),
+        "running": bool(running),
+        "missing": bool(missing),
+        "stale": bool(stale),
+        "failed": bool(failed),
+        "counts": {
+            "total": len(reports),
+            "readable": len(readable),
+            "active": len(active),
+            "queued": len(queued),
+            "running": len(running),
+            "missing": len(missing),
+            "stale": len(stale),
+            "failed": len(failed),
+        },
+        "items": reports,
     }
 
 
@@ -1295,8 +1363,19 @@ def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatc
             "message": None,
             "snapshot": {"content": {"report": "# tests"}},
         },
+        {
+            "audit": "deps",
+            "current_head_sha": "head_2",
+            "last_audited_head_sha": None,
+            "out_of_date": None,
+            "available": True,
+            "state": "ready",
+            "reason": None,
+            "message": None,
+            "snapshot": {"content": {"report": "# deps"}},
+        },
     ]
-    assert captured_audits == ["security", "tests"]
+    assert captured_audits == ["security", "tests", "deps"]
 
 
 def test_read_reports_for_repo_can_read_all_report_audits(monkeypatch: MonkeyPatch) -> None:
@@ -1448,7 +1527,7 @@ def test_read_reports_for_repo_all_marks_missing_ready_snapshot_unavailable(monk
             "last_audited_head_sha": "head_1",
             "out_of_date": True,
             "available": False,
-            "state": "ready",
+            "state": "missing",
             "reason": "snapshot_not_found",
             "message": "security snapshot not found",
             "error_code": "NOT_FOUND",
@@ -1995,46 +2074,78 @@ def test_wait_for_report_completion_times_out_when_reports_remain_missing(monkey
     )
 
     assert payload["complete"] is False
-    assert payload["timed_out"] is True
-    assert payload["reason"] == "timeout"
+    assert payload["timed_out"] is False
+    assert payload["reason"] == "missing"
     assert payload["counts"]["missing"] == 1
 
 
 def _report_wait_status(
     *,
     complete: bool,
-    state: core.ReportAuditState,
+    state: ReportReadState,
     out_of_date: bool | None,
     run_status: str | None,
 ) -> core.ReportStatusPayload:
-    ready = ["security"] if state == "ready" else []
+    readable = ["security"] if state != "missing" else []
+    active = ["security"] if state == "running" else []
+    queued: list[str] = []
     running = ["security"] if state == "running" else []
     missing = ["security"] if state == "missing" else []
+    stale = ["security"] if out_of_date is True else []
+    failed: list[str] = []
     return {
+        "schema_version": 2,
         "repo_id": "repo_1",
         "current_head_sha": "head_2",
         "last_report_at": "2026-06-30T12:00:00Z",
         "complete": complete,
-        "ready": ready,
-        "running": running,
-        "missing": missing,
-        "reports": [
+        "fresh": not stale,
+        "readable": bool(readable),
+        "active": bool(active),
+        "queued": bool(queued),
+        "running": bool(running),
+        "missing": bool(missing),
+        "stale": bool(stale),
+        "failed": bool(failed),
+        "counts": {
+            "total": 1,
+            "readable": len(readable),
+            "active": len(active),
+            "queued": len(queued),
+            "running": len(running),
+            "missing": len(missing),
+            "stale": len(stale),
+            "failed": len(failed),
+        },
+        "items": [
             {
                 "audit": "security",
                 "label": "Security",
                 "action_key": "audit.security",
                 "route_slug": "security",
-                "state": state,
-                "ready": state == "ready",
-                "running": state == "running",
-                "fleet_task_id": "task_1",
-                "created_at": "2026-06-30T11:00:00Z",
-                "started_at": "2026-06-30T11:00:00Z",
-                "completed_at": "2026-06-30T12:00:00Z",
-                "run_status": run_status,
-                "current_head_sha": "head_2",
-                "last_audited_head_sha": "head_1",
-                "out_of_date": out_of_date,
+                "report": {
+                    "readability_state": "readable" if state != "missing" else "unavailable",
+                    "can_read": state != "missing",
+                    "freshness_state": "unknown" if out_of_date is None else ("stale" if out_of_date else "fresh"),
+                    "current_head_sha": "head_2",
+                    "audited_head_sha": "head_1",
+                    "created_at": "2026-06-30T11:00:00Z",
+                    "started_at": "2026-06-30T11:00:00Z",
+                    "completed_at": "2026-06-30T12:00:00Z",
+                    "run_status": "completed" if state != "missing" else None,
+                    "fleet_task_id": "task_1",
+                    "stale": out_of_date,
+                },
+                "task": {
+                    "lifecycle_state": "running" if state == "running" else "none",
+                    "active": state == "running",
+                    "fleet_task_id": "task_1" if state == "running" else None,
+                    "run_status": run_status,
+                    "created_at": "2026-06-30T11:00:00Z" if state == "running" else None,
+                    "started_at": "2026-06-30T11:00:00Z" if state == "running" else None,
+                    "completed_at": None,
+                },
+                "agent_action": None,
             }
         ],
     }

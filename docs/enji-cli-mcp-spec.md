@@ -14,7 +14,8 @@
 - какие проекты и репозитории доступны;
 - подключен ли нужный репозиторий;
 - идет ли recon или report-аудит;
-- какие отчеты `ready`, `running`, `missing`;
+- какие report artifacts читаемы, протухли или отсутствуют;
+- какие report audit tasks стоят в очереди, выполняются или упали;
 - как запустить recon, report-аудиты, дождаться завершения и прочитать отчет;
 - как создавать, переименовывать, удалять проекты и переносить репозитории
   между проектами;
@@ -195,17 +196,22 @@ returns the machine contract. Starting a new audit can temporarily hide older
 snapshots behind the running state, so read needed snapshots before kicking off
 fresh audits.
 
+`audit start --json` returns a `results` matrix, one item per requested report
+audit. Result states are operator-level states: `started`, `queued`,
+`already_running`, `up_to_date`, or `failed`.
+
 `status` must expose scenario state, not raw API internals:
 
 - project and repo identifiers;
 - `connected`;
 - `recon_done`;
 - repo scores: raw `scores`, simple `score_grades`, and `score_summary`;
-- active runs;
+- active work;
 - repo/report revision: current HEAD, last audited HEAD, out-of-date flag,
   stale audit aliases, and `audited=mixed` when report audits disagree;
 - last observed report activity timestamp;
-- report states: `ready`, `running`, `missing`, `stale`;
+- report artifact state: readable or unavailable, plus fresh/stale/unknown;
+- audit task lifecycle: none, queued, running, or failed;
 - summary counts.
 
 ## Auth And Runtime

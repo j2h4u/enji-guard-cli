@@ -49,24 +49,18 @@ SCORE_GOOD_THRESHOLD = 75.0
 SCORE_EXCELLENT_THRESHOLD = 90.0
 
 
-class AuditRunBatchItem(TypedDict):
+class AuditRunBatchResultItem(TypedDict):
     audit: str
     action_key: str
-    response: JsonObjectPayload
-
-
-class AuditRunSkippedItem(TypedDict):
-    audit: str
-    action_key: str
-    reason: str
-    active_runs: list[JsonValue]
+    state: Literal["started", "queued", "already_running", "up_to_date", "failed"]
     current_head_sha: str | None
     last_audited_head_sha: str | None
+    task_id: NotRequired[str | None]
+    task_status: NotRequired[str | None]
 
 
 class AuditRunBatchPayload(TypedDict):
-    runs: list[AuditRunBatchItem]
-    skipped: list[AuditRunSkippedItem]
+    results: list[AuditRunBatchResultItem]
 
 
 class AuditRunSkippedPayload(TypedDict):
@@ -113,8 +107,11 @@ class ProjectRef(TypedDict):
     name: str | None
 
 
-type ReportAuditState = Literal["missing", "ready", "running"]
-type ReportWaitReason = Literal["complete", "waiting", "timeout", "failed", "stale"]
+type ReportReadabilityState = Literal["readable", "unavailable"]
+type ReportFreshnessState = Literal["fresh", "stale", "unknown"]
+type ReportTaskLifecycleState = Literal["none", "queued", "running", "failed"]
+type ReportReadState = Literal["missing", "ready", "running"]
+type ReportWaitReason = Literal["complete", "waiting", "timeout", "failed", "stale", "missing"]
 type ReportWaitCallback = Callable[[dict[str, object]], None]
 
 DEFAULT_REPORT_WAIT_POLL_SECONDS = SETTINGS_DEFAULT_REPORT_WAIT_POLL_SECONDS
@@ -123,38 +120,63 @@ DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS = SETTINGS_DEFAULT_REPORT_WAIT_HEARTBEAT_S
 FAILED_REPORT_WAIT_STATUSES = frozenset({"failed", "canceled", "cancelled"})
 
 
+class ReportArtifactStatusPayload(TypedDict):
+    readability_state: ReportReadabilityState
+    can_read: bool
+    freshness_state: ReportFreshnessState
+    current_head_sha: str | None
+    audited_head_sha: str | None
+    created_at: str | None
+    started_at: str | None
+    completed_at: str | None
+    run_status: str | None
+    fleet_task_id: str | None
+    stale: bool | None
+
+
+class ReportTaskStatusPayload(TypedDict):
+    lifecycle_state: ReportTaskLifecycleState
+    active: bool
+    fleet_task_id: str | None
+    run_status: str | None
+    created_at: str | None
+    started_at: str | None
+    completed_at: str | None
+
+
 class ReportAuditStatusPayload(TypedDict):
     audit: str
     label: str
     action_key: str
     route_slug: str
-    state: ReportAuditState
-    ready: bool
-    running: bool
-    fleet_task_id: str | None
-    created_at: str | None
-    started_at: str | None
-    completed_at: str | None
-    run_status: str | None
-    current_head_sha: str | None
-    last_audited_head_sha: str | None
-    out_of_date: bool | None
+    report: ReportArtifactStatusPayload
+    task: ReportTaskStatusPayload
+    agent_action: str | None
 
 
 class ReportStatusPayload(TypedDict):
+    schema_version: int
     repo_id: str
     current_head_sha: str | None
     last_report_at: str | None
     complete: bool
-    ready: list[str]
-    running: list[str]
-    missing: list[str]
-    reports: list[ReportAuditStatusPayload]
+    fresh: bool
+    readable: bool
+    active: bool
+    queued: bool
+    running: bool
+    missing: bool
+    stale: bool
+    failed: bool
+    counts: ReportWaitCountsPayload
+    items: list[ReportAuditStatusPayload]
 
 
 class ReportWaitCountsPayload(TypedDict):
     total: int
-    ready: int
+    readable: int
+    active: int
+    queued: int
     running: int
     missing: int
     stale: int
@@ -171,12 +193,14 @@ class ReportWaitPayload(TypedDict):
     current_head_sha: str | None
     last_report_at: str | None
     counts: ReportWaitCountsPayload
-    ready: list[str]
+    readable: list[str]
+    active: list[str]
+    queued: list[str]
     running: list[str]
     missing: list[str]
     stale: list[str]
     failed: list[str]
-    reports: list[ReportAuditStatusPayload]
+    items: list[ReportAuditStatusPayload]
 
 
 class ReportReadItemPayload(TypedDict):
@@ -185,7 +209,7 @@ class ReportReadItemPayload(TypedDict):
     last_audited_head_sha: str | None
     out_of_date: bool | None
     available: bool
-    state: ReportAuditState
+    state: ReportReadState
     reason: str | None
     message: str | None
     error_code: NotRequired[str]

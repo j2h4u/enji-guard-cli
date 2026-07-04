@@ -114,8 +114,9 @@ needs the raw machine contract.
 - Ambiguous targets fail with `BAD_SELECTOR` and include candidates.
 - There is no default project.
 - No fuzzy matching in write commands.
-- `status` is the report readiness and freshness surface. `status REPO`
-  shows per-audit readiness for one repo.
+- `status` is the report artifact, task lifecycle, and freshness surface.
+  `status REPO` shows per-audit report readability separately from queued or
+  running audit work.
 - `report read` returns report content. With `--json`, it returns the machine
   contract for automation.
 - `report read REPO` defaults to all currently ready reports for that repo.
@@ -140,13 +141,13 @@ These concepts belong in core or debug tooling, not the public CLI:
 - raw schedule JSON payloads
 - `*-all` command variants
 
-Public commands should expose scenario state such as `ready`, `running`,
-`missing`, `stale`, `connected`, `recon_done`, `active_run_count`, and report
-revision drift. `status` must avoid implying freshness when report audits were
-generated from different commits: use explicit stale audit names and
-`audited=mixed`. Repo list and status payloads include Enji scores by default
-as raw `scores`, simple `score_grades`, and a compact `score_summary`; there is
-no separate score flag.
+Public commands should expose scenario state such as report readability,
+task lifecycle (`queued`, `running`, `failed`), `stale`, `connected`,
+`recon_done`, active work, and report revision drift. `status` must avoid
+implying freshness when report audits were generated from different commits:
+use explicit stale audit names and `audited=mixed`. Repo list and status
+payloads include Enji scores by default as raw `scores`, simple
+`score_grades`, and a compact `score_summary`; there is no separate score flag.
 
 `schedule` is the public noun for automatic report audit runs. It exposes domain
 settings (`enabled`, `frequency`, timezone) and hides Enji's

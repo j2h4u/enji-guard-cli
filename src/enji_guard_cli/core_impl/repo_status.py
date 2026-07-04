@@ -11,9 +11,10 @@ from enji_guard_cli.core_impl.models import (
     SCORE_POOR_THRESHOLD,
     TERMINAL_RUN_STATUSES,
     ProjectRuntimeStatusPayload,
-    ReportAuditState,
     ReportAuditStatusPayload,
+    ReportFreshnessState,
     ReportStatusPayload,
+    ReportTaskLifecycleState,
     ReportWaitOptions,
     ReportWaitPayload,
     ReportWaitReason,
@@ -40,18 +41,38 @@ def report_status_from_task_links(
         for audit in REPORT_AUDITS
     ]
     latest_report_at = last_report_at(reports)
-    ready = [report["audit"] for report in reports if report["ready"]]
-    running = [report["audit"] for report in reports if report["running"]]
-    missing = [report["audit"] for report in reports if report["state"] == "missing"]
+    readable = _audits_with_readable_reports(reports)
+    active = _audits_with_active_tasks(reports)
+    queued = _audits_with_task_lifecycle(reports, "queued")
+    running = _audits_with_task_lifecycle(reports, "running")
+    missing = _audits_with_unreadable_reports(reports)
+    stale = _stale_report_audits(reports)
+    failed = _failed_report_audits(reports)
     return {
+        "schema_version": 2,
         "repo_id": repo_id,
         "current_head_sha": current_sha,
         "last_report_at": latest_report_at,
-        "complete": not running and not missing,
-        "ready": ready,
-        "running": running,
-        "missing": missing,
-        "reports": reports,
+        "complete": not active and not missing,
+        "fresh": not stale,
+        "readable": bool(readable),
+        "active": bool(active),
+        "queued": bool(queued),
+        "running": bool(running),
+        "missing": bool(missing),
+        "stale": bool(stale),
+        "failed": bool(failed),
+        "counts": {
+            "total": len(reports),
+            "readable": len(readable),
+            "active": len(active),
+            "queued": len(queued),
+            "running": len(running),
+            "missing": len(missing),
+            "stale": len(stale),
+            "failed": len(failed),
+        },
+        "items": reports,
     }
 
 
@@ -75,24 +96,37 @@ def _report_audit_status(
     action_key = audit.action_key
     link = links_by_action.get(action_key)
     active_run = active_runs_by_action.get(action_key)
-    state = _report_audit_state(link, active_run)
-    last_audited_sha = last_audited_head_sha(rerun_state, action_key)
+    audited_head_sha = last_audited_head_sha(rerun_state, action_key)
+    stale = out_of_date(current_sha, audited_head_sha)
+    task_lifecycle_state = _task_lifecycle_state(active_run)
     return {
         "audit": audit.alias.value,
         "label": audit.label,
         "action_key": action_key,
         "route_slug": audit.route_slug,
-        "state": state,
-        "ready": state == "ready",
-        "running": state == "running",
-        "fleet_task_id": _active_run_value(active_run, "fleetTaskId") or _link_value(link, "fleetTaskId"),
-        "created_at": _active_run_value(active_run, "createdAt") or _link_value(link, "createdAt"),
-        "started_at": _active_run_value(active_run, "startedAt") or _link_value(link, "startedAt"),
-        "completed_at": _active_run_value(active_run, "completedAt") or _link_value(link, "completedAt"),
-        "run_status": _active_run_value(active_run, "status") or _link_value(link, "status"),
-        "current_head_sha": current_sha,
-        "last_audited_head_sha": last_audited_sha,
-        "out_of_date": out_of_date(current_sha, last_audited_sha),
+        "report": {
+            "readability_state": "readable" if link is not None else "unavailable",
+            "can_read": link is not None,
+            "freshness_state": _freshness_state(link, stale),
+            "current_head_sha": current_sha,
+            "audited_head_sha": audited_head_sha,
+            "created_at": _link_value(link, "createdAt"),
+            "started_at": _link_value(link, "startedAt"),
+            "completed_at": _link_value(link, "completedAt"),
+            "run_status": _link_value(link, "status"),
+            "fleet_task_id": _link_value(link, "fleetTaskId"),
+            "stale": stale,
+        },
+        "task": {
+            "lifecycle_state": task_lifecycle_state,
+            "active": task_lifecycle_state in {"queued", "running"},
+            "fleet_task_id": _active_run_value(active_run, "fleetTaskId"),
+            "run_status": _active_run_value(active_run, "status"),
+            "created_at": _active_run_value(active_run, "createdAt"),
+            "started_at": _active_run_value(active_run, "startedAt"),
+            "completed_at": _active_run_value(active_run, "completedAt"),
+        },
+        "agent_action": action_key,
     }
 
 
@@ -118,15 +152,24 @@ def out_of_date(current_sha: str | None, last_audited_sha: str | None) -> bool |
     return current_sha != last_audited_sha
 
 
-def _report_audit_state(
-    link: dict[str, JsonValue] | None,
-    active_run: dict[str, JsonValue] | None,
-) -> ReportAuditState:
-    if active_run is not None:
+def _freshness_state(link: dict[str, JsonValue] | None, stale: bool | None) -> ReportFreshnessState:
+    if link is None:
+        return "unknown"
+    if stale is None:
+        return "unknown"
+    if stale is True:
+        return "stale"
+    return "fresh"
+
+
+def _task_lifecycle_state(active_run: dict[str, JsonValue] | None) -> ReportTaskLifecycleState:
+    if active_run is None:
+        return "none"
+    if _normalized_run_status(_active_run_value(active_run, "status")) in FAILED_REPORT_WAIT_STATUSES:
+        return "failed"
+    if _active_run_value(active_run, "startedAt") is not None:
         return "running"
-    if link is not None:
-        return "ready"
-    return "missing"
+    return "queued"
 
 
 def _link_value(link: dict[str, JsonValue] | None, key: str) -> str | None:
@@ -168,10 +211,15 @@ def report_wait_payload(
     *,
     timed_out: bool,
 ) -> ReportWaitPayload:
-    stale = _stale_report_audits(status)
-    failed = _failed_report_audits(status)
+    stale = _stale_report_audits(status["items"])
+    failed = _failed_report_audits(status["items"])
+    readable = _audits_with_readable_reports(status["items"])
+    active = _audits_with_active_tasks(status["items"])
+    queued = _audits_with_task_lifecycle(status["items"], "queued")
+    running = _audits_with_task_lifecycle(status["items"], "running")
+    missing = _audits_with_unreadable_reports(status["items"])
     fresh = not stale
-    complete = status["complete"] and not failed and not timed_out
+    complete = not active and not missing and not failed and not timed_out
     return {
         "repo_id": repo_id,
         "complete": complete,
@@ -182,19 +230,23 @@ def report_wait_payload(
         "current_head_sha": status["current_head_sha"],
         "last_report_at": status["last_report_at"],
         "counts": {
-            "total": len(status["reports"]),
-            "ready": len(status["ready"]),
-            "running": len(status["running"]),
-            "missing": len(status["missing"]),
+            "total": len(status["items"]),
+            "readable": len(readable),
+            "active": len(active),
+            "queued": len(queued),
+            "running": len(running),
+            "missing": len(missing),
             "stale": len(stale),
             "failed": len(failed),
         },
-        "ready": status["ready"],
-        "running": status["running"],
-        "missing": status["missing"],
+        "readable": readable,
+        "active": active,
+        "queued": queued,
+        "running": running,
+        "missing": missing,
         "stale": stale,
         "failed": failed,
-        "reports": status["reports"],
+        "items": status["items"],
     }
 
 
@@ -208,21 +260,40 @@ def _report_wait_reason(
         return "failed"
     if timed_out:
         return "timeout"
+    if status["active"] or status["queued"]:
+        return "waiting"
+    if status["missing"]:
+        return "missing"
     if status["complete"]:
         return "complete"
-    return "waiting"
+    return "stale"
 
 
-def _stale_report_audits(status: ReportStatusPayload) -> list[str]:
-    return [report["audit"] for report in status["reports"] if report["out_of_date"] is True]
+def _stale_report_audits(reports: list[ReportAuditStatusPayload]) -> list[str]:
+    return [report["audit"] for report in reports if report["report"]["stale"] is True]
 
 
-def _failed_report_audits(status: ReportStatusPayload) -> list[str]:
-    return [
-        report["audit"]
-        for report in status["reports"]
-        if _normalized_run_status(report["run_status"]) in FAILED_REPORT_WAIT_STATUSES
-    ]
+def _failed_report_audits(reports: list[ReportAuditStatusPayload]) -> list[str]:
+    return [report["audit"] for report in reports if report["task"]["lifecycle_state"] == "failed"]
+
+
+def _audits_with_readable_reports(reports: list[ReportAuditStatusPayload]) -> list[str]:
+    return [report["audit"] for report in reports if report["report"]["can_read"]]
+
+
+def _audits_with_active_tasks(reports: list[ReportAuditStatusPayload]) -> list[str]:
+    return [report["audit"] for report in reports if report["task"]["active"]]
+
+
+def _audits_with_unreadable_reports(reports: list[ReportAuditStatusPayload]) -> list[str]:
+    return [report["audit"] for report in reports if not report["report"]["can_read"]]
+
+
+def _audits_with_task_lifecycle(
+    reports: list[ReportAuditStatusPayload],
+    lifecycle_state: ReportTaskLifecycleState,
+) -> list[str]:
+    return [report["audit"] for report in reports if report["task"]["lifecycle_state"] == lifecycle_state]
 
 
 def _normalized_run_status(value: str | None) -> str | None:
@@ -341,7 +412,8 @@ def _missing_last_score(score: float | None) -> float:
 def last_report_at(reports: list[ReportAuditStatusPayload]) -> str | None:
     latest: tuple[float, str] | None = None
     for report in reports:
-        for value in (report["completed_at"], report["started_at"], report["created_at"]):
+        artifact = report["report"]
+        for value in (artifact["completed_at"], artifact["started_at"], artifact["created_at"]):
             if value is None:
                 continue
             timestamp = report_timestamp(value)
@@ -366,14 +438,30 @@ def report_timestamp(value: str | None) -> float | None:
 def empty_report_status(repo_id: str) -> ReportStatusPayload:
     reports = [_empty_report_audit_status(audit) for audit in REPORT_AUDITS]
     return {
+        "schema_version": 2,
         "repo_id": repo_id,
         "current_head_sha": None,
         "last_report_at": None,
         "complete": False,
-        "ready": [],
-        "running": [],
-        "missing": [report["audit"] for report in reports],
-        "reports": reports,
+        "fresh": True,
+        "readable": False,
+        "active": False,
+        "queued": False,
+        "running": False,
+        "missing": True,
+        "stale": False,
+        "failed": False,
+        "counts": {
+            "total": len(reports),
+            "readable": 0,
+            "active": 0,
+            "queued": 0,
+            "running": 0,
+            "missing": len(reports),
+            "stale": 0,
+            "failed": 0,
+        },
+        "items": reports,
     }
 
 
@@ -383,17 +471,29 @@ def _empty_report_audit_status(audit: ReportAuditDefinition) -> ReportAuditStatu
         "label": audit.label,
         "action_key": audit.action_key,
         "route_slug": audit.route_slug,
-        "state": "missing",
-        "ready": False,
-        "running": False,
-        "fleet_task_id": None,
-        "created_at": None,
-        "started_at": None,
-        "completed_at": None,
-        "run_status": None,
-        "current_head_sha": None,
-        "last_audited_head_sha": None,
-        "out_of_date": None,
+        "report": {
+            "readability_state": "unavailable",
+            "can_read": False,
+            "freshness_state": "unknown",
+            "current_head_sha": None,
+            "audited_head_sha": None,
+            "created_at": None,
+            "started_at": None,
+            "completed_at": None,
+            "run_status": None,
+            "fleet_task_id": None,
+            "stale": None,
+        },
+        "task": {
+            "lifecycle_state": "none",
+            "active": False,
+            "fleet_task_id": None,
+            "run_status": None,
+            "created_at": None,
+            "started_at": None,
+            "completed_at": None,
+        },
+        "agent_action": audit.action_key,
     }
 
 

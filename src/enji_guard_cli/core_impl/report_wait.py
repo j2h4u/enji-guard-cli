@@ -33,7 +33,7 @@ def wait_for_report_completion(
     while True:
         status = dependencies.read_status(repo_id)
         payload = report_wait_payload(repo_id, status, started_at, timed_out=False)
-        if payload["complete"] or payload["reason"] == "failed":
+        if payload["complete"] or payload["reason"] in {"failed", "missing"}:
             return payload
         now = dependencies.monotonic()
         if now >= deadline:

@@ -26,11 +26,14 @@ requires `--yes`.
 Recon is baseline discovery. Report audits are separate, slow jobs that produce
 readable reports and scores. `status` is the snapshot/readiness/freshness view,
 `wait` is the completion check after `status`, and `report read` is the content
-path. Scores are triage hints: use them to sort and prioritize repositories,
-then read the reports before changing code. When a report exposes commit
-hashes, compare them with the current checkout before treating the report as
-fresh. Starting a new audit can temporarily hide older snapshots behind the
-running state, so read any needed snapshots before you start a fresh audit.
+path. `status --json` separates the latest readable report artifact from the
+current audit task lifecycle, so a stale readable report and a newly queued or
+running task can both be true. Scores are triage hints: use them to sort and
+prioritize repositories, then read the reports before changing code. When a
+report exposes commit hashes, compare them with the current checkout before
+treating the report as fresh. Starting a new audit can temporarily hide older
+snapshots behind running work, so read any needed snapshots before you start a
+fresh audit.
 `report read --all --json` is a batch contract: readable reports include
 summary metadata, and unavailable reports are returned with `available: false`
 plus a reason instead of aborting the whole batch.
@@ -97,9 +100,11 @@ docker exec -i enji-guard-cli enji-guard report read "$REPO"
 Recon and report audits can take tens of minutes. Use `status` for a snapshot,
 `wait` as a follow-up completion check, and `report read` after reports are
 ready. `status` shows stale audits explicitly and uses `audited=mixed` when
-report audits were generated from different commits. Prefer reading reports
-through CLI/MCP instead of relying on email; disable noisy scheduled mail when
-it is not part of the workflow.
+report audits were generated from different commits. `audit start --json`
+returns a `results` matrix, one item per requested report audit, with states
+such as `started`, `queued`, `already_running`, `up_to_date`, or `failed`.
+Prefer reading reports through CLI/MCP instead of relying on email; disable
+noisy scheduled mail when it is not part of the workflow.
 
 ## Requirements
 

@@ -105,7 +105,7 @@ def _exit_code(exc: Exception, resolver: ExitCodeResolver | None) -> int:
 
 def _result_count(result: object | None) -> int | None:
     if isinstance(result, dict):
-        for key in ("projects", "reports", "runs", "items", "schedules", "preferences", "audits"):
+        for key in ("projects", "reports", "results", "items", "schedules", "preferences", "audits"):
             value = result.get(key)
             if isinstance(value, list):
                 return len(value)
