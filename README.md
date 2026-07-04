@@ -25,10 +25,12 @@ requires `--yes`.
 
 Recon is baseline discovery. Report audits are separate, slow jobs that produce
 readable reports and scores. `status` is the snapshot/readiness/freshness view,
-`wait` is the blocking gate, and `report read` is the content path. Scores are
-triage hints: use them to sort and prioritize repositories, then read the
-reports before changing code. When a report exposes commit hashes, compare them
-with the current checkout before treating the report as fresh.
+`wait` is the completion check after `status`, and `report read` is the content
+path. Scores are triage hints: use them to sort and prioritize repositories,
+then read the reports before changing code. When a report exposes commit
+hashes, compare them with the current checkout before treating the report as
+fresh. Starting a new audit can temporarily hide older snapshots behind the
+running state, so read any needed snapshots before you start a fresh audit.
 `report read --all --json` is a batch contract: readable reports include
 summary metadata, and unavailable reports are returned with `available: false`
 plus a reason instead of aborting the whole batch.
@@ -45,14 +47,16 @@ container instead of installing or running this Python package on the host:
 docker exec -i enji-guard-cli enji-guard --help
 ```
 
-Application telemetry is persisted outside the container at:
+Application telemetry is written only to the persistent file outside the
+container at:
 
 ```text
 ~/.config/enji-guard/logs/telemetry.jsonl
 ```
 
 CLI stdout/stderr are reserved for command results, progress, and CLI errors.
-Use the telemetry file for HTTP/auth/runtime events.
+Use the telemetry file for HTTP/auth/runtime events. Keep stdout/stderr for CLI
+results, progress, and errors only.
 
 When working on another repository, pass the repository as `OWNER/NAME`. If an
 agent is already in a GitHub checkout and wants to derive it from `origin`, it
@@ -89,11 +93,11 @@ docker exec -i enji-guard-cli enji-guard report read "$REPO"
 ```
 
 Recon and report audits can take tens of minutes. Use `status` for a snapshot,
-`wait` until all report audits have results, and `report read` after reports
-are ready. `wait` is a blocking gate; `status` shows stale audits explicitly
-and uses `audited=mixed` when report audits were generated from different
-commits. Prefer reading reports through CLI/MCP instead of relying on email;
-disable noisy scheduled mail when it is not part of the workflow.
+`wait` as a follow-up completion check, and `report read` after reports are
+ready. `status` shows stale audits explicitly and uses `audited=mixed` when
+report audits were generated from different commits. Prefer reading reports
+through CLI/MCP instead of relying on email; disable noisy scheduled mail when
+it is not part of the workflow.
 
 ## Requirements
 

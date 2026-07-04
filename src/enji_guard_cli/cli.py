@@ -1,8 +1,11 @@
+import logging
 import socket
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from ipaddress import IPv6Address, ip_address
 from pathlib import Path
+from time import monotonic
 from typing import Annotated, Literal, TypeGuard, cast
 
 import typer
@@ -12,6 +15,7 @@ from enji_guard_cli.cli_impl.durations import parse_duration_seconds
 from enji_guard_cli.cli_impl.rendering import (
     echo_access,
     echo_audit_catalog,
+    echo_audit_start,
     echo_auth_status,
     echo_email_preferences_table,
     echo_generic_payload,
@@ -28,6 +32,8 @@ from enji_guard_cli.cli_impl.rendering import (
 from enji_guard_cli.cli_impl.rendering_support import object_dict
 from enji_guard_cli.cli_impl.report_rendering import report_read_summary_payload, reports_markdown
 from enji_guard_cli.cli_impl.write_targets import (
+    EmailSetCliArgs,
+    ScheduleSetCliArgs,
     parse_email_set_args,
     parse_schedule_set_args,
 )
@@ -68,7 +74,7 @@ from enji_guard_cli.mcp_server import create_mcp_server, run_mcp_server
 from enji_guard_cli.readiness import readiness_verdict
 from enji_guard_cli.runtime import run_service
 from enji_guard_cli.settings import DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT, DEFAULT_MCP_TRANSPORT, default_settings
-from enji_guard_cli.telemetry import configure_logging
+from enji_guard_cli.telemetry import configure_logging, log_event
 
 MAIN_HELP = """Agent-oriented CLI for Enji Guard repository audits.
 
@@ -109,8 +115,20 @@ get_access = ACCESS_OPERATION.execute
 auth_status = AUTH_STATUS_OPERATION.execute
 _cli_state: dict[str, object] = {"project": None, "json": False}
 _DEFAULT_CLI_SETTINGS = default_settings()
+_CLI_LOGGER = logging.getLogger(__name__)
+_CLI_COMMAND_ROOT = "enji-guard"
 
 type JsonCommandAction = Callable[[], OperationResult]
+type CommandBody = Callable[[], object]
+
+
+@dataclass(frozen=True, slots=True)
+class CliJourney:
+    command_path: str
+    selector_kind: str = "unknown"
+    all_flag: bool | None = None
+
+
 ANY_IPV4_HOST = str(ip_address(0))
 ANY_IPV6_HOST = str(IPv6Address(0))
 LOCALHOST_NAME = "localhost"
@@ -132,13 +150,25 @@ def _run_human_or_json_command(
     action: JsonCommandAction,
     json_output: bool,
     human_renderer: Callable[[object], None] | None = None,
+    *,
+    journey: CliJourney,
 ) -> None:
-    payload = _resolve_command_payload(action)
-    if json_output:
-        echo_json(payload)
-        return
-    renderer = human_renderer if human_renderer is not None else echo_generic_payload
-    renderer(payload)
+    def _body() -> object:
+        payload = _resolve_command_payload(action)
+        if json_output:
+            echo_json(payload)
+        else:
+            renderer = human_renderer if human_renderer is not None else echo_generic_payload
+            renderer(payload)
+        return payload
+
+    _run_cli_journey(
+        _body,
+        command_path=journey.command_path,
+        json_output=json_output,
+        selector_kind=journey.selector_kind,
+        all_flag=journey.all_flag,
+    )
 
 
 def _resolve_command_payload(action: JsonCommandAction) -> object:
@@ -160,6 +190,102 @@ def _exit_code_for_error(code: str) -> int:
     return 1
 
 
+def _run_cli_journey(
+    body: CommandBody,
+    *,
+    json_output: bool,
+    selector_kind: str,
+    all_flag: bool | None = None,
+    command_path: str | None = None,
+) -> object:
+    resolved_command_path = command_path if command_path is not None else _CLI_COMMAND_ROOT
+    started_at = monotonic()
+    exit_code = 0
+    result: object | None = None
+    log_event(
+        _CLI_LOGGER,
+        logging.INFO,
+        "cli_command_started",
+        _cli_command_fields(
+            resolved_command_path,
+            json_output=json_output,
+            selector_kind=selector_kind,
+            all_flag=all_flag,
+        ),
+    )
+    try:
+        result = body()
+    except typer.Exit as exc:
+        exit_code = int(exc.exit_code) if exc.exit_code is not None else 0
+        raise
+    except Exception:
+        exit_code = 1
+        raise
+    else:
+        return result
+    finally:
+        finished_fields: dict[str, object] = {
+            **_cli_command_fields(
+                resolved_command_path,
+                json_output=json_output,
+                selector_kind=selector_kind,
+                all_flag=all_flag,
+            ),
+            "duration_ms": int((monotonic() - started_at) * 1000),
+            "exit_code": exit_code,
+        }
+        result_count = _command_result_count(result)
+        if result_count is not None:
+            finished_fields["result_count"] = result_count
+        log_event(_CLI_LOGGER, logging.INFO, "cli_command_finished", finished_fields)
+
+
+def _cli_command_fields(
+    command_path: str,
+    *,
+    json_output: bool,
+    selector_kind: str,
+    all_flag: bool | None = None,
+) -> dict[str, object]:
+    fields: dict[str, object] = {
+        "command_path": command_path,
+        "json": json_output,
+        "selector_kind": selector_kind,
+    }
+    if all_flag is not None:
+        fields["all"] = all_flag
+    return fields
+
+
+def _command_path(*parts: str) -> str:
+    return " ".join((_CLI_COMMAND_ROOT, *parts))
+
+
+def _command_result_count(result: object | None) -> int | None:
+    if isinstance(result, dict):
+        for key in ("projects", "reports", "runs", "items", "schedules", "preferences"):
+            value = result.get(key)
+            if isinstance(value, list):
+                return len(value)
+    if isinstance(result, list):
+        return len(result)
+    return None
+
+
+def _selector_kind_for_repo(repo: str | None, *, project: str | None = None, all_flag: bool = False) -> str:
+    if all_flag:
+        return "all"
+    if repo is not None:
+        return "owner_name" if "/" in repo else "repo_id"
+    if project is not None:
+        return "project"
+    return "unknown"
+
+
+def _selector_kind_for_github_repo(github_repo: str) -> str:
+    return "owner_name" if "/" in github_repo else "unknown"
+
+
 @app.callback(invoke_without_command=True)
 def main(
     version: Annotated[bool, typer.Option("--version", help="Show the installed version and exit.")] = False,
@@ -173,8 +299,17 @@ def main(
     _cli_state["json"] = json_output
     configure_logging()
     if version:
-        typer.echo(package_version())
-        raise typer.Exit
+        _run_cli_journey(
+            _version_body,
+            command_path=_command_path("--version"),
+            json_output=json_output,
+            selector_kind="unknown",
+        )
+
+
+def _version_body() -> object:
+    typer.echo(package_version())
+    raise typer.Exit
 
 
 @app.command(help="Return process liveness or full service readiness.")
@@ -184,6 +319,15 @@ def health(
         typer.Option("--ready", help="Also check local MCP and cached Enji backend readiness."),
     ] = False,
 ) -> None:
+    _run_cli_journey(
+        lambda: _health_body(ready),
+        command_path=_command_path("health"),
+        json_output=_json_output(),
+        selector_kind="unknown",
+    )
+
+
+def _health_body(ready: bool) -> object:
     if ready:
         try:
             _check_local_listener(DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT)
@@ -192,8 +336,9 @@ def health(
             raise typer.Exit(1) from None
         _check_backend_readiness()
         typer.echo("ready")
-        return
+        return None
     typer.echo("ok")
+    return None
 
 
 def _check_local_listener(host: str, port: int) -> None:
@@ -242,7 +387,12 @@ def _is_loopback_host(host: str) -> bool:
 def access(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_human_or_json_command(get_access, _json_output(json_output), echo_access)
+    _run_human_or_json_command(
+        get_access,
+        _json_output(json_output),
+        echo_access,
+        journey=CliJourney(command_path=_command_path("access")),
+    )
 
 
 @app.command(help="Run MCP plus background auth refresh under one supervisor.")
@@ -265,8 +415,24 @@ def run(
         ),
     ] = False,
 ) -> None:
+    _run_cli_journey(
+        lambda: _run_service_body(transport, host, port, mount_path, allow_external_host),
+        command_path=_command_path("run"),
+        json_output=_json_output(),
+        selector_kind="unknown",
+    )
+
+
+def _run_service_body(
+    transport: Literal["stdio", "sse", "streamable-http"],
+    host: str,
+    port: int,
+    mount_path: str | None,
+    allow_external_host: bool,
+) -> object:
     _validate_http_bind(host, transport, allow_external_host=allow_external_host)
     run_service(transport=transport, host=host, port=port, mount_path=mount_path)
+    return None
 
 
 @app.command(hidden=True)
@@ -289,8 +455,24 @@ def serve(
         ),
     ] = False,
 ) -> None:
+    _run_cli_journey(
+        lambda: _serve_body(transport, host, port, mount_path, allow_external_host),
+        command_path=_command_path("serve"),
+        json_output=_json_output(),
+        selector_kind="unknown",
+    )
+
+
+def _serve_body(
+    transport: Literal["stdio", "sse", "streamable-http"],
+    host: str,
+    port: int,
+    mount_path: str | None,
+    allow_external_host: bool,
+) -> object:
     _validate_http_bind(host, transport, allow_external_host=allow_external_host)
     run_mcp_server(create_mcp_server(host=host, port=port), transport=transport, mount_path=mount_path)
+    return None
 
 
 @app.command(help="Show repository scores, report freshness, and active work.")
@@ -309,6 +491,10 @@ def status(
         lambda: runtime_status(repo, _selected_project(), sort),
         _json_output(json_output),
         echo_repo_status_table,
+        journey=CliJourney(
+            command_path=_command_path("status"),
+            selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
+        ),
     )
 
 
@@ -324,6 +510,15 @@ def wait(
     ] = _DEFAULT_CLI_SETTINGS.report_wait.timeout_text,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
+    _run_cli_journey(
+        lambda: _wait_body(repo=repo, timeout=timeout, json_output=json_output),
+        command_path=_command_path("wait"),
+        json_output=_json_output(json_output),
+        selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
+    )
+
+
+def _wait_body(*, repo: str, timeout: str, json_output: bool) -> object:
     payload = _resolve_command_payload(
         lambda: wait_for_reports(
             repo,
@@ -342,13 +537,22 @@ def wait(
         echo_wait_status(payload)
     if isinstance(payload, dict) and payload.get("complete") is False:
         raise typer.Exit(2)
+    return payload
 
 
 @project_app.command("list", help="List Enji projects and their repository counts.")
 def project_list(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_human_or_json_command(list_projects, _json_output(json_output), echo_project_table)
+    _run_human_or_json_command(
+        list_projects,
+        _json_output(json_output),
+        echo_project_table,
+        journey=CliJourney(
+            command_path=_command_path("project", "list"),
+            selector_kind=_selector_kind_for_repo(None, project=_selected_project()),
+        ),
+    )
 
 
 @project_app.command("create", help="Create an Enji project.")
@@ -356,7 +560,11 @@ def project_create(
     name: Annotated[str, typer.Argument(help="Project name.")],
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_human_or_json_command(lambda: create_project(name), _json_output(json_output))
+    _run_human_or_json_command(
+        lambda: create_project(name),
+        _json_output(json_output),
+        journey=CliJourney(command_path=_command_path("project", "create"), selector_kind="project"),
+    )
 
 
 @project_app.command("rename", help="Rename an Enji project.")
@@ -365,7 +573,11 @@ def project_rename(
     name: Annotated[str, typer.Argument(help="New project name.")],
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_human_or_json_command(lambda: rename_project(project, name), _json_output(json_output))
+    _run_human_or_json_command(
+        lambda: rename_project(project, name),
+        _json_output(json_output),
+        journey=CliJourney(command_path=_command_path("project", "rename"), selector_kind="project"),
+    )
 
 
 @project_app.command("delete", help="Delete an Enji project. Requires --yes.")
@@ -374,10 +586,24 @@ def project_delete(
     yes: Annotated[bool, typer.Option("--yes", help="Confirm destructive project deletion.")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
+    _run_cli_journey(
+        lambda: _project_delete_body(project=project, yes=yes, json_output=json_output),
+        command_path=_command_path("project", "delete"),
+        json_output=_json_output(json_output),
+        selector_kind="project",
+    )
+
+
+def _project_delete_body(*, project: str, yes: bool, json_output: bool) -> object:
     if not yes:
         _echo_error("VALIDATION", "project delete requires --yes")
         raise typer.Exit(1)
-    _run_human_or_json_command(lambda: delete_project(project), _json_output(json_output))
+    payload = _resolve_command_payload(lambda: delete_project(project))
+    if _json_output(json_output):
+        echo_json(payload)
+    else:
+        echo_key_values(cast(dict[str, object], payload))
+    return payload
 
 
 @report_app.command("read", help="Read ready report Markdown for a repository.")
@@ -390,17 +616,34 @@ def report_read(
     all_reports: Annotated[bool, typer.Option("--all", help="Read every report audit.")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
+    _run_cli_journey(
+        lambda: _report_read_body(repo=repo, audits=audits, all_reports=all_reports, json_output=json_output),
+        command_path=_command_path("report", "read"),
+        json_output=_json_output(json_output),
+        selector_kind=_selector_kind_for_repo(repo, project=_selected_project(), all_flag=all_reports),
+        all_flag=all_reports,
+    )
+
+
+def _report_read_body(
+    *,
+    repo: str,
+    audits: list[ReportAuditAlias] | None,
+    all_reports: bool,
+    json_output: bool,
+) -> object:
     payload = _resolve_command_payload(
         lambda: read_reports_for_repo(repo, _selected_project(), _report_audits(audits or []), all_reports=all_reports)
     )
     if _json_output(json_output):
         echo_json(report_read_summary_payload(payload))
-        return
+        return payload
     try:
         typer.echo(reports_markdown(payload))
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
+    return payload
 
 
 @repo_app.command("list", help="List connected repositories with triage scores.")
@@ -418,6 +661,10 @@ def repo_list(
         lambda: list_project_inventory(_selected_project(), sort),
         _json_output(json_output),
         echo_repo_score_table,
+        journey=CliJourney(
+            command_path=_command_path("repo", "list"),
+            selector_kind=_selector_kind_for_repo(None, project=_selected_project()),
+        ),
     )
 
 
@@ -430,6 +677,10 @@ def repo_resolve(
         lambda: resolve_repo(repo, _selected_project()),
         _json_output(json_output),
         echo_repo_resolve_table,
+        journey=CliJourney(
+            command_path=_command_path("repo", "resolve"),
+            selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
+        ),
     )
 
 
@@ -438,7 +689,14 @@ def repo_connect(
     github_repo: Annotated[str, typer.Argument(help="GitHub owner/name repository slug.")],
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_human_or_json_command(lambda: connect_repo(github_repo, _selected_project()), _json_output(json_output))
+    _run_human_or_json_command(
+        lambda: connect_repo(github_repo, _selected_project()),
+        _json_output(json_output),
+        journey=CliJourney(
+            command_path=_command_path("repo", "connect"),
+            selector_kind=_selector_kind_for_github_repo(github_repo),
+        ),
+    )
 
 
 @repo_app.command("move", help="Move a repository to another Enji project.")
@@ -447,7 +705,14 @@ def repo_move(
     to_project: Annotated[str, typer.Option("--to-project", help="Destination exact Enji project id or name.")],
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_human_or_json_command(lambda: move_repo(repo, _selected_project(), to_project), _json_output(json_output))
+    _run_human_or_json_command(
+        lambda: move_repo(repo, _selected_project(), to_project),
+        _json_output(json_output),
+        journey=CliJourney(
+            command_path=_command_path("repo", "move"),
+            selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
+        ),
+    )
 
 
 @recon_app.command("start", help="Start baseline discovery for a connected repository.")
@@ -455,7 +720,14 @@ def recon_start(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_human_or_json_command(lambda: start_recon(repo, _selected_project()), _json_output(json_output))
+    _run_human_or_json_command(
+        lambda: start_recon(repo, _selected_project()),
+        _json_output(json_output),
+        journey=CliJourney(
+            command_path=_command_path("recon", "start"),
+            selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
+        ),
+    )
 
 
 @audit_app.command("start", help="Start one or more slow report-producing audits.")
@@ -468,10 +740,30 @@ def audit_start(
     all_reports: Annotated[bool, typer.Option("--all", help="Start every report audit.")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    _run_human_or_json_command(
-        lambda: start_report_audits(repo, _selected_project(), _report_audits(audits or []), all_reports=all_reports),
-        _json_output(json_output),
+    _run_cli_journey(
+        lambda: _audit_start_body(repo=repo, audits=audits, all_reports=all_reports, json_output=json_output),
+        command_path=_command_path("audit", "start"),
+        json_output=_json_output(json_output),
+        selector_kind=_selector_kind_for_repo(repo, project=_selected_project(), all_flag=all_reports),
+        all_flag=all_reports,
     )
+
+
+def _audit_start_body(
+    *,
+    repo: str,
+    audits: list[ReportAuditAlias] | None,
+    all_reports: bool,
+    json_output: bool,
+) -> object:
+    payload = _resolve_command_payload(
+        lambda: start_report_audits(repo, _selected_project(), _report_audits(audits or []), all_reports=all_reports)
+    )
+    if _json_output(json_output):
+        echo_json(payload)
+    else:
+        echo_audit_start(payload)
+    return payload
 
 
 @schedule_app.command("list", help="List automatic report audit schedules.")
@@ -486,6 +778,10 @@ def schedule_list(
         lambda: list_schedule_settings(repo, _selected_project()),
         _json_output(json_output),
         echo_schedule_settings_table,
+        journey=CliJourney(
+            command_path=_command_path("schedule", "list"),
+            selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
+        ),
     )
 
 
@@ -502,7 +798,19 @@ def schedule_set(ctx: typer.Context) -> None:
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
-    _run_human_or_json_command(
+    _run_cli_journey(
+        lambda: _schedule_set_body(args),
+        command_path=_command_path("schedule", "set"),
+        json_output=args.json_output,
+        selector_kind=_selector_kind_for_repo(
+            args.repo, project=_selected_project(), all_flag=args.all_repos or args.all_projects
+        ),
+        all_flag=args.all_repos or args.all_projects,
+    )
+
+
+def _schedule_set_body(args: ScheduleSetCliArgs) -> object:
+    payload = _resolve_command_payload(
         lambda: set_schedule_settings(
             args.repo,
             _selected_project(),
@@ -516,9 +824,12 @@ def schedule_set(ctx: typer.Context) -> None:
             all_repos=args.all_repos,
             all_projects=args.all_projects,
         ),
-        _json_output(args.json_output),
-        echo_schedule_settings_table,
     )
+    if _json_output(args.json_output):
+        echo_json(payload)
+    else:
+        echo_schedule_settings_table(payload)
+    return payload
 
 
 @schedule_app.command("auto-time", help="Let Enji choose automatic report audit times.")
@@ -547,6 +858,13 @@ def schedule_auto_time(
         ),
         _json_output(json_output),
         echo_schedule_settings_table,
+        journey=CliJourney(
+            command_path=_command_path("schedule", "auto-time"),
+            selector_kind=_selector_kind_for_repo(
+                repo, project=_selected_project(), all_flag=all_repos or all_projects
+            ),
+            all_flag=all_repos or all_projects,
+        ),
     )
 
 
@@ -562,6 +880,10 @@ def email_list(
         lambda: list_email_preferences(repo, _selected_project()),
         _json_output(json_output),
         echo_email_preferences_table,
+        journey=CliJourney(
+            command_path=_command_path("email", "list"),
+            selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
+        ),
     )
 
 
@@ -578,7 +900,19 @@ def email_set(ctx: typer.Context) -> None:
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
-    _run_human_or_json_command(
+    _run_cli_journey(
+        lambda: _email_set_body(args),
+        command_path=_command_path("email", "set"),
+        json_output=args.json_output,
+        selector_kind=_selector_kind_for_repo(
+            args.repo, project=_selected_project(), all_flag=args.all_repos or args.all_projects
+        ),
+        all_flag=args.all_repos or args.all_projects,
+    )
+
+
+def _email_set_body(args: EmailSetCliArgs) -> object:
+    payload = _resolve_command_payload(
         lambda: set_email_preferences(
             args.repo,
             _selected_project(),
@@ -589,20 +923,33 @@ def email_set(ctx: typer.Context) -> None:
             all_repos=args.all_repos,
             all_projects=args.all_projects,
         ),
-        _json_output(args.json_output),
-        echo_email_preferences_table,
     )
+    if _json_output(args.json_output):
+        echo_json(payload)
+    else:
+        echo_email_preferences_table(payload)
+    return payload
 
 
 @catalog_app.command("audits", help=CATALOG_AUDITS_OPERATION.summary)
 def catalog_audits(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
+    _run_cli_journey(
+        lambda: _catalog_audits_body(json_output=json_output),
+        command_path=_command_path("catalog", "audits"),
+        json_output=_json_output(json_output),
+        selector_kind="unknown",
+    )
+
+
+def _catalog_audits_body(*, json_output: bool) -> object:
     payload = resolve_operation_result(CATALOG_AUDITS_OPERATION.execute())
     if _json_output(json_output):
         echo_json(payload)
-        return
-    echo_audit_catalog(payload)
+    else:
+        echo_audit_catalog(payload)
+    return payload
 
 
 @catalog_app.command("audit", help=CATALOG_AUDIT_OPERATION.summary)
@@ -610,11 +957,21 @@ def catalog_audit(
     audit: Annotated[AuditAlias, typer.Argument(help="Canonical audit alias.")],
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
+    _run_cli_journey(
+        lambda: _catalog_audit_body(audit=audit, json_output=json_output),
+        command_path=_command_path("catalog", "audit"),
+        json_output=_json_output(json_output),
+        selector_kind="unknown",
+    )
+
+
+def _catalog_audit_body(*, audit: AuditAlias, json_output: bool) -> object:
     payload = resolve_operation_result(CATALOG_AUDIT_OPERATION.execute(audit))
     if _json_output(json_output):
         echo_json(payload)
-        return
-    echo_key_values(object_dict(payload))
+    else:
+        echo_key_values(object_dict(payload))
+    return payload
 
 
 @auth_app.command("import-cookie", help="Import a raw browser Cookie header from stdin.")
@@ -626,6 +983,15 @@ def auth_import_cookie(
     ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
+    _run_cli_journey(
+        lambda: _auth_import_cookie_body(stdin=stdin, auth_file=auth_file, json_output=json_output),
+        command_path=_command_path("auth", "import-cookie"),
+        json_output=_json_output(json_output),
+        selector_kind="unknown",
+    )
+
+
+def _auth_import_cookie_body(*, stdin: bool, auth_file: Path | None, json_output: bool) -> object:
     if not stdin:
         _echo_error("VALIDATION", "use --stdin to avoid storing cookies in shell history")
         raise typer.Exit(1)
@@ -637,6 +1003,7 @@ def auth_import_cookie(
             echo_json(payload)
         else:
             echo_key_values(cast(dict[str, object], payload))
+        return payload
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
@@ -654,6 +1021,15 @@ def auth_import_token(
     ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
+    _run_cli_journey(
+        lambda: _auth_import_token_body(stdin=stdin, auth_file=auth_file, json_output=json_output),
+        command_path=_command_path("auth", "import-token"),
+        json_output=_json_output(json_output),
+        selector_kind="unknown",
+    )
+
+
+def _auth_import_token_body(*, stdin: bool, auth_file: Path | None, json_output: bool) -> object:
     if not stdin:
         _echo_error("VALIDATION", "use --stdin to avoid storing tokens in shell history")
         raise typer.Exit(1)
@@ -665,6 +1041,7 @@ def auth_import_token(
             echo_json(payload)
         else:
             echo_key_values(cast(dict[str, object], payload))
+        return payload
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
@@ -681,6 +1058,15 @@ def auth_status_command(
     ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
+    _run_cli_journey(
+        lambda: _auth_status_body(auth_file=auth_file, json_output=json_output),
+        command_path=_command_path("auth", "status"),
+        json_output=_json_output(json_output),
+        selector_kind="unknown",
+    )
+
+
+def _auth_status_body(*, auth_file: Path | None, json_output: bool) -> object:
     payload = cast_auth_status_payload(resolve_operation_result(auth_status(auth_file)))
     if _json_output(json_output):
         echo_json(payload)
@@ -688,6 +1074,7 @@ def auth_status_command(
         echo_auth_status(payload)
     if not payload["authenticated"]:
         raise typer.Exit(3)
+    return payload
 
 
 @auth_app.command("refresh", help="Refresh cookie auth and persist rotated cookies.")
@@ -698,12 +1085,22 @@ def auth_refresh_command(
     ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
+    _run_cli_journey(
+        lambda: _auth_refresh_body(auth_file=auth_file, json_output=json_output),
+        command_path=_command_path("auth", "refresh"),
+        json_output=_json_output(json_output),
+        selector_kind="unknown",
+    )
+
+
+def _auth_refresh_body(*, auth_file: Path | None, json_output: bool) -> object:
     try:
         payload = refresh_auth(auth_file)
         if _json_output(json_output):
             echo_json(payload)
         else:
             echo_key_values(cast(dict[str, object], payload))
+        return payload
     except AuthError as exc:
         _echo_error(exc.code, exc.message)
         raise typer.Exit(_exit_code_for_error(exc.code)) from None

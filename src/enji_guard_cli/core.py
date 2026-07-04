@@ -59,6 +59,7 @@ from enji_guard_cli.core_impl.operations import resolve_operation as resolve_ope
 from enji_guard_cli.core_impl.operations import resolve_operation_result as resolve_operation_result
 from enji_guard_cli.core_impl.operations import resolve_operation_spec as resolve_operation_spec
 from enji_guard_cli.core_impl.payloads import json_object_payload as _json_object_payload
+from enji_guard_cli.core_impl.preflight import report_start_preflight_payload as _report_start_preflight_payload
 from enji_guard_cli.core_impl.project_admin import MoveRepoDependencies as _MoveRepoDependencies
 from enji_guard_cli.core_impl.project_admin import connect_repo_payload as _connect_repo_payload
 from enji_guard_cli.core_impl.project_admin import create_project_payload as _create_project_payload
@@ -284,9 +285,13 @@ def start_report_audits(
 ) -> dict[str, object]:
     target = _resolve_single_repo_target(repo, project)
     selected_audits = _selected_report_audits(audits, all_reports=all_reports)
+    preflight = _report_start_preflight_payload(_report_status(target["repo_id"]))
     return _targeted_run_payload(
         target,
-        _start_report_audits_for_target(target["repo_id"], target["project_id"], selected_audits),
+        {
+            "preflight": preflight,
+            **_start_report_audits_for_target(target["repo_id"], target["project_id"], selected_audits),
+        },
     )
 
 

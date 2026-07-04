@@ -71,6 +71,12 @@ PROJECT_ADMIN_RULES = (
     "repo move uses global --project as source project or selector disambiguation when needed",
 )
 
+DOC_MODEL_PHRASES = (
+    "wait is the completion check after status",
+    "Starting a new audit can temporarily hide older snapshots behind the running state",
+    "Application telemetry is written only to the persistent file outside the container",
+)
+
 
 def test_visible_cli_command_inventory_matches_workflow_surface() -> None:
     command = get_command(app)
@@ -101,6 +107,9 @@ def test_documented_cli_surface_covers_project_admin_and_repo_move_commands() ->
         assert rule in readme
         assert rule in design
         assert rule in spec
+
+    for phrase in DOC_MODEL_PHRASES:
+        assert phrase in readme or phrase in spec
 
 
 def _visible_command_paths(command: object, prefix: tuple[str, ...] = ()) -> Iterable[tuple[str, ...]]:

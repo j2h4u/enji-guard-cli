@@ -3,7 +3,7 @@ import logging
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import Literal, TypedDict, cast
 
 from pytest import MonkeyPatch
 from typer.testing import CliRunner
@@ -717,6 +717,77 @@ def test_audit_start_routes_all_flag(monkeypatch: MonkeyPatch) -> None:
     }
 
 
+def test_audit_start_human_output_shows_preflight_warning(monkeypatch: MonkeyPatch) -> None:
+    def fake_start(
+        repo: str,
+        project: str | None,
+        audits: list[AuditAlias],
+        *,
+        all_reports: bool,
+    ) -> dict[str, object]:
+        return {
+            "target": {"repo_id": "repo_1", "project_id": "project_1", "github_repo": "j2h4u/enji-guard-cli"},
+            "preflight": {
+                "warning": {
+                    "code": "SNAPSHOT_VISIBILITY_RISK",
+                    "message": "starting report audits can temporarily hide older snapshots",
+                },
+                "counts": {"ready": 2, "running": 1, "stale": 1},
+                "lists": {"ready": ["security", "tests"], "running": ["deps"], "stale": ["tests"]},
+            },
+            "runs": [{"audit": "security"}],
+            "skipped": [],
+        }
+
+    monkeypatch.setattr(cli, "start_report_audits", fake_start)
+
+    result = CliRunner().invoke(app, ["audit", "start", "j2h4u/enji-guard-cli", "security"])
+
+    assert result.exit_code == 0
+    assert "preflight: 2 ready, 1 running, 1 stale" in _plain_cli_output(result.output)
+    assert (
+        "warning: SNAPSHOT_VISIBILITY_RISK starting report audits can temporarily hide older snapshots"
+        in _plain_cli_output(result.output)
+    )
+
+
+def test_audit_start_json_output_returns_structured_preflight(monkeypatch: MonkeyPatch) -> None:
+    def fake_start(
+        repo: str,
+        project: str | None,
+        audits: list[AuditAlias],
+        *,
+        all_reports: bool,
+    ) -> dict[str, object]:
+        return {
+            "target": {"repo_id": "repo_1", "project_id": "project_1", "github_repo": "j2h4u/enji-guard-cli"},
+            "preflight": {
+                "warning": {
+                    "code": "SNAPSHOT_VISIBILITY_RISK",
+                    "message": "starting report audits can temporarily hide older snapshots",
+                },
+                "counts": {"ready": 2, "running": 1, "stale": 1},
+                "lists": {"ready": ["security", "tests"], "running": ["deps"], "stale": ["tests"]},
+            },
+            "runs": [{"audit": "security"}],
+            "skipped": [],
+        }
+
+    monkeypatch.setattr(cli, "start_report_audits", fake_start)
+
+    result = CliRunner().invoke(app, ["audit", "start", "j2h4u/enji-guard-cli", "security", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["preflight"] == {
+        "warning": {
+            "code": "SNAPSHOT_VISIBILITY_RISK",
+            "message": "starting report audits can temporarily hide older snapshots",
+        },
+        "counts": {"ready": 2, "running": 1, "stale": 1},
+        "lists": {"ready": ["security", "tests"], "running": ["deps"], "stale": ["tests"]},
+    }
+
+
 def test_wait_routes_to_top_level_workflow(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
@@ -874,7 +945,116 @@ def test_wait_routes_transport_info_logs_to_file_not_operator_stderr(
         "current_head_sha=abc123\n"
     )
     assert "enji_http_response" not in result.stderr
-    assert json.loads(log_file.read_text(encoding="utf-8"))["message"] == "enji_http_response"
+    assert any(line["message"] == "enji_http_response" for line in _telemetry_log_lines(log_file))
+
+
+def test_cli_journey_telemetry_logs_start_and_finish_for_all_flagged_command(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    log_file = tmp_path / "logs" / "telemetry.jsonl"
+
+    def fake_start(
+        repo: str,
+        project: str | None,
+        audits: list[object],
+        *,
+        all_reports: bool,
+    ) -> dict[str, object]:
+        assert repo == "j2h4u/enji-guard-cli"
+        assert project == "Pets"
+        assert audits == []
+        assert all_reports is True
+        return {"runs": [{"id": "run_1"}]}
+
+    monkeypatch.setattr(cli, "start_report_audits", fake_start)
+    monkeypatch.setattr(
+        cli,
+        "configure_logging",
+        lambda: configure_test_logging(
+            TelemetrySettings(
+                level_name="INFO",
+                log_format="json",
+                log_file=log_file,
+                max_bytes=10_000,
+                backup_count=1,
+            )
+        ),
+    )
+
+    result = CliRunner().invoke(app, ["--project", "Pets", "audit", "start", "j2h4u/enji-guard-cli", "--all", "--json"])
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+
+    started, finished = _telemetry_log_lines(log_file)
+    assert started["message"] == "cli_command_started"
+    assert isinstance(started["command_path"], str)
+    assert started["command_path"] == "enji-guard audit start"
+    assert started["json"] is True
+    assert started["all"] is True
+    assert started["selector_kind"] == "all"
+    assert finished["message"] == "cli_command_finished"
+    assert finished["command_path"] == started["command_path"]
+    assert finished["json"] is True
+    assert finished["all"] is True
+    assert finished["selector_kind"] == "all"
+    assert finished["exit_code"] == 0
+    assert isinstance(finished["duration_ms"], int)
+    assert finished["result_count"] == 1
+
+
+def test_cli_journey_telemetry_logs_validation_failures_to_finish_event(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    log_file = tmp_path / "logs" / "telemetry.jsonl"
+    monkeypatch.setattr(
+        cli,
+        "configure_logging",
+        lambda: configure_test_logging(
+            TelemetrySettings(
+                level_name="INFO",
+                log_format="json",
+                log_file=log_file,
+                max_bytes=10_000,
+                backup_count=1,
+            )
+        ),
+    )
+
+    result = CliRunner().invoke(app, ["project", "delete", "Pets"])
+
+    assert result.exit_code == 1
+    assert result.output == "VALIDATION: project delete requires --yes\n"
+    assert result.stderr == "VALIDATION: project delete requires --yes\n"
+
+    started, finished = _telemetry_log_lines(log_file)
+    assert started["message"] == "cli_command_started"
+    assert isinstance(started["command_path"], str)
+    assert started["command_path"] == "enji-guard project delete"
+    assert started["json"] is False
+    assert started["selector_kind"] == "project"
+    assert finished["message"] == "cli_command_finished"
+    assert finished["command_path"] == started["command_path"]
+    assert finished["json"] is False
+    assert finished["selector_kind"] == "project"
+    assert finished["exit_code"] == 1
+    assert "Pets" not in log_file.read_text(encoding="utf-8")
+
+
+def _telemetry_log_lines(log_file: Path) -> list[dict[str, object]]:
+    return [cast(dict[str, object], json.loads(line)) for line in log_file.read_text(encoding="utf-8").splitlines()]
+
+
+def _telemetry_settings(log_file: Path, log_format: Literal["json", "text"] = "json") -> TelemetrySettings:
+    return TelemetrySettings(
+        level_name="INFO",
+        log_format=log_format,
+        log_file=log_file,
+        max_bytes=10_000,
+        backup_count=1,
+    )
 
 
 def test_duration_formatting_uses_readable_largest_units() -> None:
