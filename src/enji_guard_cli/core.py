@@ -47,7 +47,6 @@ from enji_guard_cli.core_impl.models import (
     OperationResult as OperationResult,
 )
 from enji_guard_cli.core_impl.models import OperationSpec as OperationSpec
-from enji_guard_cli.core_impl.models import ReportAuditState as ReportAuditState
 from enji_guard_cli.core_impl.operations import READ_OPERATION_SPECS as READ_OPERATION_SPECS
 from enji_guard_cli.core_impl.operations import access_async_operation as access_async_operation
 from enji_guard_cli.core_impl.operations import auth_status_async_operation as auth_status_async_operation

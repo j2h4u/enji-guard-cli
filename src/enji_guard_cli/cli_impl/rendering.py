@@ -60,9 +60,12 @@ def echo_repo_status_table(payload: object) -> None:
         "state",
         "overall",
         "weakest",
-        "reports",
+        "readable",
         "stale",
         "active",
+        "queued",
+        "running",
+        "failed",
         "last_report",
         "current",
         "audited",
@@ -89,9 +92,9 @@ def echo_repo_resolve_table(payload: object) -> None:
 
 
 def echo_status_report_table(repo: dict[str, object]) -> None:
-    headers = ("repo", "audit", "state", "run", "completed", "current", "audited", "freshness")
+    headers = ("repo", "audit", "report", "freshness", "task", "run", "report_done", "task_done", "current", "audited")
     reports = object_dict(repo.get("reports"))
-    rows = [status_report_row(repo, object_dict(report)) for report in object_list(reports.get("reports"))]
+    rows = [status_report_row(repo, object_dict(report)) for report in object_list(reports.get("items"))]
     echo_table(headers, rows, "No reports.")
 
 
@@ -198,6 +201,20 @@ def echo_audit_start(payload: object) -> None:
         f"{text_cell(counts.get('stale'))} stale"
     )
     typer.echo(f"warning: {text_cell(warning.get('code'))} {text_cell(warning.get('message'))}")
+    results = object_list(data.get("results"))
+    state_counts: dict[str, int] = {
+        "started": 0,
+        "queued": 0,
+        "already_running": 0,
+        "up_to_date": 0,
+        "failed": 0,
+    }
+    for result in (object_dict(item) for item in results):
+        state = result.get("state")
+        if isinstance(state, str):
+            state_counts[state] = state_counts.get(state, 0) + 1
+    results_summary = ", ".join(f"{state}={state_counts[state]}" for state in state_counts)
+    typer.echo(f"results: {results_summary}")
 
 
 def echo_wait_status(payload: object) -> None:
@@ -341,15 +358,19 @@ def repo_score_row(project: dict[str, object], repo: dict[str, object]) -> tuple
 
 
 def status_report_row(repo: dict[str, object], report: dict[str, object]) -> tuple[str, ...]:
+    report_state = object_dict(report.get("report"))
+    task_state = object_dict(report.get("task"))
     return (
         repo_label(repo),
         text_cell(report.get("audit")),
-        text_cell(report.get("state")),
-        text_cell(report.get("run_status")),
-        date_cell(report.get("completed_at")),
-        sha_cell(report.get("current_head_sha")),
-        sha_cell(report.get("last_audited_head_sha")),
-        freshness_cell(report.get("out_of_date")),
+        text_cell(report_state.get("readability_state")),
+        text_cell(report_state.get("freshness_state")),
+        text_cell(task_state.get("lifecycle_state")),
+        text_cell(task_state.get("run_status")),
+        date_cell(report_state.get("completed_at")),
+        date_cell(task_state.get("completed_at")),
+        sha_cell(report_state.get("current_head_sha")),
+        sha_cell(report_state.get("audited_head_sha")),
     )
 
 
@@ -364,15 +385,19 @@ def freshness_cell(value: object) -> str:
 def repo_status_row(project: dict[str, object], repo: dict[str, object]) -> tuple[str, ...]:
     score_summary = object_dict(repo.get("score_summary"))
     reports = object_dict(repo.get("reports"))
+    counts = object_dict(reports.get("counts"))
     return (
         project_label(project),
         repo_label(repo),
         repo_state(repo),
         score_cell(score_summary.get("overall_score")),
         weakest_cell(score_summary),
-        reports_cell(reports),
+        count_cell(counts.get("readable")),
         stale_audits_cell(reports),
-        text_cell(repo.get("active_run_count")),
+        count_cell(counts.get("active")),
+        count_cell(counts.get("queued")),
+        count_cell(counts.get("running")),
+        count_cell(counts.get("failed")),
         date_cell(repo.get("last_report_at")),
         sha_cell(repo.get("current_head_sha")),
         sha_cell(audited_head(reports)),
@@ -429,28 +454,11 @@ def weakest_cell(score_summary: dict[str, object]) -> str:
     return f"{axis}={score}"
 
 
-def reports_cell(reports: dict[str, object]) -> str:
-    ready = len(object_list(reports.get("ready")))
-    running = len(object_list(reports.get("running")))
-    missing = len(object_list(reports.get("missing")))
-    parts: list[str] = []
-    if ready:
-        parts.append(f"{ready} ready")
-    if running:
-        parts.append(f"{running} running")
-    if missing:
-        parts.append(f"{missing} missing")
-    stale = len(stale_audits(reports))
-    if stale:
-        parts.append(f"{stale} stale")
-    return ", ".join(parts) if parts else "-"
-
-
 def audited_head(reports: dict[str, object]) -> object | None:
     audited_heads: set[str] = set()
-    for report_value in object_list(reports.get("reports")):
+    for report_value in object_list(reports.get("items")):
         report = object_dict(report_value)
-        audited_head = report.get("last_audited_head_sha")
+        audited_head = object_dict(report.get("report")).get("audited_head_sha")
         if isinstance(audited_head, str) and audited_head:
             audited_heads.add(audited_head)
     if not audited_heads:
@@ -467,11 +475,18 @@ def stale_audits_cell(reports: dict[str, object]) -> str:
 
 def stale_audits(reports: dict[str, object]) -> list[str]:
     stale: list[str] = []
-    for report_value in object_list(reports.get("reports")):
+    for report_value in object_list(reports.get("items")):
         report = object_dict(report_value)
-        if report.get("out_of_date") is True and isinstance(report.get("audit"), str):
+        report_state = object_dict(report.get("report"))
+        if report_state.get("stale") is True and isinstance(report.get("audit"), str):
             stale.append(cast(str, report["audit"]))
     return stale
+
+
+def count_cell(value: object) -> str:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return "-"
+    return str(value)
 
 
 def sha_cell(value: object) -> str:

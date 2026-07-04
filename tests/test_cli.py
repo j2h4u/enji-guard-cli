@@ -597,19 +597,48 @@ def test_status_routes_to_runtime_snapshot(monkeypatch: MonkeyPatch) -> None:
                                 "weakest_grade": "poor",
                             },
                             "reports": {
-                                "ready": ["security", "tests"],
-                                "running": [],
-                                "missing": [],
-                                "reports": [
+                                "counts": {
+                                    "total": 2,
+                                    "readable": 2,
+                                    "active": 1,
+                                    "queued": 0,
+                                    "running": 1,
+                                    "missing": 0,
+                                    "stale": 1,
+                                    "failed": 0,
+                                },
+                                "items": [
                                     {
                                         "audit": "security",
-                                        "last_audited_head_sha": "0307f239c88a4c761cd2f96cb17b5eb8a4ae8487",
-                                        "out_of_date": False,
+                                        "report": {
+                                            "readability_state": "readable",
+                                            "freshness_state": "fresh",
+                                            "current_head_sha": "0307f239c88a4c761cd2f96cb17b5eb8a4ae8487",
+                                            "audited_head_sha": "0307f239c88a4c761cd2f96cb17b5eb8a4ae8487",
+                                            "completed_at": "2026-06-30T12:00:00Z",
+                                            "stale": False,
+                                        },
+                                        "task": {
+                                            "lifecycle_state": "none",
+                                            "run_status": None,
+                                            "completed_at": None,
+                                        },
                                     },
                                     {
                                         "audit": "tests",
-                                        "last_audited_head_sha": "3249b095c88a4c761cd2f96cb17b5eb8a4ae8487",
-                                        "out_of_date": True,
+                                        "report": {
+                                            "readability_state": "readable",
+                                            "freshness_state": "stale",
+                                            "current_head_sha": "0307f239c88a4c761cd2f96cb17b5eb8a4ae8487",
+                                            "audited_head_sha": "3249b095c88a4c761cd2f96cb17b5eb8a4ae8487",
+                                            "completed_at": "2026-06-29T12:00:00Z",
+                                            "stale": True,
+                                        },
+                                        "task": {
+                                            "lifecycle_state": "running",
+                                            "run_status": "in_progress",
+                                            "completed_at": None,
+                                        },
                                     },
                                 ],
                             },
@@ -631,11 +660,14 @@ def test_status_routes_to_runtime_snapshot(monkeypatch: MonkeyPatch) -> None:
 
     assert result.exit_code == 0
     assert "project  repo" in result.output
-    assert "2 ready, 1 stale" in result.output
+    assert "readable  stale  active  queued  running  failed" in result.output
+    assert "2         tests  1       0       1        0" in result.output
     assert "tests" in result.output
     assert "mixed" in result.output
     assert "2026-06-30" in result.output
     assert "0307f239" in result.output
+    assert "security  readable  fresh" in result.output
+    assert "tests     readable  stale      running  in_progress" in result.output
     assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets", "sort": "overall"}
 
 
@@ -670,7 +702,7 @@ def test_audit_start_routes_positional_report_audits(monkeypatch: MonkeyPatch) -
         captured["project"] = project
         captured["audits"] = [audit.value for audit in audits]
         captured["all_reports"] = all_reports
-        return {"runs": []}
+        return {"results": []}
 
     monkeypatch.setattr(cli, "start_report_audits", fake_start)
 
@@ -702,7 +734,7 @@ def test_audit_start_routes_all_flag(monkeypatch: MonkeyPatch) -> None:
         captured["project"] = project
         captured["audits"] = [audit.value for audit in audits]
         captured["all_reports"] = all_reports
-        return {"runs": []}
+        return {"results": []}
 
     monkeypatch.setattr(cli, "start_report_audits", fake_start)
 
@@ -735,8 +767,7 @@ def test_audit_start_human_output_shows_preflight_warning(monkeypatch: MonkeyPat
                 "counts": {"ready": 2, "running": 1, "stale": 1},
                 "lists": {"ready": ["security", "tests"], "running": ["deps"], "stale": ["tests"]},
             },
-            "runs": [{"audit": "security"}],
-            "skipped": [],
+            "results": [{"audit": "security", "action_key": "audit.security", "state": "started"}],
         }
 
     monkeypatch.setattr(cli, "start_report_audits", fake_start)
@@ -749,6 +780,7 @@ def test_audit_start_human_output_shows_preflight_warning(monkeypatch: MonkeyPat
         "warning: SNAPSHOT_VISIBILITY_RISK starting report audits can temporarily hide older snapshots"
         in _plain_cli_output(result.output)
     )
+    assert "results: started=1, queued=0, already_running=0, up_to_date=0, failed=0" in _plain_cli_output(result.output)
 
 
 def test_audit_start_json_output_returns_structured_preflight(monkeypatch: MonkeyPatch) -> None:
@@ -769,8 +801,7 @@ def test_audit_start_json_output_returns_structured_preflight(monkeypatch: Monke
                 "counts": {"ready": 2, "running": 1, "stale": 1},
                 "lists": {"ready": ["security", "tests"], "running": ["deps"], "stale": ["tests"]},
             },
-            "runs": [{"audit": "security"}],
-            "skipped": [],
+            "results": [{"audit": "security", "action_key": "audit.security", "state": "started"}],
         }
 
     monkeypatch.setattr(cli, "start_report_audits", fake_start)
@@ -965,7 +996,7 @@ def test_cli_journey_telemetry_logs_start_and_finish_for_all_flagged_command(
         assert project == "Pets"
         assert audits == []
         assert all_reports is True
-        return {"runs": [{"id": "run_1"}]}
+        return {"results": [{"audit": "security", "action_key": "audit.security", "state": "started"}]}
 
     monkeypatch.setattr(cli, "start_report_audits", fake_start)
     monkeypatch.setattr(

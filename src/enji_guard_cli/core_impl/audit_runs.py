@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
 from enji_guard_cli.audits import REPORT_AUDITS, AuditAlias
 from enji_guard_cli.audits import require_report_audit as registry_require_report_audit
@@ -14,9 +15,8 @@ from enji_guard_cli.core_impl.audit_tasks import (
 )
 from enji_guard_cli.core_impl.models import (
     DEFAULT_EXECUTION_FLOW,
-    AuditRunBatchItem,
     AuditRunBatchPayload,
-    AuditRunSkippedItem,
+    AuditRunBatchResultItem,
     AuditRunSkippedPayload,
 )
 from enji_guard_cli.core_impl.payloads import json_object_or_default, json_str, required_str
@@ -27,6 +27,7 @@ from enji_guard_cli.core_impl.repo_status import (
     last_audited_head_sha,
     out_of_date,
 )
+from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 type ListRepoActiveRuns = Callable[[str], JsonObjectPayload]
@@ -99,8 +100,7 @@ def start_report_audits_for_target[TCreateRequest](
     dependencies: StartAuditDependencies[TCreateRequest],
     get_repo_rerun_state: GetRepoRerunState,
 ) -> AuditRunBatchPayload:
-    runs: list[AuditRunBatchItem] = []
-    skipped: list[AuditRunSkippedItem] = []
+    result_matrix: list[AuditRunBatchResultItem] = []
     active_runs = current_active_runs(dependencies.list_repo_active_runs(repo_id))
     rerun_state = get_repo_rerun_state(repo_id)
     current_sha = current_head_sha(rerun_state)
@@ -112,53 +112,67 @@ def start_report_audits_for_target[TCreateRequest](
         last_sha = last_audited_head_sha(rerun_state, action_key)
         matching_active_runs = active_runs_for_action(active_runs, action_key)
         if matching_active_runs:
-            skipped.append(
-                {
-                    "audit": alias.value,
-                    "action_key": action_key,
-                    "reason": "already_running",
-                    "active_runs": matching_active_runs,
-                    "current_head_sha": current_sha,
-                    "last_audited_head_sha": last_sha,
-                }
+            state = _active_run_state(matching_active_runs)
+            task_id, task_status = _active_run_task(matching_active_runs[0])
+            result_matrix.append(
+                _batch_result_item(
+                    alias.value,
+                    action_key,
+                    "already_running" if state == "running" else state,
+                    (current_sha, last_sha),
+                    (task_id, task_status),
+                )
             )
             continue
         if out_of_date(current_sha, last_sha) is False:
-            skipped.append(
-                {
-                    "audit": alias.value,
-                    "action_key": action_key,
-                    "reason": "up_to_date",
-                    "active_runs": [],
-                    "current_head_sha": current_sha,
-                    "last_audited_head_sha": last_sha,
-                }
+            result_matrix.append(
+                _batch_result_item(
+                    alias.value,
+                    action_key,
+                    "up_to_date",
+                    (current_sha, last_sha),
+                )
             )
             continue
-        runs.append(
-            {
-                "audit": alias.value,
-                "action_key": action_key,
-                "response": dependencies.start_audit_run(
-                    dependencies.make_audit_run_create(
-                        repo_id,
-                        project_id,
-                        action_key,
-                        audit_run_task_body(
-                            AuditRunTaskContext(
-                                project_id=project_id,
-                                repo_id=repo_id,
-                                action_key=action_key,
-                                project=project,
-                                catalog=catalog,
-                            ),
-                            runbook=dependencies.runbook,
+        try:
+            response = dependencies.start_audit_run(
+                dependencies.make_audit_run_create(
+                    repo_id,
+                    project_id,
+                    action_key,
+                    audit_run_task_body(
+                        AuditRunTaskContext(
+                            project_id=project_id,
+                            repo_id=repo_id,
+                            action_key=action_key,
+                            project=project,
+                            catalog=catalog,
                         ),
-                    )
-                ),
-            }
+                        runbook=dependencies.runbook,
+                    ),
+                )
+            )
+        except EnjiApiError:
+            result_matrix.append(
+                _batch_result_item(
+                    alias.value,
+                    action_key,
+                    "failed",
+                    (current_sha, last_sha),
+                )
+            )
+            continue
+        task_id, task_status = _start_task_identity(response)
+        result_matrix.append(
+            _batch_result_item(
+                alias.value,
+                action_key,
+                "started",
+                (current_sha, last_sha),
+                (task_id, task_status),
+            )
         )
-    return {"runs": runs, "skipped": skipped}
+    return {"results": result_matrix}
 
 
 def selected_report_audits(audits: list[AuditAlias], *, all_reports: bool) -> list[AuditAlias]:
@@ -181,6 +195,81 @@ def skipped_audit_payload(audit: str, action_key: str, active_runs: list[JsonVal
         "reason": "already_running",
         "active_runs": active_runs,
     }
+
+
+def _active_run_state(active_runs: list[JsonValue]) -> Literal["queued", "running"]:
+    for active_run in active_runs:
+        if not isinstance(active_run, dict):
+            continue
+        started_at = json_str(active_run.get("startedAt"))
+        if started_at is None:
+            return "queued"
+    return "running"
+
+
+def _batch_result_item(
+    audit: str,
+    action_key: str,
+    state: Literal["started", "queued", "already_running", "up_to_date", "failed"],
+    head_hashes: tuple[str | None, str | None],
+    task: tuple[str | None, str | None] = (None, None),
+) -> AuditRunBatchResultItem:
+    current_head_sha, last_audited_head_sha = head_hashes
+    task_id, task_status = task
+    item: AuditRunBatchResultItem = {
+        "audit": audit,
+        "action_key": action_key,
+        "state": state,
+        "current_head_sha": current_head_sha,
+        "last_audited_head_sha": last_audited_head_sha,
+    }
+    if task_id is not None:
+        item["task_id"] = task_id
+    if task_status is not None:
+        item["task_status"] = task_status
+    return item
+
+
+def _start_task_identity(response: JsonObjectPayload) -> tuple[str | None, str | None]:
+    task = response.get("task")
+    if isinstance(task, dict):
+        task_id = json_str(task.get("id")) or json_str(task.get("fleetTaskId")) or json_str(task.get("taskId"))
+        task_status = (
+            json_str(task.get("status")) or json_str(task.get("lifecycle_state")) or json_str(task.get("state"))
+        )
+        return task_id, task_status
+    if task is not None:
+        return json_str(task), None
+    task_id = json_str(response.get("id"))
+    if task_id is None:
+        task_id = json_str(response.get("taskId")) or json_str(response.get("fleetTaskId"))
+    task_status = json_str(response.get("status")) or json_str(response.get("state"))
+    return task_id, task_status
+
+
+def _active_run_task(active_run: JsonValue) -> tuple[str | None, str | None]:
+    if not isinstance(active_run, dict):
+        return None, None
+    task = active_run.get("task")
+    if isinstance(task, dict):
+        task_id = (
+            json_str(task.get("fleetTaskId"))
+            or json_str(task.get("id"))
+            or json_str(active_run.get("fleetTaskId"))
+            or json_str(active_run.get("taskId"))
+        )
+        task_status = (
+            json_str(task.get("status"))
+            or json_str(task.get("state"))
+            or json_str(active_run.get("status"))
+            or json_str(active_run.get("state"))
+        )
+        return task_id, task_status
+    task_id = (
+        json_str(active_run.get("fleetTaskId")) or json_str(active_run.get("taskId")) or json_str(active_run.get("id"))
+    )
+    task_status = json_str(active_run.get("status")) or json_str(active_run.get("state"))
+    return task_id, task_status
 
 
 def audit_run_task_body(

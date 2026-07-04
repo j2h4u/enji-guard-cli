@@ -7,6 +7,7 @@ from enji_guard_cli.core_impl.models import (
     ReportAuditStatusPayload,
     ReportReadItemPayload,
     ReportReadPayload,
+    ReportReadState,
     ReportStatusPayload,
 )
 from enji_guard_cli.core_impl.payloads import json_dict
@@ -27,9 +28,9 @@ def selected_reports_to_read(
     if all_reports:
         if audits:
             raise ValueError("pass report audits or --all, not both")
-        return status["reports"]
+        return status["items"]
     if not audits:
-        return [report for report in status["reports"] if report["ready"]]
+        return [report for report in status["items"] if report["report"]["can_read"]]
 
     selected_reports: list[ReportAuditStatusPayload] = []
     for audit in audits:
@@ -37,14 +38,14 @@ def selected_reports_to_read(
         report = reports_by_audit.get(audit.value)
         if report is None:
             raise EnjiApiError("NOT_FOUND", f"{audit.value} report status not found")
-        if not report["ready"]:
+        if not report["report"]["can_read"]:
             _raise_unreadable_report(report)
         selected_reports.append(report)
     return selected_reports
 
 
 def _report_status_by_audit(status: ReportStatusPayload) -> dict[str, ReportAuditStatusPayload]:
-    return {report["audit"]: report for report in status["reports"]}
+    return {report["audit"]: report for report in status["items"]}
 
 
 def read_reports_for_target(
@@ -74,9 +75,9 @@ def _report_read_item(
     snapshot_reader: SnapshotReader,
     tolerate_unavailable: bool,
 ) -> ReportReadItemPayload:
-    if not report["ready"]:
+    if not report["report"]["can_read"]:
         if tolerate_unavailable:
-            return _unavailable_report_read_item(report, reason=report["state"])
+            return _unavailable_report_read_item(report, reason=_unreadable_report_reason(report))
         _raise_unreadable_report(report)
 
     audit = AuditAlias(report["audit"])
@@ -101,14 +102,15 @@ def _available_report_read_item(
     report: ReportAuditStatusPayload,
     snapshot: JsonObjectPayload,
 ) -> ReportReadItemPayload:
-    current_head_sha = report["current_head_sha"]
-    last_audited_head_sha = report["last_audited_head_sha"]
+    report_status = report["report"]
+    current_head_sha = report_status["current_head_sha"]
+    last_audited_head_sha = report_status["audited_head_sha"]
     return {
         "audit": report["audit"],
         "current_head_sha": current_head_sha,
         "last_audited_head_sha": last_audited_head_sha,
-        "out_of_date": report["out_of_date"]
-        if report["out_of_date"] is not None
+        "out_of_date": report_status["stale"]
+        if report_status["stale"] is not None
         else out_of_date(
             current_head_sha,
             last_audited_head_sha,
@@ -128,13 +130,14 @@ def _unavailable_report_read_item(
     error_code: str | None = None,
     message: str | None = None,
 ) -> ReportReadItemPayload:
+    report_status = report["report"]
     item: ReportReadItemPayload = {
         "audit": report["audit"],
-        "current_head_sha": report["current_head_sha"],
-        "last_audited_head_sha": report["last_audited_head_sha"],
-        "out_of_date": report["out_of_date"],
+        "current_head_sha": report_status["current_head_sha"],
+        "last_audited_head_sha": report_status["audited_head_sha"],
+        "out_of_date": report_status["stale"],
         "available": False,
-        "state": report["state"],
+        "state": _unreadable_report_state(reason),
         "reason": reason,
         "message": message or _unreadable_report_message(report),
     }
@@ -143,15 +146,36 @@ def _unavailable_report_read_item(
     return item
 
 
+def _unreadable_report_reason(report: ReportAuditStatusPayload) -> str:
+    task_state = report["task"]["lifecycle_state"]
+    if task_state == "queued":
+        return "queued"
+    if task_state == "running":
+        return "running"
+    if task_state == "failed":
+        return "failed"
+    return "missing"
+
+
+def _unreadable_report_state(reason: str) -> ReportReadState:
+    if reason in {"queued", "running"}:
+        return "running"
+    return "missing"
+
+
 def _raise_unreadable_report(report: ReportAuditStatusPayload) -> Never:
     raise EnjiApiError("NOT_FOUND", _unreadable_report_message(report))
 
 
 def _unreadable_report_message(report: ReportAuditStatusPayload) -> str:
     audit = report["audit"]
-    state = report["state"]
-    if state == "missing":
-        return f"{audit} report is missing"
+    state = report["task"]["lifecycle_state"]
     if state == "running":
         return f"{audit} report is still running"
+    if state == "queued":
+        return f"{audit} report is queued"
+    if state == "failed":
+        return f"{audit} report run failed"
+    if report["report"]["readability_state"] == "unavailable":
+        return f"{audit} report is missing"
     return f"{audit} report is not readable"
