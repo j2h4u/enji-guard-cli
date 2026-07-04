@@ -27,5 +27,5 @@ Leave durable context only when it changes future work:
 
 - update `README.md` for user/operator workflow changes;
 - update `AGENTS.md` for developer/QA/Ops rules;
-- update `docs/` for CLI/MCP ontology or architectural decisions;
+- update `README.md` for CLI/MCP ontology or architectural decisions;
 - do not keep temporary investigation backlogs after they are resolved.

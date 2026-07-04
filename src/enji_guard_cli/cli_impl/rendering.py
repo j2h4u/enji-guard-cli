@@ -91,6 +91,21 @@ def echo_repo_resolve_table(payload: object) -> None:
     echo_table(headers, rows, "No repositories.")
 
 
+def echo_repo_add(payload: object) -> None:
+    data = object_dict(payload)
+    repo = object_dict(data.get("repo"))
+    response = object_dict(data.get("response"))
+    if response and not repo:
+        repo = response
+    github_repo = _github_repo_label(repo)
+    typer.echo(f"added: {text_cell(data.get('added'))}")
+    typer.echo(f"connected: {text_cell(data.get('connected'))}")
+    if github_repo != "-":
+        typer.echo(f"repo: {github_repo}")
+    typer.echo("next: enji-guard status REPO")
+    typer.echo("next: if recon_done=false, run enji-guard recon start REPO")
+
+
 def echo_status_report_table(repo: dict[str, object]) -> None:
     headers = ("repo", "audit", "report", "freshness", "task", "run", "report_done", "task_done", "current", "audited")
     reports = object_dict(repo.get("reports"))
@@ -295,6 +310,17 @@ def echo_key_values(payload: dict[str, object]) -> None:
         return
     for key, value in payload.items():
         typer.echo(f"{key}: {value_cell(value)}")
+
+
+def _github_repo_label(repo: dict[str, object]) -> str:
+    github_repo = repo.get("github_repo")
+    if isinstance(github_repo, str) and github_repo:
+        return github_repo
+    owner = repo.get("github_owner") or repo.get("githubOwner")
+    name = repo.get("github_name") or repo.get("githubName")
+    if isinstance(owner, str) and isinstance(name, str) and owner and name:
+        return f"{owner}/{name}"
+    return "-"
 
 
 def payload_projects(payload: object) -> list[dict[str, object]]:

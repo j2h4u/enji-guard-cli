@@ -16,6 +16,7 @@ from enji_guard_cli._enji_api_contract import (
     IMPROVEMENT_JOBS_ENDPOINT_SPEC,
     PROJECT_DETAIL_ENDPOINT_SPEC,
     PROJECT_RENAME_ENDPOINT_SPEC,
+    PROJECT_REPO_CONNECTION_ENDPOINT_SPEC,
     PROJECT_REPO_DELETE_ENDPOINT_SPEC,
     PROJECT_REPOS_ADD_ENDPOINT_SPEC,
     PROJECTS_ENDPOINT_SPEC,
@@ -135,6 +136,11 @@ class RepoTransferRequest(TypedDict):
 class RepoAddRequest(TypedDict):
     githubOwner: str
     githubName: str
+
+
+class RepoConnectionRequest(TypedDict):
+    connected: bool
+    lastVerifiedAt: str
 
 
 class AuditRunCreateRequest(TypedDict):
@@ -393,6 +399,26 @@ def delete_project_repo(
         auth_file,
         client,
         PROJECT_REPO_DELETE_ENDPOINT.request(path_params={"projectId": project_id, "repoId": repo_id}),
+    )
+
+
+def connect_project_repo(
+    project_id: str,
+    repo_id: str,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> JsonObjectPayload:
+    request: RepoConnectionRequest = {
+        "connected": True,
+        "lastVerifiedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+    }
+    return run_api_request(
+        auth_file,
+        client,
+        PROJECT_REPO_CONNECTION_ENDPOINT.request(
+            path_params={"projectId": project_id, "repoId": repo_id},
+            json_body=cast(EnjiJsonValue, request),
+        ),
     )
 
 
@@ -659,6 +685,10 @@ PROJECT_REPO_DELETE_ENDPOINT = ApiEndpoint(
     spec=PROJECT_REPO_DELETE_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
     expected_statuses=HTTP_NO_CONTENT_ONLY,
+)
+PROJECT_REPO_CONNECTION_ENDPOINT = ApiEndpoint(
+    spec=PROJECT_REPO_CONNECTION_ENDPOINT_SPEC,
+    parser=_parse_json_object_payload,
 )
 REPO_ACTIVE_RUNS_ENDPOINT = ApiEndpoint(
     spec=REPO_ACTIVE_RUNS_ENDPOINT_SPEC,

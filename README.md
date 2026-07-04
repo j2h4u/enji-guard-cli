@@ -41,6 +41,24 @@ plus a reason instead of aborting the whole batch.
 CLI output is human text and tables by default. Use `--json` only when another
 tool needs structured output.
 
+## Surfaces
+
+Core owns Enji/auth behavior and task-level use cases. The CLI and MCP layers
+stay thin and call core instead of duplicating backend logic.
+
+The CLI is the broad operator surface for agents. It exposes reads, writes,
+project administration, repository moves, schedule changes, email preferences,
+auth bootstrap, and runtime checks.
+
+MCP is the curated read-mostly surface for agents that need the Enji picture:
+project and repository overview, scores, freshness, active work, report
+inventory, and report content. MCP does not mirror every CLI command or Enji
+frontend endpoint.
+
+The reconstructed Enji API contract lives in
+`contracts/enji-openapi.json`. Markdown documentation must not become a second
+API spec.
+
 ## Agent Workflow
 
 The service runtime is Docker. Agents should call the CLI inside the running
@@ -84,7 +102,13 @@ If the repository is absent from Enji:
 
 ```bash
 docker exec -i enji-guard-cli enji-guard repo add "$REPO"
+docker exec -i enji-guard-cli enji-guard status "$REPO"
+docker exec -i enji-guard-cli enji-guard recon start "$REPO"
 ```
+
+`repo add` only places the repository into an Enji project. Do not assume it
+starts baseline diagnostics. Check `status`; when `recon_done=false`, start
+recon explicitly before expecting reports or scores.
 
 For triage across all visible repositories:
 
@@ -197,6 +221,8 @@ docker exec -i enji-guard-cli enji-guard project list
 docker exec -i enji-guard-cli enji-guard project create Pets
 docker exec -i enji-guard-cli enji-guard project rename Pets Friends
 docker exec -i enji-guard-cli enji-guard project delete Pets
+docker exec -i enji-guard-cli enji-guard repo add j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard repo remove j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard repo resolve j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard repo move j2h4u/enji-guard-cli --to-project Friends
 docker exec -i enji-guard-cli enji-guard status j2h4u/enji-guard-cli
@@ -272,10 +298,6 @@ bound to loopback or behind an explicit trusted boundary.
 - [SECURITY.md](SECURITY.md): credential handling, supported versions, and MCP
   exposure notes.
 - [CHANGELOG.md](CHANGELOG.md): release history.
-- [docs/cli-surface-design.md](docs/cli-surface-design.md): CLI ontology and
-  command-shape decisions.
-- [docs/enji-cli-mcp-spec.md](docs/enji-cli-mcp-spec.md): product surface model
-  for core, CLI, and MCP.
 - [docs/deployment.md](docs/deployment.md): GHCR image and production-style
   Docker deployment.
 
