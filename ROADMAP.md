@@ -13,10 +13,12 @@ surface.
   projects, report runs, readiness, freshness, schedules, email preferences,
   and report reading.
 - Added persistent JSONL telemetry so long-running report and auth behavior can
-  be inspected after restarts. This is the minimal foundation for future
-  external sinks and OpenTelemetry-style export.
+  be inspected after restarts. CLI and MCP agent journey events use the same
+  telemetry layer. This is currently JSONL-only and is the minimal foundation
+  for future external sinks and OpenTelemetry-style export.
 - Added release automation, container publishing, and a strict local/CI quality
-  gate.
+  gate. Added a release status check for open PRs, the latest release, GHCR
+  publication, and recent GitHub Actions.
 
 ## Current State
 

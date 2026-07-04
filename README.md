@@ -60,8 +60,8 @@ container by default. The current destination is JSONL at:
 CLI stdout/stderr are reserved for command results, progress, and CLI errors.
 Use the telemetry file for HTTP/auth/runtime events and CLI/MCP agent journey
 events. It is the minimal foundation for future external sinks and
-OpenTelemetry-style export. Keep stdout/stderr for CLI results, progress, and
-errors only.
+OpenTelemetry-style export; there is no Prometheus or OpenTelemetry exporter
+yet. Keep stdout/stderr for CLI results, progress, and errors only.
 
 When working on another repository, pass the repository as `OWNER/NAME`. If an
 agent is already in a GitHub checkout and wants to derive it from `origin`, it
@@ -123,6 +123,15 @@ conventional commits, updates `CHANGELOG.md`, and creates the GitHub Release
 after that PR is merged. Use `feat:` and `fix:` only for changes that should be
 visible in release notes; keep internal churn under `chore:`, `refactor:`,
 `test:`, `ci:`, or `docs:`.
+
+Use the local release status check after merges and releases:
+
+```bash
+just release-status
+```
+
+It reports git state, open PRs, the latest GitHub Release, GHCR image
+publication, and recent GitHub Actions.
 
 ## Runtime
 
