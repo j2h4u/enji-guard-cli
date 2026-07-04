@@ -1058,6 +1058,44 @@ def test_report_read_markdown_marks_unavailable_reports(monkeypatch: MonkeyPatch
     )
 
 
+def test_report_read_markdown_strips_terminal_control_sequences(monkeypatch: MonkeyPatch) -> None:
+    def fake_read_reports(
+        repo: str,
+        project: str | None,
+        audits: list[AuditAlias],
+        *,
+        all_reports: bool,
+    ) -> dict[str, object]:
+        return {
+            "reports": [
+                {
+                    "audit": "security",
+                    "snapshot": {
+                        "content": {"report": "# Security\n\x1b[31mred\x1b[0m\n\x1b]52;c;Y2xpcGJvYXJk\x07\nbad\btext\n"}
+                    },
+                },
+                {
+                    "audit": "tests",
+                    "available": False,
+                    "state": "running",
+                    "reason": "running",
+                    "message": "\x1b[2Jtests report is still running",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(cli, "read_reports_for_repo", fake_read_reports)
+
+    result = CliRunner().invoke(app, ["report", "read", "j2h4u/enji-guard-cli", "--all"])
+
+    assert result.exit_code == 0
+    assert result.output == (
+        "<!-- enji-report audit=security -->\n\n# Security\nred\n\nbadtext\n\n---\n\n"
+        "<!-- enji-report audit=tests unavailable=true -->\n\n"
+        "_tests report is still running_\n"
+    )
+
+
 def test_report_read_rejects_unknown_option() -> None:
     result = CliRunner().invoke(app, ["report", "read", "j2h4u/enji-guard-cli", "--unexpected"])
 
