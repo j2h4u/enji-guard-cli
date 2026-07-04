@@ -532,24 +532,20 @@ def project_rename(
     )
 
 
-@project_app.command("delete", help="Delete an Enji project. Requires --yes.")
+@project_app.command("delete", help="Delete an empty Enji project.")
 def project_delete(
     project: Annotated[str, typer.Argument(help="Exact project id or name.")],
-    yes: Annotated[bool, typer.Option("--yes", help="Confirm destructive project deletion.")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     _run_cli_journey(
-        lambda: _project_delete_body(project=project, yes=yes, json_output=json_output),
+        lambda: _project_delete_body(project=project, json_output=json_output),
         command_path=_command_path("project", "delete"),
         json_output=_json_output(json_output),
         selector_kind="project",
     )
 
 
-def _project_delete_body(*, project: str, yes: bool, json_output: bool) -> object:
-    if not yes:
-        _echo_error("VALIDATION", "project delete requires --yes")
-        raise typer.Exit(1)
+def _project_delete_body(*, project: str, json_output: bool) -> object:
     payload = _resolve_command_payload(lambda: delete_project(project))
     if _json_output(json_output):
         echo_json(payload)

@@ -20,8 +20,8 @@ repository, `--all-repos` with `--project NAME_OR_ID` for every repository in
 one project, or `--all-projects` for every repository in every project.
 
 Project admin commands are direct domain actions: create, rename, delete, and
-move repositories between projects. `project delete` is destructive and
-requires `--yes`.
+move repositories between projects. `project delete` succeeds only for empty
+projects; a project with any repository is rejected by the core layer.
 
 Recon is baseline discovery. Report audits are separate, slow jobs that produce
 readable reports and scores. `status` is the snapshot/readiness/freshness view,
@@ -192,7 +192,7 @@ docker exec -i enji-guard-cli enji-guard access
 docker exec -i enji-guard-cli enji-guard project list
 docker exec -i enji-guard-cli enji-guard project create Pets
 docker exec -i enji-guard-cli enji-guard project rename Pets Friends
-docker exec -i enji-guard-cli enji-guard project delete Pets --yes
+docker exec -i enji-guard-cli enji-guard project delete Pets
 docker exec -i enji-guard-cli enji-guard repo resolve j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard repo move j2h4u/enji-guard-cli --to-project Friends
 docker exec -i enji-guard-cli enji-guard status j2h4u/enji-guard-cli

@@ -479,6 +479,7 @@ def test_project_admin_operations_resolve_selectors_and_validate_names(monkeypat
 
     monkeypatch.setattr(core, "run_create_project", fake_create)
     monkeypatch.setattr(core, "run_rename_project", fake_rename)
+    monkeypatch.setattr(core, "run_project_detail", lambda project_id: {"project": {"id": project_id, "repoIds": []}})
     monkeypatch.setattr(core, "run_delete_project", fake_delete)
 
     assert core.create_project(" Friends ") == {
@@ -498,6 +499,27 @@ def test_project_admin_operations_resolve_selectors_and_validate_names(monkeypat
         "deleted_project_id": "project_1",
     }
 
+
+def test_project_delete_rejects_non_empty_project(monkeypatch: MonkeyPatch) -> None:
+    deleted: list[str] = []
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1", "name": "Pets"}]})
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda project_id: {
+            "project": {"id": project_id, "repoIds": ["repo_1"]},
+            "repos": [{"id": "repo_1"}],
+        },
+    )
+    monkeypatch.setattr(core, "run_delete_project", deleted.append)
+
+    with pytest.raises(ValueError, match=r"project is not empty: 1 repo\(s\)"):
+        core.delete_project("Pets")
+
+    assert deleted == []
+
+
+def test_project_create_rejects_empty_name() -> None:
     with pytest.raises(ValueError, match="project name must not be empty"):
         core.create_project(" ")
 
