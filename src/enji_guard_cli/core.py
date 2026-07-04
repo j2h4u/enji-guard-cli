@@ -71,6 +71,7 @@ from enji_guard_cli.core_impl.repo_status import empty_report_status as _empty_r
 from enji_guard_cli.core_impl.repo_status import report_status_from_task_links as _report_status_from_task_links
 from enji_guard_cli.core_impl.repo_status import sort_project_repos as _sort_project_repos
 from enji_guard_cli.core_impl.selectors import parse_github_repo as _parse_github_repo
+from enji_guard_cli.core_impl.selectors import repo_candidate as _repo_candidate
 from enji_guard_cli.core_impl.selectors import repo_target as _repo_target
 from enji_guard_cli.core_impl.selectors import targeted_run_payload as _targeted_run_payload
 from enji_guard_cli.core_impl.selectors import transfer_schedule_replacements as _transfer_schedule_replacements
@@ -170,6 +171,10 @@ def list_project_inventory(project: str | None, sort: RepoSort = DEFAULT_REPO_SO
 
 
 def connect_repo(github_repo: str, project: str | None) -> JsonObjectPayload:
+    existing = _matching_repo_targets(github_repo, _selected_project_ids(None))
+    if existing:
+        candidates = ", ".join(_repo_candidate(match) for match in existing)
+        raise ValueError(f"repo is already present in Enji Guard: {github_repo}. candidates: {candidates}")
     return _connect_repo_payload(
         github_repo,
         project,
