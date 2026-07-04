@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 from typing import cast
 
@@ -10,6 +11,8 @@ import enji_guard_cli.mcp_server as mcp_server
 from enji_guard_cli.audits import AuditAlias, AuditPayload
 from enji_guard_cli.auth import AuthStatusPayload
 from enji_guard_cli.mcp_server import create_mcp_server
+from enji_guard_cli.settings import LogFormat, LogLevelName, TelemetrySettings
+from enji_guard_cli.telemetry import configure_logging
 
 
 def call_structured_tool(server: FastMCP, name: str, arguments: dict[str, object]) -> object:
@@ -148,6 +151,34 @@ def test_reports_list_tool_passes_selector(monkeypatch: pytest.MonkeyPatch) -> N
     assert captured == {"selector": "pets/*"}
 
 
+def test_reports_list_tool_writes_agent_journey_without_raw_selector(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    log_file = tmp_path / "logs" / "telemetry.jsonl"
+    configure_logging(_telemetry_settings(log_file=log_file, log_format="json"))
+    server = create_mcp_server()
+    payload: dict[str, object] = {
+        "projects": [{"id": "project_1", "name": "Pets", "repo_ids": ["repo_1"], "scores": {}}],
+    }
+
+    monkeypatch.setattr(mcp_server, "get_reports_list", lambda selector="*": payload)
+
+    structured = call_structured_tool(server, "enji_reports_list", {"selector": "pets/*"})
+
+    assert structured == payload
+    started, finished = _telemetry_log_lines(log_file)
+    assert started["message"] == "mcp_tool_started"
+    assert started["surface"] == "mcp"
+    assert started["tool_name"] == "enji_reports_list"
+    assert started["operation"] == "enji_reports_list"
+    assert started["selector_kind"] == "owner_name"
+    assert finished["message"] == "mcp_tool_finished"
+    assert finished["exit_code"] == 0
+    assert finished["result_count"] == 1
+    assert "pets/*" not in log_file.read_text(encoding="utf-8")
+
+
 def test_auth_status_tool_passes_optional_auth_file(monkeypatch: pytest.MonkeyPatch) -> None:
     server = create_mcp_server()
     captured: dict[str, Path | None] = {}
@@ -172,3 +203,22 @@ def test_auth_status_tool_passes_optional_auth_file(monkeypatch: pytest.MonkeyPa
 
     assert structured == payload
     assert captured["auth_file"] == Path("~/tmp/auth.json").expanduser()
+
+
+def _telemetry_log_lines(log_file: Path) -> list[dict[str, object]]:
+    return [cast(dict[str, object], json.loads(line)) for line in log_file.read_text(encoding="utf-8").splitlines()]
+
+
+def _telemetry_settings(
+    *,
+    log_file: Path | None,
+    log_format: LogFormat,
+    level_name: LogLevelName = "INFO",
+) -> TelemetrySettings:
+    return TelemetrySettings(
+        level_name=level_name,
+        log_format=log_format,
+        log_file=log_file,
+        max_bytes=10_000,
+        backup_count=1,
+    )

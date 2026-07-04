@@ -55,8 +55,8 @@ container at:
 ```
 
 CLI stdout/stderr are reserved for command results, progress, and CLI errors.
-Use the telemetry file for HTTP/auth/runtime events. Keep stdout/stderr for CLI
-results, progress, and errors only.
+Use the telemetry file for HTTP/auth/runtime events and CLI/MCP agent journey
+events. Keep stdout/stderr for CLI results, progress, and errors only.
 
 When working on another repository, pass the repository as `OWNER/NAME`. If an
 agent is already in a GitHub checkout and wants to derive it from `origin`, it
