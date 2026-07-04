@@ -34,7 +34,8 @@ CLI stdout/stderr are command I/O. Application telemetry currently defaults to
 the configured persistent JSONL log file, not interleaved with command output.
 CLI and MCP agent journey events use the same shared telemetry layer, which is
 kept intentionally minimal as the foundation for future external sinks and
-OpenTelemetry-style export.
+OpenTelemetry-style export. The current product does not expose a Prometheus or
+OpenTelemetry endpoint.
 
 MCP is the curated read-mostly agent surface. It is for a tech-lead or project
 manager agent that needs the Enji picture: project/repo overview, scores,
