@@ -99,11 +99,12 @@ def echo_repo_add(payload: object) -> None:
         repo = response
     github_repo = _github_repo_label(repo)
     typer.echo(f"added: {text_cell(data.get('added'))}")
+    typer.echo(f"already_present: {text_cell(data.get('already_present'))}")
     typer.echo(f"connected: {text_cell(data.get('connected'))}")
     if github_repo != "-":
         typer.echo(f"repo: {github_repo}")
+    typer.echo(f"recon: {_recon_summary(data.get('recon'))}")
     typer.echo("next: enji-guard status REPO")
-    typer.echo("next: if recon_done=false, run enji-guard recon start REPO")
 
 
 def echo_status_report_table(repo: dict[str, object]) -> None:
@@ -321,6 +322,20 @@ def _github_repo_label(repo: dict[str, object]) -> str:
     if isinstance(owner, str) and isinstance(name, str) and owner and name:
         return f"{owner}/{name}"
     return "-"
+
+
+def _recon_summary(value: object) -> str:
+    recon = object_dict(value)
+    if not recon:
+        return "-"
+    if recon.get("skipped") is True:
+        return f"skipped {text_cell(recon.get('reason'))}"
+    task = object_dict(recon.get("task"))
+    task_id = text_cell(task.get("id"))
+    status = text_cell(task.get("status"))
+    if task_id == "-" and status == "-":
+        return value_cell(value)
+    return f"{status} task_id={task_id}"
 
 
 def payload_projects(payload: object) -> list[dict[str, object]]:

@@ -103,12 +103,12 @@ If the repository is absent from Enji:
 ```bash
 docker exec -i enji-guard-cli enji-guard repo add "$REPO"
 docker exec -i enji-guard-cli enji-guard status "$REPO"
-docker exec -i enji-guard-cli enji-guard recon start "$REPO"
 ```
 
-`repo add` only places the repository into an Enji project. Do not assume it
-starts baseline diagnostics. Check `status`; when `recon_done=false`, start
-recon explicitly before expecting reports or scores.
+`repo add` is idempotent project membership. If the repository is already
+present, continue with the same flow. It starts recon when baseline diagnostics
+are not ready. Use `status` to watch progress before expecting reports or
+scores.
 
 For triage across all visible repositories:
 

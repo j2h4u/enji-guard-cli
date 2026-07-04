@@ -12,8 +12,9 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 - Keep runtime tuning in frozen settings dataclasses, not env. Env is for
   credential/security ingress only.
 - Keep mutating batch writes explicit; never infer all-project or all-repo scope.
-- Treat `repo add` as project membership only. After adding a repo, check
-  `status`; if `recon_done=false`, run `recon start REPO` explicitly.
+- Treat `repo add` as idempotent project membership. If the repo is already
+  present, continue. It starts recon when baseline diagnostics are not ready;
+  the next step is `status REPO`.
 - Keep schedule timezone stored per schedule, run the container with the host
   timezone, and use `schedule auto-time` to restore Enji-assigned run times.
 - Surface stale/mixed report freshness explicitly; never hide it behind aggregate status.

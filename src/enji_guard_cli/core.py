@@ -1,6 +1,6 @@
 import time
 from collections.abc import Callable
-from typing import Never
+from typing import Never, cast
 
 from enji_guard_cli.audits import AuditAlias
 from enji_guard_cli.audits import require_report_audit as registry_require_report_audit
@@ -176,20 +176,39 @@ def list_project_inventory(project: str | None, sort: RepoSort = DEFAULT_REPO_SO
 
 
 def add_repo(github_repo: str, project: str | None) -> JsonObjectPayload:
-    existing = _matching_repo_targets(github_repo, _selected_project_ids(None))
+    existing = _matching_repo_targets(github_repo, _selected_project_ids(project))
     if existing:
-        disconnected = [target for target in existing if target.get("connected") is not True]
-        if len(disconnected) == 1:
-            return _activate_existing_repo_payload(disconnected[0], connect_project_repo=run_connect_project_repo)
+        if len(existing) == 1:
+            payload = _activate_existing_repo_payload(existing[0], connect_project_repo=run_connect_project_repo)
+            target = _resolve_single_repo_target(github_repo, existing[0]["project_id"])
+            return _add_repo_with_recon(payload, target)
         candidates = ", ".join(_repo_candidate(match) for match in existing)
-        raise ValueError(f"repo is already present in Enji Guard: {github_repo}. candidates: {candidates}")
-    return _add_repo_payload(
+        raise ValueError(f"repo is already present in multiple Enji projects: {github_repo}. candidates: {candidates}")
+    payload = _add_repo_payload(
         github_repo,
         project,
         resolve_single_project_id=_resolve_single_project_id,
         parse_github_repo=_parse_github_repo,
         add_project_repo=run_add_project_repo,
     )
+    target = _resolve_single_repo_target(github_repo, project)
+    if target.get("connected") is not True:
+        run_connect_project_repo(target["project_id"], target["repo_id"])
+        target = _resolve_single_repo_target(github_repo, project)
+    return _add_repo_with_recon(payload, target)
+
+
+def _add_repo_with_recon(payload: JsonObjectPayload, target: RepoTargetPayload) -> JsonObjectPayload:
+    if target.get("recon_done") is True:
+        payload["recon"] = {
+            "skipped": True,
+            "audit": AuditAlias.RECON.value,
+            "action_key": "audit.recon",
+            "reason": "already_done",
+        }
+        return payload
+    payload["recon"] = cast(JsonValue, start_audit(target["repo_id"], target["project_id"], AuditAlias.RECON))
+    return payload
 
 
 def remove_repo(repo: str, project: str | None) -> JsonObjectPayload:

@@ -99,7 +99,10 @@ def add_repo_payload(
     response = add_project_repo(project_id, github_owner, github_name)
     return {
         "added": True,
+        "already_present": False,
         "connected": _repo_connected(response),
+        "project_id": project_id,
+        "github_repo": github_repo,
         "repo": response,
         "next_step": "status",
     }
@@ -108,12 +111,15 @@ def add_repo_payload(
 def activate_existing_repo_payload(
     target: RepoTargetPayload,
     *,
-    connect_project_repo: ConnectProjectRepo,
+    connect_project_repo: ConnectProjectRepo | None,
 ) -> JsonObjectPayload:
-    response = connect_project_repo(target["project_id"], target["repo_id"])
+    response: JsonObjectPayload | None = None
+    if target.get("connected") is not True and connect_project_repo is not None:
+        response = connect_project_repo(target["project_id"], target["repo_id"])
     return {
         "added": False,
-        "connected": True,
+        "already_present": True,
+        "connected": True if response is not None else target.get("connected"),
         "repo": cast(JsonValue, dict(target)),
         "response": response,
         "next_step": "status",
