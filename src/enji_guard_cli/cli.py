@@ -262,7 +262,7 @@ def main(
 
 def _cli_provenance(command: str | None) -> str:
     if command == "run":
-        return "service"
+        return "supervisor"
     if command == "serve":
         return "mcp"
     return "cli"
