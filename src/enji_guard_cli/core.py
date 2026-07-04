@@ -141,18 +141,39 @@ def list_projects() -> JsonObjectPayload:
 
 
 def create_project(name: str) -> JsonObjectPayload:
+    project_name = _validated_project_name(name)
+    for project_ref in _project_refs():
+        if project_ref["name"] is not None and project_ref["name"].casefold() == project_name.casefold():
+            return {
+                "project_id": project_ref["id"],
+                "project_name": project_ref["name"],
+                "created": False,
+                "already_present": True,
+                "response": None,
+            }
     return _create_project_payload(
-        name,
+        project_name,
         validate_project_name=_validated_project_name,
         create_project=run_create_project,
     )
 
 
 def rename_project(project: str, name: str) -> JsonObjectPayload:
+    project_id = _resolve_single_project_id(project)
+    project_name = _validated_project_name(name)
+    for project_ref in _project_refs():
+        if project_ref["id"] == project_id and project_ref["name"] == project_name:
+            return {
+                "project_id": project_id,
+                "project_name": project_name,
+                "changed": False,
+                "already_named": True,
+                "response": None,
+            }
     return _rename_project_payload(
-        project,
-        name,
-        resolve_single_project_id=_resolve_single_project_id,
+        project_id,
+        project_name,
+        resolve_single_project_id=lambda selected_project: _project_id_from_resolved(selected_project, project_id),
         validate_project_name=_validated_project_name,
         rename_project=run_rename_project,
     )
@@ -212,10 +233,25 @@ def _add_repo_with_recon(payload: JsonObjectPayload, target: RepoTargetPayload) 
 
 
 def remove_repo(repo: str, project: str | None) -> JsonObjectPayload:
+    try:
+        target = _resolve_single_repo_target(repo, project)
+    except EnjiApiError as exc:
+        if exc.code == "BAD_SELECTOR" and "/" in repo:
+            return {
+                "repo": None,
+                "project_id": None,
+                "repo_id": None,
+                "removed": False,
+                "already_absent": True,
+                "selector": repo,
+            }
+        raise
     return _remove_repo_payload(
         repo,
         project,
-        resolve_single_repo_target=_resolve_single_repo_target,
+        resolve_single_repo_target=lambda selected_repo, selected_project: _repo_target_from_resolved(
+            selected_repo, selected_project, target
+        ),
         delete_project_repo=run_delete_project_repo,
     )
 
@@ -234,6 +270,22 @@ def move_repo(repo: str, source_project: str | None, target_project: str) -> Jso
             move_repo=run_move_repo,
         ),
     )
+
+
+def _project_id_from_resolved(project: str | None, resolved_project_id: str) -> str:
+    if project == resolved_project_id:
+        return resolved_project_id
+    return _resolve_single_project_id(project)
+
+
+def _repo_target_from_resolved(
+    repo: str,
+    project: str | None,
+    resolved_target: RepoTargetPayload,
+) -> RepoTargetPayload:
+    if repo == resolved_target["repo_id"] or project == resolved_target["project_id"]:
+        return resolved_target
+    return _resolve_single_repo_target(repo, project)
 
 
 def _list_repo_active_runs(repo_id: str) -> JsonObjectPayload:
@@ -409,6 +461,7 @@ def set_email_preferences(
             operation="email set",
         ),
         dependencies=_EmailWriteDependencies(
+            get_audit_email_preferences=run_audit_email_preferences,
             put_audit_email_preferences=run_put_audit_email_preferences,
         ),
     )

@@ -484,11 +484,15 @@ def test_project_admin_operations_resolve_selectors_and_validate_names(monkeypat
 
     assert core.create_project(" Friends ") == {
         "project_name": "Friends",
+        "created": True,
+        "already_present": False,
         "response": {"project": {"id": "project_2", "name": "Friends"}},
     }
     assert core.rename_project("pets", " Work ") == {
         "project_id": "project_1",
         "project_name": "Work",
+        "changed": True,
+        "already_named": False,
         "response": {"project": {"id": "project_1", "name": "Work"}},
     }
     assert core.delete_project("PETS") == {"project_id": "project_1", "deleted": True}
@@ -497,6 +501,40 @@ def test_project_admin_operations_resolve_selectors_and_validate_names(monkeypat
         "renamed_project_id": "project_1",
         "renamed_name": "Work",
         "deleted_project_id": "project_1",
+    }
+
+
+def test_project_create_is_idempotent_for_existing_project(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1", "name": "Pets"}]})
+    monkeypatch.setattr(
+        core,
+        "run_create_project",
+        lambda name: (_ for _ in ()).throw(AssertionError("existing project should not be created")),
+    )
+
+    assert core.create_project("pets") == {
+        "project_id": "project_1",
+        "project_name": "Pets",
+        "created": False,
+        "already_present": True,
+        "response": None,
+    }
+
+
+def test_project_rename_is_idempotent_for_current_name(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1", "name": "Pets"}]})
+    monkeypatch.setattr(
+        core,
+        "run_rename_project",
+        lambda project_id, name: (_ for _ in ()).throw(AssertionError("unchanged project should not be renamed")),
+    )
+
+    assert core.rename_project("project_1", "Pets") == {
+        "project_id": "project_1",
+        "project_name": "Pets",
+        "changed": False,
+        "already_named": True,
+        "response": None,
     }
 
 
@@ -580,7 +618,7 @@ def test_move_repo_resolves_source_and_target_and_preflights_before_transfer(mon
     }
 
 
-def test_move_repo_rejects_same_source_and_target_project(monkeypatch: MonkeyPatch) -> None:
+def test_move_repo_is_idempotent_for_same_source_and_target_project(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1", "name": "Pets"}]})
     monkeypatch.setattr(
         core,
@@ -597,8 +635,14 @@ def test_move_repo_rejects_same_source_and_target_project(monkeypatch: MonkeyPat
         },
     )
 
-    with pytest.raises(ValueError, match="repo is already in target project"):
-        core.move_repo("j2h4u/enji-guard-cli", "Pets", "Pets")
+    payload = core.move_repo("j2h4u/enji-guard-cli", "Pets", "Pets")
+
+    assert payload["source_project_id"] == "project_1"
+    assert payload["target_project_id"] == "project_1"
+    assert payload["moved"] is False
+    assert payload["already_in_target"] is True
+    assert payload["preflight"] is None
+    assert payload["response"] is None
 
 
 def test_list_project_inventory_can_sort_repos_by_weakest_score(monkeypatch: MonkeyPatch) -> None:
@@ -906,6 +950,35 @@ def test_remove_repo_deletes_resolved_project_repo(monkeypatch: MonkeyPatch) -> 
     assert payload["project_id"] == "project_1"
     assert payload["repo_id"] == "repo_1"
     assert deleted == [("project_1", "repo_1")]
+
+
+def test_remove_repo_is_idempotent_for_absent_owner_name_repo(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        core,
+        "run_projects",
+        lambda: {"projects": [{"id": "project_1", "name": "Pets"}]},
+    )
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda _project_id: {"project": {"id": "project_1", "name": "Pets"}, "repos": []},
+    )
+    monkeypatch.setattr(
+        core,
+        "run_delete_project_repo",
+        lambda project_id, repo_id: (_ for _ in ()).throw(AssertionError("absent repo should not be deleted")),
+    )
+
+    payload = core.remove_repo("j2h4u/presentations", "Pets")
+
+    assert payload == {
+        "repo": None,
+        "project_id": None,
+        "repo_id": None,
+        "removed": False,
+        "already_absent": True,
+        "selector": "j2h4u/presentations",
+    }
 
 
 def test_start_recon_rejects_ambiguous_owner_repo_selector(monkeypatch: MonkeyPatch) -> None:
@@ -1728,6 +1801,11 @@ def test_set_email_preferences_fans_out_over_project_repos_and_report_audits(mon
         captured.append((repo_id, action_key, patch))
         return {"resolved": {"manualRunCompletion": True, "scheduledRunCompletion": False}}
 
+    monkeypatch.setattr(
+        core,
+        "run_audit_email_preferences",
+        lambda repo_id, action_key: {"resolved": {"manualRunCompletion": True, "scheduledRunCompletion": True}},
+    )
     monkeypatch.setattr(core, "run_put_audit_email_preferences", fake_put)
 
     payload = core.set_email_preferences(None, "Pets", EmailPreferenceUpdate(None, False), all_repos=True)
@@ -1747,7 +1825,59 @@ def test_set_email_preferences_fans_out_over_project_repos_and_report_audits(mon
         "action_key": "audit.security",
         "manual_run_completion": True,
         "scheduled_run_completion": False,
+        "changed": True,
+        "status": "changed",
     }
+
+
+def test_set_email_preferences_skips_unchanged_preferences(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        core,
+        "_selected_repo_targets",
+        lambda repo, project: [
+            {
+                "project_id": "project_1",
+                "project_name": "Pets",
+                "repo_id": "repo_1",
+                "github_owner": "j2h4u",
+                "github_name": "enji-guard-cli",
+                "github_repo": "j2h4u/enji-guard-cli",
+                "connected": True,
+                "recon_done": True,
+                "scores": {},
+                "score_grades": {},
+                "score_summary": {
+                    "overall_score": None,
+                    "overall_grade": None,
+                    "weakest_axis": None,
+                    "weakest_score": None,
+                    "weakest_grade": None,
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        core,
+        "run_audit_email_preferences",
+        lambda repo_id, action_key: {"resolved": {"manualRunCompletion": False, "scheduledRunCompletion": False}},
+    )
+    monkeypatch.setattr(
+        core,
+        "run_put_audit_email_preferences",
+        lambda repo_id, action_key, patch: (_ for _ in ()).throw(
+            AssertionError("unchanged email preference should not be written")
+        ),
+    )
+
+    payload = core.set_email_preferences(
+        "j2h4u/enji-guard-cli",
+        None,
+        EmailPreferenceUpdate(None, False),
+    )
+
+    preferences = cast(list[dict[str, object]], payload["preferences"])
+    assert preferences[0]["changed"] is False
+    assert preferences[0]["status"] == "unchanged"
 
 
 def test_set_email_preferences_rejects_empty_patch() -> None:

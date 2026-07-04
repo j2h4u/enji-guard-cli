@@ -35,6 +35,7 @@ class EmailReadDependencies:
 
 @dataclass(frozen=True, slots=True)
 class EmailWriteDependencies:
+    get_audit_email_preferences: GetAuditEmailPreferences
     put_audit_email_preferences: PutAuditEmailPreferences
 
 
@@ -86,15 +87,38 @@ def set_email_preferences(
     patch = email_preferences_patch(update)
     return email_preferences_payload(
         [
-            email_preference_row(
-                target,
-                audit,
-                dependencies.put_audit_email_preferences(target["repo_id"], audit.action_key, patch),
-            )
+            set_email_preference(target, audit, patch, dependencies=dependencies)
             for target in selected_write_repo_targets(repo, project)
             for audit in REPORT_AUDITS
         ]
     )
+
+
+def set_email_preference(
+    target: RepoTargetPayload,
+    audit: ReportAuditDefinition,
+    patch: JsonObjectPayload,
+    *,
+    dependencies: EmailWriteDependencies,
+) -> dict[str, JsonValue]:
+    existing = dependencies.get_audit_email_preferences(target["repo_id"], audit.action_key)
+    if _email_preference_matches(existing, patch):
+        return {
+            **email_preference_row(target, audit, existing),
+            "changed": False,
+            "status": "unchanged",
+        }
+    response = dependencies.put_audit_email_preferences(target["repo_id"], audit.action_key, patch)
+    return {
+        **email_preference_row(target, audit, response),
+        "changed": True,
+        "status": "changed",
+    }
+
+
+def _email_preference_matches(payload: JsonObjectPayload, patch: JsonObjectPayload) -> bool:
+    resolved = json_dict(payload.get("resolved"))
+    return all(resolved.get(key) == value for key, value in patch.items())
 
 
 def list_schedule_settings(

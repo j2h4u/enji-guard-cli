@@ -12,6 +12,8 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 - Keep runtime tuning in frozen settings dataclasses, not env. Env is for
   credential/security ingress only.
 - Keep mutating batch writes explicit; never infer all-project or all-repo scope.
+- Mutating CLI commands must be safe to repeat. Return `unchanged`,
+  `already_present`, or `already_running` instead of duplicating work.
 - Treat `repo add` as idempotent project membership. If the repo is already
   present, continue. It starts recon when baseline diagnostics are not ready;
   the next step is `status REPO`.
