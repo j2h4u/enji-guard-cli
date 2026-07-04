@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.1...v0.3.2) (2026-07-04)
+
+
+### Fixes
+
+* block non-empty project deletion ([#69](https://github.com/j2h4u/enji-guard-cli/issues/69)) ([42ea78e](https://github.com/j2h4u/enji-guard-cli/commit/42ea78e5edb5bd91f7b403abae07b500dcc2c467))
+
 ## [0.3.1](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.0...v0.3.1) (2026-07-04)
 
 
