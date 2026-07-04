@@ -156,6 +156,7 @@ source_modules = [
     "enji_guard_cli.errors",
     "enji_guard_cli.readiness",
     "enji_guard_cli.telemetry",
+    "enji_guard_cli.telemetry_sink",
     "enji_guard_cli.transport",
 ]
 forbidden_modules = [
@@ -187,6 +188,7 @@ layers = [
     "enji_guard_cli.auth_impl",
     "enji_guard_cli.transport",
     "enji_guard_cli.telemetry",
+    "enji_guard_cli.telemetry_sink",
     "enji_guard_cli.readiness",
     "enji_guard_cli.errors",
     "enji_guard_cli.json_types",
@@ -296,6 +298,7 @@ forbidden_modules = [
     "enji_guard_cli.runtime",
     "enji_guard_cli.settings",
     "enji_guard_cli.telemetry",
+    "enji_guard_cli.telemetry_sink",
     "enji_guard_cli.transport",
     "httpx",
     "httpx_retries",
@@ -321,6 +324,7 @@ source_modules = [
     "enji_guard_cli.runtime",
     "enji_guard_cli.settings",
     "enji_guard_cli.telemetry",
+    "enji_guard_cli.telemetry_sink",
 ]
 forbidden_modules = ["httpx", "httpx_retries"]
 allow_indirect_imports = true
@@ -343,6 +347,7 @@ source_modules = [
     "enji_guard_cli.readiness",
     "enji_guard_cli.settings",
     "enji_guard_cli.telemetry",
+    "enji_guard_cli.telemetry_sink",
     "enji_guard_cli.transport",
 ]
 forbidden_modules = ["typer", "mcp"]
@@ -397,6 +402,7 @@ forbidden_modules = [
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.runtime",
     "enji_guard_cli.telemetry",
+    "enji_guard_cli.telemetry_sink",
     "enji_guard_cli.transport",
     "httpx",
     "httpx_retries",
@@ -425,6 +431,7 @@ forbidden_modules = [
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.runtime",
     "enji_guard_cli.telemetry",
+    "enji_guard_cli.telemetry_sink",
     "enji_guard_cli.transport",
     "httpx",
     "httpx_retries",
@@ -454,6 +461,7 @@ forbidden_modules = [
     "enji_guard_cli.runtime",
     "enji_guard_cli.settings",
     "enji_guard_cli.telemetry",
+    "enji_guard_cli.telemetry_sink",
     "enji_guard_cli.transport",
     "httpx",
     "httpx_retries",

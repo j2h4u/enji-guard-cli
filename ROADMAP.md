@@ -12,8 +12,9 @@ surface.
 - Shaped the CLI into the primary operator surface for agents: repositories,
   projects, report runs, readiness, freshness, schedules, email preferences,
   and report reading.
-- Added persistent telemetry so long-running report and auth behavior can be
-  inspected after restarts.
+- Added persistent JSONL telemetry so long-running report and auth behavior can
+  be inspected after restarts. This is the minimal foundation for future
+  external sinks and OpenTelemetry-style export.
 - Added release automation, container publishing, and a strict local/CI quality
   gate.
 

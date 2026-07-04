@@ -48,7 +48,7 @@ docker exec -i enji-guard-cli enji-guard --help
 ```
 
 Application telemetry is written only to the persistent file outside the
-container at:
+container by default. The current destination is JSONL at:
 
 ```text
 ~/.config/enji-guard/logs/telemetry.jsonl
@@ -56,7 +56,9 @@ container at:
 
 CLI stdout/stderr are reserved for command results, progress, and CLI errors.
 Use the telemetry file for HTTP/auth/runtime events and CLI/MCP agent journey
-events. Keep stdout/stderr for CLI results, progress, and errors only.
+events. It is the minimal foundation for future external sinks and
+OpenTelemetry-style export. Keep stdout/stderr for CLI results, progress, and
+errors only.
 
 When working on another repository, pass the repository as `OWNER/NAME`. If an
 agent is already in a GitHub checkout and wants to derive it from `origin`, it
