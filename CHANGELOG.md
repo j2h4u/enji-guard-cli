@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.8](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.7...v0.3.8) (2026-07-04)
+
+
+### Fixes
+
+* make mutating CLI commands retry-safe ([#81](https://github.com/j2h4u/enji-guard-cli/issues/81)) ([a2661f3](https://github.com/j2h4u/enji-guard-cli/commit/a2661f356ecd519b2a6c0f5a164128289ff301f4))
+
 ## [0.3.7](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.6...v0.3.7) (2026-07-04)
 
 
