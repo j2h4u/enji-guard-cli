@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.2...v0.3.3) (2026-07-04)
+
+
+### Fixes
+
+* add telemetry provenance ([#71](https://github.com/j2h4u/enji-guard-cli/issues/71)) ([e206dbc](https://github.com/j2h4u/enji-guard-cli/commit/e206dbc5b9d6e5bdf68fb1a79f7bf4f177ffeda1))
+
 ## [0.3.2](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.1...v0.3.2) (2026-07-04)
 
 
