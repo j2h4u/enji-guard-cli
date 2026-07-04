@@ -69,6 +69,26 @@ def test_configure_logging_can_write_json_lines_to_file(
     }
 
 
+def test_configure_logging_preserves_jsonl_rotation(tmp_path: Path) -> None:
+    log_file = tmp_path / "logs" / "telemetry.jsonl"
+    configure_logging(
+        TelemetrySettings(
+            level_name="INFO",
+            log_format="json",
+            log_file=log_file,
+            max_bytes=160,
+            backup_count=1,
+        )
+    )
+    logger = logging.getLogger("enji_guard_cli.test")
+
+    log_event(logger, logging.INFO, "event_name", {"operation": "first", "payload": "x" * 80})
+    log_event(logger, logging.INFO, "event_name", {"operation": "second", "payload": "y" * 80})
+
+    assert log_file.exists()
+    assert log_file.with_suffix(".jsonl.1").exists()
+
+
 def test_configure_logging_keeps_httpx_quiet_by_default() -> None:
     configure_logging(_telemetry_settings(log_file=None, log_format="text"))
 
