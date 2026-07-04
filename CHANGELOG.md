@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.7](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.6...v0.3.7) (2026-07-04)
+
+
+### Fixes
+
+* start recon from repo add ([#79](https://github.com/j2h4u/enji-guard-cli/issues/79)) ([c60386f](https://github.com/j2h4u/enji-guard-cli/commit/c60386ff36338617ce32194d9fed475140162340))
+
 ## [0.3.6](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.5...v0.3.6) (2026-07-04)
 
 
