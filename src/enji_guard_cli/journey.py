@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import monotonic
 
-from enji_guard_cli.telemetry import log_event
+from enji_guard_cli.telemetry import log_event, telemetry_provenance
 
 type JourneyBody = Callable[[], object]
 type AsyncJourneyBody = Callable[[], Awaitable[object]]
@@ -17,6 +17,7 @@ class AgentJourney:
     event_prefix: str
     operation: str
     surface: str
+    provenance: str | None = None
     json_output: bool = False
     selector_kind: str = "unknown"
     all_flag: bool | None = None
@@ -30,16 +31,17 @@ def run_agent_journey(
 ) -> object:
     record = _StartedJourney(journey=journey, started_at=monotonic())
     result: object | None = None
-    log_event(_LOGGER, logging.INFO, f"{journey.event_prefix}_started", _start_fields(journey))
-    try:
-        result = body()
-    except Exception as exc:
-        record.exit_code = _exit_code(exc, exit_code_for_exception)
-        raise
-    else:
-        return result
-    finally:
-        _log_finished(record, result)
+    with telemetry_provenance(journey.provenance):
+        log_event(_LOGGER, logging.INFO, f"{journey.event_prefix}_started", _start_fields(journey))
+        try:
+            result = body()
+        except Exception as exc:
+            record.exit_code = _exit_code(exc, exit_code_for_exception)
+            raise
+        else:
+            return result
+        finally:
+            _log_finished(record, result)
 
 
 async def run_agent_journey_async(
@@ -50,16 +52,17 @@ async def run_agent_journey_async(
 ) -> object:
     record = _StartedJourney(journey=journey, started_at=monotonic())
     result: object | None = None
-    log_event(_LOGGER, logging.INFO, f"{journey.event_prefix}_started", _start_fields(journey))
-    try:
-        result = await body()
-    except Exception as exc:
-        record.exit_code = _exit_code(exc, exit_code_for_exception)
-        raise
-    else:
-        return result
-    finally:
-        _log_finished(record, result)
+    with telemetry_provenance(journey.provenance):
+        log_event(_LOGGER, logging.INFO, f"{journey.event_prefix}_started", _start_fields(journey))
+        try:
+            result = await body()
+        except Exception as exc:
+            record.exit_code = _exit_code(exc, exit_code_for_exception)
+            raise
+        else:
+            return result
+        finally:
+            _log_finished(record, result)
 
 
 @dataclass(slots=True)

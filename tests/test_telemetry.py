@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from pytest import MonkeyPatch
 
 from enji_guard_cli.settings import LogFormat, LogLevelName, TelemetrySettings
 from enji_guard_cli.telemetry import configure_logging, log_event
@@ -39,6 +40,7 @@ def test_json_logging_keeps_structured_safe_fields_and_drops_objects(capsys: pyt
         "logger": "enji_guard_cli.test",
         "message": "event_name",
         "operation": "access",
+        "provenance": "test",
     }
 
 
@@ -66,7 +68,34 @@ def test_configure_logging_can_write_json_lines_to_file(
         "logger": "enji_guard_cli.test",
         "message": "event_name",
         "operation": "wait",
+        "provenance": "test",
     }
+
+
+def test_default_test_logging_is_noop(
+    monkeypatch: MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    configure_logging()
+    logger = logging.getLogger("enji_guard_cli.test")
+
+    log_event(logger, logging.INFO, "event_name", {"operation": "wait"})
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert not (tmp_path / ".config" / "enji-guard" / "logs" / "telemetry.jsonl").exists()
+
+
+def test_configure_logging_allows_explicit_provenance(capsys: pytest.CaptureFixture[str]) -> None:
+    configure_logging(_telemetry_settings(log_file=None, log_format="json"), provenance="mcp")
+    logger = logging.getLogger("enji_guard_cli.test")
+
+    log_event(logger, logging.INFO, "event_name", {"operation": "tool"})
+
+    payload = cast(object, json.loads(capsys.readouterr().err))
+    assert isinstance(payload, dict)
+    assert payload["provenance"] == "mcp"
 
 
 def test_configure_logging_preserves_jsonl_rotation(tmp_path: Path) -> None:

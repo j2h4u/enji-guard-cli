@@ -156,7 +156,7 @@ def test_reports_list_tool_writes_agent_journey_without_raw_selector(
     tmp_path: Path,
 ) -> None:
     log_file = tmp_path / "logs" / "telemetry.jsonl"
-    configure_logging(_telemetry_settings(log_file=log_file, log_format="json"))
+    configure_logging(_telemetry_settings(log_file=log_file, log_format="json"), provenance="service")
     server = create_mcp_server()
     payload: dict[str, object] = {
         "projects": [{"id": "project_1", "name": "Pets", "repo_ids": ["repo_1"], "scores": {}}],
@@ -169,6 +169,7 @@ def test_reports_list_tool_writes_agent_journey_without_raw_selector(
     assert structured == payload
     started, finished = _telemetry_log_lines(log_file)
     assert started["message"] == "mcp_tool_started"
+    assert started["provenance"] == "mcp"
     assert started["surface"] == "mcp"
     assert started["tool_name"] == "enji_reports_list"
     assert started["operation"] == "enji_reports_list"

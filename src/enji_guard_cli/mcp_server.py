@@ -77,6 +77,7 @@ def _mcp_journey(tool_name: str, *, selector_kind: str = "unknown") -> AgentJour
         event_prefix="mcp_tool",
         operation=tool_name,
         surface="mcp",
+        provenance="mcp",
         selector_kind=selector_kind,
     )
 

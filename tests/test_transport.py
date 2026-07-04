@@ -77,6 +77,7 @@ def test_httpx_enji_http_client_logs_sanitized_request_metadata(capsys: pytest.C
     assert payload["operation"] == "access"
     assert payload["method"] == "GET"
     assert payload["path"] == "/api/ux/me/access"
+    assert payload["provenance"] == "test"
     assert payload["status_code"] == 200
     assert "secret" not in json.dumps(payload)
 

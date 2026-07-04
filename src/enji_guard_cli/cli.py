@@ -240,6 +240,7 @@ def _selector_kind_for_github_repo(github_repo: str) -> str:
 
 @app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: Annotated[bool, typer.Option("--version", help="Show the installed version and exit.")] = False,
     project: Annotated[
         str | None,
@@ -249,7 +250,7 @@ def main(
 ) -> None:
     _cli_state["project"] = project
     _cli_state["json"] = json_output
-    configure_logging()
+    configure_logging(provenance=_cli_provenance(ctx.invoked_subcommand))
     if version:
         _run_cli_journey(
             _version_body,
@@ -257,6 +258,14 @@ def main(
             json_output=json_output,
             selector_kind="unknown",
         )
+
+
+def _cli_provenance(command: str | None) -> str:
+    if command == "run":
+        return "service"
+    if command == "serve":
+        return "mcp"
+    return "cli"
 
 
 def _version_body() -> object:
