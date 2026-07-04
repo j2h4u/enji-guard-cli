@@ -17,13 +17,11 @@ from enji_guard_cli.core_impl import report_wait as _report_wait
 from enji_guard_cli.core_impl.models import (
     DEFAULT_REPO_SORT,
     AuditRunBatchPayload,
-    AuditRunBatchResultItem,
     AuditRunSkippedPayload,
     EmailPreferenceUpdate,
     ProjectRef,
     ProjectRuntimeStatusPayload,
     RepoResolvePayload,
-    ReportAuditStatusPayload,
     ReportStatusPayload,
     ReportWaitCallback,
     ReportWaitOptions,
@@ -381,7 +379,7 @@ def start_report_audits(
     selected_audits = _selected_report_audits(audits, all_reports=all_reports)
     status = _report_status(target["repo_id"])
     preflight = _report_start_preflight_payload(status)
-    linked_running_results = _linked_running_report_results(status, selected_audits)
+    linked_running_results = _audit_runs.linked_running_report_results(status, selected_audits)
     remaining_audits = [
         audit
         for audit in selected_audits
@@ -392,55 +390,11 @@ def start_report_audits(
         target,
         {
             "preflight": preflight,
-            "results": _ordered_audit_results(selected_audits, linked_running_results, started_results["results"]),
+            "results": _audit_runs.ordered_audit_results(
+                selected_audits, linked_running_results, started_results["results"]
+            ),
         },
     )
-
-
-def _linked_running_report_results(
-    status: ReportStatusPayload,
-    audits: list[AuditAlias],
-) -> dict[str, AuditRunBatchResultItem]:
-    items_by_action = {item["action_key"]: item for item in status["items"]}
-    results: dict[str, AuditRunBatchResultItem] = {}
-    for audit in audits:
-        action_key = registry_require_report_audit(audit).action_key
-        item = items_by_action.get(action_key)
-        if item is None or not _has_running_report_link(item):
-            continue
-        report = item["report"]
-        results[action_key] = {
-            "audit": audit.value,
-            "action_key": action_key,
-            "state": "already_running",
-            "current_head_sha": report["current_head_sha"],
-            "last_audited_head_sha": report["audited_head_sha"],
-            "task_id": report["fleet_task_id"],
-            "task_status": report["run_status"],
-        }
-    return results
-
-
-def _has_running_report_link(item: ReportAuditStatusPayload) -> bool:
-    report = item["report"]
-    task = item["task"]
-    return (
-        task["active"] is False
-        and report["can_read"] is True
-        and report["fleet_task_id"] is not None
-        and report["audited_head_sha"] is None
-        and report["completed_at"] is None
-    )
-
-
-def _ordered_audit_results(
-    audits: list[AuditAlias],
-    linked_results: dict[str, AuditRunBatchResultItem],
-    started_results: list[AuditRunBatchResultItem],
-) -> list[AuditRunBatchResultItem]:
-    results_by_action = {result["action_key"]: result for result in started_results}
-    results_by_action.update(linked_results)
-    return [results_by_action[registry_require_report_audit(audit).action_key] for audit in audits]
 
 
 def _start_report_audits_for_target(
