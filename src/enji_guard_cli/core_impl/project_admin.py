@@ -38,6 +38,8 @@ def create_project_payload(
     project_name = validate_project_name(name)
     return {
         "project_name": project_name,
+        "created": True,
+        "already_present": False,
         "response": create_project(project_name),
     }
 
@@ -55,6 +57,8 @@ def rename_project_payload(
     return {
         "project_id": project_id,
         "project_name": project_name,
+        "changed": True,
+        "already_named": False,
         "response": rename_project(project_id, project_name),
     }
 
@@ -165,7 +169,15 @@ def move_repo_payload[TRepoTransfer](
     source = dependencies.resolve_single_repo_target(repo, source_project)
     target_project_id = dependencies.resolve_single_project_id(target_project)
     if source["project_id"] == target_project_id:
-        raise ValueError("repo is already in target project")
+        return {
+            "repo": cast(JsonValue, dict(source)),
+            "source_project_id": source["project_id"],
+            "target_project_id": target_project_id,
+            "moved": False,
+            "already_in_target": True,
+            "preflight": None,
+            "response": None,
+        }
     preflight = dependencies.preflight_repo_move(source["project_id"], source["repo_id"], target_project_id)
     response = dependencies.move_repo(
         dependencies.make_repo_transfer(
@@ -179,6 +191,8 @@ def move_repo_payload[TRepoTransfer](
         "repo": cast(JsonValue, dict(source)),
         "source_project_id": source["project_id"],
         "target_project_id": target_project_id,
+        "moved": True,
+        "already_in_target": False,
         "preflight": preflight,
         "response": response,
     }

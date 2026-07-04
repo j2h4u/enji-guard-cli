@@ -18,6 +18,9 @@ scoped to one project.
 Mutating batch commands require explicit scope. Use a `REPO` argument for one
 repository, `--all-repos` with `--project NAME_OR_ID` for every repository in
 one project, or `--all-projects` for every repository in every project.
+Mutating commands are designed for agent retries: repeated calls should report
+`unchanged`, `already_present`, `already_running`, or equivalent state instead
+of duplicating upstream work.
 
 Project admin commands are direct domain actions: create, rename, delete, and
 move repositories between projects. `project delete` succeeds only for empty
