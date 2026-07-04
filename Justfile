@@ -116,3 +116,7 @@ dev-reload: dev-refresh
 
 # Full local gate for agents before claiming completion.
 verify: check crap-check unit docker-build
+
+# Show release, release PR, workflow, and published image status.
+release-status:
+    scripts/release_status.py
