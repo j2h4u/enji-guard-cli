@@ -1,5 +1,6 @@
 import json
 import logging
+import stat
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -70,6 +71,21 @@ def test_configure_logging_can_write_json_lines_to_file(
         "operation": "wait",
         "provenance": "test",
     }
+    assert stat.S_IMODE(log_file.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(log_file.stat().st_mode) == 0o600
+
+
+def test_configure_logging_tightens_preexisting_permissive_log_directory(tmp_path: Path) -> None:
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir(mode=0o777)
+    log_file = log_dir / "telemetry.jsonl"
+
+    configure_logging(_telemetry_settings(log_file=log_file, log_format="json"))
+    logger = logging.getLogger("enji_guard_cli.test")
+    log_event(logger, logging.INFO, "event_name", {"operation": "wait"})
+
+    assert stat.S_IMODE(log_dir.stat().st_mode) == 0o700
+    assert stat.S_IMODE(log_file.stat().st_mode) == 0o600
 
 
 def test_default_test_logging_is_noop(

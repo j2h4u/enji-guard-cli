@@ -191,12 +191,6 @@ def refresh_auth(auth_file: Path | None = None, client: EnjiHttpClient | None = 
     return asyncio.run(refresh_auth_async(auth_file, client))
 
 
-def backend_readiness_probe(
-    auth_file: Path | None = None, client: EnjiHttpClient | None = None
-) -> BackendReadinessProbe:
-    return asyncio.run(backend_readiness_probe_async(auth_file, client))
-
-
 async def auth_status_async(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> AuthStatusPayload:
     target = auth_file if auth_file is not None else default_auth_file()
     if not target.exists():
