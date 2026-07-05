@@ -13,6 +13,81 @@ from enji_guard_cli.settings import LogFormat, LogLevelName, TelemetrySettings
 from enji_guard_cli.telemetry import configure_logging
 
 
+def portfolio_payload(project_name: str = "MCP Integrations") -> dict[str, object]:
+    return {
+        "observed_at": "2026-07-05T00:00:00Z",
+        "summary": {
+            "project_count": 1,
+            "repo_count": 1,
+            "connected_repo_count": 1,
+            "active_run_count": 0,
+            "recon_done_count": 1,
+            "report_complete_count": 0,
+        },
+        "projects": [
+            {
+                "project_id": "project_1",
+                "project_name": project_name,
+                "repos": [
+                    {
+                        "project_id": "project_1",
+                        "project_name": project_name,
+                        "repo_id": "repo_1",
+                        "github_owner": "j2h4u",
+                        "github_name": "mcp-strava",
+                        "github_repo": "j2h4u/mcp-strava",
+                        "connected": True,
+                        "recon_done": True,
+                        "scores": {"tests": 80},
+                        "score_grades": {"tests": "good"},
+                        "score_summary": {
+                            "overall_score": 80.0,
+                            "overall_grade": "good",
+                            "weakest_axis": "tests",
+                            "weakest_score": 80.0,
+                            "weakest_grade": "good",
+                        },
+                        "active_run_count": 0,
+                        "active_runs": [],
+                        "current_head_sha": "abc123",
+                        "last_report_at": None,
+                        "reports": empty_report_status(),
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def empty_report_status() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "repo_id": "repo_1",
+        "current_head_sha": "abc123",
+        "last_report_at": None,
+        "complete": False,
+        "fresh": False,
+        "readable": False,
+        "active": False,
+        "queued": False,
+        "running": False,
+        "missing": True,
+        "stale": False,
+        "failed": False,
+        "counts": {
+            "total": 0,
+            "readable": 0,
+            "active": 0,
+            "queued": 0,
+            "running": 0,
+            "missing": 0,
+            "stale": 0,
+            "failed": 0,
+        },
+        "items": [],
+    }
+
+
 def call_structured_tool(server: FastMCP, name: str, arguments: dict[str, object]) -> object:
     _text, structured = cast(tuple[object, object], asyncio.run(server.call_tool(name, arguments)))
     return structured
@@ -62,26 +137,9 @@ def test_run_mcp_server_async_runs_streamable_http_transport(monkeypatch: pytest
 def test_portfolio_overview_tool_returns_runtime_status(monkeypatch: pytest.MonkeyPatch) -> None:
     server = create_mcp_server()
     captured: dict[str, object | None] = {}
-    payload: dict[str, object] = {
-        "observed_at": "2026-07-05T00:00:00Z",
-        "summary": {"project_count": 1, "repo_count": 1},
-        "projects": [
-            {
-                "project_id": "project_1",
-                "project_name": "MCP Integrations",
-                "repos": [
-                    {
-                        "repo_id": "repo_1",
-                        "github_repo": "j2h4u/mcp-strava",
-                        "scores": {"tests": 80},
-                    }
-                ],
-            }
-        ],
-    }
+    payload = portfolio_payload()
 
-    def fake_portfolio_overview(repo: str | None, project: str | None, sort: str) -> dict[str, object]:
-        captured["repo"] = repo
+    def fake_portfolio_overview(project: str | None, sort: str) -> dict[str, object]:
         captured["project"] = project
         captured["sort"] = sort
         return payload
@@ -95,7 +153,7 @@ def test_portfolio_overview_tool_returns_runtime_status(monkeypatch: pytest.Monk
     )
 
     assert structured == payload
-    assert captured == {"repo": None, "project": "MCP Integrations", "sort": "weakest"}
+    assert captured == {"project": "MCP Integrations", "sort": "weakest"}
 
 
 def test_repo_reports_tool_reads_all_reports(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -109,14 +167,9 @@ def test_repo_reports_tool_reads_all_reports(monkeypatch: pytest.MonkeyPatch) ->
     def fake_repo_reports(
         repo: str,
         project: str | None,
-        audits: list[object],
-        *,
-        all_reports: bool,
     ) -> dict[str, object]:
         captured["repo"] = repo
         captured["project"] = project
-        captured["audits"] = audits
-        captured["all_reports"] = all_reports
         return payload
 
     monkeypatch.setattr(mcp_server, "get_repo_reports", fake_repo_reports)
@@ -131,8 +184,6 @@ def test_repo_reports_tool_reads_all_reports(monkeypatch: pytest.MonkeyPatch) ->
     assert captured == {
         "repo": "j2h4u/mcp-strava",
         "project": "MCP Integrations",
-        "audits": [],
-        "all_reports": True,
     }
 
 
@@ -143,13 +194,9 @@ def test_portfolio_overview_tool_writes_agent_journey_without_raw_project(
     log_file = tmp_path / "logs" / "telemetry.jsonl"
     configure_logging(_telemetry_settings(log_file=log_file, log_format="json"), provenance="supervisor")
     server = create_mcp_server()
-    payload: dict[str, object] = {
-        "observed_at": "2026-07-05T00:00:00Z",
-        "summary": {"project_count": 1, "repo_count": 1},
-        "projects": [{"project_id": "project_1", "project_name": "Pets", "repos": []}],
-    }
+    payload = portfolio_payload("Pets")
 
-    monkeypatch.setattr(mcp_server, "get_portfolio_overview", lambda repo, project, sort: payload)
+    monkeypatch.setattr(mcp_server, "get_portfolio_overview", lambda project, sort: payload)
 
     structured = call_structured_tool(server, "enji_portfolio_overview", {"project": "Pets"})
 

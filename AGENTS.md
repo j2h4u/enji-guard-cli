@@ -11,7 +11,8 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 - MCP is curated read-only context, not a CLI mirror. Keep it focused on
   portfolio overview and repository report reading. Do not expose auth
   bootstrap, auth-file paths, project/repo writes, scheduling, email settings, or
-  other operator controls as MCP tools.
+  other operator controls as MCP tools. MCP server code must use the narrow
+  MCP facade, not the broad core facade.
 - Treat import-linter as architecture policy, not style advice.
 - Keep runtime tuning in frozen settings dataclasses, not env. Env is for
   credential/security ingress only.
