@@ -6,10 +6,10 @@ deployments should pull the published GHCR image instead.
 ## Image
 
 ```text
-ghcr.io/j2h4u/enji-guard-cli:latest
 ghcr.io/j2h4u/enji-guard-cli:v<version>
 ghcr.io/j2h4u/enji-guard-cli:<version>
 ghcr.io/j2h4u/enji-guard-cli:sha-<commit>
+ghcr.io/j2h4u/enji-guard-cli@sha256:<digest>
 ```
 
 Images are published after the `CI` workflow succeeds on `main`. Version tags
@@ -24,9 +24,11 @@ chmod 700 ~/.config/enji-guard
 ```
 
 Copy `deploy/docker-compose.ghcr.yml` to the host deployment directory, for
-example `/opt/docker/enji-guard-cli/docker-compose.yml`, then run:
+example `/opt/docker/enji-guard-cli/docker-compose.yml`, choose an immutable
+image reference, then run:
 
 ```bash
+export ENJI_GUARD_IMAGE_TAG=v0.1.0
 docker compose pull
 docker compose up -d --remove-orphans --wait
 docker exec -i enji-guard-cli enji-guard health --ready

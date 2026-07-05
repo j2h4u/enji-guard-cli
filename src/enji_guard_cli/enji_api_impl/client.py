@@ -328,10 +328,6 @@ def is_cookie_session(session: EnjiApiSession) -> bool:
     return session.stored_auth["credential"]["type"] == CredentialType.COOKIE.value
 
 
-def render_api_path(path_template: str, path_params: ApiPathParams | None = None) -> str:
-    return _render_api_path(path_template, path_params)
-
-
 def normalize_json_object(payload: object) -> JsonObjectPayload:
     return _normalize_json_object(payload)
 

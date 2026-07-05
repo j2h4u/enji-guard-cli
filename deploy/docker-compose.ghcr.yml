@@ -1,6 +1,6 @@
 services:
   enji-guard-cli:
-    image: ghcr.io/j2h4u/enji-guard-cli:latest
+    image: ghcr.io/j2h4u/enji-guard-cli:${ENJI_GUARD_IMAGE_TAG:?set ENJI_GUARD_IMAGE_TAG to a version, sha tag, or digest}
     container_name: enji-guard-cli
     command: ["run", "--transport", "streamable-http", "--host", "0.0.0.0", "--allow-external-host"]
     restart: unless-stopped

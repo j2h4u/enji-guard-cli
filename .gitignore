@@ -6,6 +6,10 @@ __pycache__/
 .pyright/
 .basedpyright/
 .import_linter_cache/
+.mypy_cache/
+.tox/
+.nox/
+.hypothesis/
 .coverage
 coverage.xml
 htmlcov/
@@ -17,6 +21,11 @@ venv/
 # Local environment files
 .env
 .env.*
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
 
 # Build artifacts
 build/

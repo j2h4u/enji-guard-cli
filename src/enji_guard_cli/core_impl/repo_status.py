@@ -313,10 +313,6 @@ def validate_report_wait_options(options: ReportWaitOptions) -> None:
         raise ValueError("heartbeat_seconds must be at least 1")
 
 
-def next_poll_sleep(deadline: float, poll_seconds: int) -> float:
-    return max(0.0, min(float(poll_seconds), deadline - time.monotonic()))
-
-
 def score_grade(score: float) -> ScoreGrade:
     if score < SCORE_POOR_THRESHOLD:
         return "critical"
