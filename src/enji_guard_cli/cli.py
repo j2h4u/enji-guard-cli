@@ -1,19 +1,23 @@
 import socket
-import sys
 from collections.abc import Callable
 from ipaddress import IPv6Address, ip_address
-from pathlib import Path
-from typing import Annotated, Literal, TypeGuard, cast
+from typing import Annotated, Literal, cast
 
 import typer
 
 from enji_guard_cli.audits import AuditAlias, ReportAuditAlias
+from enji_guard_cli.cli_impl.auth_catalog import (
+    SharedCliConfig,
+    auth_app,
+    catalog_app,
+    configure_auth_catalog_commands,
+    set_auth_refresh_action,
+    set_auth_status_action,
+)
 from enji_guard_cli.cli_impl.durations import parse_duration_seconds
 from enji_guard_cli.cli_impl.rendering import (
     echo_access,
-    echo_audit_catalog,
     echo_audit_start,
-    echo_auth_status,
     echo_email_preferences_table,
     echo_generic_payload,
     echo_json,
@@ -27,7 +31,6 @@ from enji_guard_cli.cli_impl.rendering import (
     echo_wait_heartbeat,
     echo_wait_status,
 )
-from enji_guard_cli.cli_impl.rendering_support import object_dict
 from enji_guard_cli.cli_impl.report_rendering import report_read_summary_payload, reports_markdown
 from enji_guard_cli.cli_impl.write_targets import (
     EmailSetCliArgs,
@@ -36,8 +39,6 @@ from enji_guard_cli.cli_impl.write_targets import (
     parse_schedule_set_args,
 )
 from enji_guard_cli.core import (
-    AuthError,
-    AuthStatusPayload,
     EmailPreferenceUpdate,
     OperationName,
     OperationResult,
@@ -46,8 +47,6 @@ from enji_guard_cli.core import (
     add_repo,
     create_project,
     delete_project,
-    import_bearer_token,
-    import_cookie,
     list_email_preferences,
     list_project_inventory,
     list_projects,
@@ -87,8 +86,6 @@ Text tables are the default; add --json for automation.
 """
 
 app = typer.Typer(help=MAIN_HELP)
-catalog_app = typer.Typer(help="Local audit aliases and metadata.")
-auth_app = typer.Typer(help="Credential bootstrap, refresh, and status.")
 project_app = typer.Typer(help="List and manage Enji projects.")
 repo_app = typer.Typer(help="Discover, resolve, add, remove, and move GitHub repositories.")
 recon_app = typer.Typer(help="Start baseline discovery. Recon is not a report audit.")
@@ -906,202 +903,6 @@ def _email_set_body(args: EmailSetCliArgs) -> object:
     return payload
 
 
-@catalog_app.command("audits", help=CATALOG_AUDITS_OPERATION.summary)
-def catalog_audits(
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    _run_cli_journey(
-        lambda: _catalog_audits_body(json_output=json_output),
-        command_path=_command_path("catalog", "audits"),
-        json_output=_json_output(json_output),
-        selector_kind="unknown",
-    )
-
-
-def _catalog_audits_body(*, json_output: bool) -> object:
-    payload = resolve_operation_result(CATALOG_AUDITS_OPERATION.execute())
-    if _json_output(json_output):
-        echo_json(payload)
-    else:
-        echo_audit_catalog(payload)
-    return payload
-
-
-@catalog_app.command("audit", help=CATALOG_AUDIT_OPERATION.summary)
-def catalog_audit(
-    audit: Annotated[AuditAlias, typer.Argument(help="Canonical audit alias.")],
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    _run_cli_journey(
-        lambda: _catalog_audit_body(audit=audit, json_output=json_output),
-        command_path=_command_path("catalog", "audit"),
-        json_output=_json_output(json_output),
-        selector_kind="unknown",
-    )
-
-
-def _catalog_audit_body(*, audit: AuditAlias, json_output: bool) -> object:
-    payload = resolve_operation_result(CATALOG_AUDIT_OPERATION.execute(audit))
-    if _json_output(json_output):
-        echo_json(payload)
-    else:
-        echo_key_values(object_dict(payload))
-    return payload
-
-
-@auth_app.command("import-cookie", help="Import a raw browser Cookie header from stdin.")
-def auth_import_cookie(
-    stdin: Annotated[bool, typer.Option("--stdin", help="Read a raw Cookie header from stdin.")] = False,
-    auth_file: Annotated[
-        Path | None,
-        typer.Option("--auth-file", help="Auth file path. Defaults to ~/.config/enji-guard/auth.json."),
-    ] = None,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    _run_cli_journey(
-        lambda: _auth_import_cookie_body(stdin=stdin, auth_file=auth_file, json_output=json_output),
-        command_path=_command_path("auth", "import-cookie"),
-        json_output=_json_output(json_output),
-        selector_kind="unknown",
-    )
-
-
-def _auth_import_cookie_body(*, stdin: bool, auth_file: Path | None, json_output: bool) -> object:
-    if not stdin:
-        _echo_error("VALIDATION", "use --stdin to avoid storing cookies in shell history")
-        raise typer.Exit(1)
-
-    raw_cookie = sys.stdin.read()
-    try:
-        payload = import_cookie(raw_cookie, auth_file)
-        if _json_output(json_output):
-            echo_json(payload)
-        else:
-            echo_key_values(cast(dict[str, object], payload))
-        return payload
-    except ValueError as exc:
-        _echo_error("VALIDATION", str(exc))
-        raise typer.Exit(1) from None
-    except OSError as exc:
-        _echo_error("STORAGE", str(exc))
-        raise typer.Exit(1) from None
-
-
-@auth_app.command("import-token", help="Import a bearer or API token from stdin.")
-def auth_import_token(
-    stdin: Annotated[bool, typer.Option("--stdin", help="Read a bearer token from stdin.")] = False,
-    auth_file: Annotated[
-        Path | None,
-        typer.Option("--auth-file", help="Auth file path. Defaults to ~/.config/enji-guard/auth.json."),
-    ] = None,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    _run_cli_journey(
-        lambda: _auth_import_token_body(stdin=stdin, auth_file=auth_file, json_output=json_output),
-        command_path=_command_path("auth", "import-token"),
-        json_output=_json_output(json_output),
-        selector_kind="unknown",
-    )
-
-
-def _auth_import_token_body(*, stdin: bool, auth_file: Path | None, json_output: bool) -> object:
-    if not stdin:
-        _echo_error("VALIDATION", "use --stdin to avoid storing tokens in shell history")
-        raise typer.Exit(1)
-
-    raw_token = sys.stdin.read()
-    try:
-        payload = import_bearer_token(raw_token, auth_file)
-        if _json_output(json_output):
-            echo_json(payload)
-        else:
-            echo_key_values(cast(dict[str, object], payload))
-        return payload
-    except ValueError as exc:
-        _echo_error("VALIDATION", str(exc))
-        raise typer.Exit(1) from None
-    except OSError as exc:
-        _echo_error("STORAGE", str(exc))
-        raise typer.Exit(1) from None
-
-
-@auth_app.command("status", help=AUTH_STATUS_OPERATION.summary)
-def auth_status_command(
-    auth_file: Annotated[
-        Path | None,
-        typer.Option("--auth-file", help="Auth file path. Defaults to ~/.config/enji-guard/auth.json."),
-    ] = None,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    _run_cli_journey(
-        lambda: _auth_status_body(auth_file=auth_file, json_output=json_output),
-        command_path=_command_path("auth", "status"),
-        json_output=_json_output(json_output),
-        selector_kind="unknown",
-    )
-
-
-def _auth_status_body(*, auth_file: Path | None, json_output: bool) -> object:
-    payload = cast_auth_status_payload(resolve_operation_result(auth_status(auth_file)))
-    if _json_output(json_output):
-        echo_json(payload)
-    else:
-        echo_auth_status(payload)
-    if not payload["authenticated"]:
-        raise typer.Exit(3)
-    return payload
-
-
-@auth_app.command("refresh", help="Refresh cookie auth and persist rotated cookies.")
-def auth_refresh_command(
-    auth_file: Annotated[
-        Path | None,
-        typer.Option("--auth-file", help="Auth file path. Defaults to ~/.config/enji-guard/auth.json."),
-    ] = None,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    _run_cli_journey(
-        lambda: _auth_refresh_body(auth_file=auth_file, json_output=json_output),
-        command_path=_command_path("auth", "refresh"),
-        json_output=_json_output(json_output),
-        selector_kind="unknown",
-    )
-
-
-def _auth_refresh_body(*, auth_file: Path | None, json_output: bool) -> object:
-    try:
-        payload = refresh_auth(auth_file)
-        if _json_output(json_output):
-            echo_json(payload)
-        else:
-            echo_key_values(cast(dict[str, object], payload))
-        return payload
-    except AuthError as exc:
-        _echo_error(exc.code, exc.message)
-        raise typer.Exit(_exit_code_for_error(exc.code)) from None
-
-
-def cast_auth_status_payload(payload: object) -> AuthStatusPayload:
-    return payload if _is_auth_status_payload(payload) else _invalid_auth_status_payload()
-
-
-def _is_auth_status_payload(payload: object) -> TypeGuard[AuthStatusPayload]:
-    return isinstance(payload, dict) and isinstance(payload.get("authenticated"), bool)
-
-
-def _invalid_auth_status_payload() -> AuthStatusPayload:
-    return {
-        "authenticated": False,
-        "code": "UPSTREAM",
-        "message": "auth status returned unexpected payload",
-        "auth_file": "",
-        "credential_type": None,
-        "email": None,
-        "name": None,
-        "user_id": None,
-    }
-
-
 def _preference_switch(value: Literal["on", "off"] | None) -> bool | None:
     if value == "on":
         return True
@@ -1125,3 +926,16 @@ def _report_audit(audit: ReportAuditAlias) -> AuditAlias:
 
 def _report_audits(audits: list[ReportAuditAlias]) -> list[AuditAlias]:
     return [_report_audit(audit) for audit in audits]
+
+
+configure_auth_catalog_commands(
+    SharedCliConfig(
+        run_cli_journey=_run_cli_journey,
+        command_path=_command_path,
+        json_output=_json_output,
+        echo_error=_echo_error,
+        exit_code_for_error=_exit_code_for_error,
+    )
+)
+set_auth_status_action(lambda auth_file: auth_status(auth_file))
+set_auth_refresh_action(lambda auth_file: refresh_auth(auth_file))
