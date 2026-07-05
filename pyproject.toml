@@ -139,6 +139,7 @@ forbidden_modules = [
     "enji_guard_cli.cli",
     "enji_guard_cli.cli_impl",
     "enji_guard_cli.journey",
+    "enji_guard_cli.mcp_facade",
     "enji_guard_cli.runtime",
     "enji_guard_cli.mcp_server",
 ]
@@ -164,6 +165,7 @@ forbidden_modules = [
     "enji_guard_cli.core_impl",
     "enji_guard_cli.cli",
     "enji_guard_cli.cli_impl",
+    "enji_guard_cli.mcp_facade",
     "enji_guard_cli.runtime",
     "enji_guard_cli.mcp_server",
 ]
@@ -178,6 +180,7 @@ layers = [
     "enji_guard_cli.runtime",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.journey",
+    "enji_guard_cli.mcp_facade",
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
     "enji_guard_cli.audits",
@@ -204,9 +207,18 @@ source_modules = [
     "enji_guard_cli.cli_impl",
     "enji_guard_cli.runtime",
     "enji_guard_cli.mcp_server",
+    "enji_guard_cli.mcp_facade",
     "enji_guard_cli.journey",
 ]
 forbidden_modules = ["enji_guard_cli.core_impl"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "mcp-server-uses-readonly-facade"
+name = "MCP server uses the read-only facade, not broad core"
+type = "forbidden"
+source_modules = ["enji_guard_cli.mcp_server"]
+forbidden_modules = ["enji_guard_cli.core", "enji_guard_cli.core_impl"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -219,6 +231,7 @@ source_modules = [
     "enji_guard_cli.journey",
     "enji_guard_cli.runtime",
     "enji_guard_cli.mcp_server",
+    "enji_guard_cli.mcp_facade",
 ]
 forbidden_modules = [
     "enji_guard_cli._enji_api_contract",
@@ -271,9 +284,9 @@ allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 id = "entrypoints-use-core-for-auth"
-name = "CLI and MCP entrypoints use core operations for auth"
+name = "CLI entrypoint uses core operations for auth"
 type = "forbidden"
-source_modules = ["enji_guard_cli.cli", "enji_guard_cli.mcp_server"]
+source_modules = ["enji_guard_cli.cli"]
 forbidden_modules = ["enji_guard_cli.auth"]
 allow_indirect_imports = true
 
@@ -293,6 +306,7 @@ forbidden_modules = [
     "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.errors",
     "enji_guard_cli.journey",
+    "enji_guard_cli.mcp_facade",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.readiness",
     "enji_guard_cli.runtime",
@@ -320,6 +334,7 @@ source_modules = [
     "enji_guard_cli.enji_api",
     "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.journey",
+    "enji_guard_cli.mcp_facade",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.runtime",
     "enji_guard_cli.settings",
@@ -344,6 +359,7 @@ source_modules = [
     "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.errors",
     "enji_guard_cli.journey",
+    "enji_guard_cli.mcp_facade",
     "enji_guard_cli.readiness",
     "enji_guard_cli.settings",
     "enji_guard_cli.telemetry",
@@ -370,6 +386,7 @@ forbidden_modules = [
     "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.errors",
     "enji_guard_cli.json_types",
+    "enji_guard_cli.mcp_facade",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.readiness",
     "enji_guard_cli.runtime",
@@ -399,6 +416,7 @@ forbidden_modules = [
     "enji_guard_cli.enji_api",
     "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.errors",
+    "enji_guard_cli.mcp_facade",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.runtime",
     "enji_guard_cli.telemetry",
@@ -428,6 +446,7 @@ forbidden_modules = [
     "enji_guard_cli.enji_api",
     "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.errors",
+    "enji_guard_cli.mcp_facade",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.runtime",
     "enji_guard_cli.telemetry",
@@ -457,6 +476,7 @@ forbidden_modules = [
     "enji_guard_cli.enji_api",
     "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.errors",
+    "enji_guard_cli.mcp_facade",
     "enji_guard_cli.mcp_server",
     "enji_guard_cli.runtime",
     "enji_guard_cli.settings",

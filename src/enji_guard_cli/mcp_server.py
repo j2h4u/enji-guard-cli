@@ -1,15 +1,16 @@
 import asyncio
 from collections.abc import Callable
-from typing import Literal, TypedDict, cast
+from typing import Literal, cast
 
 from mcp.server.fastmcp import FastMCP
 
-from enji_guard_cli.core import (
-    RepoSort,
-    read_reports_for_repo,
-    runtime_status,
-)
 from enji_guard_cli.journey import AgentJourney, run_agent_journey
+from enji_guard_cli.mcp_facade import (
+    RepoSort,
+    RepoStatusAllPayload,
+    read_repository_reports,
+    repository_portfolio_overview,
+)
 from enji_guard_cli.settings import DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT, DEFAULT_REPO_SORT
 
 type McpTransport = Literal["stdio", "sse", "streamable-http"]
@@ -22,14 +23,8 @@ MCP_TOOL_NAMES: tuple[str, ...] = (
 PORTFOLIO_OVERVIEW_TOOL = MCP_TOOL_NAMES[0]
 REPO_REPORTS_TOOL = MCP_TOOL_NAMES[1]
 
-get_portfolio_overview = runtime_status
-get_repo_reports = read_reports_for_repo
-
-
-class PortfolioOverviewPayload(TypedDict):
-    observed_at: str
-    summary: dict[str, object]
-    projects: list[dict[str, object]]
+get_portfolio_overview = repository_portfolio_overview
+get_repo_reports = read_repository_reports
 
 
 def _project_arg(project: str) -> str | None:
@@ -113,12 +108,12 @@ def create_mcp_server(host: str = DEFAULT_HTTP_HOST, port: int = DEFAULT_HTTP_PO
     async def portfolio_overview(
         project: str = "",
         sort: RepoSort = DEFAULT_REPO_SORT,
-    ) -> PortfolioOverviewPayload:
+    ) -> RepoStatusAllPayload:
         return cast(
-            PortfolioOverviewPayload,
+            RepoStatusAllPayload,
             await _run_mcp_tool_thread(
                 PORTFOLIO_OVERVIEW_TOOL,
-                lambda: get_portfolio_overview(None, _project_arg(project), sort),
+                lambda: get_portfolio_overview(_project_arg(project), sort),
                 selector_kind="project" if project.strip() else "all",
             ),
         )
@@ -137,7 +132,7 @@ def create_mcp_server(host: str = DEFAULT_HTTP_HOST, port: int = DEFAULT_HTTP_PO
             dict[str, object],
             await _run_mcp_tool_thread(
                 REPO_REPORTS_TOOL,
-                lambda: get_repo_reports(repo.strip(), _project_arg(project), [], all_reports=True),
+                lambda: get_repo_reports(repo.strip(), _project_arg(project)),
                 selector_kind=_selector_kind_for_repo(repo),
             ),
         )
