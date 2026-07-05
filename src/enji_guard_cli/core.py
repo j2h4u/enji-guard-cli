@@ -91,7 +91,6 @@ from enji_guard_cli.core_impl.status_views import (
 from enji_guard_cli.core_impl.status_views import repo_status_all_payload as _repo_status_all_payload_impl
 from enji_guard_cli.core_impl.targets import matching_repo_targets as _matching_repo_targets_impl
 from enji_guard_cli.core_impl.targets import project_refs as _project_refs_impl
-from enji_guard_cli.core_impl.targets import project_repo_targets as _project_repo_targets_impl
 from enji_guard_cli.core_impl.targets import resolve_single_project_id as _resolve_single_project_id_impl
 from enji_guard_cli.core_impl.targets import resolve_single_repo_target as _resolve_single_repo_target_impl
 from enji_guard_cli.core_impl.targets import selected_project_ids as _selected_project_ids_impl
@@ -598,10 +597,6 @@ def _selected_write_repo_targets(
             selected_repo_targets=_selected_repo_targets,
         ),
     )
-
-
-def _project_repo_targets(project_id: str) -> list[RepoTargetPayload]:
-    return _project_repo_targets_impl(project_id, project_detail=run_project_detail)
 
 
 def _matching_repo_targets(selector: str, project_ids: list[str]) -> list[RepoTargetPayload]:

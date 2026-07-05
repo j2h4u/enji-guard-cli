@@ -415,14 +415,6 @@ def status_report_row(repo: dict[str, object], report: dict[str, object]) -> tup
     )
 
 
-def freshness_cell(value: object) -> str:
-    if value is True:
-        return "stale"
-    if value is False:
-        return "fresh"
-    return "-"
-
-
 def repo_status_row(project: dict[str, object], repo: dict[str, object]) -> tuple[str, ...]:
     score_summary = object_dict(repo.get("score_summary"))
     reports = object_dict(repo.get("reports"))
