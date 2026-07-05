@@ -36,7 +36,10 @@ prioritize repositories, then read the reports before changing code. When a
 report exposes commit hashes, compare them with the current checkout before
 treating the report as fresh. Starting a new audit can temporarily hide older
 snapshots behind running work, so read any needed snapshots before you start a
-fresh audit.
+fresh audit. CLI `status` and `audit start` do not trust Enji active-runs
+alone; the service keeps a short local started-task ledger and reconciles it
+with `task-by-id` so incomplete active-runs projections do not trigger duplicate
+starts.
 `report read --all --json` is a batch contract: readable reports include
 summary metadata, and unavailable reports are returned with `available: false`
 plus a reason instead of aborting the whole batch.

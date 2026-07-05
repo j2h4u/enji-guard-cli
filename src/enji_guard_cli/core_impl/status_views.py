@@ -20,10 +20,9 @@ type SelectedProjectIds = Callable[[str | None], list[str]]
 type RepoRuntimeStatusFromTarget = Callable[[RepoTargetPayload], RepoRuntimeStatusPayload]
 type RepoTarget = Callable[[str, str | None, dict[str, JsonValue]], RepoTargetPayload]
 type EmptyReportStatus = Callable[[str], ReportStatusPayload]
-type ListRepoActiveRuns = Callable[[str], JsonObjectPayload]
+type RepoActiveRuns = Callable[[str], list[JsonValue]]
 type GetRepoRerunState = Callable[[str], JsonObjectPayload | None]
 type ListRepoTaskLinks = Callable[[str], JsonObjectPayload]
-type CurrentActiveRuns = Callable[[JsonObjectPayload], list[JsonValue]]
 type CurrentHeadSha = Callable[[JsonObjectPayload | None], str | None]
 type ReportStatusFromTaskLinks = Callable[
     [str, JsonObjectPayload, list[JsonValue], JsonObjectPayload | None],
@@ -33,10 +32,9 @@ type ReportStatusFromTaskLinks = Callable[
 
 @dataclass(frozen=True, slots=True)
 class RuntimeStatusDependencies:
-    list_repo_active_runs: ListRepoActiveRuns
+    repo_active_runs: RepoActiveRuns
     get_repo_rerun_state: GetRepoRerunState
     list_repo_task_links: ListRepoTaskLinks
-    current_active_runs: CurrentActiveRuns
     current_head_sha: CurrentHeadSha
     report_status_from_task_links: ReportStatusFromTaskLinks
 
@@ -119,7 +117,7 @@ def repo_runtime_status_from_target(
     dependencies: RuntimeStatusDependencies,
 ) -> RepoRuntimeStatusPayload:
     repo_id = target["repo_id"]
-    active_runs = dependencies.current_active_runs(dependencies.list_repo_active_runs(repo_id))
+    active_runs = dependencies.repo_active_runs(repo_id)
     rerun_state = dependencies.get_repo_rerun_state(repo_id)
     reports = dependencies.report_status_from_task_links(
         repo_id,

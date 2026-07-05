@@ -1,5 +1,6 @@
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Never, cast
 
 from enji_guard_cli.audits import AuditAlias
@@ -11,6 +12,7 @@ from enji_guard_cli.auth import ImportCredentialPayload as ImportCredentialPaylo
 from enji_guard_cli.auth import import_bearer_token as import_bearer_token
 from enji_guard_cli.auth import import_cookie as import_cookie
 from enji_guard_cli.auth import refresh_auth as refresh_auth
+from enji_guard_cli.core_impl import active_run_ledger as _active_run_ledger
 from enji_guard_cli.core_impl import audit_runs as _audit_runs
 from enji_guard_cli.core_impl import report_reads as _report_reads
 from enji_guard_cli.core_impl import report_wait as _report_wait
@@ -57,7 +59,9 @@ from enji_guard_cli.core_impl.operations import reports_list_async_operation as 
 from enji_guard_cli.core_impl.operations import resolve_operation as resolve_operation
 from enji_guard_cli.core_impl.operations import resolve_operation_result as resolve_operation_result
 from enji_guard_cli.core_impl.operations import resolve_operation_spec as resolve_operation_spec
+from enji_guard_cli.core_impl.payloads import json_dict as _json_dict
 from enji_guard_cli.core_impl.payloads import json_object_payload as _json_object_payload
+from enji_guard_cli.core_impl.payloads import json_str as _json_str
 from enji_guard_cli.core_impl.preflight import report_start_preflight_payload as _report_start_preflight_payload
 from enji_guard_cli.core_impl.project_admin import MoveRepoDependencies as _MoveRepoDependencies
 from enji_guard_cli.core_impl.project_admin import activate_existing_repo_payload as _activate_existing_repo_payload
@@ -131,8 +135,10 @@ from enji_guard_cli.enji_api import repo_audit_rerun_state as run_repo_audit_rer
 from enji_guard_cli.enji_api import repo_task_links as run_repo_task_links
 from enji_guard_cli.enji_api import runbook as run_runbook
 from enji_guard_cli.enji_api import start_audit_run as run_start_audit_run
+from enji_guard_cli.enji_api import task_detail as run_task_detail
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
+from enji_guard_cli.settings import default_settings
 
 
 def list_projects() -> JsonObjectPayload:
@@ -300,9 +306,10 @@ def _list_repo_task_links(repo_id: str) -> JsonObjectPayload:
 
 
 def _report_status(repo_id: str) -> ReportStatusPayload:
-    active_runs = _current_active_runs(_list_repo_active_runs(repo_id))
     rerun_state = _get_repo_rerun_state(repo_id)
-    return _report_status_from_task_links(repo_id, _list_repo_task_links(repo_id), active_runs, rerun_state)
+    task_links = _list_repo_task_links(repo_id)
+    active_runs = _merged_repo_active_runs(repo_id, rerun_state=rerun_state, task_links=task_links)
+    return _report_status_from_task_links(repo_id, task_links, active_runs, rerun_state)
 
 
 def repo_status_all(project_id: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:
@@ -657,10 +664,9 @@ def _repo_runtime_status_from_target(target: RepoTargetPayload) -> RepoRuntimeSt
     return _repo_runtime_status_from_target_impl(
         target,
         dependencies=_RuntimeStatusDependencies(
-            list_repo_active_runs=_list_repo_active_runs,
+            repo_active_runs=_merged_repo_active_runs,
             get_repo_rerun_state=_get_repo_rerun_state,
             list_repo_task_links=_list_repo_task_links,
-            current_active_runs=_current_active_runs,
             current_head_sha=_current_head_sha,
             report_status_from_task_links=_report_status_from_task_links,
         ),
@@ -689,6 +695,55 @@ def _selected_report_audits(audits: list[AuditAlias], *, all_reports: bool) -> l
     return _audit_runs.selected_report_audits(audits, all_reports=all_reports)
 
 
+def _merged_repo_active_runs(
+    repo_id: str,
+    *,
+    rerun_state: JsonObjectPayload | None = None,
+    task_links: JsonObjectPayload | None = None,
+) -> list[JsonValue]:
+    ledger_settings = default_settings().active_run_ledger
+    upstream_active_runs = _current_active_runs(_list_repo_active_runs(repo_id))
+    if _active_run_ledger.has_entries_for_repo(ledger_settings, repo_id) is False:
+        return upstream_active_runs
+    try:
+        resolved_rerun_state = rerun_state if rerun_state is not None else _get_repo_rerun_state(repo_id)
+        resolved_task_links = task_links if task_links is not None else _list_repo_task_links(repo_id)
+    except EnjiApiError:
+        if upstream_active_runs:
+            return upstream_active_runs
+        resolved_rerun_state = None
+        resolved_task_links = cast(JsonObjectPayload, {"links": []})
+    return _active_run_ledger.merged_active_runs(
+        repo_id,
+        upstream_active_runs,
+        resolved_rerun_state,
+        resolved_task_links,
+        get_task=run_task_detail,
+        settings=ledger_settings,
+        now=datetime.now(UTC),
+    )
+
+
+def _record_started_run(context: _audit_runs.RecordStartedRunContext) -> None:
+    normalized = _json_object_payload(context.response)
+    task_payload = _json_dict(normalized.get("task"))
+    _active_run_ledger.record_started_run(
+        default_settings().active_run_ledger,
+        _active_run_ledger.new_entry(
+            repo_id=context.repo_id,
+            project_id=context.project_id,
+            action_key=context.action_key,
+            task_id=_json_str(normalized.get("id")) or _json_str(task_payload.get("id")),
+            task_status=_json_str(normalized.get("status")) or _json_str(task_payload.get("status")),
+            current_head_sha=context.current_head_sha,
+            last_audited_head_sha=context.last_audited_head_sha,
+            observed_at=datetime.now(UTC),
+            started_at=None,
+            ttl_seconds=default_settings().active_run_ledger.ttl_seconds,
+        ),
+    )
+
+
 def _raise_bad_selector(message: str) -> Never:
     raise EnjiApiError("BAD_SELECTOR", message)
 
@@ -709,10 +764,11 @@ def _make_audit_run_create(
 
 def _start_audit_dependencies() -> _audit_runs.StartAuditDependencies[AuditRunCreate]:
     return _audit_runs.StartAuditDependencies(
-        list_repo_active_runs=_list_repo_active_runs,
         make_audit_run_create=_make_audit_run_create,
         start_audit_run=run_start_audit_run,
         project_detail=run_project_detail,
         catalog=run_catalog,
         runbook=run_runbook,
+        current_repo_active_runs=_merged_repo_active_runs,
+        record_started_run=_record_started_run,
     )

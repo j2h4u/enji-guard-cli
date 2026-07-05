@@ -1,3 +1,6 @@
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -23,6 +26,7 @@ from enji_guard_cli.core import (
     resolve_operation,
     resolve_operation_spec,
 )
+from enji_guard_cli.core_impl import active_run_ledger
 from enji_guard_cli.core_impl.models import (
     ReportAuditStatusPayload,
     ReportReadState,
@@ -30,6 +34,25 @@ from enji_guard_cli.core_impl.models import (
 )
 from enji_guard_cli.core_impl.selectors import parse_github_repo
 from enji_guard_cli.errors import EnjiApiError
+from enji_guard_cli.settings import default_settings
+
+
+def _ledger_test_settings(tmp_path: Path):
+    settings = default_settings()
+    return replace(
+        settings,
+        active_run_ledger=replace(
+            settings.active_run_ledger,
+            state_file=tmp_path / "state" / "active-runs.json",
+            ttl_seconds=6 * 60 * 60,
+            lookup_grace_seconds=300,
+        ),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_active_run_ledger(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(core, "default_settings", lambda: _ledger_test_settings(tmp_path))
 
 
 def test_operation_catalog_has_unique_operation_names() -> None:
@@ -2556,3 +2579,265 @@ def test_start_audit_skips_already_running_audit(monkeypatch: MonkeyPatch) -> No
             }
         ],
     }
+
+
+def test_start_audit_records_ledger_entry_for_started_report(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    settings = _ledger_test_settings(tmp_path)
+    monkeypatch.setattr(core, "default_settings", lambda: settings)
+    monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda project_id: {
+            "repos": [{"id": "repo_1", "githubOwner": "j2h4u", "githubName": "enji-guard-cli", "connected": True}],
+            "webResources": [],
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_catalog",
+        lambda: {
+            "curatedActions": [
+                {
+                    "actionKey": "audit.security",
+                    "title": "Run security audit",
+                    "runbookKind": "security",
+                    "fleetRunbookId": "runbook_1",
+                    "artifactSchemaName": "upfront.audit.summary",
+                    "artifactSchemaVersion": "v1",
+                    "taskDescriptionTemplate": "Repo {{repoFullName}}",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_runbook",
+        lambda runbook_id: {"suggested_flow": "single", "suggested_flow_config": {}},
+    )
+    monkeypatch.setattr(core, "run_start_audit_run", lambda request: {"id": "task_security", "status": "pending"})
+    monkeypatch.setattr(
+        core, "run_repo_audit_rerun_state", lambda repo_id: {"state": {"currentHeadSha": "head_2", "actions": {}}}
+    )
+
+    core._start_report_audits_for_target("repo_1", "project_1", [AuditAlias.SECURITY])
+
+    ledger = active_run_ledger.read_active_run_ledger(settings.active_run_ledger)
+    assert [
+        (entry.repo_id, entry.project_id, entry.action_key, entry.task_id, entry.task_status)
+        for entry in ledger.entries
+    ] == [("repo_1", "project_1", "audit.security", "task_security", "pending")]
+
+
+def test_report_status_projects_ledger_task_with_task_detail(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    settings = _ledger_test_settings(tmp_path)
+    monkeypatch.setattr(core, "default_settings", lambda: settings)
+    active_run_ledger.record_started_run(
+        settings.active_run_ledger,
+        active_run_ledger.new_entry(
+            repo_id="repo_1",
+            project_id="project_1",
+            action_key="audit.security",
+            task_id="task_security",
+            task_status="pending",
+            current_head_sha="head_2",
+            last_audited_head_sha="head_1",
+            observed_at=datetime(2026, 7, 5, 10, 0, tzinfo=UTC),
+            started_at=None,
+            ttl_seconds=settings.active_run_ledger.ttl_seconds,
+        ),
+    )
+    monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
+    monkeypatch.setattr(
+        core,
+        "run_repo_audit_rerun_state",
+        lambda repo_id: {
+            "state": {"currentHeadSha": "head_2", "actions": {"audit.security": {"lastAuditedHeadSha": "head_1"}}}
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_repo_task_links",
+        lambda repo_id: {
+            "links": [
+                {
+                    "actionKey": "audit.security",
+                    "artifactSchemaName": "upfront.audit.summary",
+                    "fleetTaskId": "task_old",
+                    "createdAt": "2026-07-05T09:00:00Z",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_task_detail",
+        lambda task_id: {
+            "task": {
+                "id": task_id,
+                "status": "in_progress",
+                "createdAt": "2026-07-05T10:00:00Z",
+                "startedAt": "2026-07-05T10:00:10Z",
+                "completedAt": None,
+            }
+        },
+    )
+
+    payload = core._report_status("repo_1")
+
+    assert payload["active"] is True
+    assert payload["counts"]["active"] == 1
+    assert payload["items"][0]["task"] == {
+        "lifecycle_state": "running",
+        "active": True,
+        "fleet_task_id": "task_security",
+        "run_status": "in_progress",
+        "created_at": "2026-07-05T10:00:00Z",
+        "started_at": "2026-07-05T10:00:10Z",
+        "completed_at": None,
+    }
+    assert payload["items"][0]["report"]["stale"] is True
+
+
+def test_start_audit_skips_when_ledger_task_is_still_active(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    settings = _ledger_test_settings(tmp_path)
+    monkeypatch.setattr(core, "default_settings", lambda: settings)
+    active_run_ledger.record_started_run(
+        settings.active_run_ledger,
+        active_run_ledger.new_entry(
+            repo_id="repo_1",
+            project_id="project_1",
+            action_key="audit.security",
+            task_id="task_security",
+            task_status="pending",
+            current_head_sha="head_2",
+            last_audited_head_sha="head_1",
+            observed_at=datetime.now(UTC),
+            started_at=None,
+            ttl_seconds=settings.active_run_ledger.ttl_seconds,
+        ),
+    )
+    monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
+    monkeypatch.setattr(
+        core, "run_repo_audit_rerun_state", lambda repo_id: {"state": {"currentHeadSha": "head_2", "actions": {}}}
+    )
+    monkeypatch.setattr(core, "run_repo_task_links", lambda repo_id: {"links": []})
+    monkeypatch.setattr(
+        core, "run_task_detail", lambda task_id: {"task": {"id": task_id, "status": "pending", "completedAt": None}}
+    )
+    monkeypatch.setattr(
+        core,
+        "run_start_audit_run",
+        lambda request: (_ for _ in ()).throw(AssertionError("active ledger task should skip duplicate start")),
+    )
+
+    payload = core.start_audit("repo_1", "project_1", AuditAlias.SECURITY)
+
+    assert payload["reason"] == "already_running"
+    active_runs = payload["active_runs"]
+    assert isinstance(active_runs, list)
+    assert isinstance(active_runs[0], dict)
+    assert active_runs[0]["fleetTaskId"] == "task_security"
+
+
+def test_report_status_prunes_ledger_when_report_becomes_fresh(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    settings = _ledger_test_settings(tmp_path)
+    monkeypatch.setattr(core, "default_settings", lambda: settings)
+    active_run_ledger.record_started_run(
+        settings.active_run_ledger,
+        active_run_ledger.new_entry(
+            repo_id="repo_1",
+            project_id="project_1",
+            action_key="audit.security",
+            task_id="task_security",
+            task_status="pending",
+            current_head_sha="head_2",
+            last_audited_head_sha="head_1",
+            observed_at=datetime.now(UTC),
+            started_at=None,
+            ttl_seconds=settings.active_run_ledger.ttl_seconds,
+        ),
+    )
+    monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
+    monkeypatch.setattr(
+        core,
+        "run_repo_audit_rerun_state",
+        lambda repo_id: {
+            "state": {"currentHeadSha": "head_2", "actions": {"audit.security": {"lastAuditedHeadSha": "head_2"}}}
+        },
+    )
+    monkeypatch.setattr(
+        core,
+        "run_repo_task_links",
+        lambda repo_id: {"links": [{"actionKey": "audit.security", "artifactSchemaName": "upfront.audit.summary"}]},
+    )
+
+    payload = core._report_status("repo_1")
+
+    assert payload["active"] is False
+    assert active_run_ledger.read_active_run_ledger(settings.active_run_ledger).entries == []
+
+
+def test_report_status_prunes_expired_ledger_entry(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    settings = _ledger_test_settings(tmp_path)
+    monkeypatch.setattr(core, "default_settings", lambda: settings)
+    active_run_ledger.record_started_run(
+        settings.active_run_ledger,
+        active_run_ledger.ActiveRunLedgerEntry(
+            repo_id="repo_1",
+            project_id="project_1",
+            action_key="audit.security",
+            task_id="task_security",
+            task_status="pending",
+            current_head_sha="head_2",
+            last_audited_head_sha="head_1",
+            observed_at=(datetime.now(UTC) - timedelta(hours=7)).isoformat(),
+            started_at=None,
+            expires_at=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+        ),
+    )
+    monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
+    monkeypatch.setattr(
+        core, "run_repo_audit_rerun_state", lambda repo_id: {"state": {"currentHeadSha": "head_2", "actions": {}}}
+    )
+    monkeypatch.setattr(core, "run_repo_task_links", lambda repo_id: {"links": []})
+
+    payload = core._report_status("repo_1")
+
+    assert payload["active"] is False
+    assert active_run_ledger.read_active_run_ledger(settings.active_run_ledger).entries == []
+
+
+def test_report_status_prunes_terminal_task_from_ledger(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    settings = _ledger_test_settings(tmp_path)
+    monkeypatch.setattr(core, "default_settings", lambda: settings)
+    active_run_ledger.record_started_run(
+        settings.active_run_ledger,
+        active_run_ledger.new_entry(
+            repo_id="repo_1",
+            project_id="project_1",
+            action_key="audit.security",
+            task_id="task_security",
+            task_status="pending",
+            current_head_sha="head_2",
+            last_audited_head_sha="head_1",
+            observed_at=datetime.now(UTC),
+            started_at=None,
+            ttl_seconds=settings.active_run_ledger.ttl_seconds,
+        ),
+    )
+    monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
+    monkeypatch.setattr(
+        core, "run_repo_audit_rerun_state", lambda repo_id: {"state": {"currentHeadSha": "head_2", "actions": {}}}
+    )
+    monkeypatch.setattr(core, "run_repo_task_links", lambda repo_id: {"links": []})
+    monkeypatch.setattr(
+        core,
+        "run_task_detail",
+        lambda task_id: {"task": {"id": task_id, "status": "completed", "completedAt": "2026-07-05T10:15:00Z"}},
+    )
+
+    payload = core._report_status("repo_1")
+
+    assert payload["active"] is False
+    assert active_run_ledger.read_active_run_ledger(settings.active_run_ledger).entries == []

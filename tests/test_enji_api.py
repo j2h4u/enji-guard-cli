@@ -37,6 +37,7 @@ from enji_guard_cli.enji_api import (
     reports_list,
     runbook,
     start_audit_run,
+    task_detail,
 )
 from enji_guard_cli.enji_api_impl.client import get_json_object
 from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER
@@ -354,6 +355,7 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
             json_response({"activeRuns": []}),
             json_response({"state": {"currentHeadSha": "abc"}}),
             json_response({"links": []}),
+            json_response({"task": {"id": "task_1", "status": "pending"}}),
             json_response({"task": {"id": "task_1"}}, status_code=201),
             json_response({"snapshot": {"content": {"report": "ok"}}}),
             json_response({"jobs": []}),
@@ -369,6 +371,7 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
     repo_active_runs("repo_1", auth_file, client)
     repo_audit_rerun_state("repo_1", auth_file, client)
     repo_task_links("repo_1", auth_file, client)
+    task_detail("task_1", auth_file, client)
     start_audit_run(
         AuditRunCreate(
             repo_id="repo_1",
@@ -392,19 +395,20 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
         ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/active-runs"),
         ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/audit-rerun-state"),
         ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/task-links"),
+        ("GET", "https://fleet.enji.ai/api/v1/tasks/task_1"),
         ("POST", "https://fleet.enji.ai/api/ux/repos/repo_1/audit-runs"),
         ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/snapshots/upfront.audit.summary?group=vulns"),
         ("GET", "https://fleet.enji.ai/api/ux/improvement-jobs/repo_1"),
         ("PUT", "https://fleet.enji.ai/api/ux/improvement-jobs/repo_1/vuln-audit"),
     ]
     assert client.requests[3].json_body == {"githubOwner": "j2h4u", "githubName": "enji-guard-cli"}
-    audit_body = client.requests[8].json_body
+    audit_body = client.requests[9].json_body
     assert isinstance(audit_body, dict)
     assert audit_body["projectId"] == "project_1"
     assert audit_body["actionKey"] == "audit.recon"
     assert audit_body["fleetTaskBody"] == {"title": "Run recon"}
     assert isinstance(audit_body["clientRequestId"], str)
-    assert client.requests[11].json_body == {"enabled": True}
+    assert client.requests[12].json_body == {"enabled": True}
 
 
 def test_audit_email_preferences_use_expected_requests(tmp_path: Path) -> None:

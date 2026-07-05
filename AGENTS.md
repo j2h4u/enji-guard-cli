@@ -33,6 +33,9 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 - Enji audits are slow. Do not treat `wait` as a barrier before analysis. After
   `audit start`, run `status`; read and summarize ready reports immediately,
   then check running reports later with sparse polling.
+- `status` and `audit start` do not trust Enji active-runs alone; the service
+  keeps a short local started-task ledger and reconciles it with `task-by-id`
+  so incomplete active-runs projections do not trigger duplicate starts.
 - Cookie auth is temporary. Keep bearer/API-token support first-class.
 - Never print secrets. Store credentials only in the configured auth file.
 

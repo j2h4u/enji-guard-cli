@@ -14,6 +14,7 @@ LOG_DIR_NAME = "logs"
 LOG_FILE_NAME = "telemetry.jsonl"
 STATE_DIR_NAME = "state"
 READINESS_STATE_FILE_NAME = "readiness.json"
+ACTIVE_RUN_LEDGER_FILE_NAME = "active-runs.json"
 
 DEFAULT_BASE_URL = "https://fleet.enji.ai"
 DEFAULT_GUARD_ORIGIN = "https://guard.enji.ai"
@@ -45,6 +46,8 @@ DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS = 2700
 DEFAULT_REPORT_WAIT_TIMEOUT_TEXT = "45m"
 DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS = 120
 DEFAULT_REPO_SORT: RepoSortName = "default"
+DEFAULT_ACTIVE_RUN_LEDGER_TTL_SECONDS = 6 * 60 * 60
+DEFAULT_ACTIVE_RUN_LOOKUP_GRACE_SECONDS = 300
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +126,13 @@ class RepoSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class ActiveRunLedgerSettings:
+    state_file: Path
+    ttl_seconds: int
+    lookup_grace_seconds: int
+
+
+@dataclass(frozen=True, slots=True)
 class EnjiGuardSettings:
     auth: AuthSettings
     auto_refresh: AutoRefreshSettings
@@ -132,6 +142,7 @@ class EnjiGuardSettings:
     readiness: ReadinessSettings
     report_wait: ReportWaitSettings
     repo: RepoSettings
+    active_run_ledger: ActiveRunLedgerSettings
 
 
 def default_settings() -> EnjiGuardSettings:
@@ -188,6 +199,11 @@ def default_settings() -> EnjiGuardSettings:
         ),
         repo=RepoSettings(
             default_sort=DEFAULT_REPO_SORT,
+        ),
+        active_run_ledger=ActiveRunLedgerSettings(
+            state_file=config_root / STATE_DIR_NAME / ACTIVE_RUN_LEDGER_FILE_NAME,
+            ttl_seconds=DEFAULT_ACTIVE_RUN_LEDGER_TTL_SECONDS,
+            lookup_grace_seconds=DEFAULT_ACTIVE_RUN_LOOKUP_GRACE_SECONDS,
         ),
     )
 

@@ -29,6 +29,7 @@ from enji_guard_cli._enji_api_contract import (
     REPO_TRANSFER_PREFLIGHT_ENDPOINT_SPEC,
     REPORTS_LIST_ENDPOINT_SPEC,
     RUNBOOK_ENDPOINT_SPEC,
+    TASK_DETAIL_ENDPOINT_SPEC,
     UX_PROJECT_CREATE_ENDPOINT_SPEC,
     UX_PROJECT_DELETE_ENDPOINT_SPEC,
 )
@@ -455,6 +456,21 @@ def repo_task_links(
         auth_file,
         client,
         REPO_TASK_LINKS_ENDPOINT.request(path_params={"repoId": repo_id}),
+    )
+
+
+def task_detail(
+    task_id: str,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> JsonObjectPayload:
+    return run_api_request(
+        auth_file,
+        client,
+        ApiEndpoint(
+            spec=TASK_DETAIL_ENDPOINT_SPEC,
+            parser=_parse_json_object_payload,
+        ).request(path_params={"taskId": task_id}),
     )
 
 
