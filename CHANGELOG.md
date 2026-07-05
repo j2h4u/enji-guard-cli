@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.10](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.9...v0.3.10) (2026-07-05)
+
+
+### Fixes
+
+* make audit starts deterministic ([1d40f16](https://github.com/j2h4u/enji-guard-cli/commit/1d40f161e6807f7c91f68a813e979f1be2013105))
+
 ## [0.3.9](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.8...v0.3.9) (2026-07-04)
 
 
