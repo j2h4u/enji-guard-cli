@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.11](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.10...v0.3.11) (2026-07-05)
+
+
+### Fixes
+
+* split report read and summary output ([e1bf2b4](https://github.com/j2h4u/enji-guard-cli/commit/e1bf2b453d4da56916224c1da11c306020bf490d))
+
 ## [0.3.10](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.9...v0.3.10) (2026-07-05)
 
 
