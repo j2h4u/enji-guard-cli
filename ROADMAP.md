@@ -28,10 +28,10 @@ supported runtime.
 
 ## Remaining
 
-- Design the MCP surface around the same product model as the CLI, but keep it
-  smaller and mostly read-oriented.
-- Implement the MCP tools needed for repository overview, report freshness,
-  report summaries, and focused report reading.
+- Finish the MCP surface around the same product model as the CLI, but keep it
+  smaller, read-only, and free of operator/control-plane details.
+- Refine MCP report-reading ergonomics with real agents while keeping the
+  surface centered on portfolio overview and concrete repository reports.
 - Validate the MCP surface with real agents and adjust only where the workflow
   is unclear or noisy.
 - Explore modular install modes so the tool can be used as CLI-only when API

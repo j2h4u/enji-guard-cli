@@ -8,8 +8,6 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import Tool
 
 import enji_guard_cli.mcp_server as mcp_server
-from enji_guard_cli.audits import AuditAlias, AuditPayload
-from enji_guard_cli.auth import AuthStatusPayload
 from enji_guard_cli.mcp_server import create_mcp_server
 from enji_guard_cli.settings import LogFormat, LogLevelName, TelemetrySettings
 from enji_guard_cli.telemetry import configure_logging
@@ -27,12 +25,22 @@ def test_create_mcp_server_registers_expected_tools() -> None:
     names = {tool.name for tool in tools}
 
     assert names == {
-        "enji_catalog_audits",
-        "enji_catalog_audit",
-        "enji_access",
-        "enji_reports_list",
-        "enji_auth_status",
+        "enji_portfolio_overview",
+        "enji_repo_reports",
     }
+
+
+def test_mcp_surface_omits_noisy_control_plane_tools() -> None:
+    server = create_mcp_server()
+
+    tools = cast(list[Tool], asyncio.run(server.list_tools()))
+    names = {tool.name for tool in tools}
+
+    assert "enji_auth_status" not in names
+    assert "enji_catalog_audit" not in names
+    assert "enji_access" not in names
+    assert "enji_catalog_audits" not in names
+    assert "enji_reports_list" not in names
 
 
 def test_run_mcp_server_async_runs_streamable_http_transport(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -51,107 +59,84 @@ def test_run_mcp_server_async_runs_streamable_http_transport(monkeypatch: pytest
     assert called is True
 
 
-def test_catalog_audit_tool_uses_audit_alias_enum_schema() -> None:
-    server = create_mcp_server()
-
-    tools = cast(list[Tool], asyncio.run(server.list_tools()))
-    catalog_audit_tool = next(tool for tool in tools if tool.name == "enji_catalog_audit")
-    defs = cast(dict[str, dict[str, object]], catalog_audit_tool.inputSchema["$defs"])
-
-    assert defs["AuditAlias"]["enum"] == [
-        "security",
-        "ai-readiness",
-        "tests",
-        "tech-health",
-        "deps",
-        "cognitive-debt",
-        "dead-code",
-        "recon",
-    ]
-
-
-def test_catalog_audits_tool_returns_catalog_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    server = create_mcp_server()
-    payload: list[AuditPayload] = [
-        {
-            "alias": "security",
-            "label": "Security",
-            "route_slug": "vulns",
-            "job_kind": "vuln-audit",
-            "action_key": "audit.security",
-        }
-    ]
-
-    monkeypatch.setattr(mcp_server, "get_audit_catalog", lambda: payload)
-
-    structured = call_structured_tool(server, "enji_catalog_audits", {})
-
-    assert structured == {"audits": payload}
-
-
-def test_catalog_audit_tool_resolves_alias(monkeypatch: pytest.MonkeyPatch) -> None:
-    server = create_mcp_server()
-    captured: dict[str, AuditAlias] = {}
-    payload: AuditPayload = {
-        "alias": "deps",
-        "label": "Dependency hygiene",
-        "route_slug": "dependency-hygiene",
-        "job_kind": "dependency-hygiene",
-        "action_key": "audit.dependency-hygiene",
-    }
-
-    def fake_resolve_audit(audit: AuditAlias) -> AuditPayload:
-        captured["audit"] = audit
-        return payload
-
-    monkeypatch.setattr(mcp_server, "get_resolve_audit", fake_resolve_audit)
-
-    structured = call_structured_tool(server, "enji_catalog_audit", {"audit": "deps"})
-
-    assert structured == payload
-    assert captured["audit"] is AuditAlias.DEPS
-
-
-def test_access_tool_returns_access_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    server = create_mcp_server()
-    payload = {
-        "group": "pro",
-        "full_access": True,
-        "limits": {"can_use_schedules": True, "audit_runs": {}, "autofix_runs": {}},
-        "usage": [],
-    }
-
-    monkeypatch.setattr(mcp_server, "get_access", lambda: payload)
-
-    structured = call_structured_tool(server, "enji_access", {})
-
-    assert structured == payload
-
-
-def test_reports_list_tool_passes_selector(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_portfolio_overview_tool_returns_runtime_status(monkeypatch: pytest.MonkeyPatch) -> None:
     server = create_mcp_server()
     captured: dict[str, object | None] = {}
     payload: dict[str, object] = {
-        "projects": [{"id": "project_1", "name": "Pets", "repo_ids": ["repo_1"], "scores": {}}],
+        "observed_at": "2026-07-05T00:00:00Z",
+        "summary": {"project_count": 1, "repo_count": 1},
+        "projects": [
+            {
+                "project_id": "project_1",
+                "project_name": "MCP Integrations",
+                "repos": [
+                    {
+                        "repo_id": "repo_1",
+                        "github_repo": "j2h4u/mcp-strava",
+                        "scores": {"tests": 80},
+                    }
+                ],
+            }
+        ],
     }
 
-    def fake_reports_list(selector: str = "*") -> dict[str, object]:
-        captured["selector"] = selector
+    def fake_portfolio_overview(repo: str | None, project: str | None, sort: str) -> dict[str, object]:
+        captured["repo"] = repo
+        captured["project"] = project
+        captured["sort"] = sort
         return payload
 
-    monkeypatch.setattr(mcp_server, "get_reports_list", fake_reports_list)
+    monkeypatch.setattr(mcp_server, "get_portfolio_overview", fake_portfolio_overview)
 
     structured = call_structured_tool(
         server,
-        "enji_reports_list",
-        {"selector": "pets/*"},
+        "enji_portfolio_overview",
+        {"project": "MCP Integrations", "sort": "weakest"},
     )
 
     assert structured == payload
-    assert captured == {"selector": "pets/*"}
+    assert captured == {"repo": None, "project": "MCP Integrations", "sort": "weakest"}
 
 
-def test_reports_list_tool_writes_agent_journey_without_raw_selector(
+def test_repo_reports_tool_reads_all_reports(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = create_mcp_server()
+    captured: dict[str, object | None] = {}
+    payload: dict[str, object] = {
+        "target": {"repo_id": "repo_1", "github_repo": "j2h4u/mcp-strava"},
+        "reports": [{"audit": "tests", "available": True, "snapshot": {"content": {"report": "ok"}}}],
+    }
+
+    def fake_repo_reports(
+        repo: str,
+        project: str | None,
+        audits: list[object],
+        *,
+        all_reports: bool,
+    ) -> dict[str, object]:
+        captured["repo"] = repo
+        captured["project"] = project
+        captured["audits"] = audits
+        captured["all_reports"] = all_reports
+        return payload
+
+    monkeypatch.setattr(mcp_server, "get_repo_reports", fake_repo_reports)
+
+    structured = call_structured_tool(
+        server,
+        "enji_repo_reports",
+        {"repo": "j2h4u/mcp-strava", "project": "MCP Integrations"},
+    )
+
+    assert structured == payload
+    assert captured == {
+        "repo": "j2h4u/mcp-strava",
+        "project": "MCP Integrations",
+        "audits": [],
+        "all_reports": True,
+    }
+
+
+def test_portfolio_overview_tool_writes_agent_journey_without_raw_project(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -159,51 +144,27 @@ def test_reports_list_tool_writes_agent_journey_without_raw_selector(
     configure_logging(_telemetry_settings(log_file=log_file, log_format="json"), provenance="supervisor")
     server = create_mcp_server()
     payload: dict[str, object] = {
-        "projects": [{"id": "project_1", "name": "Pets", "repo_ids": ["repo_1"], "scores": {}}],
+        "observed_at": "2026-07-05T00:00:00Z",
+        "summary": {"project_count": 1, "repo_count": 1},
+        "projects": [{"project_id": "project_1", "project_name": "Pets", "repos": []}],
     }
 
-    monkeypatch.setattr(mcp_server, "get_reports_list", lambda selector="*": payload)
+    monkeypatch.setattr(mcp_server, "get_portfolio_overview", lambda repo, project, sort: payload)
 
-    structured = call_structured_tool(server, "enji_reports_list", {"selector": "pets/*"})
+    structured = call_structured_tool(server, "enji_portfolio_overview", {"project": "Pets"})
 
     assert structured == payload
     started, finished = _telemetry_log_lines(log_file)
     assert started["message"] == "mcp_tool_started"
     assert started["provenance"] == "mcp"
     assert started["surface"] == "mcp"
-    assert started["tool_name"] == "enji_reports_list"
-    assert started["operation"] == "enji_reports_list"
-    assert started["selector_kind"] == "owner_name"
+    assert started["tool_name"] == "enji_portfolio_overview"
+    assert started["operation"] == "enji_portfolio_overview"
+    assert started["selector_kind"] == "project"
     assert finished["message"] == "mcp_tool_finished"
     assert finished["exit_code"] == 0
     assert finished["result_count"] == 1
-    assert "pets/*" not in log_file.read_text(encoding="utf-8")
-
-
-def test_auth_status_tool_passes_optional_auth_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    server = create_mcp_server()
-    captured: dict[str, Path | None] = {}
-    payload: AuthStatusPayload = {
-        "authenticated": False,
-        "code": "AUTH_REQUIRED",
-        "message": "auth file does not exist",
-        "auth_file": "/tmp/auth.json",
-        "credential_type": None,
-        "email": None,
-        "name": None,
-        "user_id": None,
-    }
-
-    def fake_auth_status(auth_file: Path | None = None) -> AuthStatusPayload:
-        captured["auth_file"] = auth_file
-        return payload
-
-    monkeypatch.setattr(mcp_server, "get_auth_status", fake_auth_status)
-
-    structured = call_structured_tool(server, "enji_auth_status", {"auth_file": "~/tmp/auth.json"})
-
-    assert structured == payload
-    assert captured["auth_file"] == Path("~/tmp/auth.json").expanduser()
+    assert "Pets" not in log_file.read_text(encoding="utf-8")
 
 
 def _telemetry_log_lines(log_file: Path) -> list[dict[str, object]]:
