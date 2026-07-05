@@ -8,6 +8,10 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 
 - Use `uv` only. Keep `uv.lock` current; use hardlink mode outside Docker.
 - Keep CLI and MCP thin. Put Enji/auth behavior behind the shared core/API layer.
+- MCP is curated read-only context, not a CLI mirror. Keep it focused on
+  portfolio overview and repository report reading. Do not expose auth
+  bootstrap, auth-file paths, project/repo writes, scheduling, email settings, or
+  other operator controls as MCP tools.
 - Treat import-linter as architecture policy, not style advice.
 - Keep runtime tuning in frozen settings dataclasses, not env. Env is for
   credential/security ingress only.
@@ -58,5 +62,6 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
   current cookie state. Prefer a `Cookie` header from any Fleet request made
   after refresh. If using the refresh request itself, merge its response
   `Set-Cookie` values; its request `Cookie` has the old refresh token.
-- After bootstrap, prove Docker refresh works: container `auth refresh`,
-  CLI/MCP auth smoke, and `enji_auth_auto_refresh_succeeded` in logs.
+- After bootstrap, prove Docker refresh works: container `auth refresh`, CLI auth
+  smoke, and `enji_auth_auto_refresh_succeeded` in logs. MCP tools should either
+  work through the configured service auth or return clear auth errors.

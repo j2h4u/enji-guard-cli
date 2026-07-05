@@ -53,10 +53,12 @@ The CLI is the broad operator surface for agents. It exposes reads, writes,
 project administration, repository moves, schedule changes, email preferences,
 auth bootstrap, and runtime checks.
 
-MCP is the curated read-mostly surface for agents that need the Enji picture:
-project and repository overview, scores, freshness, active work, report
-inventory, and report content. MCP does not mirror every CLI command or Enji
-frontend endpoint.
+MCP is the curated read-only surface for agents that need the Enji picture:
+portfolio overview across projects and repositories, scores, freshness, active
+work, and report reading for a concrete repository. MCP does not mirror every CLI
+command or Enji frontend endpoint, and it does not expose auth bootstrap,
+auth-file diagnostics, project administration, or scheduling controls. Auth
+belongs to the Docker runtime and CLI operator surface.
 
 The reconstructed Enji API contract lives in
 `contracts/enji-openapi.json`. Markdown documentation must not become a second
