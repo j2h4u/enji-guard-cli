@@ -25,6 +25,7 @@ EXPECTED_VISIBLE_COMMANDS = {
     ("repo", "remove"),
     ("repo", "resolve"),
     ("report", "read"),
+    ("report", "summary"),
     ("run",),
     ("schedule", "list"),
     ("schedule", "auto-time"),

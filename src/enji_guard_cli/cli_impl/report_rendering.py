@@ -1,5 +1,8 @@
 import re
 
+import typer
+
+from enji_guard_cli.cli_impl.rendering import echo_table
 from enji_guard_cli.cli_impl.rendering_support import number_or_none, object_dict, object_list, string_or_none
 
 _ANSI_CSI_RE = re.compile(r"(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]")
@@ -9,17 +12,15 @@ _CONTROL_CHARS = dict.fromkeys(
 )
 
 
-def report_read_summary_payload(payload: object) -> dict[str, object]:
+def report_summary_payload(payload: object) -> dict[str, object]:
     data = object_dict(payload)
-    summary: dict[str, object] = {
-        "reports": [report_read_summary_item(item) for item in object_list(data.get("reports"))]
-    }
+    summary: dict[str, object] = {"reports": [report_summary_item(item) for item in object_list(data.get("reports"))]}
     if "target" in data:
         summary["target"] = data["target"]
     return summary
 
 
-def report_read_summary_item(item: object) -> dict[str, object]:
+def report_summary_item(item: object) -> dict[str, object]:
     report = object_dict(item)
     snapshot = object_dict(report.get("snapshot"))
     content = object_dict(snapshot.get("content"))
@@ -41,6 +42,40 @@ def report_read_summary_item(item: object) -> dict[str, object]:
         "message": string_or_none(report.get("message")),
         "error_code": string_or_none(report.get("error_code")),
     }
+
+
+def echo_report_summary(payload: object) -> None:
+    reports = [object_dict(item) for item in object_list(report_summary_payload(payload).get("reports"))]
+    rows = [report_summary_row(report) for report in reports]
+    echo_table(
+        ("audit", "available", "score", "freshness", "completed_at", "headline"),
+        rows,
+        "No reports.",
+    )
+    for report in reports:
+        if report.get("available") is False:
+            audit = string_or_none(report.get("audit")) or "-"
+            reason = string_or_none(report.get("reason")) or "unavailable"
+            message = string_or_none(report.get("message")) or f"{audit} report is unavailable"
+            typer.echo(f"{audit}: {reason}: {message}")
+
+
+def report_summary_row(report: dict[str, object]) -> tuple[str, ...]:
+    freshness = "unknown"
+    if report.get("available") is False:
+        freshness = string_or_none(report.get("reason")) or "unavailable"
+    elif report.get("out_of_date") is True:
+        freshness = "stale"
+    elif report.get("out_of_date") is False:
+        freshness = "fresh"
+    return (
+        text_cell(report.get("audit")),
+        text_cell(report.get("available")),
+        score_cell(report.get("score")),
+        freshness,
+        text_cell(report.get("completed_at")),
+        text_cell(report.get("headline")),
+    )
 
 
 def report_markdown(payload: object) -> str:
@@ -84,3 +119,21 @@ def report_item_markdown(item: object) -> str:
         message = string_or_none(item.get("message")) or f"{audit} report is unavailable"
         return f"<!-- enji-report audit={audit} unavailable=true -->\n\n_{safe_terminal_markdown(message)}_"
     return f"<!-- enji-report audit={audit} -->\n\n{safe_terminal_markdown(report_markdown(item)).strip()}"
+
+
+def text_cell(value: object, *, fallback: str = "-") -> str:
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if value is None:
+        return fallback
+    text = str(value).strip()
+    return text or fallback
+
+
+def score_cell(value: object) -> str:
+    score = number_or_none(value)
+    if score is None:
+        return "-"
+    if isinstance(score, int):
+        return str(score)
+    return f"{score:.0f}" if score.is_integer() else f"{score:.1f}"
