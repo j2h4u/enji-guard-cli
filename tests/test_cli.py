@@ -285,7 +285,8 @@ def test_top_level_help_explains_agent_model() -> None:
     assert "projects group GitHub repositories" in result.output
     assert "Recon is" in result.output
     assert "baseline discovery" in result.output
-    assert "Text tables are the default" in result.output
+    assert "report summary for compact metadata" in result.output
+    assert "Text is the default" in result.output
 
 
 def test_installed_cli_entrypoint_smoke_runs_version_and_help() -> None:
@@ -1212,7 +1213,7 @@ def test_report_read_defaults_to_ready_reports_and_markdown(monkeypatch: MonkeyP
     }
 
 
-def test_report_read_can_emit_json_for_all_reports(monkeypatch: MonkeyPatch) -> None:
+def test_report_read_can_emit_full_json_for_all_reports(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
     def fake_read_reports(
@@ -1270,6 +1271,93 @@ def test_report_read_can_emit_json_for_all_reports(monkeypatch: MonkeyPatch) -> 
         "reports": [
             {
                 "audit": "security",
+                "current_head_sha": "head_2",
+                "last_audited_head_sha": "head_1",
+                "out_of_date": True,
+                "available": True,
+                "state": "ready",
+                "reason": None,
+                "message": None,
+                "snapshot": {
+                    "content": {
+                        "completedAt": "2026-06-30T12:00:00Z",
+                        "summary": {"summary": {"headline": "Security is clean", "score": 98}},
+                        "report": "# Security",
+                    }
+                },
+            },
+            {
+                "audit": "cognitive-debt",
+                "current_head_sha": "head_2",
+                "last_audited_head_sha": None,
+                "out_of_date": None,
+                "available": False,
+                "state": "missing",
+                "reason": "missing",
+                "message": "cognitive-debt report is missing",
+            },
+        ]
+    }
+    assert captured == {
+        "repo": "j2h4u/enji-guard-cli",
+        "project": None,
+        "audits": [],
+        "all_reports": True,
+    }
+
+
+def test_report_summary_can_emit_compact_json_for_all_reports(monkeypatch: MonkeyPatch) -> None:
+    def fake_read_reports(
+        repo: str,
+        project: str | None,
+        audits: list[AuditAlias],
+        *,
+        all_reports: bool,
+    ) -> dict[str, object]:
+        return {
+            "reports": [
+                {
+                    "audit": "security",
+                    "current_head_sha": "head_2",
+                    "last_audited_head_sha": "head_1",
+                    "out_of_date": True,
+                    "available": True,
+                    "state": "ready",
+                    "reason": None,
+                    "message": None,
+                    "snapshot": {
+                        "content": {
+                            "completedAt": "2026-06-30T12:00:00Z",
+                            "summary": {"summary": {"headline": "Security is clean", "score": 98}},
+                            "report": "# Security",
+                        }
+                    },
+                },
+                {
+                    "audit": "cognitive-debt",
+                    "current_head_sha": "head_2",
+                    "last_audited_head_sha": None,
+                    "out_of_date": None,
+                    "available": False,
+                    "state": "missing",
+                    "reason": "missing",
+                    "message": "cognitive-debt report is missing",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(cli, "read_reports_for_repo", fake_read_reports)
+
+    result = CliRunner().invoke(
+        app,
+        ["report", "summary", "j2h4u/enji-guard-cli", "--all", "--json"],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {
+        "reports": [
+            {
+                "audit": "security",
                 "available": True,
                 "completed_at": "2026-06-30T12:00:00Z",
                 "current_head_sha": "head_2",
@@ -1298,12 +1386,56 @@ def test_report_read_can_emit_json_for_all_reports(monkeypatch: MonkeyPatch) -> 
             },
         ]
     }
-    assert captured == {
-        "repo": "j2h4u/enji-guard-cli",
-        "project": None,
-        "audits": [],
-        "all_reports": True,
-    }
+
+
+def test_report_summary_defaults_to_compact_text(monkeypatch: MonkeyPatch) -> None:
+    def fake_read_reports(
+        repo: str,
+        project: str | None,
+        audits: list[AuditAlias],
+        *,
+        all_reports: bool,
+    ) -> dict[str, object]:
+        return {
+            "reports": [
+                {
+                    "audit": "security",
+                    "current_head_sha": "head_2",
+                    "last_audited_head_sha": "head_1",
+                    "out_of_date": False,
+                    "available": True,
+                    "state": "ready",
+                    "reason": None,
+                    "message": None,
+                    "snapshot": {
+                        "content": {
+                            "completedAt": "2026-06-30T12:00:00Z",
+                            "summary": {"summary": {"headline": "Security is clean", "score": 98}},
+                            "report": "# Security",
+                        }
+                    },
+                },
+                {
+                    "audit": "deps",
+                    "available": False,
+                    "state": "running",
+                    "reason": "running",
+                    "message": "deps report is still running",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(cli, "read_reports_for_repo", fake_read_reports)
+
+    result = CliRunner().invoke(app, ["report", "summary", "j2h4u/enji-guard-cli", "--all"])
+
+    assert result.exit_code == 0
+    assert "audit" in result.output
+    assert "security" in result.output
+    assert "fresh" in result.output
+    assert "Security is clean" in result.output
+    assert "deps" in result.output
+    assert "running: deps report is still running" in result.output
 
 
 def test_report_read_markdown_marks_unavailable_reports(monkeypatch: MonkeyPatch) -> None:

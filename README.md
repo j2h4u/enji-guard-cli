@@ -28,8 +28,9 @@ projects; a project with any repository is rejected by the core layer.
 
 Recon is baseline discovery. Report audits are separate, slow jobs that produce
 readable reports and scores. `status` is the snapshot/readiness/freshness view,
-`wait` is the completion check after `status`, and `report read` is the content
-path. `status --json` separates the latest readable report artifact from the
+`wait` is the completion check after `status`, `report summary` is the compact
+metadata path, and `report read` is the content path. `status --json`
+separates the latest readable report artifact from the
 current audit task lifecycle, so a stale readable report and a newly queued or
 running task can both be true. Scores are triage hints: use them to sort and
 prioritize repositories, then read the reports before changing code. When a
@@ -40,9 +41,11 @@ fresh audit. CLI `status` and `audit start` do not trust Enji active-runs
 alone; the service keeps a short local started-task ledger and reconciles it
 with `task-by-id` so incomplete active-runs projections do not trigger duplicate
 starts.
-`report read --all --json` is a batch contract: readable reports include
-summary metadata, and unavailable reports are returned with `available: false`
-plus a reason instead of aborting the whole batch.
+`report read --json` returns the full structured read payload, including each
+available Markdown report body. `report summary --json` is the compact batch
+contract: readable reports include summary metadata, and unavailable reports are
+returned with `available: false` plus a reason instead of aborting the whole
+batch.
 
 CLI output is human text and tables by default. Use `--json` only when another
 tool needs structured output.
@@ -130,12 +133,14 @@ For reports:
 ```bash
 docker exec -i enji-guard-cli enji-guard audit start "$REPO" --all
 docker exec -i enji-guard-cli enji-guard wait "$REPO"
+docker exec -i enji-guard-cli enji-guard report summary "$REPO"
 docker exec -i enji-guard-cli enji-guard report read "$REPO"
 ```
 
 Recon and report audits can take tens of minutes. Use `status` for a snapshot,
-`wait` as a follow-up completion check, and `report read` after reports are
-ready. `status` shows stale audits explicitly and uses `audited=mixed` when
+`wait` as a follow-up completion check, `report summary` for compact triage,
+and `report read` after reports are ready. `status` shows stale audits
+explicitly and uses `audited=mixed` when
 report audits were generated from different commits. `audit start --json`
 returns a `results` matrix, one item per requested report audit, with states
 such as `started`, `queued`, `already_running`, `up_to_date`, or `failed`.
@@ -239,6 +244,8 @@ docker exec -i enji-guard-cli enji-guard repo move j2h4u/enji-guard-cli --to-pro
 docker exec -i enji-guard-cli enji-guard status j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard audit start j2h4u/enji-guard-cli --all
 docker exec -i enji-guard-cli enji-guard wait j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard report summary j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard report summary j2h4u/enji-guard-cli --json
 docker exec -i enji-guard-cli enji-guard report read j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard report read j2h4u/enji-guard-cli --json
 docker exec -i enji-guard-cli enji-guard --project Pets schedule list

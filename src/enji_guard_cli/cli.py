@@ -31,7 +31,7 @@ from enji_guard_cli.cli_impl.rendering import (
     echo_wait_heartbeat,
     echo_wait_status,
 )
-from enji_guard_cli.cli_impl.report_rendering import report_read_summary_payload, reports_markdown
+from enji_guard_cli.cli_impl.report_rendering import echo_report_summary, report_summary_payload, reports_markdown
 from enji_guard_cli.cli_impl.write_targets import (
     EmailSetCliArgs,
     ScheduleSetCliArgs,
@@ -81,8 +81,9 @@ Model: projects group GitHub repositories. Pass the known owner/name repo
 selector directly when an agent is working on a specific checkout. Recon is
 baseline discovery; report audits are separate slow jobs that produce scores
 and readable reports. Use status/list for triage, audit start for work,
-wait/status for long-running jobs, and report read for the Markdown findings.
-Text tables are the default; add --json for automation.
+wait/status for long-running jobs, report summary for compact metadata, and
+report read for the Markdown findings. Text is the default; add --json for
+automation.
 """
 
 app = typer.Typer(help=MAIN_HELP)
@@ -562,7 +563,7 @@ def _project_delete_body(*, project: str, json_output: bool) -> object:
     return payload
 
 
-@report_app.command("read", help="Read ready report Markdown for a repository.")
+@report_app.command("read", help="Read report bodies for a repository. Default output is Markdown.")
 def report_read(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     audits: Annotated[
@@ -570,7 +571,10 @@ def report_read(
         typer.Argument(help="Optional report audit aliases. Defaults to ready reports."),
     ] = None,
     all_reports: Annotated[bool, typer.Option("--all", help="Read every report audit.")] = False,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit the full structured read payload, including report Markdown bodies."),
+    ] = False,
 ) -> None:
     _run_cli_journey(
         lambda: _report_read_body(repo=repo, audits=audits, all_reports=all_reports, json_output=json_output),
@@ -592,13 +596,49 @@ def _report_read_body(
         lambda: read_reports_for_repo(repo, _selected_project(), _report_audits(audits or []), all_reports=all_reports)
     )
     if _json_output(json_output):
-        echo_json(report_read_summary_payload(payload))
+        echo_json(payload)
         return payload
     try:
         typer.echo(reports_markdown(payload))
     except ValueError as exc:
         _echo_error("VALIDATION", str(exc))
         raise typer.Exit(1) from None
+    return payload
+
+
+@report_app.command("summary", help="Read compact report metadata for a repository.")
+def report_summary(
+    repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
+    audits: Annotated[
+        list[ReportAuditAlias] | None,
+        typer.Argument(help="Optional report audit aliases. Defaults to ready reports."),
+    ] = None,
+    all_reports: Annotated[bool, typer.Option("--all", help="Summarize every report audit.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit compact structured report summary output.")] = False,
+) -> None:
+    _run_cli_journey(
+        lambda: _report_summary_body(repo=repo, audits=audits, all_reports=all_reports, json_output=json_output),
+        command_path=_command_path("report", "summary"),
+        json_output=_json_output(json_output),
+        selector_kind=_selector_kind_for_repo(repo, project=_selected_project(), all_flag=all_reports),
+        all_flag=all_reports,
+    )
+
+
+def _report_summary_body(
+    *,
+    repo: str,
+    audits: list[ReportAuditAlias] | None,
+    all_reports: bool,
+    json_output: bool,
+) -> object:
+    payload = _resolve_command_payload(
+        lambda: read_reports_for_repo(repo, _selected_project(), _report_audits(audits or []), all_reports=all_reports)
+    )
+    if _json_output(json_output):
+        echo_json(report_summary_payload(payload))
+    else:
+        echo_report_summary(payload)
     return payload
 
 
