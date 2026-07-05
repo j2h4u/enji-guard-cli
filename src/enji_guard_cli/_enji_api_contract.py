@@ -151,6 +151,12 @@ REPO_TASK_LINKS_ENDPOINT_SPEC = EnjiEndpointSpec(
     operation_id="listRepoTaskLinks",
     operation="repo task links",
 )
+TASK_DETAIL_ENDPOINT_SPEC = EnjiEndpointSpec(
+    method="GET",
+    path_template="/api/v1/tasks/{taskId}",
+    operation_id="getTask",
+    operation="task detail",
+)
 REPO_AUDIT_RUNS_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="POST",
     path_template="/api/ux/repos/{repoId}/audit-runs",
@@ -211,6 +217,7 @@ IMPLEMENTED_ENJI_ENDPOINTS = (
     REPO_ACTIVE_RUNS_ENDPOINT_SPEC,
     REPO_AUDIT_RERUN_STATE_ENDPOINT_SPEC,
     REPO_TASK_LINKS_ENDPOINT_SPEC,
+    TASK_DETAIL_ENDPOINT_SPEC,
     REPO_AUDIT_RUNS_ENDPOINT_SPEC,
     REPO_AUDIT_SUMMARY_ENDPOINT_SPEC,
     AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT_SPEC,

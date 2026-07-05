@@ -24,7 +24,6 @@ from enji_guard_cli.core_impl.models import (
 from enji_guard_cli.core_impl.payloads import json_object_or_default, json_str, required_str
 from enji_guard_cli.core_impl.repo_status import (
     active_runs_for_action,
-    current_active_runs,
     current_head_sha,
     last_audited_head_sha,
     out_of_date,
@@ -32,23 +31,37 @@ from enji_guard_cli.core_impl.repo_status import (
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
-type ListRepoActiveRuns = Callable[[str], JsonObjectPayload]
 type GetRepoRerunState = Callable[[str], JsonObjectPayload]
 type StartAuditRun[TCreateRequest] = Callable[[TCreateRequest], JsonObjectPayload]
 type MakeAuditRunCreate[TCreateRequest] = Callable[[str, str, str, JsonObjectPayload], TCreateRequest]
 type ProjectDetail = Callable[[str], JsonObjectPayload]
 type Catalog = Callable[[], JsonObjectPayload]
 type Runbook = Callable[[str], JsonObjectPayload]
+type CurrentRepoActiveRuns = Callable[[str], list[JsonValue]]
+
+
+@dataclass(frozen=True, slots=True)
+class RecordStartedRunContext:
+    repo_id: str
+    project_id: str
+    action_key: str
+    response: JsonObjectPayload
+    current_head_sha: str | None
+    last_audited_head_sha: str | None
+
+
+type RecordStartedRun = Callable[[RecordStartedRunContext], None]
 
 
 @dataclass(frozen=True, slots=True)
 class StartAuditDependencies[TCreateRequest]:
-    list_repo_active_runs: ListRepoActiveRuns
     make_audit_run_create: MakeAuditRunCreate[TCreateRequest]
     start_audit_run: StartAuditRun[TCreateRequest]
     project_detail: ProjectDetail
     catalog: Catalog
     runbook: Runbook
+    current_repo_active_runs: CurrentRepoActiveRuns
+    record_started_run: RecordStartedRun
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,13 +82,10 @@ def start_audit[TCreateRequest](
 ) -> JsonObjectPayload | AuditRunSkippedPayload:
     resolved = registry_resolve_audit(audit)
     action_key = resolved.action_key
-    active_runs = active_runs_for_action(
-        current_active_runs(dependencies.list_repo_active_runs(repo_id)),
-        action_key,
-    )
+    active_runs = active_runs_for_action(dependencies.current_repo_active_runs(repo_id), action_key)
     if active_runs:
         return skipped_audit_payload(audit.value, action_key, active_runs)
-    return dependencies.start_audit_run(
+    response = dependencies.start_audit_run(
         dependencies.make_audit_run_create(
             repo_id,
             project_id,
@@ -92,6 +102,17 @@ def start_audit[TCreateRequest](
             ),
         )
     )
+    dependencies.record_started_run(
+        RecordStartedRunContext(
+            repo_id=repo_id,
+            project_id=project_id,
+            action_key=action_key,
+            response=response,
+            current_head_sha=None,
+            last_audited_head_sha=None,
+        )
+    )
+    return response
 
 
 def start_report_audits_for_target[TCreateRequest](
@@ -103,9 +124,9 @@ def start_report_audits_for_target[TCreateRequest](
     get_repo_rerun_state: GetRepoRerunState,
 ) -> AuditRunBatchPayload:
     result_matrix: list[AuditRunBatchResultItem] = []
-    active_runs = current_active_runs(dependencies.list_repo_active_runs(repo_id))
     rerun_state = get_repo_rerun_state(repo_id)
     current_sha = current_head_sha(rerun_state)
+    active_runs = dependencies.current_repo_active_runs(repo_id)
     project = dependencies.project_detail(project_id)
     catalog = dependencies.catalog()
     for alias in audits:
@@ -165,6 +186,16 @@ def start_report_audits_for_target[TCreateRequest](
             )
             continue
         task_id, task_status = _start_task_identity(response)
+        dependencies.record_started_run(
+            RecordStartedRunContext(
+                repo_id=repo_id,
+                project_id=project_id,
+                action_key=action_key,
+                response=response,
+                current_head_sha=current_sha,
+                last_audited_head_sha=last_sha,
+            )
+        )
         result_matrix.append(
             _batch_result_item(
                 alias.value,

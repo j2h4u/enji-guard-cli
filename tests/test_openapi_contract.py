@@ -29,6 +29,7 @@ from enji_guard_cli.enji_api import (
     reports_list,
     runbook,
     start_audit_run,
+    task_detail,
 )
 from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse
 
@@ -69,6 +70,7 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
             json_response({"activeRuns": []}),
             json_response({"state": {}}),
             json_response({"links": []}),
+            json_response({"task": {"id": "task_1"}}),
             json_response({"task": {"id": "task_1"}}, status_code=201),
             json_response({"snapshot": {"content": {"report": "ok"}}}),
             json_response({"jobs": []}),
@@ -92,6 +94,7 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
     repo_active_runs("repo_1", auth_file, client)
     repo_audit_rerun_state("repo_1", auth_file, client)
     repo_task_links("repo_1", auth_file, client)
+    task_detail("task_1", auth_file, client)
     start_audit_run(
         AuditRunCreate(
             repo_id="repo_1",
