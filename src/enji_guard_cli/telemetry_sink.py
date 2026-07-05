@@ -10,6 +10,8 @@ from threading import Lock
 from typing import Protocol
 
 type LogFieldValue = None | bool | int | float | str
+_PRIVATE_DIRECTORY_MODE = 0o700
+_PRIVATE_FILE_MODE = 0o600
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +66,7 @@ class _TextStreamSink:
 
 @dataclass(slots=True)
 class _FileJsonlSink:
-    handler: RotatingFileHandler
+    handler: _PrivateRotatingFileHandler
 
     def emit(self, event: TelemetryEvent) -> None:
         line = json.dumps(event.to_jsonl_payload(), sort_keys=True)
@@ -84,6 +86,13 @@ class _FileJsonlSink:
         self.handler.close()
 
 
+class _PrivateRotatingFileHandler(RotatingFileHandler):
+    def _open(self):  # type: ignore[override]
+        stream = super()._open()
+        Path(self.baseFilename).chmod(_PRIVATE_FILE_MODE)
+        return stream
+
+
 def build_telemetry_sink(
     *,
     log_file: Path | None,
@@ -97,7 +106,8 @@ def build_telemetry_sink(
         return _TextStreamSink(formatter=formatter, lock=Lock())
     path = log_file.expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
-    handler = RotatingFileHandler(
+    path.parent.chmod(_PRIVATE_DIRECTORY_MODE)
+    handler = _PrivateRotatingFileHandler(
         path,
         maxBytes=max_bytes,
         backupCount=backup_count,

@@ -28,7 +28,7 @@ example `/opt/docker/enji-guard-cli/docker-compose.yml`, choose an immutable
 image reference, then run:
 
 ```bash
-export ENJI_GUARD_IMAGE_TAG=v0.1.0
+export ENJI_GUARD_IMAGE_TAG=sha-<git-commit>
 docker compose pull
 docker compose up -d --remove-orphans --wait
 docker exec -i enji-guard-cli enji-guard health --ready

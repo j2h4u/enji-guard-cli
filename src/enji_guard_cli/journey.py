@@ -1,12 +1,11 @@
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from time import monotonic
 
 from enji_guard_cli.telemetry import log_event, telemetry_provenance
 
 type JourneyBody = Callable[[], object]
-type AsyncJourneyBody = Callable[[], Awaitable[object]]
 type ExitCodeResolver = Callable[[Exception], int]
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,27 +34,6 @@ def run_agent_journey(
         log_event(_LOGGER, logging.INFO, f"{journey.event_prefix}_started", _start_fields(journey))
         try:
             result = body()
-        except Exception as exc:
-            record.exit_code = _exit_code(exc, exit_code_for_exception)
-            raise
-        else:
-            return result
-        finally:
-            _log_finished(record, result)
-
-
-async def run_agent_journey_async(
-    body: AsyncJourneyBody,
-    journey: AgentJourney,
-    *,
-    exit_code_for_exception: ExitCodeResolver | None = None,
-) -> object:
-    record = _StartedJourney(journey=journey, started_at=monotonic())
-    result: object | None = None
-    with telemetry_provenance(journey.provenance):
-        log_event(_LOGGER, logging.INFO, f"{journey.event_prefix}_started", _start_fields(journey))
-        try:
-            result = await body()
         except Exception as exc:
             record.exit_code = _exit_code(exc, exit_code_for_exception)
             raise
