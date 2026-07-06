@@ -12,10 +12,8 @@ from enji_guard_cli.auth import ImportCredentialPayload as ImportCredentialPaylo
 from enji_guard_cli.auth import import_bearer_token as import_bearer_token
 from enji_guard_cli.auth import import_cookie as import_cookie
 from enji_guard_cli.auth import refresh_auth as refresh_auth
-from enji_guard_cli.core_impl import active_run_ledger as _active_run_ledger
 from enji_guard_cli.core_impl import audit_runs as _audit_runs
-from enji_guard_cli.core_impl import report_reads as _report_reads
-from enji_guard_cli.core_impl import report_wait as _report_wait
+from enji_guard_cli.core_impl import report_workflows as _report_workflows
 from enji_guard_cli.core_impl.models import (
     DEFAULT_REPO_SORT,
     AuditRunBatchPayload,
@@ -59,10 +57,7 @@ from enji_guard_cli.core_impl.operations import reports_list_async_operation as 
 from enji_guard_cli.core_impl.operations import resolve_operation as resolve_operation
 from enji_guard_cli.core_impl.operations import resolve_operation_result as resolve_operation_result
 from enji_guard_cli.core_impl.operations import resolve_operation_spec as resolve_operation_spec
-from enji_guard_cli.core_impl.payloads import json_dict as _json_dict
 from enji_guard_cli.core_impl.payloads import json_object_payload as _json_object_payload
-from enji_guard_cli.core_impl.payloads import json_str as _json_str
-from enji_guard_cli.core_impl.preflight import report_start_preflight_payload as _report_start_preflight_payload
 from enji_guard_cli.core_impl.project_admin import MoveRepoDependencies as _MoveRepoDependencies
 from enji_guard_cli.core_impl.project_admin import ProjectCrudDependencies as _ProjectCrudDependencies
 from enji_guard_cli.core_impl.project_admin import activate_existing_repo_payload as _activate_existing_repo_payload
@@ -72,7 +67,6 @@ from enji_guard_cli.core_impl.project_admin import delete_project as _delete_pro
 from enji_guard_cli.core_impl.project_admin import move_repo_payload as _move_repo_payload
 from enji_guard_cli.core_impl.project_admin import remove_repo_payload as _remove_repo_payload
 from enji_guard_cli.core_impl.project_admin import rename_project as _rename_project_impl
-from enji_guard_cli.core_impl.repo_status import current_active_runs as _current_active_runs
 from enji_guard_cli.core_impl.repo_status import current_head_sha as _current_head_sha
 from enji_guard_cli.core_impl.repo_status import empty_report_status as _empty_report_status
 from enji_guard_cli.core_impl.repo_status import report_status_from_task_links as _report_status_from_task_links
@@ -265,22 +259,19 @@ def _repo_target_from_resolved(
 
 
 def _list_repo_active_runs(repo_id: str) -> JsonObjectPayload:
-    return run_repo_active_runs(repo_id)
+    return _report_workflows.list_repo_active_runs(repo_id, dependencies=_report_workflow_dependencies())
 
 
 def _get_repo_rerun_state(repo_id: str) -> JsonObjectPayload:
-    return run_repo_audit_rerun_state(repo_id)
+    return _report_workflows.get_repo_rerun_state(repo_id, dependencies=_report_workflow_dependencies())
 
 
 def _list_repo_task_links(repo_id: str) -> JsonObjectPayload:
-    return run_repo_task_links(repo_id)
+    return _report_workflows.list_repo_task_links(repo_id, dependencies=_report_workflow_dependencies())
 
 
 def _report_status(repo_id: str) -> ReportStatusPayload:
-    rerun_state = _get_repo_rerun_state(repo_id)
-    task_links = _list_repo_task_links(repo_id)
-    active_runs = _merged_repo_active_runs(repo_id, rerun_state=rerun_state, task_links=task_links)
-    return _report_status_from_task_links(repo_id, task_links, active_runs, rerun_state)
+    return _report_workflows.report_status(repo_id, dependencies=_report_workflow_dependencies())
 
 
 def repo_status_all(project_id: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:
@@ -315,15 +306,11 @@ def wait_for_report_completion(
     options: ReportWaitOptions,
     heartbeat: Callable[[ReportWaitPayload], None] | None,
 ) -> ReportWaitPayload:
-    return _report_wait.wait_for_report_completion(
+    return _report_workflows.wait_for_report_completion(
         repo_id,
         options=options,
         heartbeat=heartbeat,
-        dependencies=_report_wait.ReportWaitDependencies(
-            read_status=_report_status,
-            monotonic=time.monotonic,
-            sleep=time.sleep,
-        ),
+        dependencies=_report_workflow_dependencies(),
     )
 
 
@@ -352,25 +339,12 @@ def start_report_audits(
     *,
     all_reports: bool,
 ) -> dict[str, object]:
-    target = _resolve_single_repo_target(repo, project)
-    selected_audits = _selected_report_audits(audits, all_reports=all_reports)
-    status = _report_status(target["repo_id"])
-    preflight = _report_start_preflight_payload(status)
-    linked_running_results = _audit_runs.linked_running_report_results(status, selected_audits)
-    remaining_audits = [
-        audit
-        for audit in selected_audits
-        if registry_require_report_audit(audit).action_key not in linked_running_results
-    ]
-    started_results = _start_report_audits_for_target(target["repo_id"], target["project_id"], remaining_audits)
-    return _targeted_run_payload(
-        target,
-        {
-            "preflight": preflight,
-            "results": _audit_runs.ordered_audit_results(
-                selected_audits, linked_running_results, started_results["results"]
-            ),
-        },
+    return _report_workflows.start_report_audits(
+        repo,
+        project,
+        audits,
+        all_reports=all_reports,
+        dependencies=_report_workflow_dependencies(),
     )
 
 
@@ -379,12 +353,11 @@ def _start_report_audits_for_target(
     project_id: str,
     audits: list[AuditAlias],
 ) -> AuditRunBatchPayload:
-    return _audit_runs.start_report_audits_for_target(
+    return _report_workflows.start_report_audits_for_target(
         repo_id,
         project_id,
         audits,
-        dependencies=_start_audit_dependencies(),
-        get_repo_rerun_state=_get_repo_rerun_state,
+        dependencies=_report_workflow_dependencies(),
     )
 
 
@@ -395,22 +368,17 @@ def read_reports_for_repo(
     *,
     all_reports: bool,
 ) -> dict[str, object]:
-    target = _resolve_single_repo_target(repo, project)
-    status = _report_status(target["repo_id"])
-    selected_reports = _report_reads.selected_reports_to_read(status, audits, all_reports=all_reports)
-    return _targeted_run_payload(
-        target,
-        _report_reads.read_reports_for_target(
-            target["repo_id"],
-            selected_reports,
-            snapshot_reader=_read_report_snapshot,
-            tolerate_unavailable=not audits,
-        ),
+    return _report_workflows.read_reports_for_repo(
+        repo,
+        project,
+        audits,
+        all_reports=all_reports,
+        dependencies=_report_workflow_dependencies(),
     )
 
 
 def _read_report_snapshot(repo_id: str, audit: AuditAlias) -> JsonObjectPayload:
-    return run_audit_summary_snapshot(repo_id, registry_require_report_audit(audit).route_slug)
+    return _report_workflows.read_report_snapshot(repo_id, audit, dependencies=_report_workflow_dependencies())
 
 
 def list_email_preferences(repo: str | None, project: str | None) -> JsonObjectPayload:
@@ -512,21 +480,13 @@ def wait_for_reports(
     options: ReportWaitOptions,
     heartbeat: ReportWaitCallback | None,
 ) -> dict[str, object]:
-    target = _resolve_single_repo_target(repo, project)
-    targeted_heartbeat: Callable[[ReportWaitPayload], None] | None = None
-    if heartbeat is not None:
-
-        def target_heartbeat(payload: ReportWaitPayload) -> None:
-            heartbeat(_targeted_run_payload(target, payload))
-
-        targeted_heartbeat = target_heartbeat
-
-    payload = wait_for_report_completion(
-        target["repo_id"],
+    return _report_workflows.wait_for_reports(
+        repo,
+        project,
         options=options,
-        heartbeat=targeted_heartbeat,
+        heartbeat=heartbeat,
+        dependencies=_report_workflow_dependencies(),
     )
-    return _targeted_run_payload(target, payload)
 
 
 def _selected_project_ids(project: str | None) -> list[str]:
@@ -663,7 +623,11 @@ def _repo_status_all_payload(projects: list[ProjectRuntimeStatusPayload]) -> Rep
 
 
 def _selected_report_audits(audits: list[AuditAlias], *, all_reports: bool) -> list[AuditAlias]:
-    return _audit_runs.selected_report_audits(audits, all_reports=all_reports)
+    return _report_workflows.selected_report_audits(
+        audits,
+        all_reports=all_reports,
+        dependencies=_report_workflow_dependencies(),
+    )
 
 
 def _merged_repo_active_runs(
@@ -672,46 +636,38 @@ def _merged_repo_active_runs(
     rerun_state: JsonObjectPayload | None = None,
     task_links: JsonObjectPayload | None = None,
 ) -> list[JsonValue]:
-    ledger_settings = default_settings().active_run_ledger
-    upstream_active_runs = _current_active_runs(_list_repo_active_runs(repo_id))
-    if _active_run_ledger.has_entries_for_repo(ledger_settings, repo_id) is False:
-        return upstream_active_runs
-    try:
-        resolved_rerun_state = rerun_state if rerun_state is not None else _get_repo_rerun_state(repo_id)
-        resolved_task_links = task_links if task_links is not None else _list_repo_task_links(repo_id)
-    except EnjiApiError:
-        if upstream_active_runs:
-            return upstream_active_runs
-        resolved_rerun_state = None
-        resolved_task_links = cast(JsonObjectPayload, {"links": []})
-    return _active_run_ledger.merged_active_runs(
+    return _report_workflows.merged_repo_active_runs(
         repo_id,
-        upstream_active_runs,
-        resolved_rerun_state,
-        resolved_task_links,
-        get_task=run_task_detail,
-        settings=ledger_settings,
-        now=datetime.now(UTC),
+        rerun_state=rerun_state,
+        task_links=task_links,
+        dependencies=_report_workflow_dependencies(),
     )
 
 
 def _record_started_run(context: _audit_runs.RecordStartedRunContext) -> None:
-    normalized = _json_object_payload(context.response)
-    task_payload = _json_dict(normalized.get("task"))
-    _active_run_ledger.record_started_run(
-        default_settings().active_run_ledger,
-        _active_run_ledger.new_entry(
-            repo_id=context.repo_id,
-            project_id=context.project_id,
-            action_key=context.action_key,
-            task_id=_json_str(normalized.get("id")) or _json_str(task_payload.get("id")),
-            task_status=_json_str(normalized.get("status")) or _json_str(task_payload.get("status")),
-            current_head_sha=context.current_head_sha,
-            last_audited_head_sha=context.last_audited_head_sha,
-            observed_at=datetime.now(UTC),
-            started_at=None,
-            ttl_seconds=default_settings().active_run_ledger.ttl_seconds,
-        ),
+    _report_workflows.record_started_run(context, dependencies=_report_workflow_dependencies())
+
+
+def _report_workflow_dependencies() -> _report_workflows.ReportWorkflowDependencies[AuditRunCreate]:
+    return _report_workflows.ReportWorkflowDependencies(
+        list_repo_active_runs=run_repo_active_runs,
+        get_repo_rerun_state=run_repo_audit_rerun_state,
+        list_repo_task_links=run_repo_task_links,
+        report_status_from_task_links=_report_status_from_task_links,
+        resolve_single_repo_target=_resolve_single_repo_target,
+        targeted_run_payload=_targeted_run_payload,
+        report_status=_report_status,
+        report_snapshot=run_audit_summary_snapshot,
+        read_report_snapshot=_read_report_snapshot,
+        wait_for_report_completion=wait_for_report_completion,
+        start_report_audits_for_target=_start_report_audits_for_target,
+        require_report_audit=registry_require_report_audit,
+        monotonic=time.monotonic,
+        sleep=time.sleep,
+        get_task=run_task_detail,
+        active_run_ledger_settings=lambda: default_settings().active_run_ledger,
+        now_utc=lambda: datetime.now(UTC),
+        start_audit_dependencies=_start_audit_dependencies,
     )
 
 
