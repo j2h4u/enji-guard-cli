@@ -34,14 +34,6 @@ class ResponseAdapter(Protocol):
     def json(self, *, operation: str) -> object: ...
 
 
-class ReadinessProbeFields(TypedDict):
-    failure_kind: str | None
-    failure_code: str | None
-    failure_message: str | None
-    failure_status_code: int | None
-    credential_type: str | None
-
-
 def _auth_refresh_payload(auth_file: Path, stored_auth: StoredAuth) -> AuthRefreshPayload:
     credential = stored_auth["credential"]
     if credential["type"] != CredentialType.COOKIE.value:

@@ -151,6 +151,7 @@ noisy scheduled mail when it is not part of the workflow.
 
 - Docker
 - just
+- Python 3.14 for repository development and QA
 - uv, only for repository development and QA
 
 ## Releases
