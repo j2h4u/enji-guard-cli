@@ -66,14 +66,14 @@ jobs:
 
       - name: Initialize CodeQL
         if: needs.changes.outputs.requires-codeql == 'true'
-        uses: github/codeql-action/init@1a818fd5f97ed0ee9a823421bd5b171add01227f # v4.36.2
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           languages: python
           queries: security-extended
 
       - name: Perform CodeQL Analysis
         if: needs.changes.outputs.requires-codeql == 'true'
-        uses: github/codeql-action/analyze@1a818fd5f97ed0ee9a823421bd5b171add01227f # v4.36.2
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           category: "/language:python"
           upload: always
