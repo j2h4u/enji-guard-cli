@@ -4,10 +4,11 @@ import fcntl
 import logging
 import time
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
-from typing import NotRequired, TypedDict
+from typing import NotRequired, TypedDict, TypeGuard, cast
 
+from enji_guard_cli.auth_impl import auto_refresh as auto_refresh_impl
 from enji_guard_cli.auth_impl.cookies import (
     CookieHeader as CookieHeader,
 )
@@ -249,79 +250,35 @@ async def backend_readiness_probe_async(
 
 def start_auto_refresh_task() -> asyncio.Task[None] | None:
     settings = default_settings()
-    if not settings.auto_refresh.enabled:
-        return None
-    stored_auth = load_stored_auth(settings.auth.auth_file)
-    if stored_auth is not None and stored_auth["credential"]["type"] != CredentialType.COOKIE.value:
-        return None
-    return asyncio.create_task(
-        _auto_refresh_loop(
-            auth_file=settings.auth.auth_file,
-            refresh_settings=settings.auto_refresh,
+    return auto_refresh_impl.start_auto_refresh_task(
+        auth_file=settings.auth.auth_file,
+        refresh_settings=settings.auto_refresh,
+        credential_cookie_type=CredentialType.COOKIE.value,
+        dependencies=auto_refresh_impl.AutoRefreshTaskDependencies(
+            load_stored_auth_fn=load_stored_auth,
+            auto_refresh_loop_fn=auto_refresh_impl._auto_refresh_loop,
+            loop_dependencies=auto_refresh_impl.AutoRefreshLoopDependencies(
+                sleep_seconds_fn=auto_refresh_impl._auto_refresh_sleep_seconds,
+                load_sleep_seconds_stored_auth_fn=load_stored_auth,
+                cookie_refresh_sleep_seconds_fn=cookie_refresh_sleep_seconds,
+                refresh_stored_cookie_auth_fn=_refresh_stored_cookie_auth_for_auto_refresh,
+                cookie_access_expires_at_fn=cookie_access_expires_at,
+                is_refresh_error_fn=_is_auto_refresh_error,
+                log_event_fn=log_event,
+                logger=_LOGGER,
+                sleep_fn=asyncio.sleep,
+                client_factory=HttpxEnjiHttpClient,
+            ),
         ),
-        name="enji-guard-auth-auto-refresh",
     )
 
 
-async def _auto_refresh_loop(
-    *,
-    auth_file: Path,
-    refresh_settings: AutoRefreshSettings,
-) -> None:
-    async with HttpxEnjiHttpClient() as client:
-        while True:
-            try:
-                sleep_seconds = _auto_refresh_sleep_seconds(
-                    auth_file=auth_file,
-                    refresh_settings=refresh_settings,
-                )
-                log_event(
-                    _LOGGER,
-                    logging.INFO,
-                    "enji_auth_auto_refresh_scheduled",
-                    {"sleep_seconds": sleep_seconds, "auth_file": str(auth_file)},
-                )
-                await asyncio.sleep(sleep_seconds)
-                refreshed_auth = await refresh_stored_cookie_auth(auth_file, client)
-            except EnjiHttpError as exc:
-                log_event(
-                    _LOGGER,
-                    logging.WARNING,
-                    "enji_auth_auto_refresh_failed",
-                    {
-                        "code": exc.code,
-                        "status_code": exc.status_code,
-                        "retry_seconds": refresh_settings.retry_seconds,
-                    },
-                )
-                await asyncio.sleep(refresh_settings.retry_seconds)
-            except (OSError, ValueError) as exc:
-                log_event(
-                    _LOGGER,
-                    logging.ERROR,
-                    "enji_auth_auto_refresh_crashed",
-                    {
-                        "error_type": type(exc).__name__,
-                        "message": str(exc),
-                        "retry_seconds": refresh_settings.retry_seconds,
-                    },
-                )
-                await asyncio.sleep(refresh_settings.retry_seconds)
-            else:
-                expires_at = cookie_access_expires_at(refreshed_auth)
-                log_event(
-                    _LOGGER,
-                    logging.INFO,
-                    "enji_auth_auto_refresh_succeeded",
-                    {"access_expires_at": expires_at.isoformat() if expires_at is not None else None},
-                )
+async def _refresh_stored_cookie_auth_for_auto_refresh(path: Path, client: object) -> StoredAuth:
+    return await refresh_stored_cookie_auth(path, cast(EnjiHttpClient, client))
 
 
-def _auto_refresh_sleep_seconds(*, auth_file: Path, refresh_settings: AutoRefreshSettings) -> int:
-    stored_auth = load_stored_auth(auth_file)
-    if stored_auth is None:
-        return refresh_settings.fallback_seconds
-    return cookie_refresh_sleep_seconds(stored_auth, datetime.now(UTC), settings=refresh_settings)
+def _is_auto_refresh_error(exc: Exception) -> TypeGuard[auto_refresh_impl.RefreshErrorLike]:
+    return isinstance(exc, EnjiHttpError)
 
 
 async def _auth_status_with_client(
