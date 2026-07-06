@@ -16,7 +16,6 @@ from enji_guard_cli.cli_impl.durations import parse_duration_seconds
 from enji_guard_cli.cli_impl.rendering import (
     echo_access,
     echo_audit_start,
-    echo_email_preferences_table,
     echo_generic_payload,
     echo_json,
     echo_key_values,
@@ -25,7 +24,6 @@ from enji_guard_cli.cli_impl.rendering import (
     echo_repo_resolve_table,
     echo_repo_score_table,
     echo_repo_status_table,
-    echo_schedule_settings_table,
     echo_wait_heartbeat,
     echo_wait_status,
 )
@@ -36,18 +34,16 @@ from enji_guard_cli.cli_impl.runtime_controls import (
     _run_service_body,
     _serve_body,
 )
-from enji_guard_cli.cli_impl.write_targets import (
-    EmailSetCliArgs,
-    ScheduleSetCliArgs,
-    parse_email_set_args,
-    parse_schedule_set_args,
+from enji_guard_cli.cli_impl.write_preferences_commands import (
+    WritePreferencesCliConfig,
+    configure_write_preferences_commands,
+    email_app,
+    schedule_app,
 )
 from enji_guard_cli.core import (
-    EmailPreferenceUpdate,
     OperationName,
     OperationResult,
     ReportWaitOptions,
-    ScheduleSettingsUpdate,
     add_repo,
     create_project,
     delete_project,
@@ -93,8 +89,6 @@ repo_app = typer.Typer(help="Discover, resolve, add, remove, and move GitHub rep
 recon_app = typer.Typer(help="Start baseline discovery. Recon is not a report audit.")
 audit_app = typer.Typer(help="Start slow report-producing audits.")
 report_app = typer.Typer(help="Read generated audit reports.")
-schedule_app = typer.Typer(help="Manage scheduled report audits.")
-email_app = typer.Typer(help="Manage report completion email preferences.")
 app.add_typer(catalog_app, name="catalog", hidden=True)
 app.add_typer(auth_app, name="auth")
 app.add_typer(project_app, name="project")
@@ -118,16 +112,6 @@ _CLI_COMMAND_ROOT = "enji-guard"
 
 type JsonCommandAction = Callable[[], OperationResult]
 type CommandBody = Callable[[], object]
-
-
-SCHEDULE_SET_EPILOG = """
-Targets: REPO, --project PROJECT --all-repos, or --all-projects.
-Options: --enabled on|off, --frequency daily|workdays|weekly-3x|weekly-2x|weekly|monthly, --timezone TZ, --json.
-"""
-EMAIL_SET_EPILOG = """
-Targets: REPO, --project PROJECT --all-repos, or --all-projects.
-Options: --manual on|off, --scheduled on|off, --json.
-"""
 
 
 def _echo_error(code: str, message: str) -> None:
@@ -710,179 +694,6 @@ def _audit_start_body(
     return payload
 
 
-@schedule_app.command("list", help="List automatic report audit schedules.")
-def schedule_list(
-    repo: Annotated[
-        str | None,
-        typer.Argument(help="Optional repo id or owner/name. Defaults to every repo in scope."),
-    ] = None,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    _run_human_or_json_command(
-        lambda: list_schedule_settings(repo, _selected_project()),
-        _json_output(json_output),
-        echo_schedule_settings_table,
-        journey=_cli_journey(
-            command_path=_command_path("schedule", "list"),
-            selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
-        ),
-    )
-
-
-@schedule_app.command(
-    "set",
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
-    help="Batch update automatic report audit schedules.",
-    epilog=SCHEDULE_SET_EPILOG,
-    options_metavar="[OPTIONS] [REPO]",
-)
-def schedule_set(ctx: typer.Context) -> None:
-    try:
-        args = parse_schedule_set_args(ctx.args)
-    except ValueError as exc:
-        _echo_error("VALIDATION", str(exc))
-        raise typer.Exit(1) from None
-    _run_cli_journey(
-        lambda: _schedule_set_body(args),
-        command_path=_command_path("schedule", "set"),
-        json_output=args.json_output,
-        selector_kind=_selector_kind_for_repo(
-            args.repo, project=_selected_project(), all_flag=args.all_repos or args.all_projects
-        ),
-        all_flag=args.all_repos or args.all_projects,
-    )
-
-
-def _schedule_set_body(args: ScheduleSetCliArgs) -> object:
-    payload = _resolve_command_payload(
-        lambda: set_schedule_settings(
-            args.repo,
-            _selected_project(),
-            ScheduleSettingsUpdate(
-                enabled=_preference_switch(args.enabled),
-                frequency=args.frequency,
-                days_of_week=None,
-                schedule_time=None,
-                timezone=args.timezone,
-            ),
-            all_repos=args.all_repos,
-            all_projects=args.all_projects,
-        ),
-    )
-    if _json_output(args.json_output):
-        echo_json(payload)
-    else:
-        echo_schedule_settings_table(payload)
-    return payload
-
-
-@schedule_app.command("auto-time", help="Let Enji choose automatic report audit times.")
-def schedule_auto_time(
-    repo: Annotated[
-        str | None,
-        typer.Argument(help="Optional repo id or owner/name for a single-repo update."),
-    ] = None,
-    all_repos: Annotated[bool, typer.Option("--all-repos", help="Batch every repo in the selected --project.")] = False,
-    all_projects: Annotated[bool, typer.Option("--all-projects", help="Batch every repo in every project.")] = False,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    _run_human_or_json_command(
-        lambda: set_schedule_settings(
-            repo,
-            _selected_project(),
-            ScheduleSettingsUpdate(
-                enabled=None,
-                frequency=None,
-                days_of_week=None,
-                schedule_time="auto",
-                timezone=None,
-            ),
-            all_repos=all_repos,
-            all_projects=all_projects,
-        ),
-        _json_output(json_output),
-        echo_schedule_settings_table,
-        journey=_cli_journey(
-            command_path=_command_path("schedule", "auto-time"),
-            selector_kind=_selector_kind_for_repo(
-                repo, project=_selected_project(), all_flag=all_repos or all_projects
-            ),
-            all_flag=all_repos or all_projects,
-        ),
-    )
-
-
-@email_app.command("list", help="List manual and scheduled report email preferences.")
-def email_list(
-    repo: Annotated[
-        str | None,
-        typer.Argument(help="Optional repo id or owner/name. Defaults to every repo in scope."),
-    ] = None,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    _run_human_or_json_command(
-        lambda: list_email_preferences(repo, _selected_project()),
-        _json_output(json_output),
-        echo_email_preferences_table,
-        journey=_cli_journey(
-            command_path=_command_path("email", "list"),
-            selector_kind=_selector_kind_for_repo(repo, project=_selected_project()),
-        ),
-    )
-
-
-@email_app.command(
-    "set",
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
-    help="Batch update report email preferences.",
-    epilog=EMAIL_SET_EPILOG,
-    options_metavar="[OPTIONS] [REPO]",
-)
-def email_set(ctx: typer.Context) -> None:
-    try:
-        args = parse_email_set_args(ctx.args)
-    except ValueError as exc:
-        _echo_error("VALIDATION", str(exc))
-        raise typer.Exit(1) from None
-    _run_cli_journey(
-        lambda: _email_set_body(args),
-        command_path=_command_path("email", "set"),
-        json_output=args.json_output,
-        selector_kind=_selector_kind_for_repo(
-            args.repo, project=_selected_project(), all_flag=args.all_repos or args.all_projects
-        ),
-        all_flag=args.all_repos or args.all_projects,
-    )
-
-
-def _email_set_body(args: EmailSetCliArgs) -> object:
-    payload = _resolve_command_payload(
-        lambda: set_email_preferences(
-            args.repo,
-            _selected_project(),
-            EmailPreferenceUpdate(
-                manual_run_completion=_preference_switch(args.manual),
-                scheduled_run_completion=_preference_switch(args.scheduled),
-            ),
-            all_repos=args.all_repos,
-            all_projects=args.all_projects,
-        ),
-    )
-    if _json_output(args.json_output):
-        echo_json(payload)
-    else:
-        echo_email_preferences_table(payload)
-    return payload
-
-
-def _preference_switch(value: Literal["on", "off"] | None) -> bool | None:
-    if value == "on":
-        return True
-    if value == "off":
-        return False
-    return None
-
-
 def _selected_project() -> str | None:
     project = _cli_state["project"]
     return project if isinstance(project, str) else None
@@ -907,6 +718,25 @@ configure_auth_catalog_commands(
         json_output=_json_output,
         echo_error=_echo_error,
         exit_code_for_error=_exit_code_for_error,
+    )
+)
+configure_write_preferences_commands(
+    WritePreferencesCliConfig(
+        run_cli_journey=_run_cli_journey,
+        command_path=_command_path,
+        json_output=_json_output,
+        echo_error=_echo_error,
+        selected_project=_selected_project,
+        selector_kind_for_repo=_selector_kind_for_repo,
+        resolve_command_payload=_resolve_command_payload,
+        list_schedule_settings=lambda repo, project: list_schedule_settings(repo, project),
+        set_schedule_settings=lambda repo, project, update, **kwargs: set_schedule_settings(
+            repo, project, update, **kwargs
+        ),
+        list_email_preferences=lambda repo, project: list_email_preferences(repo, project),
+        set_email_preferences=lambda repo, project, update, **kwargs: set_email_preferences(
+            repo, project, update, **kwargs
+        ),
     )
 )
 set_auth_status_action(lambda auth_file: auth_status(auth_file))
