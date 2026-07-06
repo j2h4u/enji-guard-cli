@@ -3,7 +3,7 @@ from typing import Annotated, Literal, cast
 
 import typer
 
-from enji_guard_cli.audits import AuditAlias, ReportAuditAlias
+from enji_guard_cli.audits import ReportAuditAlias
 from enji_guard_cli.cli_impl.auth_catalog import (
     SharedCliConfig,
     auth_app,
@@ -27,7 +27,12 @@ from enji_guard_cli.cli_impl.rendering import (
     echo_wait_heartbeat,
     echo_wait_status,
 )
-from enji_guard_cli.cli_impl.report_rendering import echo_report_summary, report_summary_payload, reports_markdown
+from enji_guard_cli.cli_impl.report_commands import (
+    ReportCommandsCliConfig,
+    _report_audits,
+    configure_report_commands,
+    report_app,
+)
 from enji_guard_cli.cli_impl.runtime_controls import (
     _check_backend_readiness,
     _check_local_listener,
@@ -88,7 +93,6 @@ project_app = typer.Typer(help="List and manage Enji projects.")
 repo_app = typer.Typer(help="Discover, resolve, add, remove, and move GitHub repositories.")
 recon_app = typer.Typer(help="Start baseline discovery. Recon is not a report audit.")
 audit_app = typer.Typer(help="Start slow report-producing audits.")
-report_app = typer.Typer(help="Read generated audit reports.")
 app.add_typer(catalog_app, name="catalog", hidden=True)
 app.add_typer(auth_app, name="auth")
 app.add_typer(project_app, name="project")
@@ -479,85 +483,6 @@ def _project_delete_body(*, project: str, json_output: bool) -> object:
     return payload
 
 
-@report_app.command("read", help="Read report bodies for a repository. Default output is Markdown.")
-def report_read(
-    repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
-    audits: Annotated[
-        list[ReportAuditAlias] | None,
-        typer.Argument(help="Optional report audit aliases. Defaults to ready reports."),
-    ] = None,
-    all_reports: Annotated[bool, typer.Option("--all", help="Read every report audit.")] = False,
-    json_output: Annotated[
-        bool,
-        typer.Option("--json", help="Emit the full structured read payload, including report Markdown bodies."),
-    ] = False,
-) -> None:
-    _run_cli_journey(
-        lambda: _report_read_body(repo=repo, audits=audits, all_reports=all_reports, json_output=json_output),
-        command_path=_command_path("report", "read"),
-        json_output=_json_output(json_output),
-        selector_kind=_selector_kind_for_repo(repo, project=_selected_project(), all_flag=all_reports),
-        all_flag=all_reports,
-    )
-
-
-def _report_read_body(
-    *,
-    repo: str,
-    audits: list[ReportAuditAlias] | None,
-    all_reports: bool,
-    json_output: bool,
-) -> object:
-    payload = _resolve_command_payload(
-        lambda: read_reports_for_repo(repo, _selected_project(), _report_audits(audits or []), all_reports=all_reports)
-    )
-    if _json_output(json_output):
-        echo_json(payload)
-        return payload
-    try:
-        typer.echo(reports_markdown(payload))
-    except ValueError as exc:
-        _echo_error("VALIDATION", str(exc))
-        raise typer.Exit(1) from None
-    return payload
-
-
-@report_app.command("summary", help="Read compact report metadata for a repository.")
-def report_summary(
-    repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
-    audits: Annotated[
-        list[ReportAuditAlias] | None,
-        typer.Argument(help="Optional report audit aliases. Defaults to ready reports."),
-    ] = None,
-    all_reports: Annotated[bool, typer.Option("--all", help="Summarize every report audit.")] = False,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit compact structured report summary output.")] = False,
-) -> None:
-    _run_cli_journey(
-        lambda: _report_summary_body(repo=repo, audits=audits, all_reports=all_reports, json_output=json_output),
-        command_path=_command_path("report", "summary"),
-        json_output=_json_output(json_output),
-        selector_kind=_selector_kind_for_repo(repo, project=_selected_project(), all_flag=all_reports),
-        all_flag=all_reports,
-    )
-
-
-def _report_summary_body(
-    *,
-    repo: str,
-    audits: list[ReportAuditAlias] | None,
-    all_reports: bool,
-    json_output: bool,
-) -> object:
-    payload = _resolve_command_payload(
-        lambda: read_reports_for_repo(repo, _selected_project(), _report_audits(audits or []), all_reports=all_reports)
-    )
-    if _json_output(json_output):
-        echo_json(report_summary_payload(payload))
-    else:
-        echo_report_summary(payload)
-    return payload
-
-
 @repo_app.command("list", help="List connected repositories with triage scores.")
 def repo_list(
     sort: Annotated[
@@ -703,14 +628,6 @@ def _json_output(local_json_output: bool = False) -> bool:
     return local_json_output or _cli_state["json"] is True
 
 
-def _report_audit(audit: ReportAuditAlias) -> AuditAlias:
-    return AuditAlias(audit.value)
-
-
-def _report_audits(audits: list[ReportAuditAlias]) -> list[AuditAlias]:
-    return [_report_audit(audit) for audit in audits]
-
-
 configure_auth_catalog_commands(
     SharedCliConfig(
         run_cli_journey=_run_cli_journey,
@@ -736,6 +653,20 @@ configure_write_preferences_commands(
         list_email_preferences=lambda repo, project: list_email_preferences(repo, project),
         set_email_preferences=lambda repo, project, update, **kwargs: set_email_preferences(
             repo, project, update, **kwargs
+        ),
+    )
+)
+configure_report_commands(
+    ReportCommandsCliConfig(
+        run_cli_journey=_run_cli_journey,
+        command_path=_command_path,
+        json_output=_json_output,
+        echo_error=_echo_error,
+        selected_project=_selected_project,
+        selector_kind_for_repo=_selector_kind_for_repo,
+        resolve_command_payload=_resolve_command_payload,
+        read_reports_for_repo=lambda repo, project, audits, all_reports: read_reports_for_repo(
+            repo, project, audits, all_reports=all_reports
         ),
     )
 )
