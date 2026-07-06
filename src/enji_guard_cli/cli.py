@@ -71,7 +71,7 @@ from enji_guard_cli.core import (
     wait_for_reports,
 )
 from enji_guard_cli.errors import EnjiApiError
-from enji_guard_cli.journey import AgentJourney, run_agent_journey
+from enji_guard_cli.journey import AgentJourney, run_agent_journey, selector_kind_for_github_repo
 from enji_guard_cli.settings import DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT, DEFAULT_MCP_TRANSPORT, default_settings
 from enji_guard_cli.telemetry import configure_logging
 
@@ -213,10 +213,6 @@ def _selector_kind_for_repo(repo: str | None, *, project: str | None = None, all
     if project is not None:
         return "project"
     return "unknown"
-
-
-def _selector_kind_for_github_repo(github_repo: str) -> str:
-    return "owner_name" if "/" in github_repo else "unknown"
 
 
 @app.callback(invoke_without_command=True)
@@ -527,7 +523,7 @@ def repo_add(
         echo_repo_add,
         journey=_cli_journey(
             command_path=_command_path("repo", "add"),
-            selector_kind=_selector_kind_for_github_repo(github_repo),
+            selector_kind=selector_kind_for_github_repo(github_repo),
         ),
     )
 

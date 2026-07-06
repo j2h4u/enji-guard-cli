@@ -1,4 +1,4 @@
-set shell := ["bash", "-uc"]
+set shell := ["bash", "-euo", "pipefail", "-c"]
 export UV_LINK_MODE := "hardlink"
 
 # Show available repo commands.
