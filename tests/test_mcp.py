@@ -13,14 +13,18 @@ from enji_guard_cli.settings import LogFormat, LogLevelName, TelemetrySettings
 from enji_guard_cli.telemetry import configure_logging
 
 
-def portfolio_payload(project_name: str = "MCP Integrations") -> dict[str, object]:
+def portfolio_payload(
+    project_name: str = "MCP Integrations",
+    repos: list[dict[str, object]] | None = None,
+    active_run_count: int = 0,
+) -> dict[str, object]:
     return {
         "observed_at": "2026-07-05T00:00:00Z",
         "summary": {
             "project_count": 1,
             "repo_count": 1,
             "connected_repo_count": 1,
-            "active_run_count": 0,
+            "active_run_count": active_run_count,
             "recon_done_count": 1,
             "report_complete_count": 0,
         },
@@ -28,7 +32,9 @@ def portfolio_payload(project_name: str = "MCP Integrations") -> dict[str, objec
             {
                 "project_id": "project_1",
                 "project_name": project_name,
-                "repos": [
+                "repos": repos
+                if repos is not None
+                else [
                     {
                         "project_id": "project_1",
                         "project_name": project_name,
@@ -88,9 +94,131 @@ def empty_report_status() -> dict[str, object]:
     }
 
 
+def workflow_repo_payload() -> dict[str, object]:
+    reports = empty_report_status()
+    reports["items"] = [
+        {
+            "audit": "security",
+            "label": "Security",
+            "action_key": "audit.security",
+            "route_slug": "vulns",
+            "report": {
+                "readability_state": "readable",
+                "can_read": True,
+                "freshness_state": "stale",
+                "current_head_sha": "abc123",
+                "audited_head_sha": "def456",
+                "created_at": "2026-07-05T00:30:00Z",
+                "started_at": "2026-07-05T00:31:00Z",
+                "completed_at": "2026-07-05T01:00:00Z",
+                "run_status": "completed",
+                "fleet_task_id": "fleet_1",
+                "stale": True,
+            },
+            "task": {
+                "lifecycle_state": "running",
+                "active": True,
+                "fleet_task_id": "fleet_2",
+                "run_status": "running",
+                "created_at": "2026-07-05T01:30:00Z",
+                "started_at": "2026-07-05T01:31:00Z",
+                "completed_at": None,
+            },
+            "agent_action": "audit.security",
+        }
+    ]
+    reports.update(
+        {
+            "repo_id": "repo_1",
+            "current_head_sha": "abc123",
+            "last_report_at": "2026-07-05T01:00:00Z",
+            "complete": False,
+            "fresh": False,
+            "readable": True,
+            "active": True,
+            "queued": False,
+            "running": True,
+            "missing": False,
+            "stale": True,
+            "failed": False,
+            "counts": {
+                "total": 1,
+                "readable": 1,
+                "active": 1,
+                "queued": 0,
+                "running": 1,
+                "missing": 0,
+                "stale": 1,
+                "failed": 0,
+            },
+        }
+    )
+    return {
+        "project_id": "project_1",
+        "project_name": "MCP Integrations",
+        "repo_id": "repo_1",
+        "github_owner": "j2h4u",
+        "github_name": "mcp-strava",
+        "github_repo": "j2h4u/mcp-strava",
+        "connected": True,
+        "recon_done": True,
+        "scores": {"security": 67},
+        "score_grades": {"security": "fair"},
+        "score_summary": {
+            "overall_score": 67.0,
+            "overall_grade": "fair",
+            "weakest_axis": "security",
+            "weakest_score": 67.0,
+            "weakest_grade": "fair",
+        },
+        "active_run_count": 1,
+        "active_runs": [{"audit": "security", "run_id": "run_1"}],
+        "current_head_sha": "abc123",
+        "last_report_at": "2026-07-05T01:00:00Z",
+        "reports": reports,
+    }
+
+
+def repo_reports_payload() -> dict[str, object]:
+    return {
+        "target": {
+            "repo_id": "repo_1",
+            "project_id": "project_1",
+            "github_repo": "j2h4u/mcp-strava",
+        },
+        "reports": [
+            {
+                "audit": "security",
+                "available": True,
+                "current_head_sha": "abc123",
+                "last_audited_head_sha": "def456",
+                "out_of_date": True,
+                "state": "ready",
+                "reason": None,
+                "message": None,
+                "snapshot": {
+                    "content": {
+                        "summary": {
+                            "summary": {
+                                "headline": "Refresh this report before acting on it",
+                                "score": 67,
+                            }
+                        }
+                    }
+                },
+            }
+        ],
+    }
+
+
 def call_structured_tool(server: FastMCP, name: str, arguments: dict[str, object]) -> object:
     _text, structured = cast(tuple[object, object], asyncio.run(server.call_tool(name, arguments)))
     return structured
+
+
+def tool_by_name(server: FastMCP, name: str) -> Tool:
+    tools = cast(list[Tool], asyncio.run(server.list_tools()))
+    return next(tool for tool in tools if tool.name == name)
 
 
 def test_create_mcp_server_registers_expected_tools() -> None:
@@ -185,6 +313,96 @@ def test_repo_reports_tool_reads_all_reports(monkeypatch: pytest.MonkeyPatch) ->
         "repo": "j2h4u/mcp-strava",
         "project": "MCP Integrations",
     }
+
+
+def test_mcp_read_only_workflow_stays_overview_first_then_repo_reports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server = create_mcp_server()
+    overview_tool = tool_by_name(server, "enji_portfolio_overview")
+    repo_reports_tool = tool_by_name(server, "enji_repo_reports")
+
+    assert_tool_metadata(overview_tool, repo_reports_tool)
+
+    workflow_repo = workflow_repo_payload()
+    overview_payload = portfolio_payload(repos=[workflow_repo], active_run_count=1)
+    reports_payload = repo_reports_payload()
+    monkeypatch.setattr(mcp_server, "get_portfolio_overview", lambda project, sort: overview_payload)
+    monkeypatch.setattr(mcp_server, "get_repo_reports", lambda repo, project: reports_payload)
+
+    repo_entry, report_state = assert_overview_exposes_report_freshness(server)
+    assert_repo_reports_preserves_target_and_freshness(server, repo_entry, report_state)
+
+
+def assert_tool_metadata(overview_tool: Tool, repo_reports_tool: Tool) -> None:
+    assert overview_tool.description is not None
+    assert "Use this first" in overview_tool.description
+    assert "report freshness" in overview_tool.description
+    assert repo_reports_tool.description is not None
+    assert "Use this after the portfolio overview identifies the target repo" in repo_reports_tool.description
+    assert "owner/name or repo_id" in repo_reports_tool.description
+
+    overview_schema = cast(dict[str, object], overview_tool.inputSchema)
+    overview_props = cast(dict[str, object], overview_schema["properties"])
+    repo_reports_schema = cast(dict[str, object], repo_reports_tool.inputSchema)
+    repo_reports_props = cast(dict[str, object], repo_reports_schema["properties"])
+
+    assert set(overview_props) == {"project", "sort"}
+    assert cast(dict[str, object], overview_props["project"])["default"] == ""
+    assert cast(dict[str, object], overview_props["sort"])["default"] == "default"
+    assert cast(dict[str, object], overview_props["sort"])["$ref"] == "#/$defs/RepoSort"
+    assert cast(dict[str, object], repo_reports_schema)["required"] == ["repo"]
+    assert set(repo_reports_props) == {"project", "repo"}
+    assert cast(dict[str, object], repo_reports_props["project"])["default"] == ""
+
+
+def assert_overview_exposes_report_freshness(server: FastMCP) -> tuple[dict[str, object], dict[str, object]]:
+    overview = cast(
+        dict[str, object],
+        call_structured_tool(server, "enji_portfolio_overview", {"project": "", "sort": "weakest"}),
+    )
+    project_entry = cast(dict[str, object], cast(list[object], overview["projects"])[0])
+    repo_entry = cast(dict[str, object], cast(list[object], project_entry["repos"])[0])
+    reports_status = cast(dict[str, object], repo_entry["reports"])
+    report_state = cast(
+        dict[str, object], cast(dict[str, object], cast(list[object], reports_status["items"])[0])["report"]
+    )
+
+    assert repo_entry["repo_id"] == "repo_1"
+    assert repo_entry["github_repo"] == "j2h4u/mcp-strava"
+    assert reports_status["current_head_sha"] == "abc123"
+    assert report_state["freshness_state"] == "stale"
+    assert report_state["current_head_sha"] == "abc123"
+    assert report_state["audited_head_sha"] == "def456"
+
+    return repo_entry, report_state
+
+
+def assert_repo_reports_preserves_target_and_freshness(
+    server: FastMCP,
+    repo_entry: dict[str, object],
+    report_state: dict[str, object],
+) -> None:
+    reports = cast(
+        dict[str, object],
+        call_structured_tool(
+            server,
+            "enji_repo_reports",
+            {
+                "repo": cast(str, repo_entry["github_repo"]),
+                "project": cast(str, repo_entry["project_name"]),
+            },
+        ),
+    )
+    report_target = cast(dict[str, object], reports["target"])
+    report = cast(dict[str, object], cast(list[object], reports["reports"])[0])
+
+    assert report_target["repo_id"] == repo_entry["repo_id"]
+    assert report_target["project_id"] == repo_entry["project_id"]
+    assert report_target["github_repo"] == repo_entry["github_repo"]
+    assert report["out_of_date"] is True
+    assert report["current_head_sha"] == report_state["current_head_sha"]
+    assert report["last_audited_head_sha"] == report_state["audited_head_sha"]
 
 
 def test_portfolio_overview_tool_writes_agent_journey_without_raw_project(

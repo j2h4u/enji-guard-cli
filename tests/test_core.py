@@ -2632,6 +2632,9 @@ def test_start_audit_records_ledger_entry_for_started_report(tmp_path: Path, mon
 def test_report_status_projects_ledger_task_with_task_detail(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     settings = _ledger_test_settings(tmp_path)
     monkeypatch.setattr(core, "default_settings", lambda: settings)
+    observed_at = datetime.now(UTC) - timedelta(minutes=1)
+    created_at = observed_at.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    started_at = (observed_at + timedelta(seconds=10)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     active_run_ledger.record_started_run(
         settings.active_run_ledger,
         active_run_ledger.new_entry(
@@ -2642,7 +2645,7 @@ def test_report_status_projects_ledger_task_with_task_detail(tmp_path: Path, mon
             task_status="pending",
             current_head_sha="head_2",
             last_audited_head_sha="head_1",
-            observed_at=datetime(2026, 7, 5, 10, 0, tzinfo=UTC),
+            observed_at=observed_at,
             started_at=None,
             ttl_seconds=settings.active_run_ledger.ttl_seconds,
         ),
@@ -2676,8 +2679,8 @@ def test_report_status_projects_ledger_task_with_task_detail(tmp_path: Path, mon
             "task": {
                 "id": task_id,
                 "status": "in_progress",
-                "createdAt": "2026-07-05T10:00:00Z",
-                "startedAt": "2026-07-05T10:00:10Z",
+                "createdAt": created_at,
+                "startedAt": started_at,
                 "completedAt": None,
             }
         },
@@ -2692,8 +2695,8 @@ def test_report_status_projects_ledger_task_with_task_detail(tmp_path: Path, mon
         "active": True,
         "fleet_task_id": "task_security",
         "run_status": "in_progress",
-        "created_at": "2026-07-05T10:00:00Z",
-        "started_at": "2026-07-05T10:00:10Z",
+        "created_at": created_at,
+        "started_at": started_at,
         "completed_at": None,
     }
     assert payload["items"][0]["report"]["stale"] is True
