@@ -29,7 +29,7 @@ def configure_logging(settings: TelemetrySettings | None = None, *, provenance: 
     telemetry_settings = settings if settings is not None else default_settings().telemetry
     _ACTIVE_SINK = (
         NoopTelemetrySink()
-        if settings is None and _ACTIVE_PROVENANCE == "test"
+        if settings is None and _running_under_pytest()
         else build_telemetry_sink(
             log_file=telemetry_settings.log_file,
             json_format=telemetry_settings.log_format == "json",
@@ -86,9 +86,13 @@ def _event_provenance() -> str:
 
 
 def _default_provenance() -> str:
-    if "PYTEST_CURRENT_TEST" in os.environ:
+    if _running_under_pytest():
         return "test"
     return "runtime"
+
+
+def _running_under_pytest() -> bool:
+    return "PYTEST_CURRENT_TEST" in os.environ
 
 
 def _parse_log_level(raw_level: str) -> int:
