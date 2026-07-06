@@ -23,8 +23,10 @@ New Python packages stay in quarantine for 7 to 14 days before normal use, or
 they need explicit owner approval for earlier adoption. This is a review and
 merge policy, not a separate automated gate.
 
-Lifecycle and install scripts are disabled by default. Only allowlist a script
-when it has been reviewed and is required for the change.
+Production Docker builds install third-party runtime dependencies with source
+builds disabled, then install this project separately. Runtime dependencies must
+have wheels for the deployment platform. Dev-only tooling may still use source
+distributions when no wheel exists; review those changes as dependency changes.
 
 Dependabot PRs get the same review standard as any other dependency change.
 Reviewers should check the package delta, lockfile updates, install-script

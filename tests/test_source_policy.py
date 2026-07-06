@@ -10,6 +10,12 @@ def test_dockerfile_default_command_is_loopback_safe() -> None:
     assert '"--allow-external-host"' not in dockerfile
 
 
+def test_dockerfile_runtime_dependency_layer_disables_source_builds() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "uv sync --frozen --no-build --no-install-project --no-dev" in dockerfile
+
+
 def test_container_publish_workflow_run_requires_trusted_source() -> None:
     workflow = (ROOT / ".github" / "workflows" / "container.yml").read_text(encoding="utf-8")
 

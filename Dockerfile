@@ -17,7 +17,7 @@ ENV SETUPTOOLS_SCM_PRETEND_VERSION=${PACKAGE_VERSION} \
 
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-build --no-install-project --no-dev
 
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
