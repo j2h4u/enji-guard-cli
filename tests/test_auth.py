@@ -4,13 +4,13 @@ import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import NotRequired, TypedDict, cast
+from typing import NotRequired, TypedDict, TypeGuard, cast
 
 import httpx
 import pytest
 from typer.testing import CliRunner
 
-import enji_guard_cli.auth as auth_module
+import enji_guard_cli.auth_impl.auto_refresh as auto_refresh_module
 from enji_guard_cli.auth import (
     AUTH_REFRESH_USER_AGENT,
     AuthError,
@@ -33,7 +33,7 @@ from enji_guard_cli.auth import StoredAuth as RuntimeStoredAuth
 from enji_guard_cli.cli import app
 from enji_guard_cli.readiness import BackendReadinessProbe
 from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER, AutoRefreshSettings
-from enji_guard_cli.transport import HttpxEnjiHttpClient
+from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient
 
 AUTH_REFRESH_ORIGIN = DEFAULT_GUARD_ORIGIN
 AUTH_REFRESH_REFERER = DEFAULT_GUARD_REFERER
@@ -87,13 +87,16 @@ def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch
     slept_with: list[int] = []
 
     class FakeHttpxEnjiHttpClient:
-        async def __aenter__(self) -> object:
-            return object()
+        async def __aenter__(self) -> FakeHttpxEnjiHttpClient:
+            return self
 
         async def __aexit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
             return None
 
-    def fake_sleep_seconds(*, auth_file: Path, refresh_settings: AutoRefreshSettings) -> int:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            raise AssertionError(f"request should not be called: {request.operation}")
+
+    def fake_sleep_seconds(*, auth_file: Path, refresh_settings: AutoRefreshSettings, **_kwargs: object) -> int:
         raise ValueError("invalid auth state")
 
     async def fake_sleep(seconds: int) -> None:
@@ -103,20 +106,38 @@ def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch
     def fake_log_event(*_args: object, **_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr(auth_module, "log_event", fake_log_event)
-    monkeypatch.setattr(auth_module, "HttpxEnjiHttpClient", FakeHttpxEnjiHttpClient)
-    monkeypatch.setattr(auth_module, "_auto_refresh_sleep_seconds", fake_sleep_seconds)
-    monkeypatch.setattr(auth_module.asyncio, "sleep", fake_sleep)
+    async def fail_refresh(*_args: object, **_kwargs: object) -> RuntimeStoredAuth:
+        raise AssertionError("refresh should not be called")
+
+    def is_refresh_error(exc: Exception) -> TypeGuard[auto_refresh_module.RefreshErrorLike]:
+        return False
+
+    def cookie_expires(*_args: object, **_kwargs: object) -> datetime | None:
+        return None
+
+    monkeypatch.setattr(auto_refresh_module.asyncio, "sleep", fake_sleep)
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
-            auth_module._auto_refresh_loop(
+            auto_refresh_module._auto_refresh_loop(
                 auth_file=Path("auth.json"),
                 refresh_settings=AutoRefreshSettings(
                     enabled=True,
                     lead_seconds=300,
                     fallback_seconds=900,
                     retry_seconds=60,
+                ),
+                dependencies=auto_refresh_module.AutoRefreshLoopDependencies(
+                    sleep_seconds_fn=fake_sleep_seconds,
+                    load_sleep_seconds_stored_auth_fn=lambda _path: None,
+                    cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
+                    refresh_stored_cookie_auth_fn=fail_refresh,
+                    cookie_access_expires_at_fn=cookie_expires,
+                    is_refresh_error_fn=is_refresh_error,
+                    log_event_fn=fake_log_event,
+                    logger=auto_refresh_module.logging.getLogger("test"),
+                    sleep_fn=fake_sleep,
+                    client_factory=FakeHttpxEnjiHttpClient,
                 ),
             )
         )
@@ -616,11 +637,13 @@ def test_start_auto_refresh_task_runs_without_bootstrapped_auth_file(
     auth_file = tmp_path / "auth.json"
     captured: dict[str, object] = {}
 
-    async def fake_auto_refresh_loop(*, auth_file: Path, refresh_settings: AutoRefreshSettings) -> None:
+    async def fake_auto_refresh_loop(
+        *, auth_file: Path, refresh_settings: AutoRefreshSettings, **_kwargs: object
+    ) -> None:
         captured["auth_file"] = auth_file
         captured["refresh_settings"] = refresh_settings
 
-    monkeypatch.setattr("enji_guard_cli.auth._auto_refresh_loop", fake_auto_refresh_loop)
+    monkeypatch.setattr("enji_guard_cli.auth_impl.auto_refresh._auto_refresh_loop", fake_auto_refresh_loop)
     monkeypatch.setattr(
         "enji_guard_cli.auth.default_settings",
         lambda: type(
