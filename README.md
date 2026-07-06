@@ -313,6 +313,8 @@ bound to loopback or behind an explicit trusted boundary.
   rules.
 - [AGENTS.md](AGENTS.md): concise development, QA, and ops rules for coding
   agents.
+- [docs/decisions.md](docs/decisions.md): current architectural decision index
+  and invariants.
 - [SECURITY.md](SECURITY.md): credential handling, supported versions, and MCP
   exposure notes.
 - [CHANGELOG.md](CHANGELOG.md): release history.

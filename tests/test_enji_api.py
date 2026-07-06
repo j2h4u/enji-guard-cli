@@ -753,11 +753,12 @@ def empty_response(*, status_code: int = 204) -> EnjiHttpResponse:
 class ConcurrentRefreshFakeClient:
     requests: list[EnjiHttpRequest] = field(default_factory=list)
     get_count: int = 0
+    second_invalid_seen: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
         self.requests.append(request)
         if request.method == "POST":
-            await asyncio.sleep(0.01)
+            await self.second_invalid_seen.wait()
             return json_response(
                 {"message": "token refreshed"},
                 set_cookie_headers=(
@@ -767,5 +768,7 @@ class ConcurrentRefreshFakeClient:
             )
         self.get_count += 1
         if self.get_count <= 2:
+            if self.get_count == 2:
+                self.second_invalid_seen.set()
             return json_response({"error": {"code": "AUTH_INVALID"}}, status_code=401)
         return json_response({"access": {"group": "pro", "fullAccess": True, "limits": {}}})
