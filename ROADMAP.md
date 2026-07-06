@@ -22,9 +22,10 @@ surface.
 
 ## Current State
 
-The product is close to complete for its intended scope. The CLI is the
-validated surface and is suitable for daily agent workflows. Docker is the
-supported runtime.
+The product is working for its primary scope: Docker-first Enji Guard access
+through a validated CLI for daily agent workflows. Docker is the supported
+runtime. The remaining product work is concentrated in the smaller read-only
+MCP surface and optional future install modes.
 
 ## Remaining
 
