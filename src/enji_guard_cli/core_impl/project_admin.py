@@ -3,8 +3,10 @@ from dataclasses import dataclass
 from typing import cast
 
 from enji_guard_cli.core_impl.models import RepoTargetPayload
+from enji_guard_cli.core_impl.targets import project_refs
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
+type ListProjects = Callable[[], JsonObjectPayload]
 type ResolveSingleProjectId = Callable[[str | None], str]
 type ResolveSingleRepoTarget = Callable[[str, str | None], RepoTargetPayload]
 type ValidateProjectName = Callable[[str], str]
@@ -23,6 +25,17 @@ type MakeRepoTransfer[TRepoTransfer] = Callable[[str, str, str, JsonObjectPayloa
 
 
 @dataclass(frozen=True, slots=True)
+class ProjectCrudDependencies:
+    list_projects: ListProjects
+    resolve_single_project_id: ResolveSingleProjectId
+    validate_project_name: ValidateProjectName
+    create_project: CreateProject
+    rename_project: RenameProject
+    project_detail: ProjectDetail
+    delete_project: DeleteProject
+
+
+@dataclass(frozen=True, slots=True)
 class MoveRepoDependencies[TRepoTransfer]:
     resolve_single_repo_target: ResolveSingleRepoTarget
     resolve_single_project_id: ResolveSingleProjectId
@@ -30,6 +43,24 @@ class MoveRepoDependencies[TRepoTransfer]:
     transfer_schedule_replacements: TransferScheduleReplacements
     make_repo_transfer: MakeRepoTransfer[TRepoTransfer]
     move_repo: MoveRepo[TRepoTransfer]
+
+
+def create_project(name: str, *, dependencies: ProjectCrudDependencies) -> JsonObjectPayload:
+    project_name = dependencies.validate_project_name(name)
+    for project_ref in project_refs(dependencies.list_projects()):
+        if project_ref["name"] is not None and project_ref["name"].casefold() == project_name.casefold():
+            return {
+                "project_id": project_ref["id"],
+                "project_name": project_ref["name"],
+                "created": False,
+                "already_present": True,
+                "response": None,
+            }
+    return create_project_payload(
+        project_name,
+        validate_project_name=dependencies.validate_project_name,
+        create_project=dependencies.create_project,
+    )
 
 
 def create_project_payload(
@@ -42,6 +73,31 @@ def create_project_payload(
         "already_present": False,
         "response": create_project(project_name),
     }
+
+
+def rename_project(project: str, name: str, *, dependencies: ProjectCrudDependencies) -> JsonObjectPayload:
+    project_id = dependencies.resolve_single_project_id(project)
+    project_name = dependencies.validate_project_name(name)
+    for project_ref in project_refs(dependencies.list_projects()):
+        if project_ref["id"] == project_id and project_ref["name"] == project_name:
+            return {
+                "project_id": project_id,
+                "project_name": project_name,
+                "changed": False,
+                "already_named": True,
+                "response": None,
+            }
+    return rename_project_payload(
+        project_id,
+        project_name,
+        resolve_single_project_id=lambda selected_project: _project_id_from_resolved(
+            selected_project,
+            resolved_project_id=project_id,
+            resolve_single_project_id=dependencies.resolve_single_project_id,
+        ),
+        validate_project_name=dependencies.validate_project_name,
+        rename_project=dependencies.rename_project,
+    )
 
 
 def rename_project_payload(
@@ -63,6 +119,15 @@ def rename_project_payload(
     }
 
 
+def delete_project(project: str, *, dependencies: ProjectCrudDependencies) -> JsonObjectPayload:
+    return delete_project_payload(
+        project,
+        resolve_single_project_id=dependencies.resolve_single_project_id,
+        project_detail=dependencies.project_detail,
+        delete_project=dependencies.delete_project,
+    )
+
+
 def delete_project_payload(
     project: str,
     *,
@@ -76,6 +141,17 @@ def delete_project_payload(
         raise ValueError(f"project is not empty: {repo_count} repo(s)")
     delete_project(project_id)
     return {"project_id": project_id, "deleted": True}
+
+
+def _project_id_from_resolved(
+    project: str | None,
+    *,
+    resolved_project_id: str,
+    resolve_single_project_id: ResolveSingleProjectId,
+) -> str:
+    if project == resolved_project_id:
+        return resolved_project_id
+    return resolve_single_project_id(project)
 
 
 def _project_repo_count(project: JsonObjectPayload) -> int:
