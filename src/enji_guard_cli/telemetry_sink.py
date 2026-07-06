@@ -3,6 +3,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from io import TextIOWrapper
 from logging import INFO, Formatter, LogRecord
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -87,7 +88,7 @@ class _FileJsonlSink:
 
 
 class _PrivateRotatingFileHandler(RotatingFileHandler):
-    def _open(self):  # type: ignore[override]
+    def _open(self) -> TextIOWrapper:
         stream = super()._open()
         Path(self.baseFilename).chmod(_PRIVATE_FILE_MODE)
         return stream
