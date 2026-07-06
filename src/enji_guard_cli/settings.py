@@ -92,9 +92,6 @@ class TelemetrySettings:
 
 @dataclass(frozen=True, slots=True)
 class ServiceSettings:
-    mcp_transport: McpTransportName
-    http_host: str
-    http_port: int
     local_readiness_timeout_seconds: float
 
 
@@ -178,9 +175,6 @@ def default_settings() -> EnjiGuardSettings:
             backup_count=DEFAULT_LOG_BACKUP_COUNT,
         ),
         service=ServiceSettings(
-            mcp_transport=DEFAULT_MCP_TRANSPORT,
-            http_host=DEFAULT_HTTP_HOST,
-            http_port=DEFAULT_HTTP_PORT,
             local_readiness_timeout_seconds=DEFAULT_LOCAL_READINESS_TIMEOUT_SECONDS,
         ),
         readiness=ReadinessSettings(

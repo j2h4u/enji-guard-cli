@@ -19,7 +19,6 @@ from enji_guard_cli.core_impl.models import (
     AuditRunBatchPayload,
     AuditRunSkippedPayload,
     EmailPreferenceUpdate,
-    ProjectRef,
     ProjectRuntimeStatusPayload,
     RepoResolvePayload,
     ReportStatusPayload,
@@ -89,7 +88,6 @@ from enji_guard_cli.core_impl.status_views import (
 )
 from enji_guard_cli.core_impl.status_views import repo_status_all_payload as _repo_status_all_payload_impl
 from enji_guard_cli.core_impl.targets import matching_repo_targets as _matching_repo_targets_impl
-from enji_guard_cli.core_impl.targets import project_refs as _project_refs_impl
 from enji_guard_cli.core_impl.targets import resolve_single_project_id as _resolve_single_project_id_impl
 from enji_guard_cli.core_impl.targets import resolve_single_repo_target as _resolve_single_repo_target_impl
 from enji_guard_cli.core_impl.targets import selected_project_ids as _selected_project_ids_impl
@@ -256,10 +254,6 @@ def _repo_target_from_resolved(
     if repo == resolved_target["repo_id"] or project == resolved_target["project_id"]:
         return resolved_target
     return _resolve_single_repo_target(repo, project)
-
-
-def _list_repo_active_runs(repo_id: str) -> JsonObjectPayload:
-    return _report_workflows.list_repo_active_runs(repo_id, dependencies=_report_workflow_dependencies())
 
 
 def _get_repo_rerun_state(repo_id: str) -> JsonObjectPayload:
@@ -497,10 +491,6 @@ def _resolve_single_project_id(project: str | None) -> str:
     return _resolve_single_project_id_impl(project, list_projects=list_projects, raise_bad_selector=_raise_bad_selector)
 
 
-def _project_refs() -> list[ProjectRef]:
-    return _project_refs_impl(list_projects())
-
-
 def _selected_repo_targets(repo: str | None, project: str | None) -> list[RepoTargetPayload]:
     return _selected_repo_targets_impl(
         repo,
@@ -620,14 +610,6 @@ def _repo_inventory_status(
 
 def _repo_status_all_payload(projects: list[ProjectRuntimeStatusPayload]) -> RepoStatusAllPayload:
     return _repo_status_all_payload_impl(projects)
-
-
-def _selected_report_audits(audits: list[AuditAlias], *, all_reports: bool) -> list[AuditAlias]:
-    return _report_workflows.selected_report_audits(
-        audits,
-        all_reports=all_reports,
-        dependencies=_report_workflow_dependencies(),
-    )
 
 
 def _merged_repo_active_runs(
