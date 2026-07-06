@@ -100,8 +100,6 @@ app.add_typer(report_app, name="report")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(email_app, name="email")
 
-CATALOG_AUDITS_OPERATION = resolve_operation_spec(OperationName.CATALOG_AUDITS)
-CATALOG_AUDIT_OPERATION = resolve_operation_spec(OperationName.CATALOG_AUDIT)
 ACCESS_OPERATION = resolve_operation_spec(OperationName.ACCESS)
 AUTH_STATUS_OPERATION = resolve_operation_spec(OperationName.AUTH_STATUS)
 

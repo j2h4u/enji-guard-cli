@@ -2638,16 +2638,18 @@ def test_report_status_projects_ledger_task_with_task_detail(tmp_path: Path, mon
     active_run_ledger.record_started_run(
         settings.active_run_ledger,
         active_run_ledger.new_entry(
-            repo_id="repo_1",
-            project_id="project_1",
-            action_key="audit.security",
-            task_id="task_security",
-            task_status="pending",
-            current_head_sha="head_2",
-            last_audited_head_sha="head_1",
-            observed_at=observed_at,
-            started_at=None,
-            ttl_seconds=settings.active_run_ledger.ttl_seconds,
+            active_run_ledger.NewActiveRunLedgerEntryRequest(
+                repo_id="repo_1",
+                project_id="project_1",
+                action_key="audit.security",
+                task_id="task_security",
+                task_status="pending",
+                current_head_sha="head_2",
+                last_audited_head_sha="head_1",
+                observed_at=observed_at,
+                started_at=None,
+                ttl_seconds=settings.active_run_ledger.ttl_seconds,
+            )
         ),
     )
     monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
@@ -2708,16 +2710,18 @@ def test_start_audit_skips_when_ledger_task_is_still_active(tmp_path: Path, monk
     active_run_ledger.record_started_run(
         settings.active_run_ledger,
         active_run_ledger.new_entry(
-            repo_id="repo_1",
-            project_id="project_1",
-            action_key="audit.security",
-            task_id="task_security",
-            task_status="pending",
-            current_head_sha="head_2",
-            last_audited_head_sha="head_1",
-            observed_at=datetime.now(UTC),
-            started_at=None,
-            ttl_seconds=settings.active_run_ledger.ttl_seconds,
+            active_run_ledger.NewActiveRunLedgerEntryRequest(
+                repo_id="repo_1",
+                project_id="project_1",
+                action_key="audit.security",
+                task_id="task_security",
+                task_status="pending",
+                current_head_sha="head_2",
+                last_audited_head_sha="head_1",
+                observed_at=datetime.now(UTC),
+                started_at=None,
+                ttl_seconds=settings.active_run_ledger.ttl_seconds,
+            )
         ),
     )
     monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
@@ -2749,16 +2753,18 @@ def test_report_status_prunes_ledger_when_report_becomes_fresh(tmp_path: Path, m
     active_run_ledger.record_started_run(
         settings.active_run_ledger,
         active_run_ledger.new_entry(
-            repo_id="repo_1",
-            project_id="project_1",
-            action_key="audit.security",
-            task_id="task_security",
-            task_status="pending",
-            current_head_sha="head_2",
-            last_audited_head_sha="head_1",
-            observed_at=datetime.now(UTC),
-            started_at=None,
-            ttl_seconds=settings.active_run_ledger.ttl_seconds,
+            active_run_ledger.NewActiveRunLedgerEntryRequest(
+                repo_id="repo_1",
+                project_id="project_1",
+                action_key="audit.security",
+                task_id="task_security",
+                task_status="pending",
+                current_head_sha="head_2",
+                last_audited_head_sha="head_1",
+                observed_at=datetime.now(UTC),
+                started_at=None,
+                ttl_seconds=settings.active_run_ledger.ttl_seconds,
+            )
         ),
     )
     monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
@@ -2817,16 +2823,18 @@ def test_report_status_prunes_terminal_task_from_ledger(tmp_path: Path, monkeypa
     active_run_ledger.record_started_run(
         settings.active_run_ledger,
         active_run_ledger.new_entry(
-            repo_id="repo_1",
-            project_id="project_1",
-            action_key="audit.security",
-            task_id="task_security",
-            task_status="pending",
-            current_head_sha="head_2",
-            last_audited_head_sha="head_1",
-            observed_at=datetime.now(UTC),
-            started_at=None,
-            ttl_seconds=settings.active_run_ledger.ttl_seconds,
+            active_run_ledger.NewActiveRunLedgerEntryRequest(
+                repo_id="repo_1",
+                project_id="project_1",
+                action_key="audit.security",
+                task_id="task_security",
+                task_status="pending",
+                current_head_sha="head_2",
+                last_audited_head_sha="head_1",
+                observed_at=datetime.now(UTC),
+                started_at=None,
+                ttl_seconds=settings.active_run_ledger.ttl_seconds,
+            )
         ),
     )
     monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})

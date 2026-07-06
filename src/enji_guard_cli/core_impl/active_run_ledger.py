@@ -37,6 +37,31 @@ class ActiveRunLedger:
     entries: list[ActiveRunLedgerEntry]
 
 
+@dataclass(frozen=True, slots=True)
+class MergedActiveRunsRequest:
+    repo_id: str
+    upstream_active_runs: list[JsonValue]
+    rerun_state: JsonObjectPayload | None
+    task_links_payload: JsonObjectPayload
+    get_task: GetTask
+    settings: ActiveRunLedgerSettings
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class NewActiveRunLedgerEntryRequest:
+    repo_id: str
+    project_id: str
+    action_key: str
+    task_id: str | None
+    task_status: str | None
+    current_head_sha: str | None
+    last_audited_head_sha: str | None
+    observed_at: datetime
+    started_at: str | None
+    ttl_seconds: int
+
+
 def record_started_run(
     settings: ActiveRunLedgerSettings,
     entry: ActiveRunLedgerEntry,
@@ -50,34 +75,28 @@ def record_started_run(
     write_active_run_ledger(settings.state_file, ActiveRunLedger(entries=[*retained, entry]))
 
 
-def merged_active_runs(  # noqa: PLR0913
-    repo_id: str,
-    upstream_active_runs: list[JsonValue],
-    rerun_state: JsonObjectPayload | None,
-    task_links_payload: JsonObjectPayload,
-    *,
-    get_task: GetTask,
-    settings: ActiveRunLedgerSettings,
-    now: datetime,
-) -> list[JsonValue]:
-    ledger = read_active_run_ledger(settings)
-    report_links = _report_links_by_action(task_links_payload)
-    upstream_by_action = _active_runs_by_action(upstream_active_runs)
+def merged_active_runs(request: MergedActiveRunsRequest) -> list[JsonValue]:
+    ledger = read_active_run_ledger(request.settings)
+    report_links = _report_links_by_action(request.task_links_payload)
+    upstream_by_action = _active_runs_by_action(request.upstream_active_runs)
     retained_entries: list[ActiveRunLedgerEntry] = []
     projected_runs: list[JsonValue] = []
     changed = False
     for entry in ledger.entries:
-        if entry.repo_id != repo_id:
+        if entry.repo_id != request.repo_id:
             retained_entries.append(entry)
             continue
-        if _entry_expired(entry, now) or _entry_fresh(entry, rerun_state, report_links):
+        if _entry_expired(entry, request.now) or _entry_fresh(entry, request.rerun_state, report_links):
             changed = True
             continue
         if entry.action_key in upstream_by_action:
             retained_entries.append(entry)
             continue
         task_run = _task_lookup_active_run(
-            entry, get_task=get_task, now=now, lookup_grace_seconds=settings.lookup_grace_seconds
+            entry,
+            get_task=request.get_task,
+            now=request.now,
+            lookup_grace_seconds=request.settings.lookup_grace_seconds,
         )
         if task_run is None:
             changed = True
@@ -85,8 +104,8 @@ def merged_active_runs(  # noqa: PLR0913
         retained_entries.append(entry)
         projected_runs.append(task_run)
     if changed:
-        write_active_run_ledger(settings.state_file, ActiveRunLedger(entries=retained_entries))
-    return [*upstream_active_runs, *projected_runs]
+        write_active_run_ledger(request.settings.state_file, ActiveRunLedger(entries=retained_entries))
+    return [*request.upstream_active_runs, *projected_runs]
 
 
 def projected_active_run(entry: ActiveRunLedgerEntry) -> JsonObjectPayload:
@@ -105,31 +124,19 @@ def projected_active_run(entry: ActiveRunLedgerEntry) -> JsonObjectPayload:
     }
 
 
-def new_entry(  # noqa: PLR0913
-    *,
-    repo_id: str,
-    project_id: str,
-    action_key: str,
-    task_id: str | None,
-    task_status: str | None,
-    current_head_sha: str | None,
-    last_audited_head_sha: str | None,
-    observed_at: datetime,
-    started_at: str | None,
-    ttl_seconds: int,
-) -> ActiveRunLedgerEntry:
-    expires_at = observed_at.astimezone(UTC) + timedelta(seconds=ttl_seconds)
-    observed_at_text = observed_at.astimezone(UTC).isoformat()
+def new_entry(request: NewActiveRunLedgerEntryRequest) -> ActiveRunLedgerEntry:
+    expires_at = request.observed_at.astimezone(UTC) + timedelta(seconds=request.ttl_seconds)
+    observed_at_text = request.observed_at.astimezone(UTC).isoformat()
     return ActiveRunLedgerEntry(
-        repo_id=repo_id,
-        project_id=project_id,
-        action_key=action_key,
-        task_id=task_id,
-        task_status=task_status,
-        current_head_sha=current_head_sha,
-        last_audited_head_sha=last_audited_head_sha,
+        repo_id=request.repo_id,
+        project_id=request.project_id,
+        action_key=request.action_key,
+        task_id=request.task_id,
+        task_status=request.task_status,
+        current_head_sha=request.current_head_sha,
+        last_audited_head_sha=request.last_audited_head_sha,
         observed_at=observed_at_text,
-        started_at=started_at,
+        started_at=request.started_at,
         expires_at=expires_at.isoformat(),
     )
 

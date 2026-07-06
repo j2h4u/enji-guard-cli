@@ -255,13 +255,15 @@ def merged_repo_active_runs[TCreateRequest](
         resolved_rerun_state = None
         resolved_task_links = cast(JsonObjectPayload, {"links": []})
     return _active_run_ledger.merged_active_runs(
-        repo_id,
-        upstream_active_runs,
-        resolved_rerun_state,
-        resolved_task_links,
-        get_task=dependencies.get_task,
-        settings=ledger_settings,
-        now=dependencies.now_utc(),
+        _active_run_ledger.MergedActiveRunsRequest(
+            repo_id=repo_id,
+            upstream_active_runs=upstream_active_runs,
+            rerun_state=resolved_rerun_state,
+            task_links_payload=resolved_task_links,
+            get_task=dependencies.get_task,
+            settings=ledger_settings,
+            now=dependencies.now_utc(),
+        )
     )
 
 
@@ -276,15 +278,17 @@ def record_started_run[TCreateRequest](
     _active_run_ledger.record_started_run(
         ledger_settings,
         _active_run_ledger.new_entry(
-            repo_id=context.repo_id,
-            project_id=context.project_id,
-            action_key=context.action_key,
-            task_id=_json_str(normalized.get("id")) or _json_str(task_payload.get("id")),
-            task_status=_json_str(normalized.get("status")) or _json_str(task_payload.get("status")),
-            current_head_sha=context.current_head_sha,
-            last_audited_head_sha=context.last_audited_head_sha,
-            observed_at=dependencies.now_utc(),
-            started_at=None,
-            ttl_seconds=ledger_settings.ttl_seconds,
+            _active_run_ledger.NewActiveRunLedgerEntryRequest(
+                repo_id=context.repo_id,
+                project_id=context.project_id,
+                action_key=context.action_key,
+                task_id=_json_str(normalized.get("id")) or _json_str(task_payload.get("id")),
+                task_status=_json_str(normalized.get("status")) or _json_str(task_payload.get("status")),
+                current_head_sha=context.current_head_sha,
+                last_audited_head_sha=context.last_audited_head_sha,
+                observed_at=dependencies.now_utc(),
+                started_at=None,
+                ttl_seconds=ledger_settings.ttl_seconds,
+            )
         ),
     )
