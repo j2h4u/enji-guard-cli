@@ -5,6 +5,7 @@ from typing import Annotated
 import typer
 
 from enji_guard_cli.audits import AuditAlias, ReportAuditAlias
+from enji_guard_cli.cli_impl.audit_aliases import report_audits
 from enji_guard_cli.cli_impl.rendering import echo_json
 from enji_guard_cli.cli_impl.report_rendering import echo_report_summary, report_summary_payload, reports_markdown
 
@@ -74,7 +75,7 @@ def _report_read_body(
     json_output: bool,
 ) -> object:
     payload = _require_resolve_command_payload()(
-        lambda: _require_read_reports_for_repo()(repo, project, _report_audits(audits or []), all_reports)
+        lambda: _require_read_reports_for_repo()(repo, project, report_audits(audits or []), all_reports)
     )
     if _require_json_output()(json_output):
         echo_json(payload)
@@ -122,21 +123,13 @@ def _report_summary_body(
     json_output: bool,
 ) -> object:
     payload = _require_resolve_command_payload()(
-        lambda: _require_read_reports_for_repo()(repo, project, _report_audits(audits or []), all_reports)
+        lambda: _require_read_reports_for_repo()(repo, project, report_audits(audits or []), all_reports)
     )
     if _require_json_output()(json_output):
         echo_json(report_summary_payload(payload))
     else:
         echo_report_summary(payload)
     return payload
-
-
-def _report_audit(audit: ReportAuditAlias) -> AuditAlias:
-    return AuditAlias(audit.value)
-
-
-def _report_audits(audits: list[ReportAuditAlias]) -> list[AuditAlias]:
-    return [_report_audit(audit) for audit in audits]
 
 
 def _require_config() -> ReportCommandsCliConfig:

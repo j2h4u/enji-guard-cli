@@ -3,7 +3,7 @@ from typing import Annotated, Literal, cast
 
 import typer
 
-from enji_guard_cli.audits import ReportAuditAlias
+from enji_guard_cli.cli_impl.audit_commands import AuditCommandsCliConfig, audit_app, configure_audit_commands
 from enji_guard_cli.cli_impl.auth_catalog import (
     SharedCliConfig,
     auth_app,
@@ -15,7 +15,6 @@ from enji_guard_cli.cli_impl.auth_catalog import (
 from enji_guard_cli.cli_impl.durations import parse_duration_seconds
 from enji_guard_cli.cli_impl.rendering import (
     echo_access,
-    echo_audit_start,
     echo_generic_payload,
     echo_json,
     echo_key_values,
@@ -29,7 +28,6 @@ from enji_guard_cli.cli_impl.rendering import (
 )
 from enji_guard_cli.cli_impl.report_commands import (
     ReportCommandsCliConfig,
-    _report_audits,
     configure_report_commands,
     report_app,
 )
@@ -92,7 +90,6 @@ app = typer.Typer(help=MAIN_HELP)
 project_app = typer.Typer(help="List and manage Enji projects.")
 repo_app = typer.Typer(help="Discover, resolve, add, remove, and move GitHub repositories.")
 recon_app = typer.Typer(help="Start baseline discovery. Recon is not a report audit.")
-audit_app = typer.Typer(help="Start slow report-producing audits.")
 app.add_typer(catalog_app, name="catalog", hidden=True)
 app.add_typer(auth_app, name="auth")
 app.add_typer(project_app, name="project")
@@ -583,42 +580,6 @@ def recon_start(
     )
 
 
-@audit_app.command("start", help="Start one or more slow report-producing audits.")
-def audit_start(
-    repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
-    audits: Annotated[
-        list[ReportAuditAlias] | None,
-        typer.Argument(help="One or more canonical report audit aliases. Use --all for all report audits."),
-    ] = None,
-    all_reports: Annotated[bool, typer.Option("--all", help="Start every report audit.")] = False,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-) -> None:
-    _run_cli_journey(
-        lambda: _audit_start_body(repo=repo, audits=audits, all_reports=all_reports, json_output=json_output),
-        command_path=_command_path("audit", "start"),
-        json_output=_json_output(json_output),
-        selector_kind=_selector_kind_for_repo(repo, project=_selected_project(), all_flag=all_reports),
-        all_flag=all_reports,
-    )
-
-
-def _audit_start_body(
-    *,
-    repo: str,
-    audits: list[ReportAuditAlias] | None,
-    all_reports: bool,
-    json_output: bool,
-) -> object:
-    payload = _resolve_command_payload(
-        lambda: start_report_audits(repo, _selected_project(), _report_audits(audits or []), all_reports=all_reports)
-    )
-    if _json_output(json_output):
-        echo_json(payload)
-    else:
-        echo_audit_start(payload)
-    return payload
-
-
 def _selected_project() -> str | None:
     project = _cli_state["project"]
     return project if isinstance(project, str) else None
@@ -666,6 +627,19 @@ configure_report_commands(
         selector_kind_for_repo=_selector_kind_for_repo,
         resolve_command_payload=_resolve_command_payload,
         read_reports_for_repo=lambda repo, project, audits, all_reports: read_reports_for_repo(
+            repo, project, audits, all_reports=all_reports
+        ),
+    )
+)
+configure_audit_commands(
+    AuditCommandsCliConfig(
+        run_cli_journey=_run_cli_journey,
+        command_path=_command_path,
+        json_output=_json_output,
+        selected_project=_selected_project,
+        selector_kind_for_repo=_selector_kind_for_repo,
+        resolve_command_payload=_resolve_command_payload,
+        start_report_audits=lambda repo, project, audits, all_reports: start_report_audits(
             repo, project, audits, all_reports=all_reports
         ),
     )
