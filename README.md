@@ -304,6 +304,9 @@ Use `CONTRIBUTING.md` for change intake, acceptance criteria, and handoff rules.
 Cookie auth is temporary and will be removed when API-token support is available
 from Enji. MCP HTTP transports do not add their own authentication; keep them
 bound to loopback or behind an explicit trusted boundary.
+See [SECURITY.md](SECURITY.md) for the supply-chain policy covering package
+quarantine, allowlisted lifecycle scripts, Dependabot review, and locked
+dependency/Docker/CI references.
 
 ## Documentation
 
