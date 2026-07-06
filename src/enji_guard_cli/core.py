@@ -64,13 +64,14 @@ from enji_guard_cli.core_impl.payloads import json_object_payload as _json_objec
 from enji_guard_cli.core_impl.payloads import json_str as _json_str
 from enji_guard_cli.core_impl.preflight import report_start_preflight_payload as _report_start_preflight_payload
 from enji_guard_cli.core_impl.project_admin import MoveRepoDependencies as _MoveRepoDependencies
+from enji_guard_cli.core_impl.project_admin import ProjectCrudDependencies as _ProjectCrudDependencies
 from enji_guard_cli.core_impl.project_admin import activate_existing_repo_payload as _activate_existing_repo_payload
 from enji_guard_cli.core_impl.project_admin import add_repo_payload as _add_repo_payload
-from enji_guard_cli.core_impl.project_admin import create_project_payload as _create_project_payload
-from enji_guard_cli.core_impl.project_admin import delete_project_payload as _delete_project_payload
+from enji_guard_cli.core_impl.project_admin import create_project as _create_project_impl
+from enji_guard_cli.core_impl.project_admin import delete_project as _delete_project_impl
 from enji_guard_cli.core_impl.project_admin import move_repo_payload as _move_repo_payload
 from enji_guard_cli.core_impl.project_admin import remove_repo_payload as _remove_repo_payload
-from enji_guard_cli.core_impl.project_admin import rename_project_payload as _rename_project_payload
+from enji_guard_cli.core_impl.project_admin import rename_project as _rename_project_impl
 from enji_guard_cli.core_impl.repo_status import current_active_runs as _current_active_runs
 from enji_guard_cli.core_impl.repo_status import current_head_sha as _current_head_sha
 from enji_guard_cli.core_impl.repo_status import empty_report_status as _empty_report_status
@@ -145,52 +146,28 @@ def list_projects() -> JsonObjectPayload:
     return run_projects()
 
 
-def create_project(name: str) -> JsonObjectPayload:
-    project_name = _validated_project_name(name)
-    for project_ref in _project_refs():
-        if project_ref["name"] is not None and project_ref["name"].casefold() == project_name.casefold():
-            return {
-                "project_id": project_ref["id"],
-                "project_name": project_ref["name"],
-                "created": False,
-                "already_present": True,
-                "response": None,
-            }
-    return _create_project_payload(
-        project_name,
+def _project_crud_dependencies() -> _ProjectCrudDependencies:
+    return _ProjectCrudDependencies(
+        list_projects=run_projects,
+        resolve_single_project_id=_resolve_single_project_id,
         validate_project_name=_validated_project_name,
         create_project=run_create_project,
-    )
-
-
-def rename_project(project: str, name: str) -> JsonObjectPayload:
-    project_id = _resolve_single_project_id(project)
-    project_name = _validated_project_name(name)
-    for project_ref in _project_refs():
-        if project_ref["id"] == project_id and project_ref["name"] == project_name:
-            return {
-                "project_id": project_id,
-                "project_name": project_name,
-                "changed": False,
-                "already_named": True,
-                "response": None,
-            }
-    return _rename_project_payload(
-        project_id,
-        project_name,
-        resolve_single_project_id=lambda selected_project: _project_id_from_resolved(selected_project, project_id),
-        validate_project_name=_validated_project_name,
         rename_project=run_rename_project,
-    )
-
-
-def delete_project(project: str) -> JsonObjectPayload:
-    return _delete_project_payload(
-        project,
-        resolve_single_project_id=_resolve_single_project_id,
         project_detail=run_project_detail,
         delete_project=run_delete_project,
     )
+
+
+def create_project(name: str) -> JsonObjectPayload:
+    return _create_project_impl(name, dependencies=_project_crud_dependencies())
+
+
+def rename_project(project: str, name: str) -> JsonObjectPayload:
+    return _rename_project_impl(project, name, dependencies=_project_crud_dependencies())
+
+
+def delete_project(project: str) -> JsonObjectPayload:
+    return _delete_project_impl(project, dependencies=_project_crud_dependencies())
 
 
 def list_project_inventory(project: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:
@@ -275,12 +252,6 @@ def move_repo(repo: str, source_project: str | None, target_project: str) -> Jso
             move_repo=run_move_repo,
         ),
     )
-
-
-def _project_id_from_resolved(project: str | None, resolved_project_id: str) -> str:
-    if project == resolved_project_id:
-        return resolved_project_id
-    return _resolve_single_project_id(project)
 
 
 def _repo_target_from_resolved(
