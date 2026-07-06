@@ -4,7 +4,7 @@ from typing import Literal, cast
 
 from mcp.server.fastmcp import FastMCP
 
-from enji_guard_cli.journey import AgentJourney, run_agent_journey
+from enji_guard_cli.journey import AgentJourney, run_agent_journey, selector_kind_for_mcp_repo
 from enji_guard_cli.mcp_facade import (
     RepoSort,
     RepoStatusAllPayload,
@@ -48,14 +48,6 @@ def _mcp_journey(tool_name: str, *, selector_kind: str = "unknown") -> AgentJour
         provenance="mcp",
         selector_kind=selector_kind,
     )
-
-
-def _selector_kind_for_repo(repo: str) -> str:
-    if "/" in repo:
-        return "owner_name"
-    if repo.startswith("repo_"):
-        return "repo_id"
-    return "selector"
 
 
 async def run_mcp_server_async(
@@ -133,7 +125,7 @@ def create_mcp_server(host: str = DEFAULT_HTTP_HOST, port: int = DEFAULT_HTTP_PO
             await _run_mcp_tool_thread(
                 REPO_REPORTS_TOOL,
                 lambda: get_repo_reports(repo.strip(), _project_arg(project)),
-                selector_kind=_selector_kind_for_repo(repo),
+                selector_kind=selector_kind_for_mcp_repo(repo),
             ),
         )
 

@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 from enji_guard_cli import cli
 from enji_guard_cli.audits import AuditAlias
 from enji_guard_cli.cli import app
+from enji_guard_cli.cli_impl import runtime_controls
 from enji_guard_cli.cli_impl.durations import format_duration_seconds
 from enji_guard_cli.core import EmailPreferenceUpdate, ReportWaitOptions, ScheduleSettingsUpdate
 from enji_guard_cli.enji_api import EnjiApiError
@@ -74,8 +75,8 @@ def test_serve_runs_mcp_server_with_stdio_defaults(monkeypatch: MonkeyPatch) -> 
         captured["transport"] = transport
         captured["mount_path"] = mount_path
 
-    monkeypatch.setattr(cli, "create_mcp_server", fake_create_mcp_server)
-    monkeypatch.setattr(cli, "run_mcp_server", fake_run_mcp_server)
+    monkeypatch.setattr(runtime_controls, "create_mcp_server", fake_create_mcp_server)
+    monkeypatch.setattr(runtime_controls, "run_mcp_server", fake_run_mcp_server)
 
     result = CliRunner().invoke(app, ["serve"])
 
@@ -98,8 +99,8 @@ def test_serve_uses_project_logging_settings(monkeypatch: MonkeyPatch) -> None:
         captured["provenance"] = provenance
 
     monkeypatch.setattr(cli, "configure_logging", fake_configure_logging)
-    monkeypatch.setattr(cli, "create_mcp_server", lambda host="127.0.0.1", port=8000: FakeServer())
-    monkeypatch.setattr(cli, "run_mcp_server", lambda server, *, transport="stdio", mount_path=None: None)
+    monkeypatch.setattr(runtime_controls, "create_mcp_server", lambda host="127.0.0.1", port=8000: FakeServer())
+    monkeypatch.setattr(runtime_controls, "run_mcp_server", lambda server, *, transport="stdio", mount_path=None: None)
 
     result = CliRunner().invoke(app, ["serve"])
 
@@ -128,8 +129,8 @@ def test_serve_passes_transport_options_to_mcp_server(monkeypatch: MonkeyPatch) 
         captured["transport"] = transport
         captured["mount_path"] = mount_path
 
-    monkeypatch.setattr(cli, "create_mcp_server", fake_create_mcp_server)
-    monkeypatch.setattr(cli, "run_mcp_server", fake_run_mcp_server)
+    monkeypatch.setattr(runtime_controls, "create_mcp_server", fake_create_mcp_server)
+    monkeypatch.setattr(runtime_controls, "run_mcp_server", fake_run_mcp_server)
 
     result = CliRunner().invoke(
         app,
@@ -170,7 +171,7 @@ def test_run_passes_transport_options_to_supervised_runtime(monkeypatch: MonkeyP
         captured["port"] = port
         captured["mount_path"] = mount_path
 
-    monkeypatch.setattr(cli, "run_service", fake_run_service)
+    monkeypatch.setattr(runtime_controls, "run_service", fake_run_service)
 
     result = CliRunner().invoke(
         app,
@@ -196,7 +197,7 @@ def test_run_rejects_external_http_bind_without_explicit_allow(monkeypatch: Monk
     ) -> None:
         raise AssertionError("external HTTP bind should be rejected before runtime starts")
 
-    monkeypatch.setattr(cli, "run_service", fake_run_service)
+    monkeypatch.setattr(runtime_controls, "run_service", fake_run_service)
 
     result = CliRunner().invoke(
         app,
@@ -225,8 +226,10 @@ def test_health_ready_checks_local_mcp_listener(monkeypatch: MonkeyPatch) -> Non
         captured["timeout"] = timeout
         return FakeSocket()
 
-    monkeypatch.setattr(cli.socket, "create_connection", fake_create_connection)
-    monkeypatch.setattr(cli, "readiness_verdict", lambda: ReadinessVerdict(ready=True, reason=None, state=None))
+    monkeypatch.setattr(runtime_controls.socket, "create_connection", fake_create_connection)
+    monkeypatch.setattr(
+        runtime_controls, "readiness_verdict", lambda: ReadinessVerdict(ready=True, reason=None, state=None)
+    )
 
     result = CliRunner().invoke(app, ["health", "--ready"])
 
@@ -239,7 +242,7 @@ def test_health_ready_fails_when_local_mcp_listener_is_down(monkeypatch: MonkeyP
     def fake_create_connection(_address: tuple[str, int], *, timeout: float) -> object:
         raise ConnectionRefusedError("connection refused")
 
-    monkeypatch.setattr(cli.socket, "create_connection", fake_create_connection)
+    monkeypatch.setattr(runtime_controls.socket, "create_connection", fake_create_connection)
 
     result = CliRunner().invoke(app, ["health", "--ready"])
 
@@ -258,9 +261,9 @@ def test_health_ready_fails_when_backend_readiness_is_down(monkeypatch: MonkeyPa
     def fake_create_connection(_address: tuple[str, int], *, timeout: float) -> FakeSocket:
         return FakeSocket()
 
-    monkeypatch.setattr(cli.socket, "create_connection", fake_create_connection)
+    monkeypatch.setattr(runtime_controls.socket, "create_connection", fake_create_connection)
     monkeypatch.setattr(
-        cli,
+        runtime_controls,
         "readiness_verdict",
         lambda: ReadinessVerdict(ready=False, reason="backend readiness failure threshold reached", state=None),
     )
