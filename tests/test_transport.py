@@ -1,8 +1,6 @@
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime, timedelta
-from email.utils import format_datetime
 from typing import cast
 
 import httpx
@@ -107,8 +105,7 @@ def test_httpx_enji_http_client_wraps_transport_errors() -> None:
 
 
 def test_raise_for_response_status_returns_retry_after_seconds() -> None:
-    future_value = format_datetime(datetime.now(UTC) + timedelta(seconds=11), usegmt=True)
-    response = httpx.Response(429, headers={"Retry-After": future_value})
+    response = httpx.Response(429, headers={"Retry-After": "11"})
 
     try:
         raise_for_response_status(
@@ -118,8 +115,7 @@ def test_raise_for_response_status_returns_retry_after_seconds() -> None:
         )
     except EnjiRateLimitError as exc:
         assert exc.code == "RATE_LIMIT"
-        assert exc.retry_after_seconds is not None
-        assert 0 <= exc.retry_after_seconds <= 11
+        assert exc.retry_after_seconds == 11
     else:
         raise AssertionError("expected EnjiRateLimitError")
 
