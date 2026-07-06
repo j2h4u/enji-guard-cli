@@ -4,8 +4,6 @@ import subprocess
 from dataclasses import dataclass
 from typing import cast
 
-REPO = "j2h4u/enji-guard-cli"
-
 
 @dataclass(frozen=True, slots=True)
 class CommandResult:
