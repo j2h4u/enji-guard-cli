@@ -103,6 +103,21 @@ def test_default_test_logging_is_noop(
     assert not (tmp_path / ".config" / "enji-guard" / "logs" / "telemetry.jsonl").exists()
 
 
+def test_default_test_logging_is_noop_for_explicit_provenance(
+    monkeypatch: MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    configure_logging(provenance="cli")
+    logger = logging.getLogger("enji_guard_cli.test")
+
+    log_event(logger, logging.INFO, "event_name", {"operation": "wait"})
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert not (tmp_path / ".config" / "enji-guard" / "logs" / "telemetry.jsonl").exists()
+
+
 def test_configure_logging_allows_explicit_provenance(capsys: pytest.CaptureFixture[str]) -> None:
     configure_logging(_telemetry_settings(log_file=None, log_format="json"), provenance="mcp")
     logger = logging.getLogger("enji_guard_cli.test")
