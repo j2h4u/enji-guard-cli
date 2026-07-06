@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.12](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.11...v0.3.12) (2026-07-06)
+
+
+### Fixes
+
+* address fresh audit cleanup findings ([06fd2a0](https://github.com/j2h4u/enji-guard-cli/commit/06fd2a0c0adf9c09f8a19d483c4073227ee8528f))
+* address fresh Enji audit followups ([463ef1a](https://github.com/j2h4u/enji-guard-cli/commit/463ef1a41cda9a5b15c43c9feb378818ba001949))
+* disable source builds for runtime deps ([9831ae6](https://github.com/j2h4u/enji-guard-cli/commit/9831ae684e1dca15f63670c8817f898a0caf8e86))
+* gate container publish to trusted workflow runs ([#108](https://github.com/j2h4u/enji-guard-cli/issues/108)) ([e6f8df1](https://github.com/j2h4u/enji-guard-cli/commit/e6f8df1938f96cf5d9f34ea6cb48ed105c47c198))
+* remove confirmed dead code ([3b300b1](https://github.com/j2h4u/enji-guard-cli/commit/3b300b16bccf50cdbfd192d25375b2b688bd459e))
+* remove inline lint suppressions ([#107](https://github.com/j2h4u/enji-guard-cli/issues/107)) ([7e10fa7](https://github.com/j2h4u/enji-guard-cli/commit/7e10fa71894159095aa2636ea6719a0c5f84b0cc))
+
 ## [0.3.11](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.10...v0.3.11) (2026-07-05)
 
 
