@@ -2,11 +2,13 @@
 
 Python 3.14 CLI and MCP bridge for Enji Guard.
 
-This repository is an early prototype. It supports a shared core, a Typer CLI,
-and a FastMCP server that can expose Enji Guard access and compact report
-metadata to local tools.
+This is a working Docker-first product for local coding agents that use Enji
+Guard as an external repository-audit backend. It provides a shared core, a
+validated Typer CLI operator surface, and a curated read-only FastMCP surface
+for portfolio and report access.
 
-See [ROADMAP.md](ROADMAP.md) for the product status and remaining scope.
+See [ROADMAP.md](ROADMAP.md) for the current product status and remaining MCP
+scope.
 
 ## Mental Model
 
