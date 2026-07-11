@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/j2h4u/enji-guard-cli/compare/v0.4.0...v0.4.1) (2026-07-11)
+
+
+### Fixes
+
+* retain rotated auth across storage failures ([#118](https://github.com/j2h4u/enji-guard-cli/issues/118)) ([5d21457](https://github.com/j2h4u/enji-guard-cli/commit/5d2145765d9f387fb018894ea3eda3c27b3d9cd4))
+
 ## [0.4.0](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.12...v0.4.0) (2026-07-11)
 
 
