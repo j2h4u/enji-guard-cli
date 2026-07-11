@@ -326,6 +326,8 @@ dependency/Docker/CI references.
 - [CHANGELOG.md](CHANGELOG.md): release history.
 - [docs/deployment.md](docs/deployment.md): GHCR image and production-style
   Docker deployment.
+- [docs/enji-api-field-guide.md](docs/enji-api-field-guide.md): sanitized
+  reverse-engineering notes, endpoint behavior, and known contract gaps.
 
 ## License
 
