@@ -6,7 +6,6 @@ from typing import Annotated, TypeGuard, cast
 
 import typer
 
-from enji_guard_cli.audits import AuditAlias
 from enji_guard_cli.cli_impl.rendering import (
     echo_audit_catalog,
     echo_auth_status,
@@ -114,7 +113,7 @@ def _catalog_audits_body(*, json_output: bool) -> object:
 
 @catalog_app.command("audit", help=CATALOG_AUDIT_HELP)
 def catalog_audit(
-    audit: Annotated[AuditAlias, typer.Argument(help="Canonical audit alias.")],
+    audit: Annotated[str, typer.Argument(help="Audit selector from the live catalog.")],
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     _require_runner()(
@@ -125,7 +124,7 @@ def catalog_audit(
     )
 
 
-def _catalog_audit_body(*, audit: AuditAlias, json_output: bool) -> object:
+def _catalog_audit_body(*, audit: str, json_output: bool) -> object:
     payload = resolve_operation_result(resolve_operation_spec(OperationName.CATALOG_AUDIT).execute(audit))
     if _require_json_output()(json_output):
         echo_json(payload)

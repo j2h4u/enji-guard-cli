@@ -4,8 +4,6 @@ from typing import Annotated
 
 import typer
 
-from enji_guard_cli.audits import AuditAlias, ReportAuditAlias
-from enji_guard_cli.cli_impl.audit_aliases import report_audits
 from enji_guard_cli.cli_impl.rendering import echo_json
 from enji_guard_cli.cli_impl.report_rendering import echo_report_summary, report_summary_payload, reports_markdown
 
@@ -18,7 +16,7 @@ type ErrorEchoer = Callable[[str, str], None]
 type SelectedProjectResolver = Callable[[], str | None]
 type RepoSelectorKindResolver = Callable[..., str]
 type CommandPayloadResolver = Callable[[Callable[[], object]], object]
-type ReadReportsAction = Callable[[str, str | None, list[AuditAlias], bool], object]
+type ReadReportsAction = Callable[[str, str | None, list[str], bool], object]
 
 
 @dataclass(frozen=True)
@@ -45,8 +43,8 @@ def configure_report_commands(config: ReportCommandsCliConfig) -> None:
 def report_read(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     audits: Annotated[
-        list[ReportAuditAlias] | None,
-        typer.Argument(help="Optional report audit aliases. Defaults to ready reports."),
+        list[str] | None,
+        typer.Argument(help="Optional report audit selectors. Defaults to ready reports."),
     ] = None,
     all_reports: Annotated[bool, typer.Option("--all", help="Read every report audit.")] = False,
     json_output: Annotated[
@@ -70,12 +68,12 @@ def _report_read_body(
     *,
     repo: str,
     project: str | None,
-    audits: list[ReportAuditAlias] | None,
+    audits: list[str] | None,
     all_reports: bool,
     json_output: bool,
 ) -> object:
     payload = _require_resolve_command_payload()(
-        lambda: _require_read_reports_for_repo()(repo, project, report_audits(audits or []), all_reports)
+        lambda: _require_read_reports_for_repo()(repo, project, audits or [], all_reports)
     )
     if _require_json_output()(json_output):
         echo_json(payload)
@@ -92,8 +90,8 @@ def _report_read_body(
 def report_summary(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     audits: Annotated[
-        list[ReportAuditAlias] | None,
-        typer.Argument(help="Optional report audit aliases. Defaults to ready reports."),
+        list[str] | None,
+        typer.Argument(help="Optional report audit selectors. Defaults to ready reports."),
     ] = None,
     all_reports: Annotated[bool, typer.Option("--all", help="Summarize every report audit.")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Emit compact structured report summary output.")] = False,
@@ -118,12 +116,12 @@ def _report_summary_body(
     *,
     repo: str,
     project: str | None,
-    audits: list[ReportAuditAlias] | None,
+    audits: list[str] | None,
     all_reports: bool,
     json_output: bool,
 ) -> object:
     payload = _require_resolve_command_payload()(
-        lambda: _require_read_reports_for_repo()(repo, project, report_audits(audits or []), all_reports)
+        lambda: _require_read_reports_for_repo()(repo, project, audits or [], all_reports)
     )
     if _require_json_output()(json_output):
         echo_json(report_summary_payload(payload))

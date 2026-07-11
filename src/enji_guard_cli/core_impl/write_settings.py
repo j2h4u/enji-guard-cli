@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from enji_guard_cli.audits import REPORT_AUDITS, AuditAlias, ReportAuditDefinition
+from enji_guard_cli.audits import AuditCatalog, AuditDefinition
 from enji_guard_cli.core_impl.email_preferences import (
     email_preference_row,
     email_preferences_patch,
@@ -24,7 +24,7 @@ type ValidateWriteScope = Callable[[str | None, str | None], None]
 type GetAuditEmailPreferences = Callable[[str, str], JsonObjectPayload]
 type PutAuditEmailPreferences = Callable[[str, str, JsonObjectPayload], JsonObjectPayload]
 type ListSchedules = Callable[[str], JsonObjectPayload]
-type SetSchedule = Callable[[str, AuditAlias, JsonObjectPayload], JsonObjectPayload]
+type SetSchedule = Callable[[str, AuditDefinition, JsonObjectPayload], JsonObjectPayload]
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,11 +57,28 @@ class WriteScopeDependencies:
     selected_repo_targets: SelectedRepoTargets
 
 
+@dataclass(frozen=True, slots=True)
+class SetEmailPreferencesContext:
+    repo: str | None
+    project: str | None
+    update: EmailPreferenceUpdate
+    catalog: AuditCatalog
+
+
+@dataclass(frozen=True, slots=True)
+class SetScheduleSettingsContext:
+    repo: str | None
+    project: str | None
+    update: ScheduleSettingsUpdate
+    catalog: AuditCatalog
+
+
 def list_email_preferences(
     repo: str | None,
     project: str | None,
     *,
     dependencies: EmailReadDependencies,
+    catalog: AuditCatalog,
 ) -> JsonObjectPayload:
     return email_preferences_payload(
         [
@@ -71,32 +88,30 @@ def list_email_preferences(
                 dependencies.get_audit_email_preferences(target["repo_id"], audit.action_key),
             )
             for target in dependencies.selected_repo_targets(repo, project)
-            for audit in REPORT_AUDITS
+            for audit in catalog.report_audits
         ]
     )
 
 
 def set_email_preferences(
-    repo: str | None,
-    project: str | None,
-    update: EmailPreferenceUpdate,
+    context: SetEmailPreferencesContext,
     *,
     selected_write_repo_targets: SelectedRepoTargets,
     dependencies: EmailWriteDependencies,
 ) -> JsonObjectPayload:
-    patch = email_preferences_patch(update)
+    patch = email_preferences_patch(context.update)
     return email_preferences_payload(
         [
             set_email_preference(target, audit, patch, dependencies=dependencies)
-            for target in selected_write_repo_targets(repo, project)
-            for audit in REPORT_AUDITS
+            for target in selected_write_repo_targets(context.repo, context.project)
+            for audit in context.catalog.report_audits
         ]
     )
 
 
 def set_email_preference(
     target: RepoTargetPayload,
-    audit: ReportAuditDefinition,
+    audit: AuditDefinition,
     patch: JsonObjectPayload,
     *,
     dependencies: EmailWriteDependencies,
@@ -126,30 +141,29 @@ def list_schedule_settings(
     project: str | None,
     *,
     dependencies: ScheduleReadDependencies,
+    catalog: AuditCatalog,
 ) -> JsonObjectPayload:
     rows = [
-        schedule_setting_row(target, audit, schedule_job_by_kind(jobs, audit.job_kind))
+        schedule_setting_row(target, audit, schedule_job_by_kind(jobs, audit.runbook_kind))
         for target in dependencies.selected_repo_targets(repo, project)
         for jobs in (dependencies.list_schedules(target["repo_id"]),)
-        for audit in REPORT_AUDITS
+        for audit in catalog.report_audits
     ]
     return schedule_settings_payload(rows)
 
 
 def set_schedule_settings(
-    repo: str | None,
-    project: str | None,
-    update: ScheduleSettingsUpdate,
+    context: SetScheduleSettingsContext,
     *,
     selected_write_repo_targets: SelectedRepoTargets,
     dependencies: ScheduleWriteDependencies,
 ) -> JsonObjectPayload:
-    validate_schedule_settings_update(update)
+    validate_schedule_settings_update(context.update)
     rows = [
-        set_schedule_setting(target, audit, jobs, update, set_schedule=dependencies.set_schedule)
-        for target in selected_write_repo_targets(repo, project)
+        set_schedule_setting(target, audit, jobs, context.update, set_schedule=dependencies.set_schedule)
+        for target in selected_write_repo_targets(context.repo, context.project)
         for jobs in (dependencies.list_schedules(target["repo_id"]),)
-        for audit in REPORT_AUDITS
+        for audit in context.catalog.report_audits
     ]
     return schedule_settings_payload(rows)
 
@@ -174,18 +188,18 @@ def selected_write_repo_targets(
 
 def set_schedule_setting(
     target: RepoTargetPayload,
-    audit: ReportAuditDefinition,
+    audit: AuditDefinition,
     jobs: JsonObjectPayload,
     update: ScheduleSettingsUpdate,
     *,
     set_schedule: SetSchedule,
 ) -> dict[str, JsonValue]:
-    existing = schedule_job_by_kind(jobs, audit.job_kind)
+    existing = schedule_job_by_kind(jobs, audit.runbook_kind)
     desired = schedule_settings_payload_for_job(existing, update)
     if desired is None:
         return schedule_setting_row(target, audit, existing, changed=False, status="unchanged")
     if existing is not None and schedule_effective_state(existing) == schedule_effective_state(desired):
         return schedule_setting_row(target, audit, existing, changed=False, status="unchanged")
-    response = set_schedule(target["repo_id"], audit.alias, desired)
+    response = set_schedule(target["repo_id"], audit, desired)
     resolved = json_dict(response.get("job")) or desired
     return schedule_setting_row(target, audit, resolved, changed=True, status="changed")

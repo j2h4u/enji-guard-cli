@@ -1,6 +1,6 @@
 from typing import cast
 
-from enji_guard_cli.audits import ReportAuditDefinition
+from enji_guard_cli.audits import AuditDefinition
 from enji_guard_cli.core_impl.models import EmailPreferenceUpdate, RepoTargetPayload
 from enji_guard_cli.core_impl.payloads import json_bool, json_dict
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
@@ -19,7 +19,7 @@ def email_preferences_patch(update: EmailPreferenceUpdate) -> JsonObjectPayload:
 
 def email_preference_row(
     target: RepoTargetPayload,
-    audit: ReportAuditDefinition,
+    audit: AuditDefinition,
     payload: JsonObjectPayload,
 ) -> dict[str, JsonValue]:
     resolved = json_dict(payload.get("resolved"))
@@ -28,7 +28,7 @@ def email_preference_row(
         "project_name": target["project_name"],
         "repo_id": target["repo_id"],
         "github_repo": target["github_repo"],
-        "audit": audit.alias.value,
+        "audit": audit.action_key,
         "action_key": audit.action_key,
         "manual_run_completion": json_bool(resolved.get("manualRunCompletion")),
         "scheduled_run_completion": json_bool(resolved.get("scheduledRunCompletion")),

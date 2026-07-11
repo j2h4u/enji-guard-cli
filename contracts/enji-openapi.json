@@ -156,7 +156,14 @@
         "x-enji-observed": true,
         "responses": {
           "200": {
-            "$ref": "#/components/responses/GenericObject"
+            "description": "Live Enji catalog, including the current curated audit actions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -3138,6 +3145,69 @@
               }
             },
             "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "CatalogResponse": {
+        "type": "object",
+        "required": [
+          "curatedActions"
+        ],
+        "properties": {
+          "curatedActions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CuratedAction"
+            }
+          },
+          "metricGroups": {
+            "type": "array",
+            "items": {}
+          },
+          "auditAutofixes": {
+            "type": "array",
+            "items": {}
+          }
+        },
+        "additionalProperties": true
+      },
+      "CuratedAction": {
+        "type": "object",
+        "required": [
+          "actionKey",
+          "title",
+          "category",
+          "status",
+          "runbookKind"
+        ],
+        "properties": {
+          "actionKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "category": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "metricGroup": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runbookKind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fleetRunbookId": {
+            "type": "string"
           }
         },
         "additionalProperties": true

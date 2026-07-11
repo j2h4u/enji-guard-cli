@@ -3,8 +3,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Never, cast
 
-from enji_guard_cli.audits import AuditAlias
-from enji_guard_cli.audits import require_report_audit as registry_require_report_audit
+from enji_guard_cli.audits import AuditCatalog, AuditDefinition
 from enji_guard_cli.auth import AuthError as AuthError
 from enji_guard_cli.auth import AuthRefreshPayload as AuthRefreshPayload
 from enji_guard_cli.auth import AuthStatusPayload as AuthStatusPayload
@@ -14,6 +13,7 @@ from enji_guard_cli.auth import import_cookie as import_cookie
 from enji_guard_cli.auth import refresh_auth as refresh_auth
 from enji_guard_cli.core_impl import audit_runs as _audit_runs
 from enji_guard_cli.core_impl import report_workflows as _report_workflows
+from enji_guard_cli.core_impl.catalog import parse_audit_catalog as _parse_audit_catalog
 from enji_guard_cli.core_impl.models import (
     DEFAULT_REPO_SORT,
     AuditRunBatchPayload,
@@ -77,6 +77,7 @@ from enji_guard_cli.core_impl.selectors import targeted_run_payload as _targeted
 from enji_guard_cli.core_impl.selectors import transfer_schedule_replacements as _transfer_schedule_replacements
 from enji_guard_cli.core_impl.selectors import validate_write_scope as _validate_write_scope
 from enji_guard_cli.core_impl.selectors import validated_project_name as _validated_project_name
+from enji_guard_cli.core_impl.status_views import RepoInventoryStatusContext as _RepoInventoryStatusContext
 from enji_guard_cli.core_impl.status_views import RuntimeStatusDependencies as _RuntimeStatusDependencies
 from enji_guard_cli.core_impl.status_views import project_inventory_status as _project_inventory_status_impl
 from enji_guard_cli.core_impl.status_views import project_runtime_status as _project_runtime_status_impl
@@ -96,6 +97,8 @@ from enji_guard_cli.core_impl.write_settings import EmailReadDependencies as _Em
 from enji_guard_cli.core_impl.write_settings import EmailWriteDependencies as _EmailWriteDependencies
 from enji_guard_cli.core_impl.write_settings import ScheduleReadDependencies as _ScheduleReadDependencies
 from enji_guard_cli.core_impl.write_settings import ScheduleWriteDependencies as _ScheduleWriteDependencies
+from enji_guard_cli.core_impl.write_settings import SetEmailPreferencesContext as _SetEmailPreferencesContext
+from enji_guard_cli.core_impl.write_settings import SetScheduleSettingsContext as _SetScheduleSettingsContext
 from enji_guard_cli.core_impl.write_settings import WriteScopeDependencies as _WriteScopeDependencies
 from enji_guard_cli.core_impl.write_settings import list_email_preferences as _list_email_preferences
 from enji_guard_cli.core_impl.write_settings import list_schedule_settings as _list_schedule_settings
@@ -138,6 +141,13 @@ def list_projects() -> JsonObjectPayload:
     return run_projects()
 
 
+def _catalog_context() -> tuple[AuditCatalog, JsonObjectPayload]:
+    """Fetch and parse the live catalog once for one top-level operation."""
+
+    payload = run_catalog()
+    return _parse_audit_catalog(payload), payload
+
+
 def _project_crud_dependencies() -> _ProjectCrudDependencies:
     return _ProjectCrudDependencies(
         list_projects=run_projects,
@@ -163,9 +173,10 @@ def delete_project(project: str) -> JsonObjectPayload:
 
 
 def list_project_inventory(project: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:
+    catalog, _ = _catalog_context()
     project_ids = _selected_project_ids(project)
     project_status = _project_runtime_status if sort == "latest-report" else _project_inventory_status
-    projects = [project_status(project_id) for project_id in project_ids]
+    projects = [project_status(project_id, catalog) for project_id in project_ids]
     _sort_project_repos(projects, sort)
     return _repo_status_all_payload(projects)
 
@@ -197,12 +208,16 @@ def _add_repo_with_recon(payload: JsonObjectPayload, target: RepoTargetPayload) 
     if target.get("recon_done") is True:
         payload["recon"] = {
             "skipped": True,
-            "audit": AuditAlias.RECON.value,
+            "audit": "audit.recon",
             "action_key": "audit.recon",
             "reason": "already_done",
         }
         return payload
-    payload["recon"] = cast(JsonValue, start_audit(target["repo_id"], target["project_id"], AuditAlias.RECON))
+    catalog, catalog_payload = _catalog_context()
+    payload["recon"] = cast(
+        JsonValue,
+        start_audit(target["repo_id"], target["project_id"], catalog.recon, catalog_payload, catalog),
+    )
     return payload
 
 
@@ -256,31 +271,42 @@ def _repo_target_from_resolved(
     return _resolve_single_repo_target(repo, project)
 
 
-def _get_repo_rerun_state(repo_id: str) -> JsonObjectPayload:
-    return _report_workflows.get_repo_rerun_state(repo_id, dependencies=_report_workflow_dependencies())
+def _get_repo_rerun_state(repo_id: str, catalog: AuditCatalog) -> JsonObjectPayload:
+    return _report_workflows.get_repo_rerun_state(
+        repo_id, dependencies=_report_workflow_dependencies(catalog, {"curatedActions": []})
+    )
 
 
-def _list_repo_task_links(repo_id: str) -> JsonObjectPayload:
-    return _report_workflows.list_repo_task_links(repo_id, dependencies=_report_workflow_dependencies())
+def _list_repo_task_links(repo_id: str, catalog: AuditCatalog) -> JsonObjectPayload:
+    return _report_workflows.list_repo_task_links(
+        repo_id, dependencies=_report_workflow_dependencies(catalog, {"curatedActions": []})
+    )
 
 
-def _report_status(repo_id: str) -> ReportStatusPayload:
-    return _report_workflows.report_status(repo_id, dependencies=_report_workflow_dependencies())
+def _report_status(repo_id: str, catalog: AuditCatalog) -> ReportStatusPayload:
+    return _report_workflows.report_status(
+        repo_id, dependencies=_report_workflow_dependencies(catalog, {"curatedActions": []})
+    )
 
 
 def repo_status_all(project_id: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:
+    catalog, _ = _catalog_context()
     projects = [
-        _project_runtime_status(selected_project_id) for selected_project_id in _selected_project_ids(project_id)
+        _project_runtime_status(selected_project_id, catalog)
+        for selected_project_id in _selected_project_ids(project_id)
     ]
     _sort_project_repos(projects, sort)
     return _repo_status_all_payload(projects)
 
 
 def runtime_status(repo: str | None, project: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:
+    catalog, _ = _catalog_context()
     if repo is None:
-        return repo_status_all(project, sort)
+        projects = [_project_runtime_status(project_id, catalog) for project_id in _selected_project_ids(project)]
+        _sort_project_repos(projects, sort)
+        return _repo_status_all_payload(projects)
 
-    projects = _project_statuses_for_repo(repo, project)
+    projects = _project_statuses_for_repo(repo, project, catalog)
     if not any(project_status["repos"] for project_status in projects):
         _raise_bad_selector(f"repo selector matched no repos: {repo}")
     _sort_project_repos(projects, sort)
@@ -299,37 +325,47 @@ def wait_for_report_completion(
     *,
     options: ReportWaitOptions,
     heartbeat: Callable[[ReportWaitPayload], None] | None,
+    catalog: AuditCatalog,
 ) -> ReportWaitPayload:
     return _report_workflows.wait_for_report_completion(
         repo_id,
         options=options,
         heartbeat=heartbeat,
-        dependencies=_report_workflow_dependencies(),
+        dependencies=_report_workflow_dependencies(catalog, {"curatedActions": []}),
     )
 
 
 def start_audit(
     repo_id: str,
     project_id: str,
-    audit: AuditAlias,
+    audit: AuditDefinition,
+    catalog_payload: JsonObjectPayload | None = None,
+    catalog: AuditCatalog | None = None,
 ) -> JsonObjectPayload | AuditRunSkippedPayload:
+    if catalog is None or catalog_payload is None:
+        catalog, catalog_payload = _catalog_context()
     return _audit_runs.start_audit(
         repo_id,
         project_id,
         audit,
-        dependencies=_start_audit_dependencies(),
+        catalog_payload,
+        dependencies=_start_audit_dependencies(catalog, catalog_payload),
     )
 
 
 def start_recon(repo: str, project: str | None) -> dict[str, object]:
     target = _resolve_single_repo_target(repo, project)
-    return _targeted_run_payload(target, start_audit(target["repo_id"], target["project_id"], AuditAlias.RECON))
+    catalog, catalog_payload = _catalog_context()
+    return _targeted_run_payload(
+        target,
+        start_audit(target["repo_id"], target["project_id"], catalog.recon, catalog_payload, catalog),
+    )
 
 
 def start_report_audits(
     repo: str,
     project: str | None,
-    audits: list[AuditAlias],
+    audits: list[str],
     *,
     all_reports: bool,
 ) -> dict[str, object]:
@@ -338,27 +374,29 @@ def start_report_audits(
         project,
         audits,
         all_reports=all_reports,
-        dependencies=_report_workflow_dependencies(),
+        dependencies=_report_workflow_dependencies(*_catalog_context()),
     )
 
 
 def _start_report_audits_for_target(
     repo_id: str,
     project_id: str,
-    audits: list[AuditAlias],
+    audits: list[AuditDefinition],
+    catalog: AuditCatalog,
+    catalog_payload: JsonObjectPayload | None = None,
 ) -> AuditRunBatchPayload:
     return _report_workflows.start_report_audits_for_target(
         repo_id,
         project_id,
         audits,
-        dependencies=_report_workflow_dependencies(),
+        dependencies=_report_workflow_dependencies(catalog, catalog_payload or {"curatedActions": []}),
     )
 
 
 def read_reports_for_repo(
     repo: str,
     project: str | None,
-    audits: list[AuditAlias],
+    audits: list[str],
     *,
     all_reports: bool,
 ) -> dict[str, object]:
@@ -367,15 +405,20 @@ def read_reports_for_repo(
         project,
         audits,
         all_reports=all_reports,
-        dependencies=_report_workflow_dependencies(),
+        dependencies=_report_workflow_dependencies(*_catalog_context()),
     )
 
 
-def _read_report_snapshot(repo_id: str, audit: AuditAlias) -> JsonObjectPayload:
-    return _report_workflows.read_report_snapshot(repo_id, audit, dependencies=_report_workflow_dependencies())
+def _read_report_snapshot(
+    repo_id: str, audit: AuditDefinition, catalog: AuditCatalog, catalog_payload: JsonObjectPayload
+) -> JsonObjectPayload:
+    return _report_workflows.read_report_snapshot(
+        repo_id, audit, dependencies=_report_workflow_dependencies(catalog, catalog_payload)
+    )
 
 
 def list_email_preferences(repo: str | None, project: str | None) -> JsonObjectPayload:
+    catalog, _ = _catalog_context()
     return _list_email_preferences(
         repo,
         project,
@@ -383,6 +426,7 @@ def list_email_preferences(repo: str | None, project: str | None) -> JsonObjectP
             selected_repo_targets=_selected_repo_targets,
             get_audit_email_preferences=_get_audit_email_preferences,
         ),
+        catalog=catalog,
     )
 
 
@@ -398,10 +442,9 @@ def set_email_preferences(
     all_repos: bool = False,
     all_projects: bool = False,
 ) -> JsonObjectPayload:
+    catalog, _ = _catalog_context()
     return _set_email_preferences(
-        repo,
-        project,
-        update,
+        _SetEmailPreferencesContext(repo, project, update, catalog),
         selected_write_repo_targets=lambda selected_repo, selected_project: _selected_write_repo_targets(
             selected_repo,
             selected_project,
@@ -421,6 +464,7 @@ def _list_schedules(repo_id: str) -> JsonObjectPayload:
 
 
 def list_schedule_settings(repo: str | None, project: str | None) -> JsonObjectPayload:
+    catalog, _ = _catalog_context()
     return _list_schedule_settings(
         repo,
         project,
@@ -428,17 +472,16 @@ def list_schedule_settings(repo: str | None, project: str | None) -> JsonObjectP
             selected_repo_targets=_selected_repo_targets,
             list_schedules=_list_schedules,
         ),
+        catalog=catalog,
     )
 
 
 def _set_schedule(
     repo_id: str,
-    audit: AuditAlias,
+    audit: AuditDefinition,
     payload: object,
 ) -> JsonObjectPayload:
-    return run_put_improvement_job(
-        repo_id, registry_require_report_audit(audit).job_kind, _json_object_payload(payload)
-    )
+    return run_put_improvement_job(repo_id, audit.runbook_kind, _json_object_payload(payload))
 
 
 def set_schedule_settings(
@@ -449,10 +492,9 @@ def set_schedule_settings(
     all_repos: bool = False,
     all_projects: bool = False,
 ) -> JsonObjectPayload:
+    catalog, _ = _catalog_context()
     return _set_schedule_settings(
-        repo,
-        project,
-        update,
+        _SetScheduleSettingsContext(repo, project, update, catalog),
         selected_write_repo_targets=lambda selected_repo, selected_project: _selected_write_repo_targets(
             selected_repo,
             selected_project,
@@ -474,12 +516,13 @@ def wait_for_reports(
     options: ReportWaitOptions,
     heartbeat: ReportWaitCallback | None,
 ) -> dict[str, object]:
+    catalog, catalog_payload = _catalog_context()
     return _report_workflows.wait_for_reports(
         repo,
         project,
         options=options,
         heartbeat=heartbeat,
-        dependencies=_report_workflow_dependencies(),
+        dependencies=_report_workflow_dependencies(catalog, catalog_payload),
     )
 
 
@@ -541,29 +584,35 @@ def _resolve_single_repo_target(repo: str, project: str | None) -> RepoTargetPay
     )
 
 
-def _project_runtime_status(project_id: str) -> ProjectRuntimeStatusPayload:
+def _project_runtime_status(project_id: str, catalog: AuditCatalog) -> ProjectRuntimeStatusPayload:
     return _project_runtime_status_impl(
         project_id,
         project_detail=run_project_detail,
-        repo_runtime_status=_repo_runtime_status,
+        repo_runtime_status=lambda project_id, project_name, repo: _repo_runtime_status(
+            project_id, project_name, repo, catalog
+        ),
     )
 
 
-def _project_inventory_status(project_id: str) -> ProjectRuntimeStatusPayload:
+def _project_inventory_status(project_id: str, catalog: AuditCatalog) -> ProjectRuntimeStatusPayload:
     return _project_inventory_status_impl(
         project_id,
         project_detail=run_project_detail,
-        repo_inventory_status=_repo_inventory_status,
+        repo_inventory_status=lambda project_id, project_name, repo: _repo_inventory_status(
+            project_id, project_name, repo, catalog
+        ),
     )
 
 
-def _project_statuses_for_repo(repo: str, project: str | None) -> list[ProjectRuntimeStatusPayload]:
+def _project_statuses_for_repo(
+    repo: str, project: str | None, catalog: AuditCatalog
+) -> list[ProjectRuntimeStatusPayload]:
     return _project_statuses_for_repo_impl(
         repo,
         project,
         matching_repo_targets=_matching_repo_targets,
         selected_project_ids=_selected_project_ids,
-        repo_runtime_status_from_target=_repo_runtime_status_from_target,
+        repo_runtime_status_from_target=lambda target: _repo_runtime_status_from_target(target, catalog),
     )
 
 
@@ -571,25 +620,27 @@ def _repo_runtime_status(
     project_id: str,
     project_name: str | None,
     repo: dict[str, JsonValue],
+    catalog: AuditCatalog,
 ) -> RepoRuntimeStatusPayload:
     return _repo_runtime_status_impl(
         project_id,
         project_name,
         repo,
         repo_target=_repo_target,
-        repo_runtime_status_from_target=_repo_runtime_status_from_target,
+        repo_runtime_status_from_target=lambda target: _repo_runtime_status_from_target(target, catalog),
     )
 
 
-def _repo_runtime_status_from_target(target: RepoTargetPayload) -> RepoRuntimeStatusPayload:
+def _repo_runtime_status_from_target(target: RepoTargetPayload, catalog: AuditCatalog) -> RepoRuntimeStatusPayload:
     return _repo_runtime_status_from_target_impl(
         target,
         dependencies=_RuntimeStatusDependencies(
-            repo_active_runs=_merged_repo_active_runs,
-            get_repo_rerun_state=_get_repo_rerun_state,
-            list_repo_task_links=_list_repo_task_links,
+            repo_active_runs=lambda repo_id: _merged_repo_active_runs(repo_id, catalog),
+            get_repo_rerun_state=lambda repo_id: _get_repo_rerun_state(repo_id, catalog),
+            list_repo_task_links=lambda repo_id: _list_repo_task_links(repo_id, catalog),
             current_head_sha=_current_head_sha,
             report_status_from_task_links=_report_status_from_task_links,
+            catalog=catalog,
         ),
     )
 
@@ -598,11 +649,10 @@ def _repo_inventory_status(
     project_id: str,
     project_name: str | None,
     repo: dict[str, JsonValue],
+    catalog: AuditCatalog,
 ) -> RepoRuntimeStatusPayload:
     return _repo_inventory_status_impl(
-        project_id,
-        project_name,
-        repo,
+        _RepoInventoryStatusContext(project_id, project_name, repo, catalog),
         repo_target=_repo_target,
         empty_report_status=_empty_report_status,
     )
@@ -614,6 +664,7 @@ def _repo_status_all_payload(projects: list[ProjectRuntimeStatusPayload]) -> Rep
 
 def _merged_repo_active_runs(
     repo_id: str,
+    catalog: AuditCatalog,
     *,
     rerun_state: JsonObjectPayload | None = None,
     task_links: JsonObjectPayload | None = None,
@@ -622,15 +673,14 @@ def _merged_repo_active_runs(
         repo_id,
         rerun_state=rerun_state,
         task_links=task_links,
-        dependencies=_report_workflow_dependencies(),
+        dependencies=_report_workflow_dependencies(catalog, {"curatedActions": []}),
     )
 
 
-def _record_started_run(context: _audit_runs.RecordStartedRunContext) -> None:
-    _report_workflows.record_started_run(context, dependencies=_report_workflow_dependencies())
-
-
-def _report_workflow_dependencies() -> _report_workflows.ReportWorkflowDependencies[AuditRunCreate]:
+def _report_workflow_dependencies(
+    catalog: AuditCatalog,
+    catalog_payload: JsonObjectPayload,
+) -> _report_workflows.ReportWorkflowDependencies[AuditRunCreate]:
     return _report_workflows.ReportWorkflowDependencies(
         list_repo_active_runs=run_repo_active_runs,
         get_repo_rerun_state=run_repo_audit_rerun_state,
@@ -638,18 +688,28 @@ def _report_workflow_dependencies() -> _report_workflows.ReportWorkflowDependenc
         report_status_from_task_links=_report_status_from_task_links,
         resolve_single_repo_target=_resolve_single_repo_target,
         targeted_run_payload=_targeted_run_payload,
-        report_status=_report_status,
+        report_status=lambda repo_id: _report_workflows.report_status(
+            repo_id, dependencies=_report_workflow_dependencies(catalog, catalog_payload)
+        ),
         report_snapshot=run_audit_summary_snapshot,
-        read_report_snapshot=_read_report_snapshot,
-        wait_for_report_completion=wait_for_report_completion,
-        start_report_audits_for_target=_start_report_audits_for_target,
-        require_report_audit=registry_require_report_audit,
+        read_report_snapshot=lambda repo_id, audit: _read_report_snapshot(repo_id, audit, catalog, catalog_payload),
+        wait_for_report_completion=lambda repo_id, *, options, heartbeat: wait_for_report_completion(
+            repo_id,
+            options=options,
+            heartbeat=heartbeat,
+            catalog=catalog,
+        ),
+        start_report_audits_for_target=lambda repo_id, project_id, audits: _start_report_audits_for_target(
+            repo_id, project_id, audits, catalog, catalog_payload
+        ),
         monotonic=time.monotonic,
         sleep=time.sleep,
         get_task=run_task_detail,
         active_run_ledger_settings=lambda: default_settings().active_run_ledger,
         now_utc=lambda: datetime.now(UTC),
-        start_audit_dependencies=_start_audit_dependencies,
+        start_audit_dependencies=lambda: _start_audit_dependencies(catalog, catalog_payload),
+        catalog=catalog,
+        catalog_payload=catalog_payload,
     )
 
 
@@ -671,13 +731,18 @@ def _make_audit_run_create(
     )
 
 
-def _start_audit_dependencies() -> _audit_runs.StartAuditDependencies[AuditRunCreate]:
+def _start_audit_dependencies(
+    catalog: AuditCatalog,
+    catalog_payload: JsonObjectPayload,
+) -> _audit_runs.StartAuditDependencies[AuditRunCreate]:
     return _audit_runs.StartAuditDependencies(
         make_audit_run_create=_make_audit_run_create,
         start_audit_run=run_start_audit_run,
         project_detail=run_project_detail,
-        catalog=run_catalog,
         runbook=run_runbook,
-        current_repo_active_runs=_merged_repo_active_runs,
-        record_started_run=_record_started_run,
+        current_repo_active_runs=lambda repo_id: _merged_repo_active_runs(repo_id, catalog),
+        record_started_run=lambda context: _report_workflows.record_started_run(
+            context,
+            dependencies=_report_workflow_dependencies(catalog, catalog_payload),
+        ),
     )

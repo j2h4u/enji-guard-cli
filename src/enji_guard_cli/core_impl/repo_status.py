@@ -1,7 +1,7 @@
 import time
 from datetime import UTC, datetime
 
-from enji_guard_cli.audits import REPORT_AUDITS, ReportAuditDefinition
+from enji_guard_cli.audits import AuditCatalog, AuditDefinition
 from enji_guard_cli.core_impl.models import (
     FAILED_REPORT_WAIT_STATUSES,
     REPORT_ARTIFACT_SCHEMA,
@@ -32,13 +32,14 @@ def report_status_from_task_links(
     payload: JsonObjectPayload,
     active_runs: list[JsonValue],
     rerun_state: JsonObjectPayload | None,
+    catalog: AuditCatalog,
 ) -> ReportStatusPayload:
     links_by_action = _report_links_by_action(payload)
     active_runs_by_action = active_runs_by_action_map(active_runs)
     current_sha = current_head_sha(rerun_state)
     reports = [
         _report_audit_status(audit, links_by_action, active_runs_by_action, current_sha, rerun_state)
-        for audit in REPORT_AUDITS
+        for audit in catalog.report_audits
     ]
     latest_report_at = last_report_at(reports)
     readable = _audits_with_readable_reports(reports)
@@ -87,7 +88,7 @@ def _report_links_by_action(payload: JsonObjectPayload) -> dict[str, dict[str, J
 
 
 def _report_audit_status(
-    audit: ReportAuditDefinition,
+    audit: AuditDefinition,
     links_by_action: dict[str, dict[str, JsonValue]],
     active_runs_by_action: dict[str, dict[str, JsonValue]],
     current_sha: str | None,
@@ -100,10 +101,10 @@ def _report_audit_status(
     stale = out_of_date(current_sha, audited_head_sha)
     task_lifecycle_state = _task_lifecycle_state(active_run)
     return {
-        "audit": audit.alias.value,
-        "label": audit.label,
+        "audit": audit.action_key,
+        "label": audit.title,
         "action_key": action_key,
-        "route_slug": audit.route_slug,
+        "metric_group": audit.metric_group,
         "report": {
             "readability_state": "readable" if link is not None else "unavailable",
             "can_read": link is not None,
@@ -431,8 +432,8 @@ def report_timestamp(value: str | None) -> float | None:
     return parsed.timestamp()
 
 
-def empty_report_status(repo_id: str) -> ReportStatusPayload:
-    reports = [_empty_report_audit_status(audit) for audit in REPORT_AUDITS]
+def empty_report_status(repo_id: str, catalog: AuditCatalog) -> ReportStatusPayload:
+    reports = [_empty_report_audit_status(audit) for audit in catalog.report_audits]
     return {
         "schema_version": 2,
         "repo_id": repo_id,
@@ -461,12 +462,12 @@ def empty_report_status(repo_id: str) -> ReportStatusPayload:
     }
 
 
-def _empty_report_audit_status(audit: ReportAuditDefinition) -> ReportAuditStatusPayload:
+def _empty_report_audit_status(audit: AuditDefinition) -> ReportAuditStatusPayload:
     return {
-        "audit": audit.alias.value,
-        "label": audit.label,
+        "audit": audit.action_key,
+        "label": audit.title,
         "action_key": audit.action_key,
-        "route_slug": audit.route_slug,
+        "metric_group": audit.metric_group,
         "report": {
             "readability_state": "unavailable",
             "can_read": False,

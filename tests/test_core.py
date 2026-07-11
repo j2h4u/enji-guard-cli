@@ -7,15 +7,8 @@ import pytest
 from pytest import MonkeyPatch
 
 import enji_guard_cli.core as core
-from enji_guard_cli.audits import (
-    AUDITS,
-    REPORT_AUDIT_ALIASES,
-    AuditAlias,
-    ReportAuditAlias,
-    audit_catalog,
-    audit_payload,
-    resolve_audit,
-)
+import enji_guard_cli.core_impl.operations as operations
+from enji_guard_cli.audits import AuditCatalog, AuditDefinition
 from enji_guard_cli.core import (
     READ_OPERATION_SPECS,
     EmailPreferenceUpdate,
@@ -27,6 +20,7 @@ from enji_guard_cli.core import (
     resolve_operation_spec,
 )
 from enji_guard_cli.core_impl import active_run_ledger
+from enji_guard_cli.core_impl.catalog import parse_audit_catalog
 from enji_guard_cli.core_impl.models import (
     ReportAuditStatusPayload,
     ReportReadState,
@@ -34,7 +28,84 @@ from enji_guard_cli.core_impl.models import (
 )
 from enji_guard_cli.core_impl.selectors import parse_github_repo
 from enji_guard_cli.errors import EnjiApiError
+from enji_guard_cli.json_types import JsonObjectPayload
 from enji_guard_cli.settings import default_settings
+
+
+def _catalog_action(
+    action_key: str,
+    *,
+    title: str,
+    metric_group: str | None,
+    runbook_kind: str,
+) -> JsonObjectPayload:
+    action: JsonObjectPayload = {
+        "actionKey": action_key,
+        "title": title,
+        "category": "audit" if metric_group is not None else "workflow",
+        "status": "published",
+        "runbookKind": runbook_kind,
+        "fleetRunbookId": "runbook_1",
+        "artifactSchemaName": "upfront.audit.summary",
+        "artifactSchemaVersion": "v1",
+        "taskDescriptionTemplate": "Repo {{repoFullName}}",
+    }
+    if metric_group is not None:
+        action["metricGroup"] = metric_group
+    return action
+
+
+CATALOG_PAYLOAD: JsonObjectPayload = {
+    "curatedActions": [
+        _catalog_action("audit.recon", title="Recon", metric_group=None, runbook_kind="recon"),
+        _catalog_action("audit.security", title="Security", metric_group="vulns", runbook_kind="vuln-audit"),
+        _catalog_action(
+            "audit.ai-readiness", title="AI readiness", metric_group="ai-readiness", runbook_kind="ai-audit"
+        ),
+        _catalog_action("audit.tests", title="Tests", metric_group="tests", runbook_kind="test-audit"),
+        _catalog_action(
+            "audit.tech-health", title="Tech health", metric_group="tech-health", runbook_kind="tech-audit"
+        ),
+        _catalog_action("audit.deps", title="Dependencies", metric_group="deps", runbook_kind="deps-audit"),
+        _catalog_action(
+            "audit.cognitive-debt", title="Cognitive debt", metric_group="cognitive-debt", runbook_kind="debt-audit"
+        ),
+        _catalog_action("audit.dead-code", title="Dead code", metric_group="dead-code", runbook_kind="dead-code-audit"),
+        _catalog_action(
+            "audit.maintainability",
+            title="Maintainability",
+            metric_group="maintainability",
+            runbook_kind="maintainability-audit",
+        ),
+    ]
+}
+LIVE_CATALOG = parse_audit_catalog(CATALOG_PAYLOAD)
+RECON_AUDIT = LIVE_CATALOG.recon
+REPORT_AUDITS = LIVE_CATALOG.report_audits
+
+
+def _audit(action_key: str) -> AuditDefinition:
+    return next(audit for audit in (*REPORT_AUDITS, RECON_AUDIT) if audit.action_key == action_key)
+
+
+@pytest.fixture(autouse=True)
+def _live_catalog(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(core, "run_catalog", lambda: CATALOG_PAYLOAD)
+
+
+@pytest.fixture(autouse=True)
+def _legacy_report_status_seam(monkeypatch: MonkeyPatch) -> None:
+    """Keep restored behavioral scenarios focused on their status fixture."""
+
+    dependencies = core._report_workflow_dependencies
+
+    def with_status_seam(catalog: AuditCatalog, catalog_payload: JsonObjectPayload):
+        return replace(
+            dependencies(catalog, catalog_payload),
+            report_status=lambda repo_id: core._report_status(repo_id, catalog),
+        )
+
+    monkeypatch.setattr(core, "_report_workflow_dependencies", with_status_seam)
 
 
 def _ledger_test_settings(tmp_path: Path):
@@ -98,29 +169,118 @@ def test_resolve_operation_returns_new_access_and_reports_specs() -> None:
     }
 
 
-def test_operation_specs_are_executable_bindings() -> None:
-    assert resolve_operation_spec(OperationName.CATALOG_AUDITS).execute() == audit_catalog()
-    assert resolve_operation_spec(OperationName.CATALOG_AUDIT).execute(AuditAlias.DEPS) == audit_payload(
-        resolve_audit(AuditAlias.DEPS)
-    )
+def test_operation_specs_are_executable_bindings(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(operations, "run_catalog", lambda: CATALOG_PAYLOAD)
+
+    assert resolve_operation_spec(OperationName.CATALOG_AUDITS).execute() == [
+        {
+            "action_key": audit.action_key,
+            "title": audit.title,
+            "metric_group": audit.metric_group,
+            "runbook_kind": audit.runbook_kind,
+        }
+        for audit in (*REPORT_AUDITS, RECON_AUDIT)
+    ]
+    assert resolve_operation_spec(OperationName.CATALOG_AUDIT).execute("deps") == {
+        "action_key": "audit.deps",
+        "title": "Dependencies",
+        "metric_group": "deps",
+        "runbook_kind": "deps-audit",
+    }
     assert callable(resolve_operation_spec(OperationName.ACCESS).execute)
     assert callable(resolve_operation_spec(OperationName.REPORTS_LIST).execute)
     assert callable(resolve_operation_spec(OperationName.AUTH_STATUS).execute)
 
 
-def test_audit_catalog_is_derived_from_canonical_audit_definitions() -> None:
-    assert len(audit_catalog()) == len(AUDITS)
-    assert audit_payload(resolve_audit(AuditAlias.RECON)) == {
-        "alias": "recon",
-        "label": "Recon",
-        "route_slug": None,
-        "job_kind": None,
+def test_catalog_operations_are_derived_from_live_curated_actions(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(operations, "run_catalog", lambda: CATALOG_PAYLOAD)
+
+    audits = cast(list[dict[str, object]], resolve_operation_spec(OperationName.CATALOG_AUDITS).execute())
+
+    assert len(audits) == 9
+    assert audits[-1] == {
         "action_key": "audit.recon",
+        "title": "Recon",
+        "metric_group": None,
+        "runbook_kind": "recon",
     }
 
 
-def test_report_audit_alias_enum_matches_report_registry() -> None:
-    assert tuple(AuditAlias(alias.value) for alias in ReportAuditAlias) == REPORT_AUDIT_ALIASES
+def test_catalog_operations_reject_unknown_live_action_key(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(operations, "run_catalog", lambda: CATALOG_PAYLOAD)
+
+    with pytest.raises(ValueError, match="unknown audit selector"):
+        resolve_operation_spec(OperationName.CATALOG_AUDIT).execute("removed")
+
+
+def test_runtime_status_fetches_live_catalog_exactly_once(monkeypatch: MonkeyPatch) -> None:
+    calls = 0
+
+    def catalog() -> JsonObjectPayload:
+        nonlocal calls
+        calls += 1
+        return CATALOG_PAYLOAD
+
+    monkeypatch.setattr(core, "run_catalog", catalog)
+    monkeypatch.setattr(core, "_selected_project_ids", lambda _project: ["project_1"])
+    monkeypatch.setattr(
+        core,
+        "_project_runtime_status",
+        lambda project_id, catalog: {
+            "project_id": project_id,
+            "project_name": "Pets",
+            "repos": [],
+            "catalog_size": len(catalog.report_audits),
+        },
+    )
+
+    core.runtime_status(None, "Pets")
+
+    assert calls == 1
+
+
+def test_runtime_status_reuses_one_catalog_across_multiple_repositories(monkeypatch: MonkeyPatch) -> None:
+    calls: dict[str, int] = {"catalog": 0, "parse": 0, "rerun": 0, "links": 0}
+
+    def catalog() -> JsonObjectPayload:
+        calls["catalog"] += 1
+        return CATALOG_PAYLOAD
+
+    def parse_catalog(payload: JsonObjectPayload) -> AuditCatalog:
+        calls["parse"] += 1
+        return parse_audit_catalog(payload)
+
+    monkeypatch.setattr(core, "run_catalog", catalog)
+    monkeypatch.setattr(core, "_parse_audit_catalog", parse_catalog)
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1"}]})
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda _project_id: {
+            "project": {"id": "project_1", "name": "Pets"},
+            "repos": [
+                {"id": "repo_1", "githubOwner": "j2h4u", "githubName": "one", "connected": True},
+                {"id": "repo_2", "githubOwner": "j2h4u", "githubName": "two", "connected": True},
+            ],
+        },
+    )
+    monkeypatch.setattr(core, "run_repo_active_runs", lambda _repo_id: {"activeRuns": []})
+
+    def rerun_state(repo_id: str) -> JsonObjectPayload:
+        calls["rerun"] += 1
+        return {"state": {"currentHeadSha": f"{repo_id}_head", "actions": {}}}
+
+    def task_links(_repo_id: str) -> JsonObjectPayload:
+        calls["links"] += 1
+        return {"links": []}
+
+    monkeypatch.setattr(core, "run_repo_audit_rerun_state", rerun_state)
+    monkeypatch.setattr(core, "run_repo_task_links", task_links)
+
+    payload = core.runtime_status(None, None)
+
+    assert payload["summary"]["repo_count"] == 2
+    assert calls == {"catalog": 1, "parse": 1, "rerun": 2, "links": 2}
 
 
 def test_set_schedule_normalizes_json_payload(monkeypatch: MonkeyPatch) -> None:
@@ -136,7 +296,7 @@ def test_set_schedule_normalizes_json_payload(monkeypatch: MonkeyPatch) -> None:
 
     payload = core._set_schedule(
         "repo_1",
-        AuditAlias.SECURITY,
+        _audit("audit.security"),
         {
             "enabled": True,
             "autoFix": False,
@@ -203,7 +363,7 @@ def test_report_status_derives_ready_and_missing_reports_from_task_links(monkeyp
         },
     )
 
-    payload = core._report_status("repo_1")
+    payload = core._report_status("repo_1", LIVE_CATALOG)
 
     assert payload["complete"] is False
     assert payload["readable"] is True
@@ -211,12 +371,12 @@ def test_report_status_derives_ready_and_missing_reports_from_task_links(monkeyp
     assert payload["running"] is False
     assert payload["missing"] is True
     assert payload["counts"]["readable"] == 1
-    assert payload["counts"]["missing"] == 6
+    assert payload["counts"]["missing"] == 7
     assert payload["items"][0] == {
-        "audit": "security",
+        "audit": "audit.security",
         "label": "Security",
         "action_key": "audit.security",
-        "route_slug": "vulns",
+        "metric_group": "vulns",
         "report": {
             "readability_state": "readable",
             "can_read": True,
@@ -299,7 +459,7 @@ def test_report_status_marks_started_report_runs_as_running(monkeypatch: MonkeyP
         },
     )
 
-    payload = core._report_status("repo_1")
+    payload = core._report_status("repo_1", LIVE_CATALOG)
 
     assert payload["complete"] is False
     assert payload["readable"] is True
@@ -309,10 +469,10 @@ def test_report_status_marks_started_report_runs_as_running(monkeypatch: MonkeyP
     assert payload["counts"]["running"] == 1
     assert payload["counts"]["stale"] == 1
     assert payload["items"][0] == {
-        "audit": "security",
+        "audit": "audit.security",
         "label": "Security",
         "action_key": "audit.security",
-        "route_slug": "vulns",
+        "metric_group": "vulns",
         "report": {
             "readability_state": "readable",
             "can_read": True,
@@ -381,7 +541,7 @@ def test_report_status_marks_nested_task_action_key_runs_as_running(monkeypatch:
         },
     )
 
-    payload = core._report_status("repo_1")
+    payload = core._report_status("repo_1", LIVE_CATALOG)
 
     assert payload["complete"] is False
     assert payload["active"] is True
@@ -918,6 +1078,7 @@ def test_add_repo_is_idempotent_for_existing_repo(monkeypatch: MonkeyPatch) -> N
                     "fleetRunbookId": "runbook_1",
                     "artifactSchemaName": "upfront.recon.summary",
                     "artifactSchemaVersion": "v1",
+                    "runbookKind": "recon",
                 }
             ]
         },
@@ -1107,10 +1268,10 @@ def test_start_recon_resolves_repo_and_project(monkeypatch: MonkeyPatch) -> None
         },
     )
 
-    def fake_start(repo_id: str, project_id: str, audit: AuditAlias) -> dict[str, object]:
+    def fake_start(repo_id: str, project_id: str, audit: AuditDefinition, *_: object) -> dict[str, object]:
         captured["repo_id"] = repo_id
         captured["project_id"] = project_id
-        captured["audit"] = audit.value
+        captured["audit"] = audit.action_key.removeprefix("audit.")
         return {"task": {"id": "task_1"}}
 
     monkeypatch.setattr(core, "start_audit", fake_start)
@@ -1139,7 +1300,7 @@ def test_start_report_audits_selects_all_report_audits(monkeypatch: MonkeyPatch)
     monkeypatch.setattr(
         core,
         "_report_status",
-        lambda repo_id: _report_status_payload(
+        lambda repo_id, _catalog: _report_status_payload(
             repo_id,
             [
                 _report_status_item("security", "ready", last_audited_head_sha="head_2"),
@@ -1149,14 +1310,14 @@ def test_start_report_audits_selects_all_report_audits(monkeypatch: MonkeyPatch)
     )
 
     def fake_start_report_audits_for_target(
-        repo_id: str, project_id: str, audits: list[AuditAlias]
+        repo_id: str, project_id: str, audits: list[AuditDefinition], *_: object
     ) -> dict[str, object]:
         captured["repo_id"] = repo_id
         captured["project_id"] = project_id
-        captured["audits"] = [audit.value for audit in audits]
+        captured["audits"] = [audit.action_key.removeprefix("audit.") for audit in audits]
         return {
             "results": [
-                {"audit": audit.value, "action_key": resolve_audit(audit).action_key, "state": "started"}
+                {"audit": audit.action_key.removeprefix("audit."), "action_key": audit.action_key, "state": "started"}
                 for audit in audits
             ]
         }
@@ -1171,11 +1332,20 @@ def test_start_report_audits_selects_all_report_audits(monkeypatch: MonkeyPatch)
         "repo_id": "repo_1",
         "github_repo": "j2h4u/enji-guard-cli",
     }
-    assert len(cast(list[dict[str, object]], payload["results"])) == 7
+    assert len(cast(list[dict[str, object]], payload["results"])) == 8
     assert captured == {
         "repo_id": "repo_1",
         "project_id": "project_1",
-        "audits": ["security", "ai-readiness", "tests", "tech-health", "deps", "cognitive-debt", "dead-code"],
+        "audits": [
+            "security",
+            "ai-readiness",
+            "tests",
+            "tech-health",
+            "deps",
+            "cognitive-debt",
+            "dead-code",
+            "maintainability",
+        ],
     }
 
 
@@ -1194,7 +1364,7 @@ def test_start_report_audits_includes_deterministic_preflight_before_start(monke
     monkeypatch.setattr(
         core,
         "_report_status",
-        lambda repo_id: (
+        lambda repo_id, _catalog: (
             calls.append(f"status:{repo_id}"),
             _report_status_payload(
                 repo_id,
@@ -1214,18 +1384,19 @@ def test_start_report_audits_includes_deterministic_preflight_before_start(monke
     )
 
     def fake_start_report_audits_for_target(
-        repo_id: str, project_id: str, audits: list[AuditAlias]
+        repo_id: str, project_id: str, audits: list[AuditDefinition], *_: object
     ) -> dict[str, object]:
         calls.append(f"start:{repo_id}")
         return {
             "results": [
-                {"audit": audit.value, "action_key": f"audit.{audit.value}", "state": "started"} for audit in audits
+                {"audit": audit.action_key.removeprefix("audit."), "action_key": audit.action_key, "state": "started"}
+                for audit in audits
             ]
         }
 
     monkeypatch.setattr(core, "_start_report_audits_for_target", fake_start_report_audits_for_target)
 
-    payload = core.start_report_audits("j2h4u/enji-guard-cli", "Pets", [AuditAlias.SECURITY], all_reports=False)
+    payload = core.start_report_audits("j2h4u/enji-guard-cli", "Pets", ["security"], all_reports=False)
 
     assert calls == ["status:repo_1", "start:repo_1"]
     assert payload["preflight"] == {
@@ -1235,13 +1406,13 @@ def test_start_report_audits_includes_deterministic_preflight_before_start(monke
         },
         "counts": {"readable": 3, "active": 1, "queued": 0, "running": 1, "stale": 2, "ready": 3, "missing": 1},
         "lists": {
-            "readable": ["security", "tests", "deps"],
-            "active": ["deps"],
+            "readable": ["audit.security", "audit.tests", "audit.deps"],
+            "active": ["audit.deps"],
             "queued": [],
-            "running": ["deps"],
-            "stale": ["tests", "dead-code"],
-            "ready": ["security", "tests", "deps"],
-            "missing": ["dead-code"],
+            "running": ["audit.deps"],
+            "stale": ["audit.tests", "audit.dead-code"],
+            "ready": ["audit.security", "audit.tests", "audit.deps"],
+            "missing": ["audit.dead-code"],
         },
         "current_head_sha": "head_2",
         "last_report_at": "2026-06-30T12:00:00Z",
@@ -1266,21 +1437,25 @@ def test_start_report_audits_skips_task_link_without_active_run(monkeypatch: Mon
     linked_report["report"]["created_at"] = "2026-07-04T17:44:13.795Z"
     linked_report["report"]["completed_at"] = None
     linked_report["report"]["run_status"] = None
-    monkeypatch.setattr(core, "_report_status", lambda repo_id: _report_status_payload(repo_id, [linked_report]))
+    monkeypatch.setattr(
+        core,
+        "_report_status",
+        lambda repo_id, _catalog: _report_status_payload(repo_id, [linked_report]),
+    )
 
     def fail_start_report_audits_for_target(
-        repo_id: str, project_id: str, audits: list[AuditAlias]
+        repo_id: str, project_id: str, audits: list[AuditDefinition], *_: object
     ) -> dict[str, object]:
         assert audits == []
         return {"results": []}
 
     monkeypatch.setattr(core, "_start_report_audits_for_target", fail_start_report_audits_for_target)
 
-    payload = core.start_report_audits("j2h4u/enji-guard-cli", "Pets", [AuditAlias.SECURITY], all_reports=False)
+    payload = core.start_report_audits("j2h4u/enji-guard-cli", "Pets", ["security"], all_reports=False)
 
     assert payload["results"] == [
         {
-            "audit": "security",
+            "audit": "audit.security",
             "action_key": "audit.security",
             "state": "already_running",
             "current_head_sha": "head_2",
@@ -1386,13 +1561,15 @@ def test_start_all_report_audits_skips_already_running_audits(monkeypatch: Monke
     payload = core._start_report_audits_for_target(
         "repo_1",
         "project_1",
-        [AuditAlias.SECURITY, AuditAlias.AI_READINESS, AuditAlias.TESTS, AuditAlias.DEAD_CODE],
+        [_audit("audit.security"), _audit("audit.ai-readiness"), _audit("audit.tests"), _audit("audit.dead-code")],
+        LIVE_CATALOG,
+        CATALOG_PAYLOAD,
     )
 
     assert captured_action_keys == ["audit.ai-readiness", "audit.dead-code"]
     assert payload["results"] == [
         {
-            "audit": "security",
+            "audit": "audit.security",
             "action_key": "audit.security",
             "state": "queued",
             "current_head_sha": "head_2",
@@ -1401,7 +1578,7 @@ def test_start_all_report_audits_skips_already_running_audits(monkeypatch: Monke
             "task_status": "pending",
         },
         {
-            "audit": "ai-readiness",
+            "audit": "audit.ai-readiness",
             "action_key": "audit.ai-readiness",
             "state": "started",
             "current_head_sha": "head_2",
@@ -1410,7 +1587,7 @@ def test_start_all_report_audits_skips_already_running_audits(monkeypatch: Monke
             "task_status": "pending",
         },
         {
-            "audit": "tests",
+            "audit": "audit.tests",
             "action_key": "audit.tests",
             "state": "already_running",
             "current_head_sha": "head_2",
@@ -1419,7 +1596,7 @@ def test_start_all_report_audits_skips_already_running_audits(monkeypatch: Monke
             "task_status": "in_progress",
         },
         {
-            "audit": "dead-code",
+            "audit": "audit.dead-code",
             "action_key": "audit.dead-code",
             "state": "started",
             "current_head_sha": "head_2",
@@ -1446,15 +1623,14 @@ def test_start_report_audits_skips_up_to_date_audits(monkeypatch: MonkeyPatch) -
         },
     )
     monkeypatch.setattr(core, "run_project_detail", lambda project_id: {"project": {"id": project_id}})
-    monkeypatch.setattr(core, "run_catalog", lambda: {"curatedActions": []})
     monkeypatch.setattr(core, "run_start_audit_run", fail_start)
 
-    payload = core._start_report_audits_for_target("repo_1", "project_1", [AuditAlias.SECURITY])
+    payload = core._start_report_audits_for_target("repo_1", "project_1", [_audit("audit.security")], LIVE_CATALOG)
 
     assert payload == {
         "results": [
             {
-                "audit": "security",
+                "audit": "audit.security",
                 "action_key": "audit.security",
                 "state": "up_to_date",
                 "current_head_sha": "head_2",
@@ -1468,13 +1644,13 @@ def test_start_report_audits_skips_up_to_date_audits(monkeypatch: MonkeyPatch) -
     ("audits", "all_reports", "message"),
     [
         ([], False, "pass at least one report audit or --all"),
-        ([AuditAlias.SECURITY], True, "pass report audits or --all, not both"),
-        ([AuditAlias.RECON], False, "recon is not a report audit"),
+        (["security"], True, "pass report audits or --all, not both"),
+        (["recon"], False, "unknown report audit selector"),
     ],
 )
 def test_start_report_audits_rejects_invalid_selection(
     monkeypatch: MonkeyPatch,
-    audits: list[AuditAlias],
+    audits: list[str],
     all_reports: bool,
     message: str,
 ) -> None:
@@ -1506,10 +1682,10 @@ def _report_status_item(
     task_lifecycle_state, task_run_status = task or (None, None)
     lifecycle_state: ReportTaskLifecycleState = task_lifecycle_state or ("running" if state == "running" else "none")
     return {
-        "audit": audit,
+        "audit": f"audit.{audit}",
         "label": audit,
         "action_key": f"audit.{audit}",
-        "route_slug": audit,
+        "metric_group": _audit(f"audit.{audit}").metric_group,
         "report": {
             "readability_state": "readable" if state != "missing" else "unavailable",
             "can_read": state != "missing",
@@ -1591,7 +1767,7 @@ def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatc
     monkeypatch.setattr(
         core,
         "_report_status",
-        lambda repo_id: _report_status_payload(
+        lambda repo_id, _catalog: _report_status_payload(
             repo_id,
             [
                 _report_status_item("security", "ready", last_audited_head_sha="head_2"),
@@ -1602,9 +1778,10 @@ def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatc
         ),
     )
 
-    def fake_show_report(repo_id: str, audit: AuditAlias) -> dict[str, object]:
-        captured_audits.append(audit.value)
-        return {"snapshot": {"content": {"report": f"# {audit.value}"}}}
+    def fake_show_report(repo_id: str, audit: AuditDefinition, *_: object) -> dict[str, object]:
+        name = audit.action_key.removeprefix("audit.")
+        captured_audits.append(name)
+        return {"snapshot": {"content": {"report": f"# {name}"}}}
 
     monkeypatch.setattr(core, "_read_report_snapshot", fake_show_report)
 
@@ -1616,7 +1793,7 @@ def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatc
     assert target["repo_id"] == "repo_1"
     assert reports == [
         {
-            "audit": "security",
+            "audit": "audit.security",
             "current_head_sha": "head_2",
             "last_audited_head_sha": "head_2",
             "out_of_date": False,
@@ -1627,7 +1804,7 @@ def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatc
             "snapshot": {"content": {"report": "# security"}},
         },
         {
-            "audit": "tests",
+            "audit": "audit.tests",
             "current_head_sha": "head_2",
             "last_audited_head_sha": "head_1",
             "out_of_date": True,
@@ -1638,7 +1815,7 @@ def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatc
             "snapshot": {"content": {"report": "# tests"}},
         },
         {
-            "audit": "deps",
+            "audit": "audit.deps",
             "current_head_sha": "head_2",
             "last_audited_head_sha": None,
             "out_of_date": None,
@@ -1670,14 +1847,17 @@ def test_read_reports_for_repo_can_read_all_report_audits(monkeypatch: MonkeyPat
     monkeypatch.setattr(
         core,
         "_read_report_snapshot",
-        lambda repo_id, audit: {"snapshot": {"content": {"report": audit.value}}},
+        lambda repo_id, audit, *_: {"snapshot": {"content": {"report": audit.action_key.removeprefix("audit.")}}},
     )
     monkeypatch.setattr(
         core,
         "_report_status",
-        lambda repo_id: _report_status_payload(
+        lambda repo_id, _catalog: _report_status_payload(
             repo_id,
-            [_report_status_item(audit.value, "ready", last_audited_head_sha=None) for audit in REPORT_AUDIT_ALIASES],
+            [
+                _report_status_item(audit.action_key.removeprefix("audit."), "ready", last_audited_head_sha=None)
+                for audit in REPORT_AUDITS
+            ],
         ),
     )
 
@@ -1686,13 +1866,14 @@ def test_read_reports_for_repo_can_read_all_report_audits(monkeypatch: MonkeyPat
     reports = payload["reports"]
     assert isinstance(reports, list)
     assert [report["audit"] for report in reports if isinstance(report, dict)] == [
-        "security",
-        "ai-readiness",
-        "tests",
-        "tech-health",
-        "deps",
-        "cognitive-debt",
-        "dead-code",
+        "audit.security",
+        "audit.ai-readiness",
+        "audit.tests",
+        "audit.tech-health",
+        "audit.deps",
+        "audit.cognitive-debt",
+        "audit.dead-code",
+        "audit.maintainability",
     ]
     assert all(report.get("current_head_sha") == "head_2" for report in reports if isinstance(report, dict))
 
@@ -1716,7 +1897,7 @@ def test_read_reports_for_repo_all_marks_missing_reports_unavailable(monkeypatch
     monkeypatch.setattr(
         core,
         "_report_status",
-        lambda repo_id: _report_status_payload(
+        lambda repo_id, _catalog: _report_status_payload(
             repo_id,
             [
                 _report_status_item("security", "ready", last_audited_head_sha="head_1"),
@@ -1725,9 +1906,10 @@ def test_read_reports_for_repo_all_marks_missing_reports_unavailable(monkeypatch
         ),
     )
 
-    def fake_show_report(repo_id: str, audit: AuditAlias) -> dict[str, object]:
-        captured_audits.append(audit.value)
-        return {"snapshot": {"content": {"report": f"# {audit.value}"}}}
+    def fake_show_report(repo_id: str, audit: AuditDefinition, *_: object) -> dict[str, object]:
+        name = audit.action_key.removeprefix("audit.")
+        captured_audits.append(name)
+        return {"snapshot": {"content": {"report": f"# {name}"}}}
 
     monkeypatch.setattr(core, "_read_report_snapshot", fake_show_report)
 
@@ -1737,7 +1919,7 @@ def test_read_reports_for_repo_all_marks_missing_reports_unavailable(monkeypatch
     assert isinstance(reports, list)
     assert reports == [
         {
-            "audit": "security",
+            "audit": "audit.security",
             "current_head_sha": "head_2",
             "last_audited_head_sha": "head_1",
             "out_of_date": True,
@@ -1748,14 +1930,14 @@ def test_read_reports_for_repo_all_marks_missing_reports_unavailable(monkeypatch
             "snapshot": {"content": {"report": "# security"}},
         },
         {
-            "audit": "cognitive-debt",
+            "audit": "audit.cognitive-debt",
             "current_head_sha": "head_2",
             "last_audited_head_sha": None,
             "out_of_date": None,
             "available": False,
             "state": "missing",
             "reason": "missing",
-            "message": "cognitive-debt report is missing",
+            "message": "audit.cognitive-debt report is missing",
         },
     ]
     assert captured_audits == ["security"]
@@ -1779,13 +1961,13 @@ def test_read_reports_for_repo_all_marks_missing_ready_snapshot_unavailable(monk
     monkeypatch.setattr(
         core,
         "_report_status",
-        lambda repo_id: _report_status_payload(
+        lambda repo_id, _catalog: _report_status_payload(
             repo_id,
             [_report_status_item("security", "ready", last_audited_head_sha="head_1")],
         ),
     )
 
-    def fake_show_report(repo_id: str, audit: AuditAlias) -> dict[str, object]:
+    def fake_show_report(repo_id: str, audit: AuditDefinition, *_: object) -> dict[str, object]:
         raise EnjiApiError("NOT_FOUND", "snapshot not found")
 
     monkeypatch.setattr(core, "_read_report_snapshot", fake_show_report)
@@ -1796,14 +1978,14 @@ def test_read_reports_for_repo_all_marks_missing_ready_snapshot_unavailable(monk
     assert isinstance(reports, list)
     assert reports == [
         {
-            "audit": "security",
+            "audit": "audit.security",
             "current_head_sha": "head_2",
             "last_audited_head_sha": "head_1",
             "out_of_date": True,
             "available": False,
             "state": "missing",
             "reason": "snapshot_not_found",
-            "message": "security snapshot not found",
+            "message": "audit.security snapshot not found",
             "error_code": "NOT_FOUND",
         }
     ]
@@ -1827,14 +2009,14 @@ def test_read_reports_for_repo_explicit_missing_report_has_precise_error(monkeyp
     monkeypatch.setattr(
         core,
         "_report_status",
-        lambda repo_id: _report_status_payload(
+        lambda repo_id, _catalog: _report_status_payload(
             repo_id,
             [_report_status_item("cognitive-debt", "missing", last_audited_head_sha=None)],
         ),
     )
 
-    with pytest.raises(EnjiApiError, match="cognitive-debt report is missing") as exc_info:
-        core.read_reports_for_repo("j2h4u/mcp-strava", None, [AuditAlias.COGNITIVE_DEBT], all_reports=False)
+    with pytest.raises(EnjiApiError, match=r"audit\.cognitive-debt report is missing") as exc_info:
+        core.read_reports_for_repo("j2h4u/mcp-strava", None, ["cognitive-debt"], all_reports=False)
 
     assert exc_info.value.code == "NOT_FOUND"
 
@@ -1881,16 +2063,16 @@ def test_set_email_preferences_fans_out_over_project_repos_and_report_audits(mon
 
     preferences = payload["preferences"]
     assert isinstance(preferences, list)
-    assert payload["summary"] == {"repo_count": 2, "audit_count": 14}
-    assert len(captured) == 14
+    assert payload["summary"] == {"repo_count": 2, "audit_count": 16}
+    assert len(captured) == 16
     assert captured[0] == ("repo_1", "audit.security", {"scheduledRunCompletion": False})
-    assert captured[-1] == ("repo_2", "audit.dead-code", {"scheduledRunCompletion": False})
+    assert captured[-1] == ("repo_2", "audit.maintainability", {"scheduledRunCompletion": False})
     assert preferences[0] == {
         "project_id": "project_1",
         "project_name": "Pets",
         "repo_id": "repo_1",
         "github_repo": "j2h4u/enji-guard-cli",
-        "audit": "security",
+        "audit": "audit.security",
         "action_key": "audit.security",
         "manual_run_completion": True,
         "scheduled_run_completion": False,
@@ -2001,7 +2183,7 @@ def test_list_schedule_settings_fans_out_over_project_repos_and_report_audits(mo
     schedules = cast(list[dict[str, object]], payload["schedules"])
     assert payload["summary"] == {
         "repo_count": 1,
-        "audit_count": 7,
+        "audit_count": 8,
         "enabled_count": 1,
         "changed_count": 0,
         "unchanged_count": 0,
@@ -2011,8 +2193,8 @@ def test_list_schedule_settings_fans_out_over_project_repos_and_report_audits(mo
         "project_name": "Pets",
         "repo_id": "repo_1",
         "github_repo": "j2h4u/enji-guard-cli",
-        "audit": "security",
-        "job_kind": "vuln-audit",
+        "audit": "audit.security",
+        "runbook_kind": "vuln-audit",
         "configured": True,
         "enabled": True,
         "frequency": "weekly-2x",
@@ -2022,7 +2204,7 @@ def test_list_schedule_settings_fans_out_over_project_repos_and_report_audits(mo
         "timezone": "Asia/Almaty",
         "auto_fix": True,
     }
-    assert schedules[1]["audit"] == "ai-readiness"
+    assert schedules[1]["audit"] == "audit.ai-readiness"
     assert schedules[1]["configured"] is False
 
 
@@ -2068,12 +2250,12 @@ def test_set_schedule_settings_updates_project_repos_and_report_audits(monkeypat
 
     assert payload["summary"] == {
         "repo_count": 1,
-        "audit_count": 7,
-        "enabled_count": 7,
-        "changed_count": 7,
+        "audit_count": 8,
+        "enabled_count": 8,
+        "changed_count": 8,
         "unchanged_count": 0,
     }
-    assert len(captured) == 7
+    assert len(captured) == 8
     assert captured[0] == (
         "repo_1",
         "vuln-audit",
@@ -2155,7 +2337,7 @@ def test_set_schedule_settings_skips_unchanged_existing_jobs(monkeypatch: Monkey
     schedules = cast(list[dict[str, object]], payload["schedules"])
     summary = cast(dict[str, object], payload["summary"])
     assert summary["changed_count"] == 0
-    assert summary["unchanged_count"] == 7
+    assert summary["unchanged_count"] == 8
     assert schedules[0]["status"] == "unchanged"
 
 
@@ -2196,7 +2378,7 @@ def test_set_schedule_settings_can_update_timezone_without_time(monkeypatch: Mon
         },
     )
 
-    def fake_set_schedule(_repo_id: str, _audit: AuditAlias, payload: dict[str, object]) -> dict[str, object]:
+    def fake_set_schedule(_repo_id: str, _audit: AuditDefinition, payload: dict[str, object]) -> dict[str, object]:
         captured.append(payload)
         return {"job": payload}
 
@@ -2257,7 +2439,7 @@ def test_set_schedule_settings_can_reset_schedule_time_to_auto(monkeypatch: Monk
         },
     )
 
-    def fake_set_schedule(_repo_id: str, _audit: AuditAlias, payload: dict[str, object]) -> dict[str, object]:
+    def fake_set_schedule(_repo_id: str, _audit: AuditDefinition, payload: dict[str, object]) -> dict[str, object]:
         captured.append(payload)
         return {"job": payload}
 
@@ -2326,19 +2508,20 @@ def test_wait_for_report_completion_succeeds_when_reports_are_ready_but_stale(mo
         out_of_date=True,
         run_status="completed",
     )
-    monkeypatch.setattr(core, "_report_status", lambda _repo_id: status)
+    monkeypatch.setattr(core, "_report_status", lambda _repo_id, _catalog: status)
 
     payload = core.wait_for_report_completion(
         "repo_1",
         options=ReportWaitOptions(poll_seconds=30, timeout_seconds=30, heartbeat_seconds=120),
         heartbeat=None,
+        catalog=LIVE_CATALOG,
     )
 
     assert payload["complete"] is True
     assert payload["timed_out"] is False
     assert payload["reason"] == "complete"
     assert payload["counts"]["stale"] == 1
-    assert payload["stale"] == ["security"]
+    assert payload["stale"] == ["audit.security"]
 
 
 def test_wait_for_report_completion_counts_nested_task_action_key_runs(monkeypatch: MonkeyPatch) -> None:
@@ -2359,7 +2542,7 @@ def test_wait_for_report_completion_counts_nested_task_action_key_runs(monkeypat
         run_status="in_progress",
     )
     clock = FakeClock()
-    monkeypatch.setattr(core, "_report_status", lambda _repo_id: status)
+    monkeypatch.setattr(core, "_report_status", lambda _repo_id, _catalog: status)
     monkeypatch.setattr(core.time, "monotonic", clock.monotonic)
     monkeypatch.setattr(core.time, "sleep", clock.sleep)
 
@@ -2367,6 +2550,7 @@ def test_wait_for_report_completion_counts_nested_task_action_key_runs(monkeypat
         "repo_1",
         options=ReportWaitOptions(poll_seconds=30, timeout_seconds=30, heartbeat_seconds=120),
         heartbeat=None,
+        catalog=LIVE_CATALOG,
     )
 
     assert payload["complete"] is False
@@ -2394,7 +2578,7 @@ def test_wait_for_report_completion_times_out_when_reports_remain_missing(monkey
         run_status=None,
     )
     clock = FakeClock()
-    monkeypatch.setattr(core, "_report_status", lambda _repo_id: status)
+    monkeypatch.setattr(core, "_report_status", lambda _repo_id, _catalog: status)
     monkeypatch.setattr(core.time, "monotonic", clock.monotonic)
     monkeypatch.setattr(core.time, "sleep", clock.sleep)
 
@@ -2402,6 +2586,7 @@ def test_wait_for_report_completion_times_out_when_reports_remain_missing(monkey
         "repo_1",
         options=ReportWaitOptions(poll_seconds=30, timeout_seconds=30, heartbeat_seconds=120),
         heartbeat=None,
+        catalog=LIVE_CATALOG,
     )
 
     assert payload["complete"] is False
@@ -2450,10 +2635,10 @@ def _report_wait_status(
         },
         "items": [
             {
-                "audit": "security",
+                "audit": "audit.security",
                 "label": "Security",
                 "action_key": "audit.security",
-                "route_slug": "security",
+                "metric_group": "vulns",
                 "report": {
                     "readability_state": "readable" if state != "missing" else "unavailable",
                     "can_read": state != "missing",
@@ -2521,7 +2706,7 @@ def test_start_audit_builds_spa_compatible_fleet_task_body(monkeypatch: MonkeyPa
     monkeypatch.setattr(core, "run_repo_active_runs", lambda repo_id: {"activeRuns": []})
     monkeypatch.setattr(core, "run_start_audit_run", fake_start)
 
-    payload = core.start_audit("repo_1", "project_1", AuditAlias.RECON)
+    payload = core.start_audit("repo_1", "project_1", RECON_AUDIT)
 
     assert payload == {"task": {"id": "task_1"}}
     request = captured["request"]
@@ -2563,11 +2748,11 @@ def test_start_audit_skips_already_running_audit(monkeypatch: MonkeyPatch) -> No
     )
     monkeypatch.setattr(core, "run_start_audit_run", fail_start)
 
-    payload = core.start_audit("repo_1", "project_1", AuditAlias.RECON)
+    payload = core.start_audit("repo_1", "project_1", RECON_AUDIT)
 
     assert payload == {
         "skipped": True,
-        "audit": "recon",
+        "audit": "audit.recon",
         "action_key": "audit.recon",
         "reason": "already_running",
         "active_runs": [
@@ -2620,7 +2805,9 @@ def test_start_audit_records_ledger_entry_for_started_report(tmp_path: Path, mon
         core, "run_repo_audit_rerun_state", lambda repo_id: {"state": {"currentHeadSha": "head_2", "actions": {}}}
     )
 
-    core._start_report_audits_for_target("repo_1", "project_1", [AuditAlias.SECURITY])
+    core._start_report_audits_for_target(
+        "repo_1", "project_1", [_audit("audit.security")], LIVE_CATALOG, CATALOG_PAYLOAD
+    )
 
     ledger = active_run_ledger.read_active_run_ledger(settings.active_run_ledger)
     assert [
@@ -2688,7 +2875,7 @@ def test_report_status_projects_ledger_task_with_task_detail(tmp_path: Path, mon
         },
     )
 
-    payload = core._report_status("repo_1")
+    payload = core._report_status("repo_1", LIVE_CATALOG)
 
     assert payload["active"] is True
     assert payload["counts"]["active"] == 1
@@ -2738,7 +2925,7 @@ def test_start_audit_skips_when_ledger_task_is_still_active(tmp_path: Path, monk
         lambda request: (_ for _ in ()).throw(AssertionError("active ledger task should skip duplicate start")),
     )
 
-    payload = core.start_audit("repo_1", "project_1", AuditAlias.SECURITY)
+    payload = core.start_audit("repo_1", "project_1", _audit("audit.security"))
 
     assert payload["reason"] == "already_running"
     active_runs = payload["active_runs"]
@@ -2781,7 +2968,7 @@ def test_report_status_prunes_ledger_when_report_becomes_fresh(tmp_path: Path, m
         lambda repo_id: {"links": [{"actionKey": "audit.security", "artifactSchemaName": "upfront.audit.summary"}]},
     )
 
-    payload = core._report_status("repo_1")
+    payload = core._report_status("repo_1", LIVE_CATALOG)
 
     assert payload["active"] is False
     assert active_run_ledger.read_active_run_ledger(settings.active_run_ledger).entries == []
@@ -2811,7 +2998,7 @@ def test_report_status_prunes_expired_ledger_entry(tmp_path: Path, monkeypatch: 
     )
     monkeypatch.setattr(core, "run_repo_task_links", lambda repo_id: {"links": []})
 
-    payload = core._report_status("repo_1")
+    payload = core._report_status("repo_1", LIVE_CATALOG)
 
     assert payload["active"] is False
     assert active_run_ledger.read_active_run_ledger(settings.active_run_ledger).entries == []
@@ -2848,7 +3035,7 @@ def test_report_status_prunes_terminal_task_from_ledger(tmp_path: Path, monkeypa
         lambda task_id: {"task": {"id": task_id, "status": "completed", "completedAt": "2026-07-05T10:15:00Z"}},
     )
 
-    payload = core._report_status("repo_1")
+    payload = core._report_status("repo_1", LIVE_CATALOG)
 
     assert payload["active"] is False
     assert active_run_ledger.read_active_run_ledger(settings.active_run_ledger).entries == []

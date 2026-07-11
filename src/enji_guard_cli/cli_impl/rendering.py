@@ -34,23 +34,12 @@ def table_line(cells: tuple[str, ...], widths: list[int]) -> str:
 
 
 def echo_repo_score_table(payload: object) -> None:
-    headers = (
-        "project",
-        "repo",
-        "state",
-        "last_report",
-        "overall",
-        "grade",
-        "weakest",
-        "vulns",
-        "ai",
-        "tests",
-        "tech",
-        "deps",
-        "cog",
-        "dead",
+    repo_pairs = payload_repos(payload)
+    score_names = score_columns(repo_pairs)
+    headers = ("project", "repo", "state", "last_report", "overall", "grade", "weakest", *score_names)
+    echo_table(
+        headers, [repo_score_row(project, repo, score_names) for project, repo in repo_pairs], "No repositories."
     )
-    echo_table(headers, [repo_score_row(project, repo) for project, repo in payload_repos(payload)], "No repositories.")
 
 
 def echo_repo_status_table(payload: object) -> None:
@@ -192,15 +181,19 @@ def echo_auth_status(payload: object) -> None:
 
 
 def echo_audit_catalog(payload: object) -> None:
-    headers = ("audit", "label", "job_kind", "route")
+    data = object_dict(payload)
+    actions = object_list(data.get("curatedActions")) if data else object_list(payload)
+    headers = ("action_key", "title", "category", "status", "metric_group", "runbook_kind")
     rows = [
         (
-            text_cell(audit.get("alias")),
-            text_cell(audit.get("label")),
-            text_cell(audit.get("job_kind")),
-            text_cell(audit.get("route_slug")),
+            text_cell(audit.get("actionKey")),
+            text_cell(audit.get("title")),
+            text_cell(audit.get("category")),
+            text_cell(audit.get("status")),
+            text_cell(audit.get("metricGroup")),
+            text_cell(audit.get("runbookKind")),
         )
-        for audit in (object_dict(item) for item in object_list(payload))
+        for audit in (object_dict(item) for item in actions)
     ]
     echo_table(headers, rows, "No audits.")
 
@@ -377,9 +370,12 @@ def repo_resolve_row(data: dict[str, object], match: dict[str, object]) -> tuple
     )
 
 
-def repo_score_row(project: dict[str, object], repo: dict[str, object]) -> tuple[str, ...]:
+def repo_score_row(
+    project: dict[str, object], repo: dict[str, object], score_names: tuple[str, ...] | None = None
+) -> tuple[str, ...]:
     scores = object_dict(repo.get("scores"))
     score_summary = object_dict(repo.get("score_summary"))
+    columns = score_names if score_names is not None else tuple(sorted(key for key in scores if isinstance(key, str)))
     return (
         project_label(project),
         repo_label(repo),
@@ -388,14 +384,13 @@ def repo_score_row(project: dict[str, object], repo: dict[str, object]) -> tuple
         score_cell(score_summary.get("overall_score")),
         text_cell(score_summary.get("overall_grade")),
         weakest_cell(score_summary),
-        score_cell(scores.get("vulns")),
-        score_cell(scores.get("ai-readiness")),
-        score_cell(scores.get("tests")),
-        score_cell(scores.get("tech-health")),
-        score_cell(scores.get("dependency-hygiene")),
-        score_cell(scores.get("cognitive-debt")),
-        score_cell(scores.get("dead-code")),
+        *(score_cell(scores.get(name)) for name in columns),
     )
+
+
+def score_columns(repo_pairs: list[tuple[dict[str, object], dict[str, object]]]) -> tuple[str, ...]:
+    names = {name for _, repo in repo_pairs for name in object_dict(repo.get("scores")) if isinstance(name, str)}
+    return tuple(sorted(names))
 
 
 def status_report_row(repo: dict[str, object], report: dict[str, object]) -> tuple[str, ...]:

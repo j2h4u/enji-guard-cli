@@ -32,28 +32,18 @@ same cookie state. The service therefore keeps one writable cookie jar and owns
 refresh centrally. Bearer/API-token support remains the preferred long-term
 authentication path.
 
-## Audit Identity
+## Audit Discovery
 
-One audit can have different identifiers in different API resources. Clients
-must expose one canonical alias and keep this translation internal.
+Every report-aware top-level command fetches `GET /api/ux/catalog` once per
+invocation. The client does not cache the response and has no fallback. The
+`curatedActions` array is authoritative: published actions in the live response
+define the available report audits, so newly published reports participate
+automatically.
 
-| Canonical alias | Report group | Schedule/action key | Legacy improvement kind |
-|---|---|---|---|
-| `security` | `vulns` | `audit.security` | `vuln-audit` |
-| `ai-readiness` | `ai-readiness` | `audit.ai-readiness` | `ai-maturity` |
-| `tests` | `tests` | `audit.tests` | `test-audit` |
-| `cicd` | `cicd` | `audit.cicd` | not confirmed |
-| `config-hygiene` | `config-hygiene` | `audit.config-hygiene` | not confirmed |
-| `tech-health` | `tech-health` | `audit.tech-health` | `tech-health` |
-| `deps` | `dependency-hygiene` | `audit.dependency-hygiene` | `dependency-hygiene` |
-| `cognitive-debt` | `cognitive-debt` | `audit.cognitive-debt` | `cognitive-debt` |
-| `dead-code` | `dead-code` | `audit.dead-code` | `dead-code` |
-| `recon` | none | `audit.recon` | none |
-
-`GET /api/ux/catalog` is the authoritative discovery source. Its
-`metricGroups` array contains published audit axes; `auditAutofixes` contains
-autofix variants; and `curatedActions` contains workflow actions. New audit axes
-may appear in the catalog before legacy improvement-job kinds exist.
+CLI report selectors are action-key suffixes without the `audit.` prefix. For
+example, selector `security` identifies action key `audit.security`; the exact
+action key from the catalog is used for API requests. Recon is the separate
+`audit.recon` action and is not part of the report-audit selector set.
 
 ## Repository Lifecycle
 
@@ -83,7 +73,8 @@ schedule replacements returned or required by preflight.
 
 ## Audit Runs And Reports
 
-`POST /api/ux/repos/{repoId}/audit-runs` starts recon or an audit axis. The body
+`POST /api/ux/repos/{repoId}/audit-runs` starts recon or a published catalog
+audit. The body
 contains `projectId`, `actionKey`, a small `fleetTaskBody`, and a unique
 `clientRequestId`. Enji owns the actual runbook selected by the action key.
 
@@ -109,10 +100,9 @@ in high-value negative bands are the more useful trend signal.
 There are two schedule families:
 
 - `audit-auto-runs/{actionKey}` is the current SPA path for automatic audit
-  reruns and is forward-compatible with catalog-discovered axes.
-- `improvement-jobs/{kind}` serves autofix jobs and an older parallel audit
-  scheduling surface. Autofix kinds observed are `vuln-fix`, `test-writing`,
-  and `dependency-update`.
+  reruns and uses catalog-discovered action keys.
+- `improvement-jobs/{kind}` serves autofix jobs; it is not the source of report
+  audit identity.
 
 There is no server-side project batch endpoint. The SPA applies project-wide
 settings with a client-side loop over repositories and axes. CLI batch behavior

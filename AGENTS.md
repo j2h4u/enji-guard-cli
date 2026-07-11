@@ -23,6 +23,10 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 - Treat `repo add` as idempotent project membership. If the repo is already
   present, continue. It starts recon when baseline diagnostics are not ready;
   the next step is `status REPO`.
+- For every report-aware top-level command, fetch `GET /api/ux/catalog` once;
+  do not cache or fall back. Treat `curatedActions` as authoritative so newly
+  published reports participate automatically. CLI report selectors are action
+  key suffixes without `audit.`; recon remains separate.
 - Keep schedule timezone stored per schedule, run the container with the host
   timezone, and use `schedule auto-time` to restore Enji-assigned run times.
 - Surface stale/mixed report freshness explicitly; never hide it behind aggregate status.

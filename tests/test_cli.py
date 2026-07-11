@@ -10,11 +10,11 @@ from pytest import MonkeyPatch
 from typer.testing import CliRunner
 
 from enji_guard_cli import cli
-from enji_guard_cli.audits import AuditAlias
 from enji_guard_cli.cli import app
 from enji_guard_cli.cli_impl import runtime_controls
 from enji_guard_cli.cli_impl.durations import format_duration_seconds
 from enji_guard_cli.core import EmailPreferenceUpdate, ReportWaitOptions, ScheduleSettingsUpdate
+from enji_guard_cli.core_impl import operations
 from enji_guard_cli.enji_api import EnjiApiError
 from enji_guard_cli.readiness import ReadinessVerdict
 from enji_guard_cli.settings import TelemetrySettings
@@ -26,10 +26,9 @@ ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 class AuditPayload(TypedDict):
     action_key: str
-    alias: str
-    job_kind: str | None
-    label: str
-    route_slug: str | None
+    title: str
+    metric_group: str | None
+    runbook_kind: str
 
 
 class AuthStatusPayload(TypedDict):
@@ -48,6 +47,44 @@ class AccessPayload(TypedDict):
     full_access: bool
     limits: dict[str, object]
     usage: list[object]
+
+
+def _catalog_action(
+    action_key: str,
+    *,
+    title: str,
+    metric_group: str | None,
+    runbook_kind: str,
+) -> dict[str, object]:
+    action: dict[str, object] = {
+        "actionKey": action_key,
+        "title": title,
+        "category": "audit" if metric_group is not None else "workflow",
+        "status": "published",
+        "runbookKind": runbook_kind,
+        "fleetRunbookId": "runbook_1",
+        "artifactSchemaName": "upfront.audit.summary",
+        "artifactSchemaVersion": "v1",
+        "taskDescriptionTemplate": "Repo {{repoFullName}}",
+    }
+    if metric_group is not None:
+        action["metricGroup"] = metric_group
+    return action
+
+
+def _catalog_payload() -> dict[str, object]:
+    return {
+        "curatedActions": [
+            _catalog_action("audit.recon", title="Recon", metric_group=None, runbook_kind="recon"),
+            _catalog_action("audit.security", title="Security", metric_group="vulns", runbook_kind="vuln-audit"),
+            _catalog_action(
+                "audit.dependency-hygiene",
+                title="Dependency hygiene",
+                metric_group="dependency-hygiene",
+                runbook_kind="dependency-hygiene",
+            ),
+        ]
+    }
 
 
 def _plain_cli_output(value: str) -> str:
@@ -346,39 +383,28 @@ def test_manual_write_command_help_documents_explicit_scope_flags() -> None:
     assert "--scheduled on|off" in email_output
 
 
-def test_catalog_audits_reports_canonical_identifier_map() -> None:
+def test_catalog_audits_reports_canonical_identifier_map(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(operations, "run_catalog", _catalog_payload)
+
     result = CliRunner().invoke(app, ["catalog", "audits", "--json"])
 
     assert result.exit_code == 0
     audits = cast(list[AuditPayload], json.loads(result.output))
-    assert audits[0] == {
-        "action_key": "audit.security",
-        "alias": "security",
-        "job_kind": "vuln-audit",
-        "label": "Security",
-        "route_slug": "vulns",
-    }
-    assert {audit["alias"] for audit in audits} == {
-        "security",
-        "ai-readiness",
-        "tests",
-        "tech-health",
-        "deps",
-        "cognitive-debt",
-        "dead-code",
-        "recon",
-    }
+    assert audits[0]["action_key"] == "audit.security"
+    assert {audit["action_key"] for audit in audits} >= {"audit.security", "audit.recon"}
+    assert all(audit["title"] and audit["runbook_kind"] for audit in audits)
 
 
-def test_catalog_audit_reports_single_alias() -> None:
-    result = CliRunner().invoke(app, ["catalog", "audit", "deps", "--json"])
+def test_catalog_audit_reports_live_action_key(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(operations, "run_catalog", _catalog_payload)
+
+    result = CliRunner().invoke(app, ["catalog", "audit", "dependency-hygiene", "--json"])
 
     assert result.exit_code == 0
     audit = cast(AuditPayload, json.loads(result.output))
-    assert audit["alias"] == "deps"
-    assert audit["route_slug"] == "dependency-hygiene"
-    assert audit["job_kind"] == "dependency-hygiene"
     assert audit["action_key"] == "audit.dependency-hygiene"
+    assert audit["metric_group"] == "dependency-hygiene"
+    assert audit["runbook_kind"] == "dependency-hygiene"
 
 
 def test_access_defaults_to_text_and_can_emit_json(monkeypatch: MonkeyPatch) -> None:
@@ -760,13 +786,13 @@ def test_audit_start_routes_positional_report_audits(monkeypatch: MonkeyPatch) -
     def fake_start(
         repo: str,
         project: str | None,
-        audits: list[AuditAlias],
+        audits: list[str],
         *,
         all_reports: bool,
     ) -> dict[str, object]:
         captured["repo"] = repo
         captured["project"] = project
-        captured["audits"] = [audit.value for audit in audits]
+        captured["audits"] = audits
         captured["all_reports"] = all_reports
         return {"results": []}
 
@@ -774,14 +800,23 @@ def test_audit_start_routes_positional_report_audits(monkeypatch: MonkeyPatch) -
 
     result = CliRunner().invoke(
         app,
-        ["--project", "Pets", "audit", "start", "j2h4u/enji-guard-cli", "security", "tests", "--json"],
+        [
+            "--project",
+            "Pets",
+            "audit",
+            "start",
+            "j2h4u/enji-guard-cli",
+            "audit.new-catalog-action",
+            "tests",
+            "--json",
+        ],
     )
 
     assert result.exit_code == 0
     assert captured == {
         "repo": "j2h4u/enji-guard-cli",
         "project": "Pets",
-        "audits": ["security", "tests"],
+        "audits": ["audit.new-catalog-action", "tests"],
         "all_reports": False,
     }
 
@@ -792,13 +827,13 @@ def test_audit_start_routes_all_flag(monkeypatch: MonkeyPatch) -> None:
     def fake_start(
         repo: str,
         project: str | None,
-        audits: list[AuditAlias],
+        audits: list[str],
         *,
         all_reports: bool,
     ) -> dict[str, object]:
         captured["repo"] = repo
         captured["project"] = project
-        captured["audits"] = [audit.value for audit in audits]
+        captured["audits"] = audits
         captured["all_reports"] = all_reports
         return {"results": []}
 
@@ -819,7 +854,7 @@ def test_audit_start_human_output_shows_preflight_warning(monkeypatch: MonkeyPat
     def fake_start(
         repo: str,
         project: str | None,
-        audits: list[AuditAlias],
+        audits: list[str],
         *,
         all_reports: bool,
     ) -> dict[str, object]:
@@ -853,7 +888,7 @@ def test_audit_start_json_output_returns_structured_preflight(monkeypatch: Monke
     def fake_start(
         repo: str,
         project: str | None,
-        audits: list[AuditAlias],
+        audits: list[str],
         *,
         all_reports: bool,
     ) -> dict[str, object]:
@@ -1185,13 +1220,13 @@ def test_report_read_defaults_to_ready_reports_and_markdown(monkeypatch: MonkeyP
     def fake_read_reports(
         repo: str,
         project: str | None,
-        audits: list[AuditAlias],
+        audits: list[str],
         *,
         all_reports: bool,
     ) -> dict[str, object]:
         captured["repo"] = repo
         captured["project"] = project
-        captured["audits"] = [audit.value for audit in audits]
+        captured["audits"] = audits
         captured["all_reports"] = all_reports
         return {
             "reports": [
@@ -1222,13 +1257,13 @@ def test_report_read_can_emit_full_json_for_all_reports(monkeypatch: MonkeyPatch
     def fake_read_reports(
         repo: str,
         project: str | None,
-        audits: list[AuditAlias],
+        audits: list[str],
         *,
         all_reports: bool,
     ) -> dict[str, object]:
         captured["repo"] = repo
         captured["project"] = project
-        captured["audits"] = [audit.value for audit in audits]
+        captured["audits"] = audits
         captured["all_reports"] = all_reports
         return {
             "reports": [
@@ -1266,7 +1301,7 @@ def test_report_read_can_emit_full_json_for_all_reports(monkeypatch: MonkeyPatch
 
     result = CliRunner().invoke(
         app,
-        ["report", "read", "j2h4u/enji-guard-cli", "--all", "--json"],
+        ["report", "read", "j2h4u/enji-guard-cli", "audit.new-catalog-action", "--all", "--json"],
     )
 
     assert result.exit_code == 0
@@ -1304,7 +1339,7 @@ def test_report_read_can_emit_full_json_for_all_reports(monkeypatch: MonkeyPatch
     assert captured == {
         "repo": "j2h4u/enji-guard-cli",
         "project": None,
-        "audits": [],
+        "audits": ["audit.new-catalog-action"],
         "all_reports": True,
     }
 
@@ -1313,7 +1348,7 @@ def test_report_summary_can_emit_compact_json_for_all_reports(monkeypatch: Monke
     def fake_read_reports(
         repo: str,
         project: str | None,
-        audits: list[AuditAlias],
+        audits: list[str],
         *,
         all_reports: bool,
     ) -> dict[str, object]:
@@ -1395,7 +1430,7 @@ def test_report_summary_defaults_to_compact_text(monkeypatch: MonkeyPatch) -> No
     def fake_read_reports(
         repo: str,
         project: str | None,
-        audits: list[AuditAlias],
+        audits: list[str],
         *,
         all_reports: bool,
     ) -> dict[str, object]:
@@ -1445,7 +1480,7 @@ def test_report_read_markdown_marks_unavailable_reports(monkeypatch: MonkeyPatch
     def fake_read_reports(
         repo: str,
         project: str | None,
-        audits: list[AuditAlias],
+        audits: list[str],
         *,
         all_reports: bool,
     ) -> dict[str, object]:
@@ -1478,7 +1513,7 @@ def test_report_read_markdown_strips_terminal_control_sequences(monkeypatch: Mon
     def fake_read_reports(
         repo: str,
         project: str | None,
-        audits: list[AuditAlias],
+        audits: list[str],
         *,
         all_reports: bool,
     ) -> dict[str, object]:

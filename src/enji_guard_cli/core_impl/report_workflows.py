@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import cast
 
-from enji_guard_cli.audits import AuditAlias, ReportAuditDefinition
+from enji_guard_cli.audits import AuditCatalog, AuditDefinition
 from enji_guard_cli.core_impl import active_run_ledger as _active_run_ledger
 from enji_guard_cli.core_impl import audit_runs as _audit_runs
 from enji_guard_cli.core_impl import report_reads as _report_reads
@@ -27,9 +27,8 @@ from enji_guard_cli.settings import ActiveRunLedgerSettings
 
 type ResolveSingleRepoTarget = Callable[[str, str | None], RepoTargetPayload]
 type TargetedRunPayload = Callable[[RepoTargetPayload, object], dict[str, object]]
-type RequireReportAudit = Callable[[AuditAlias], ReportAuditDefinition]
 type ReportSnapshot = Callable[[str, str], JsonObjectPayload]
-type StartReportAuditsForTarget = Callable[[str, str, list[AuditAlias]], AuditRunBatchPayload]
+type StartReportAuditsForTarget = Callable[[str, str, list[AuditDefinition]], AuditRunBatchPayload]
 type WaitForReportCompletion = Callable[..., ReportWaitPayload]
 type ActiveRunLedgerSettingsProvider = Callable[[], ActiveRunLedgerSettings]
 type NowUtc = Callable[[], datetime]
@@ -42,23 +41,24 @@ class ReportWorkflowDependencies[TCreateRequest]:
     get_repo_rerun_state: Callable[[str], JsonObjectPayload]
     list_repo_task_links: Callable[[str], JsonObjectPayload]
     report_status_from_task_links: Callable[
-        [str, JsonObjectPayload, list[JsonValue], JsonObjectPayload],
+        [str, JsonObjectPayload, list[JsonValue], JsonObjectPayload, AuditCatalog],
         ReportStatusPayload,
     ]
     resolve_single_repo_target: ResolveSingleRepoTarget
     targeted_run_payload: TargetedRunPayload
     report_status: Callable[[str], ReportStatusPayload]
     report_snapshot: ReportSnapshot
-    read_report_snapshot: Callable[[str, AuditAlias], JsonObjectPayload]
+    read_report_snapshot: Callable[[str, AuditDefinition], JsonObjectPayload]
     wait_for_report_completion: WaitForReportCompletion
     start_report_audits_for_target: StartReportAuditsForTarget
-    require_report_audit: RequireReportAudit
     monotonic: Callable[[], float]
     sleep: Callable[[float], None]
     get_task: Callable[[str], JsonObjectPayload]
     active_run_ledger_settings: ActiveRunLedgerSettingsProvider
     now_utc: NowUtc
     start_audit_dependencies: StartAuditDependenciesFactory[TCreateRequest]
+    catalog: AuditCatalog
+    catalog_payload: JsonObjectPayload
 
 
 def list_repo_active_runs[TCreateRequest](
@@ -98,7 +98,9 @@ def report_status[TCreateRequest](
         task_links=task_links,
         dependencies=dependencies,
     )
-    return dependencies.report_status_from_task_links(repo_id, task_links, active_runs, rerun_state)
+    return dependencies.report_status_from_task_links(
+        repo_id, task_links, active_runs, rerun_state, dependencies.catalog
+    )
 
 
 def wait_for_report_completion[TCreateRequest](
@@ -123,7 +125,7 @@ def wait_for_report_completion[TCreateRequest](
 def start_report_audits[TCreateRequest](
     repo: str,
     project: str | None,
-    audits: list[AuditAlias],
+    audits: list[str],
     *,
     all_reports: bool,
     dependencies: ReportWorkflowDependencies[TCreateRequest],
@@ -133,11 +135,7 @@ def start_report_audits[TCreateRequest](
     status = dependencies.report_status(target["repo_id"])
     preflight = _report_start_preflight_payload(status)
     linked_running_results = _audit_runs.linked_running_report_results(status, selected_audits)
-    remaining_audits = [
-        audit
-        for audit in selected_audits
-        if dependencies.require_report_audit(audit).action_key not in linked_running_results
-    ]
+    remaining_audits = [audit for audit in selected_audits if audit.action_key not in linked_running_results]
     started_results = dependencies.start_report_audits_for_target(
         target["repo_id"], target["project_id"], remaining_audits
     )
@@ -155,14 +153,17 @@ def start_report_audits[TCreateRequest](
 def start_report_audits_for_target[TCreateRequest](
     repo_id: str,
     project_id: str,
-    audits: list[AuditAlias],
+    audits: list[AuditDefinition],
     *,
     dependencies: ReportWorkflowDependencies[TCreateRequest],
 ) -> AuditRunBatchPayload:
     return _audit_runs.start_report_audits_for_target(
-        repo_id,
-        project_id,
-        audits,
+        _audit_runs.StartReportAuditsContext(
+            repo_id=repo_id,
+            project_id=project_id,
+            audits=audits,
+            catalog_payload=dependencies.catalog_payload,
+        ),
         dependencies=dependencies.start_audit_dependencies(),
         get_repo_rerun_state=dependencies.get_repo_rerun_state,
     )
@@ -171,14 +172,16 @@ def start_report_audits_for_target[TCreateRequest](
 def read_reports_for_repo[TCreateRequest](
     repo: str,
     project: str | None,
-    audits: list[AuditAlias],
+    audits: list[str],
     *,
     all_reports: bool,
     dependencies: ReportWorkflowDependencies[TCreateRequest],
 ) -> dict[str, object]:
     target = dependencies.resolve_single_repo_target(repo, project)
     status = dependencies.report_status(target["repo_id"])
-    selected_reports = _report_reads.selected_reports_to_read(status, audits, all_reports=all_reports)
+    selected_reports = _report_reads.selected_reports_to_read(
+        status, audits, all_reports=all_reports, catalog=dependencies.catalog
+    )
     return dependencies.targeted_run_payload(
         target,
         _report_reads.read_reports_for_target(
@@ -192,12 +195,14 @@ def read_reports_for_repo[TCreateRequest](
 
 def read_report_snapshot[TCreateRequest](
     repo_id: str,
-    audit: AuditAlias,
+    audit: AuditDefinition,
     *,
     dependencies: ReportWorkflowDependencies[TCreateRequest],
 ) -> JsonObjectPayload:
-    resolved: ReportAuditDefinition = dependencies.require_report_audit(audit)
-    return dependencies.report_snapshot(repo_id, resolved.route_slug)
+    metric_group = audit.metric_group
+    if metric_group is None:
+        raise ValueError(f"{audit.action_key} is not a report audit")
+    return dependencies.report_snapshot(repo_id, metric_group)
 
 
 def wait_for_reports[TCreateRequest](
@@ -226,13 +231,12 @@ def wait_for_reports[TCreateRequest](
 
 
 def selected_report_audits[TCreateRequest](
-    audits: list[AuditAlias],
+    audits: list[str],
     *,
     all_reports: bool,
     dependencies: ReportWorkflowDependencies[TCreateRequest],
-) -> list[AuditAlias]:
-    del dependencies
-    return _audit_runs.selected_report_audits(audits, all_reports=all_reports)
+) -> list[AuditDefinition]:
+    return _audit_runs.selected_report_audits(audits, all_reports=all_reports, catalog=dependencies.catalog)
 
 
 def merged_repo_active_runs[TCreateRequest](

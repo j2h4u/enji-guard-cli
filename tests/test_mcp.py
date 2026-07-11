@@ -7,7 +7,12 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 from mcp.types import Tool
 
+import enji_guard_cli.core as core
+import enji_guard_cli.mcp_facade as mcp_facade
 import enji_guard_cli.mcp_server as mcp_server
+from enji_guard_cli.audits import AuditCatalog
+from enji_guard_cli.core_impl.catalog import parse_audit_catalog
+from enji_guard_cli.json_types import JsonObjectPayload
 from enji_guard_cli.mcp_server import create_mcp_server
 from enji_guard_cli.settings import LogFormat, LogLevelName, TelemetrySettings
 from enji_guard_cli.telemetry import configure_logging
@@ -101,6 +106,7 @@ def workflow_repo_payload() -> dict[str, object]:
             "audit": "security",
             "label": "Security",
             "action_key": "audit.security",
+            "metric_group": "security",
             "route_slug": "vulns",
             "report": {
                 "readability_state": "readable",
@@ -282,6 +288,65 @@ def test_portfolio_overview_tool_returns_runtime_status(monkeypatch: pytest.Monk
 
     assert structured == payload
     assert captured == {"project": "MCP Integrations", "sort": "weakest"}
+
+
+def test_mcp_portfolio_overview_fetches_and_parses_one_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    catalog: JsonObjectPayload = {
+        "curatedActions": [
+            {
+                "actionKey": "audit.recon",
+                "title": "Recon",
+                "category": "workflow",
+                "status": "published",
+                "runbookKind": "recon",
+            },
+            {
+                "actionKey": "audit.security",
+                "title": "Security",
+                "category": "audit",
+                "status": "published",
+                "metricGroup": "vulns",
+                "runbookKind": "vuln-audit",
+            },
+        ]
+    }
+    calls: dict[str, int] = {"catalog": 0, "parse": 0, "rerun": 0, "links": 0}
+
+    def run_catalog() -> JsonObjectPayload:
+        calls["catalog"] += 1
+        return catalog
+
+    def parse_catalog(payload: JsonObjectPayload) -> AuditCatalog:
+        calls["parse"] += 1
+        return parse_audit_catalog(payload)
+
+    monkeypatch.setattr(core, "run_catalog", run_catalog)
+    monkeypatch.setattr(core, "_parse_audit_catalog", parse_catalog)
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1"}]})
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda _project_id: {
+            "project": {"id": "project_1", "name": "MCP Integrations"},
+            "repos": [{"id": "repo_1", "githubOwner": "j2h4u", "githubName": "mcp-strava", "connected": True}],
+        },
+    )
+    monkeypatch.setattr(core, "run_repo_active_runs", lambda _repo_id: {"activeRuns": []})
+    monkeypatch.setattr(
+        core,
+        "run_repo_audit_rerun_state",
+        lambda _repo_id: (calls.__setitem__("rerun", calls["rerun"] + 1), {"state": {"actions": {}}})[1],
+    )
+    monkeypatch.setattr(
+        core,
+        "run_repo_task_links",
+        lambda _repo_id: (calls.__setitem__("links", calls["links"] + 1), {"links": []})[1],
+    )
+
+    payload = mcp_facade.repository_portfolio_overview(None, "default")
+
+    assert payload["summary"]["repo_count"] == 1
+    assert calls == {"catalog": 1, "parse": 1, "rerun": 1, "links": 1}
 
 
 def test_repo_reports_tool_reads_all_reports(monkeypatch: pytest.MonkeyPatch) -> None:
