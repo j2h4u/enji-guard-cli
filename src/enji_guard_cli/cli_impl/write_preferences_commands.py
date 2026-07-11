@@ -122,8 +122,8 @@ def _schedule_set_body(args: ScheduleSetCliArgs, *, project: str | None) -> obje
             project,
             ScheduleSettingsUpdate(
                 enabled=_preference_switch(args.enabled),
-                frequency=args.frequency,
-                days_of_week=None,
+                cadence=args.cadence,
+                window_days=None,
                 schedule_time=None,
                 timezone=args.timezone,
             ),
@@ -179,8 +179,8 @@ def _schedule_auto_time_body(
             project,
             ScheduleSettingsUpdate(
                 enabled=None,
-                frequency=None,
-                days_of_week=None,
+                cadence=None,
+                window_days=None,
                 schedule_time="auto",
                 timezone=None,
             ),

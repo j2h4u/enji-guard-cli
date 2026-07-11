@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Literal, cast
 
 type PreferenceSwitch = Literal["on", "off"]
-type ScheduleFrequencyOption = Literal["daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"]
+type ScheduleCadenceOption = Literal["daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"]
 
 WRITE_FLAG_OPTIONS = frozenset({"--all-repos", "--all-projects", "--json"})
 SCHEDULE_SET_VALUE_OPTIONS = frozenset({"--enabled", "--frequency", "--timezone"})
@@ -25,7 +25,7 @@ class ScheduleSetCliArgs:
     all_projects: bool
     json_output: bool
     enabled: PreferenceSwitch | None
-    frequency: ScheduleFrequencyOption | None
+    cadence: ScheduleCadenceOption | None
     timezone: str | None
 
 
@@ -47,7 +47,7 @@ def parse_schedule_set_args(raw_args: list[str]) -> ScheduleSetCliArgs:
         all_projects=parsed.all_projects,
         json_output=parsed.json_output,
         enabled=optional_switch(parsed.values.get("--enabled"), "--enabled"),
-        frequency=optional_schedule_frequency(parsed.values.get("--frequency")),
+        cadence=optional_schedule_cadence(parsed.values.get("--frequency")),
         timezone=parsed.values.get("--timezone"),
     )
 
@@ -117,9 +117,9 @@ def optional_switch(value: str | None, option: str) -> PreferenceSwitch | None:
     raise ValueError(f"{option} must be on or off")
 
 
-def optional_schedule_frequency(value: str | None) -> ScheduleFrequencyOption | None:
+def optional_schedule_cadence(value: str | None) -> ScheduleCadenceOption | None:
     if value is None:
         return None
     if value in {"daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"}:
-        return cast(ScheduleFrequencyOption, value)
+        return cast(ScheduleCadenceOption, value)
     raise ValueError("--frequency is invalid")

@@ -29,6 +29,10 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
   key suffixes without `audit.`; recon remains separate.
 - Keep schedule timezone stored per schedule, run the container with the host
   timezone, and use `schedule auto-time` to restore Enji-assigned run times.
+- Audit schedules use `audit-auto-runs/{actionKey}` with the exact action key
+  from `curatedActions`; `improvement-jobs` is autofix-only, never an audit
+  scheduling fallback. Batch scheduling must remain an explicit client-side
+  loop over the selected repositories and audits.
 - Surface stale/mixed report freshness explicitly; never hide it behind aggregate status.
 - Before starting fresh audits, save/read every currently available report you
   may need. Starting audits can temporarily hide old snapshots behind running state.

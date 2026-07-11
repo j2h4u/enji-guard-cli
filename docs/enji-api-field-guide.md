@@ -99,25 +99,34 @@ in high-value negative bands are the more useful trend signal.
 
 There are two schedule families:
 
-- `audit-auto-runs/{actionKey}` is the current SPA path for automatic audit
-  reruns and uses catalog-discovered action keys.
-- `improvement-jobs/{kind}` serves autofix jobs; it is not the source of report
-  audit identity.
+- `audit-auto-runs/{actionKey}` is the current path for automatic audit runs.
+  `{actionKey}` is the exact action key published in `curatedActions`, such as
+  `audit.security`; do not synthesize keys from display names or CLI selectors.
+- `improvement-jobs/{kind}` is for autofix jobs only. It is never an audit
+  scheduling fallback and must not be used to identify or schedule report
+  audits.
 
 There is no server-side project batch endpoint. The SPA applies project-wide
-settings with a client-side loop over repositories and axes. CLI batch behavior
-must therefore throttle requests and retain automatic refresh handling.
+settings with a client-side loop over repositories and audit action keys. CLI
+batch behavior is likewise an explicit client-side loop over the selected
+repositories and audits; it must never infer an all-project or all-repository
+scope.
 
-An improvement job stores `enabled`, `autoFix`, `autofixVariantKey`,
-`frequency`, `daysOfWeek`, `scheduleTime`, `scheduleTimeSource`, `timezone`,
-`pentestMode`, and `triedAt`. `frequency` and `daysOfWeek` are independent; the
-backend accepts inconsistent combinations and does not normalize them.
+An audit schedule uses the exact subscription fields `cadence`, `enabled`,
+`scheduleDay`, `scheduleDayOfMonth`, `scheduleTime`, `scheduleTimeSource`,
+`timezone`, `windowDays`, `windowEndTime`, `windowMode`, and `windowStartTime`.
+The per-subscription `timezone` is IANA; `windowDays` is preserved alongside
+the cadence.
 
-`scheduleTimeSource` accepts `auto` or `user`, not `manual`. `timezone` is an
-IANA timezone stored on each schedule. `GET /api/ux/schedule-load` requires
-`from`, `to`, and `timezone` and returns 30-minute load buckets plus candidate
-slots. The SPA selects a low-load candidate and persists the chosen clock time
-with source `auto`.
+The run time is either user-selected or `auto` (Enji-assigned). Auto schedules
+use `scheduleTime: "00:00"` with `scheduleTimeSource: "auto"`. `schedule
+auto-time` restores those values without changing cadence or timezone. The
+container runs in the host timezone, but each subscription's stored IANA
+timezone controls that subscription's schedule.
+
+The schedule-load endpoint requires `from`, `to`, and `timezone` and returns
+30-minute load buckets plus candidate slots. The SPA selects a low-load
+candidate and persists the chosen clock time as `auto`.
 
 ## Email Preferences
 

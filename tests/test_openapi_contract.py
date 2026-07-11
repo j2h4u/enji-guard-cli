@@ -175,6 +175,69 @@ def test_catalog_contract_models_live_curated_actions_without_closed_key_or_kind
         assert "enum" not in property_schema
 
 
+def test_audit_auto_run_contract_models_dynamic_action_keys_and_subscriptions() -> None:
+    contract = cast(object, json.loads(CONTRACT_PATH.read_text(encoding="utf-8")))
+    assert isinstance(contract, dict)
+    paths = contract.get("paths")
+    assert isinstance(paths, dict)
+
+    collection = paths.get("/api/ux/repos/{repoId}/audit-auto-runs")
+    assert isinstance(collection, dict)
+    collection_get = collection.get("get")
+    assert isinstance(collection_get, dict)
+    assert collection_get.get("operationId") == "listRepoAuditAutoRuns"
+    assert _response_schema(collection_get, "200") == {"$ref": "#/components/schemas/AuditAutoRunSubscriptionsResponse"}
+
+    action = paths.get("/api/ux/repos/{repoId}/audit-auto-runs/{actionKey}")
+    assert isinstance(action, dict)
+    action_put = action.get("put")
+    assert isinstance(action_put, dict)
+    assert action_put.get("operationId") == "putRepoAuditAutoRun"
+    assert _request_body_ref(action_put) == "#/components/requestBodies/AuditAutoRunSubscriptionUpdate"
+    assert _response_schema(action_put, "200") == {"$ref": "#/components/schemas/AuditAutoRunSubscriptionResponse"}
+
+    components = contract.get("components")
+    assert isinstance(components, dict)
+    schemas = components.get("schemas")
+    assert isinstance(schemas, dict)
+    action_key = schemas.get("AuditActionKey")
+    assert isinstance(action_key, dict)
+    assert action_key.get("type") == "string"
+    assert "enum" not in action_key
+
+    update = schemas.get("AuditAutoRunSubscriptionUpdate")
+    assert isinstance(update, dict)
+    assert set(update.get("required", [])) == {
+        "enabled",
+        "cadence",
+        "scheduleDay",
+        "scheduleDayOfMonth",
+        "scheduleTime",
+        "scheduleTimeSource",
+        "timezone",
+        "windowDays",
+        "windowEndTime",
+        "windowMode",
+        "windowStartTime",
+    }
+    properties = update.get("properties")
+    assert isinstance(properties, dict)
+    assert set(properties) >= set(update["required"])
+    for property_name in ("scheduleDay", "windowEndTime", "windowStartTime"):
+        field_schema = properties.get(property_name)
+        assert isinstance(field_schema, dict)
+        assert "null" in field_schema.get("type", [])
+
+    subscription = schemas.get("AuditAutoRunSubscription")
+    assert isinstance(subscription, dict)
+    assert subscription.get("allOf", [])[1]["properties"]["actionKey"] == {
+        "$ref": "#/components/schemas/AuditActionKey"
+    }
+    response = schemas.get("AuditAutoRunSubscriptionResponse")
+    assert isinstance(response, dict)
+    assert _schema_property(response, "subscription") == {"$ref": "#/components/schemas/AuditAutoRunSubscription"}
+
+
 def test_reconstructed_extended_surfaces_remain_in_openapi_contract() -> None:
     contract = cast(object, json.loads(CONTRACT_PATH.read_text(encoding="utf-8")))
     assert isinstance(contract, dict)

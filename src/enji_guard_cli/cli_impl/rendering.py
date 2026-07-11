@@ -128,7 +128,7 @@ def echo_schedule_settings_table(payload: object) -> None:
 
 
 def schedule_settings_headers(rows: list[dict[str, object]]) -> tuple[str, ...]:
-    base = ("project", "repo", "audit", "enabled", "freq", "days", "at", "timezone")
+    base = ("project", "repo", "audit", "enabled", "cadence", "window_days", "at", "timezone")
     if any("status" in row for row in rows):
         return (*base, "status")
     return base
@@ -140,8 +140,8 @@ def schedule_settings_row(row: dict[str, object], *, include_status: bool) -> tu
         text_cell(row.get("github_repo"), fallback=text_cell(row.get("repo_id"))),
         text_cell(row.get("audit")),
         text_cell(row.get("enabled")),
-        text_cell(row.get("frequency")),
-        days_cell(row.get("days_of_week")),
+        text_cell(row.get("cadence")),
+        days_cell(row.get("window_days")),
         schedule_at_cell(row),
         text_cell(row.get("timezone")),
     )

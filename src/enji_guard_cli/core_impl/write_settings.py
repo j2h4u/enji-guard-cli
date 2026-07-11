@@ -11,10 +11,10 @@ from enji_guard_cli.core_impl.models import EmailPreferenceUpdate, RepoTargetPay
 from enji_guard_cli.core_impl.payloads import json_dict
 from enji_guard_cli.core_impl.schedules import (
     schedule_effective_state,
-    schedule_job_by_kind,
     schedule_setting_row,
     schedule_settings_payload,
-    schedule_settings_payload_for_job,
+    schedule_settings_payload_for_subscription,
+    schedule_subscription_by_action_key,
     validate_schedule_settings_update,
 )
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
@@ -144,9 +144,9 @@ def list_schedule_settings(
     catalog: AuditCatalog,
 ) -> JsonObjectPayload:
     rows = [
-        schedule_setting_row(target, audit, schedule_job_by_kind(jobs, audit.runbook_kind))
+        schedule_setting_row(target, audit, schedule_subscription_by_action_key(subscriptions, audit.action_key))
         for target in dependencies.selected_repo_targets(repo, project)
-        for jobs in (dependencies.list_schedules(target["repo_id"]),)
+        for subscriptions in (dependencies.list_schedules(target["repo_id"]),)
         for audit in catalog.report_audits
     ]
     return schedule_settings_payload(rows)
@@ -160,9 +160,9 @@ def set_schedule_settings(
 ) -> JsonObjectPayload:
     validate_schedule_settings_update(context.update)
     rows = [
-        set_schedule_setting(target, audit, jobs, context.update, set_schedule=dependencies.set_schedule)
+        set_schedule_setting(target, audit, subscriptions, context.update, set_schedule=dependencies.set_schedule)
         for target in selected_write_repo_targets(context.repo, context.project)
-        for jobs in (dependencies.list_schedules(target["repo_id"]),)
+        for subscriptions in (dependencies.list_schedules(target["repo_id"]),)
         for audit in context.catalog.report_audits
     ]
     return schedule_settings_payload(rows)
@@ -189,17 +189,17 @@ def selected_write_repo_targets(
 def set_schedule_setting(
     target: RepoTargetPayload,
     audit: AuditDefinition,
-    jobs: JsonObjectPayload,
+    subscriptions: JsonObjectPayload,
     update: ScheduleSettingsUpdate,
     *,
     set_schedule: SetSchedule,
 ) -> dict[str, JsonValue]:
-    existing = schedule_job_by_kind(jobs, audit.runbook_kind)
-    desired = schedule_settings_payload_for_job(existing, update)
+    existing = schedule_subscription_by_action_key(subscriptions, audit.action_key)
+    desired = schedule_settings_payload_for_subscription(existing, update)
     if desired is None:
         return schedule_setting_row(target, audit, existing, changed=False, status="unchanged")
     if existing is not None and schedule_effective_state(existing) == schedule_effective_state(desired):
         return schedule_setting_row(target, audit, existing, changed=False, status="unchanged")
     response = set_schedule(target["repo_id"], audit, desired)
-    resolved = json_dict(response.get("job")) or desired
+    resolved = json_dict(response.get("subscription")) or desired
     return schedule_setting_row(target, audit, resolved, changed=True, status="changed")

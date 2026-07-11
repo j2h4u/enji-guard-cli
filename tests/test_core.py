@@ -26,6 +26,7 @@ from enji_guard_cli.core_impl.models import (
     ReportReadState,
     ReportTaskLifecycleState,
 )
+from enji_guard_cli.core_impl.schedules import schedule_settings_payload_for_subscription
 from enji_guard_cli.core_impl.selectors import parse_github_repo
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload
@@ -283,33 +284,65 @@ def test_runtime_status_reuses_one_catalog_across_multiple_repositories(monkeypa
     assert calls == {"catalog": 1, "parse": 1, "rerun": 2, "links": 2}
 
 
-def test_set_schedule_normalizes_json_payload(monkeypatch: MonkeyPatch) -> None:
+def test_set_schedule_uses_exact_catalog_action_key(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_put_improvement_job(repo_id: str, job_kind: str, payload: object) -> dict[str, object]:
+    def fake_put_audit_auto_run(repo_id: str, action_key: str, payload: object) -> dict[str, object]:
         captured["repo_id"] = repo_id
-        captured["job_kind"] = job_kind
+        captured["action_key"] = action_key
         captured["payload"] = payload
-        return {"job": payload}
+        return {"subscription": payload}
 
-    monkeypatch.setattr(core, "run_put_improvement_job", fake_put_improvement_job)
+    monkeypatch.setattr(core, "run_put_audit_auto_run", fake_put_audit_auto_run)
 
     payload = core._set_schedule(
         "repo_1",
         _audit("audit.security"),
         {
+            "cadence": "workdays",
             "enabled": True,
-            "autoFix": False,
-            "frequency": "weekly",
-            "daysOfWeek": ["mon", "wed"],
+            "scheduleDay": None,
+            "scheduleDayOfMonth": 1,
+            "scheduleTime": "00:00",
+            "scheduleTimeSource": "auto",
             "timezone": "UTC",
-            "nested": {"limit": 1, "note": None},
+            "windowDays": [],
+            "windowEndTime": None,
+            "windowMode": "anytime",
+            "windowStartTime": None,
         },
     )
 
-    assert payload["job"] == captured["payload"]
+    assert payload["subscription"] == captured["payload"]
     assert captured["repo_id"] == "repo_1"
-    assert captured["job_kind"] == "vuln-audit"
+    assert captured["action_key"] == "audit.security"
+
+
+def test_workdays_auto_schedule_uses_canonical_audit_auto_run_payload() -> None:
+    payload = schedule_settings_payload_for_subscription(
+        None,
+        ScheduleSettingsUpdate(
+            enabled=True,
+            cadence="workdays",
+            window_days=None,
+            schedule_time="auto",
+            timezone="Asia/Almaty",
+        ),
+    )
+
+    assert payload == {
+        "cadence": "workdays",
+        "enabled": True,
+        "scheduleDay": None,
+        "scheduleDayOfMonth": 1,
+        "scheduleTime": "00:00",
+        "scheduleTimeSource": "auto",
+        "timezone": "Asia/Almaty",
+        "windowDays": [],
+        "windowEndTime": None,
+        "windowMode": "anytime",
+        "windowStartTime": None,
+    }
 
 
 @pytest.mark.parametrize(
@@ -2162,17 +2195,20 @@ def test_list_schedule_settings_fans_out_over_project_repos_and_report_audits(mo
         core,
         "_list_schedules",
         lambda repo_id: {
-            "jobs": [
+            "subscriptions": [
                 {
-                    "kind": "vuln-audit",
+                    "actionKey": "audit.security",
+                    "cadence": "weekly-2x",
                     "enabled": True,
-                    "autoFix": True,
-                    "autofixVariantKey": "strict",
-                    "frequency": "weekly-2x",
-                    "daysOfWeek": ["mon", "thu"],
-                    "scheduleTimeSource": "user",
+                    "scheduleDay": None,
+                    "scheduleDayOfMonth": 1,
                     "scheduleTime": "09:30",
+                    "scheduleTimeSource": "user",
                     "timezone": "Asia/Almaty",
+                    "windowDays": ["mon", "thu"],
+                    "windowEndTime": None,
+                    "windowMode": "anytime",
+                    "windowStartTime": None,
                 }
             ]
         },
@@ -2194,15 +2230,18 @@ def test_list_schedule_settings_fans_out_over_project_repos_and_report_audits(mo
         "repo_id": "repo_1",
         "github_repo": "j2h4u/enji-guard-cli",
         "audit": "audit.security",
-        "runbook_kind": "vuln-audit",
         "configured": True,
         "enabled": True,
-        "frequency": "weekly-2x",
-        "days_of_week": ["mon", "thu"],
+        "cadence": "weekly-2x",
+        "schedule_day": None,
+        "schedule_day_of_month": 1,
         "schedule_time": "09:30",
         "schedule_time_source": "user",
         "timezone": "Asia/Almaty",
-        "auto_fix": True,
+        "window_days": ["mon", "thu"],
+        "window_end_time": None,
+        "window_mode": "anytime",
+        "window_start_time": None,
     }
     assert schedules[1]["audit"] == "audit.ai-readiness"
     assert schedules[1]["configured"] is False
@@ -2227,21 +2266,21 @@ def test_set_schedule_settings_updates_project_repos_and_report_audits(monkeypat
             ],
         },
     )
-    monkeypatch.setattr(core, "_list_schedules", lambda repo_id: {"jobs": []})
+    monkeypatch.setattr(core, "_list_schedules", lambda repo_id: {"subscriptions": []})
 
-    def fake_put(repo_id: str, job_kind: str, payload: object) -> dict[str, object]:
-        captured.append((repo_id, job_kind, payload))
-        return {"job": payload}
+    def fake_put(repo_id: str, action_key: str, payload: object) -> dict[str, object]:
+        captured.append((repo_id, action_key, payload))
+        return {"subscription": payload}
 
-    monkeypatch.setattr(core, "run_put_improvement_job", fake_put)
+    monkeypatch.setattr(core, "run_put_audit_auto_run", fake_put)
 
     payload = core.set_schedule_settings(
         None,
         "Pets",
         ScheduleSettingsUpdate(
             enabled=True,
-            frequency="weekly-2x",
-            days_of_week=["mon", "thu"],
+            cadence="weekly-2x",
+            window_days=["mon", "thu"],
             schedule_time="09:30",
             timezone="Asia/Almaty",
         ),
@@ -2258,16 +2297,19 @@ def test_set_schedule_settings_updates_project_repos_and_report_audits(monkeypat
     assert len(captured) == 8
     assert captured[0] == (
         "repo_1",
-        "vuln-audit",
+        "audit.security",
         {
+            "cadence": "weekly-2x",
             "enabled": True,
-            "autoFix": False,
-            "autofixVariantKey": "default",
-            "frequency": "weekly-2x",
-            "daysOfWeek": ["mon", "thu"],
+            "scheduleDay": None,
+            "scheduleDayOfMonth": 1,
+            "scheduleTime": "09:30",
             "scheduleTimeSource": "user",
             "timezone": "Asia/Almaty",
-            "scheduleTime": "09:30",
+            "windowDays": ["mon", "thu"],
+            "windowEndTime": None,
+            "windowMode": "anytime",
+            "windowStartTime": None,
         },
     )
 
@@ -2302,33 +2344,37 @@ def test_set_schedule_settings_skips_unchanged_existing_jobs(monkeypatch: Monkey
         core,
         "_list_schedules",
         lambda repo_id: {
-            "jobs": [
+            "subscriptions": [
                 {
-                    "kind": "vuln-audit",
+                    "actionKey": "audit.security",
+                    "cadence": "weekly",
                     "enabled": False,
-                    "autoFix": False,
-                    "autofixVariantKey": "default",
-                    "frequency": "weekly",
-                    "daysOfWeek": ["mon"],
+                    "scheduleDay": None,
+                    "scheduleDayOfMonth": 1,
+                    "scheduleTime": "00:00",
                     "scheduleTimeSource": "auto",
                     "timezone": "UTC",
+                    "windowDays": [],
+                    "windowEndTime": None,
+                    "windowMode": "anytime",
+                    "windowStartTime": None,
                 }
             ]
         },
     )
 
-    def fail_put(repo_id: str, job_kind: str, payload: object) -> object:
+    def fail_put(repo_id: str, action_key: str, payload: object) -> object:
         raise AssertionError("unchanged schedule should not be written")
 
-    monkeypatch.setattr(core, "run_put_improvement_job", fail_put)
+    monkeypatch.setattr(core, "run_put_audit_auto_run", fail_put)
 
     payload = core.set_schedule_settings(
         "j2h4u/enji-guard-cli",
         None,
         ScheduleSettingsUpdate(
             enabled=False,
-            frequency=None,
-            days_of_week=None,
+            cadence=None,
+            window_days=None,
             schedule_time=None,
             timezone=None,
         ),
@@ -2364,15 +2410,20 @@ def test_set_schedule_settings_can_update_timezone_without_time(monkeypatch: Mon
         core,
         "_list_schedules",
         lambda repo_id: {
-            "jobs": [
+            "subscriptions": [
                 {
-                    "kind": "vuln-audit",
+                    "actionKey": "audit.security",
+                    "cadence": "weekly",
                     "enabled": True,
-                    "frequency": "weekly",
-                    "daysOfWeek": ["mon"],
-                    "scheduleTimeSource": "user",
+                    "scheduleDay": None,
+                    "scheduleDayOfMonth": 1,
                     "scheduleTime": "09:00",
+                    "scheduleTimeSource": "user",
                     "timezone": "UTC",
+                    "windowDays": [],
+                    "windowEndTime": None,
+                    "windowMode": "anytime",
+                    "windowStartTime": None,
                 }
             ]
         },
@@ -2380,7 +2431,7 @@ def test_set_schedule_settings_can_update_timezone_without_time(monkeypatch: Mon
 
     def fake_set_schedule(_repo_id: str, _audit: AuditDefinition, payload: dict[str, object]) -> dict[str, object]:
         captured.append(payload)
-        return {"job": payload}
+        return {"subscription": payload}
 
     monkeypatch.setattr(core, "_set_schedule", fake_set_schedule)
 
@@ -2389,8 +2440,8 @@ def test_set_schedule_settings_can_update_timezone_without_time(monkeypatch: Mon
         None,
         ScheduleSettingsUpdate(
             enabled=None,
-            frequency=None,
-            days_of_week=None,
+            cadence=None,
+            window_days=None,
             schedule_time=None,
             timezone="Asia/Almaty",
         ),
@@ -2425,15 +2476,20 @@ def test_set_schedule_settings_can_reset_schedule_time_to_auto(monkeypatch: Monk
         core,
         "_list_schedules",
         lambda repo_id: {
-            "jobs": [
+            "subscriptions": [
                 {
-                    "kind": "vuln-audit",
+                    "actionKey": "audit.security",
+                    "cadence": "workdays",
                     "enabled": True,
-                    "frequency": "workdays",
-                    "daysOfWeek": ["mon", "tue", "wed", "thu", "fri"],
-                    "scheduleTimeSource": "user",
+                    "scheduleDay": None,
+                    "scheduleDayOfMonth": 1,
                     "scheduleTime": "09:00",
+                    "scheduleTimeSource": "user",
                     "timezone": "Asia/Almaty",
+                    "windowDays": [],
+                    "windowEndTime": None,
+                    "windowMode": "anytime",
+                    "windowStartTime": None,
                 }
             ]
         },
@@ -2441,7 +2497,7 @@ def test_set_schedule_settings_can_reset_schedule_time_to_auto(monkeypatch: Monk
 
     def fake_set_schedule(_repo_id: str, _audit: AuditDefinition, payload: dict[str, object]) -> dict[str, object]:
         captured.append(payload)
-        return {"job": payload}
+        return {"subscription": payload}
 
     monkeypatch.setattr(core, "_set_schedule", fake_set_schedule)
 
@@ -2450,8 +2506,8 @@ def test_set_schedule_settings_can_reset_schedule_time_to_auto(monkeypatch: Monk
         None,
         ScheduleSettingsUpdate(
             enabled=None,
-            frequency=None,
-            days_of_week=None,
+            cadence=None,
+            window_days=None,
             schedule_time="auto",
             timezone=None,
         ),
@@ -2459,10 +2515,10 @@ def test_set_schedule_settings_can_reset_schedule_time_to_auto(monkeypatch: Monk
 
     schedules = cast(list[dict[str, object]], payload["schedules"])
     assert captured[0]["scheduleTimeSource"] == "auto"
-    assert "scheduleTime" not in captured[0]
+    assert captured[0]["scheduleTime"] == "00:00"
     assert captured[0]["timezone"] == "Asia/Almaty"
     assert schedules[0]["schedule_time_source"] == "auto"
-    assert schedules[0]["schedule_time"] is None
+    assert schedules[0]["schedule_time"] == "00:00"
 
 
 def test_set_schedule_settings_requires_explicit_write_scope() -> None:
@@ -2472,8 +2528,8 @@ def test_set_schedule_settings_requires_explicit_write_scope() -> None:
             None,
             ScheduleSettingsUpdate(
                 enabled=False,
-                frequency=None,
-                days_of_week=None,
+                cadence=None,
+                window_days=None,
                 schedule_time=None,
                 timezone=None,
             ),
@@ -2492,8 +2548,8 @@ def test_set_schedule_settings_requires_project_for_all_repos() -> None:
             None,
             ScheduleSettingsUpdate(
                 enabled=False,
-                frequency=None,
-                days_of_week=None,
+                cadence=None,
+                window_days=None,
                 schedule_time=None,
                 timezone=None,
             ),
