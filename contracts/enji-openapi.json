@@ -482,12 +482,47 @@
       "get": {
         "operationId": "getScheduleLoad",
         "summary": "Return server-selected schedule-load hints.",
-        "x-enji-observed": false,
+        "x-enji-observed": true,
         "responses": {
           "200": {
-            "$ref": "#/components/responses/GenericObject"
+            "description": "Schedule load buckets and candidate slots.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleLoadResponse"
+                }
+              }
+            }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "timezone",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/ux/repos/{repoId}/audits/{actionKey}/email-preferences": {
@@ -1364,7 +1399,14 @@
         ],
         "responses": {
           "200": {
-            "$ref": "#/components/responses/GenericObject"
+            "description": "Repository audit score history.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditHistoryResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1424,6 +1466,395 @@
         "responses": {
           "200": {
             "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/improvement-jobs/{repoId}/{kind}/tried": {
+      "post": {
+        "operationId": "markImprovementJobTried",
+        "summary": "Mark an improvement job attempt.",
+        "x-enji-observed": false,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          },
+          {
+            "$ref": "#/components/parameters/ImprovementJobKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/improvement-runs": {
+      "post": {
+        "operationId": "createImprovementRun",
+        "summary": "Start an autofix improvement run.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/audit-findings": {
+      "put": {
+        "operationId": "putAuditFindings",
+        "summary": "Persist findings for an audit report.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuditFindingsUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/audit-findings/{findingId}/autofix-result": {
+      "post": {
+        "operationId": "createAuditFindingAutofixResult",
+        "summary": "Persist an autofix result for one finding.",
+        "x-enji-observed": false,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          },
+          {
+            "$ref": "#/components/parameters/FindingId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/pentest-consents/{consentId}": {
+      "put": {
+        "operationId": "putPentestConsent",
+        "summary": "Update an explicit pentest consent.",
+        "x-enji-observed": false,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ConsentId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenericObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/pentest-runs": {
+      "post": {
+        "operationId": "createPentestRun",
+        "summary": "Start a pentest run against a linked web resource.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PentestRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/pentest-jobs/{repoId}/{kind}": {
+      "put": {
+        "operationId": "putPentestJob",
+        "summary": "Create or update a pentest schedule.",
+        "x-enji-observed": false,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          },
+          {
+            "$ref": "#/components/parameters/ImprovementJobKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenericObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deletePentestJob",
+        "summary": "Delete a pentest schedule.",
+        "x-enji-observed": false,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          },
+          {
+            "$ref": "#/components/parameters/ImprovementJobKind"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/NoContent"
+          }
+        }
+      }
+    },
+    "/api/ux/pentest-jobs/{repoId}/{kind}/binding": {
+      "put": {
+        "operationId": "putPentestJobBinding",
+        "summary": "Bind a pentest job to a Fleet schedule.",
+        "x-enji-observed": false,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          },
+          {
+            "$ref": "#/components/parameters/ImprovementJobKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenericObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/projects/{projectId}/publication": {
+      "get": {
+        "operationId": "getProjectPublication",
+        "summary": "Return project publication settings.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicationResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "putProjectPublication",
+        "summary": "Publish or unpublish selected project repositories.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationSettings"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ux/public/projects/{projectId}": {
+      "get": {
+        "operationId": "getPublicProject",
+        "summary": "Return an anonymously readable published project.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/public/projects/{projectId}/repos/{repoId}/dashboard-data": {
+      "get": {
+        "operationId": "getPublicRepoDashboard",
+        "summary": "Return an anonymously readable repository dashboard.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          },
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/ux/public/projects/{projectId}/repos/{repoId}/audit-history": {
+      "get": {
+        "operationId": "getPublicRepoAuditHistory",
+        "summary": "Return anonymously readable repository audit history.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          },
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditHistoryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ux/public/projects/{projectId}/repos/{repoId}/snapshots/{snapshotId}": {
+      "get": {
+        "operationId": "getPublicRepoSnapshot",
+        "summary": "Return an anonymously readable report snapshot.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          },
+          {
+            "$ref": "#/components/parameters/RepoId"
+          },
+          {
+            "$ref": "#/components/parameters/SnapshotId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{projectId}/members/{userId}": {
+      "delete": {
+        "operationId": "deleteProjectMember",
+        "summary": "Remove a project member.",
+        "x-enji-observed": false,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/NoContent"
           }
         }
       }
@@ -1550,6 +1981,30 @@
         "required": true,
         "schema": {
           "$ref": "#/components/schemas/AuditRouteSlug"
+        }
+      },
+      "ConsentId": {
+        "name": "consentId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "FindingId": {
+        "name": "findingId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "UserId": {
+        "name": "userId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
         }
       }
     },
@@ -2705,6 +3160,279 @@
               "type": "string",
               "format": "binary"
             }
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditHistoryPoint": {
+        "type": "object",
+        "required": [
+          "when",
+          "score"
+        ],
+        "properties": {
+          "when": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "fleetTaskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bad": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "warn": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "good": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skip": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditHistoryResponse": {
+        "type": "object",
+        "required": [
+          "history"
+        ],
+        "properties": {
+          "history": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/AuditHistoryPoint"
+              }
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "ScheduleLoadBucket": {
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "eventCount",
+          "loadPoints",
+          "level"
+        ],
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "eventCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "loadPoints": {
+            "type": "number",
+            "minimum": 0
+          },
+          "level": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "ScheduleLoadResponse": {
+        "type": "object",
+        "required": [
+          "from",
+          "to",
+          "timezone",
+          "buckets",
+          "candidates"
+        ],
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "buckets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleLoadBucket"
+            }
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GenericObject"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "PublicationSettings": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "repoIds"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repoIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "publicUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          }
+        },
+        "additionalProperties": true
+      },
+      "PublicationResponse": {
+        "type": "object",
+        "required": [
+          "settings"
+        ],
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/PublicationSettings"
+          }
+        },
+        "additionalProperties": true
+      },
+      "ImprovementRunRequest": {
+        "type": "object",
+        "required": [
+          "projectId",
+          "actionKey",
+          "fleetTaskBody",
+          "clientRequestId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "actionKey": {
+            "type": "string"
+          },
+          "autofixVariantKey": {
+            "type": "string"
+          },
+          "fleetTaskBody": {
+            "$ref": "#/components/schemas/GenericObject"
+          },
+          "auditFinding": {
+            "$ref": "#/components/schemas/GenericObject"
+          },
+          "clientRequestId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditFindingsUpdate": {
+        "type": "object",
+        "required": [
+          "auditActionKey",
+          "reportGroup",
+          "auditFleetTaskId",
+          "content",
+          "findings"
+        ],
+        "properties": {
+          "auditActionKey": {
+            "type": "string"
+          },
+          "reportGroup": {
+            "type": "string"
+          },
+          "auditFleetTaskId": {
+            "type": "string"
+          },
+          "content": {
+            "$ref": "#/components/schemas/GenericObject"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GenericObject"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "PentestRunRequest": {
+        "type": "object",
+        "required": [
+          "projectId",
+          "repoId",
+          "actionKey",
+          "webResourceId",
+          "fleetTaskBody",
+          "clientRequestId"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "repoId": {
+            "type": "string"
+          },
+          "actionKey": {
+            "type": "string"
+          },
+          "webResourceId": {
+            "type": "string"
+          },
+          "fleetTaskBody": {
+            "$ref": "#/components/schemas/GenericObject"
+          },
+          "clientRequestId": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "additionalProperties": true

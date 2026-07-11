@@ -147,6 +147,38 @@ def test_implemented_endpoint_specs_match_openapi_contract() -> None:
         assert _request_body_ref(operation) == endpoint["request_body_ref"]
 
 
+def test_reconstructed_extended_surfaces_remain_in_openapi_contract() -> None:
+    contract = cast(object, json.loads(CONTRACT_PATH.read_text(encoding="utf-8")))
+    assert isinstance(contract, dict)
+    paths = contract.get("paths")
+    assert isinstance(paths, dict)
+
+    expected_operations = {
+        ("post", "/api/ux/improvement-jobs/{repoId}/{kind}/tried"),
+        ("post", "/api/ux/repos/{repoId}/improvement-runs"),
+        ("put", "/api/ux/repos/{repoId}/audit-findings"),
+        ("post", "/api/ux/repos/{repoId}/audit-findings/{findingId}/autofix-result"),
+        ("put", "/api/ux/pentest-consents/{consentId}"),
+        ("post", "/api/ux/repos/{repoId}/pentest-runs"),
+        ("put", "/api/ux/pentest-jobs/{repoId}/{kind}"),
+        ("delete", "/api/ux/pentest-jobs/{repoId}/{kind}"),
+        ("put", "/api/ux/pentest-jobs/{repoId}/{kind}/binding"),
+        ("get", "/api/ux/projects/{projectId}/publication"),
+        ("put", "/api/ux/projects/{projectId}/publication"),
+        ("get", "/api/ux/public/projects/{projectId}"),
+        ("get", "/api/ux/public/projects/{projectId}/repos/{repoId}/dashboard-data"),
+        ("get", "/api/ux/public/projects/{projectId}/repos/{repoId}/audit-history"),
+        ("get", "/api/ux/public/projects/{projectId}/repos/{repoId}/snapshots/{snapshotId}"),
+        ("delete", "/api/v1/projects/{projectId}/members/{userId}"),
+    }
+
+    assert {
+        (method, path)
+        for method, path in expected_operations
+        if not isinstance(paths.get(path), dict) or method not in paths[path]
+    } == set()
+
+
 def json_response(payload: object, *, status_code: int = 200) -> EnjiHttpResponse:
     return EnjiHttpResponse(
         status_code=status_code,
