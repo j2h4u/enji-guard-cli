@@ -39,6 +39,10 @@ def json_bool(value: JsonValue | None) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
+def json_int(value: JsonValue | None) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def json_dict(value: JsonValue | None) -> dict[str, JsonValue]:
     return value if isinstance(value, dict) else {}
 

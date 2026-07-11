@@ -16,6 +16,7 @@ from enji_guard_cli.enji_api import (
     RepoTransfer,
     access,
     add_project_repo,
+    audit_auto_runs,
     audit_email_preferences,
     audit_summary_snapshot,
     catalog,
@@ -23,13 +24,12 @@ from enji_guard_cli.enji_api import (
     create_project,
     delete_project,
     delete_project_repo,
-    improvement_jobs,
     load_api_session,
     move_repo,
     preflight_repo_move,
     project_detail,
+    put_audit_auto_run,
     put_audit_email_preferences,
-    put_improvement_job,
     rename_project,
     repo_active_runs,
     repo_audit_rerun_state,
@@ -386,8 +386,8 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
             json_response({"task": {"id": "task_1", "status": "pending"}}),
             json_response({"task": {"id": "task_1"}}, status_code=201),
             json_response({"snapshot": {"content": {"report": "ok"}}}),
-            json_response({"jobs": []}),
-            json_response({"job": {"enabled": True}}),
+            json_response({"subscriptions": []}),
+            json_response({"subscription": {"enabled": True}}),
         ]
     )
 
@@ -411,8 +411,27 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
         client,
     )
     audit_summary_snapshot("repo_1", "vulns", auth_file, client)
-    improvement_jobs("repo_1", auth_file, client)
-    put_improvement_job("repo_1", "vuln-audit", {"enabled": True}, auth_file, client)
+    audit_auto_runs("repo_1", auth_file, client)
+    put_audit_auto_run(
+        "repo_1",
+        "audit.security",
+        {
+            "cadence": "workdays",
+            "enabled": True,
+            "scheduleDay": None,
+            "scheduleDayOfMonth": 1,
+            "scheduleTime": "00:00",
+            "scheduleTimeSource": "auto",
+            "timezone": "Asia/Almaty",
+            "windowDays": [],
+            "windowEndTime": None,
+            "windowMode": "anytime",
+            "windowStartTime": None,
+            "unexpected": "ignored",
+        },
+        auth_file,
+        client,
+    )
 
     assert [(request.method, request.url) for request in client.requests] == [
         ("GET", "https://fleet.enji.ai/api/ux/projects/project_1"),
@@ -426,8 +445,8 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
         ("GET", "https://fleet.enji.ai/api/v1/tasks/task_1"),
         ("POST", "https://fleet.enji.ai/api/ux/repos/repo_1/audit-runs"),
         ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/snapshots/upfront.audit.summary?group=vulns"),
-        ("GET", "https://fleet.enji.ai/api/ux/improvement-jobs/repo_1"),
-        ("PUT", "https://fleet.enji.ai/api/ux/improvement-jobs/repo_1/vuln-audit"),
+        ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/audit-auto-runs"),
+        ("PUT", "https://fleet.enji.ai/api/ux/repos/repo_1/audit-auto-runs/audit.security"),
     ]
     assert client.requests[3].json_body == {"githubOwner": "j2h4u", "githubName": "enji-guard-cli"}
     audit_body = client.requests[9].json_body
@@ -436,7 +455,19 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
     assert audit_body["actionKey"] == "audit.recon"
     assert audit_body["fleetTaskBody"] == {"title": "Run recon"}
     assert isinstance(audit_body["clientRequestId"], str)
-    assert client.requests[12].json_body == {"enabled": True}
+    assert client.requests[12].json_body == {
+        "cadence": "workdays",
+        "enabled": True,
+        "scheduleDay": None,
+        "scheduleDayOfMonth": 1,
+        "scheduleTime": "00:00",
+        "scheduleTimeSource": "auto",
+        "timezone": "Asia/Almaty",
+        "windowDays": [],
+        "windowEndTime": None,
+        "windowMode": "anytime",
+        "windowStartTime": None,
+    }
 
 
 def test_audit_email_preferences_use_expected_requests(tmp_path: Path) -> None:

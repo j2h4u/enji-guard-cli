@@ -111,6 +111,7 @@ from enji_guard_cli.enji_api import (
     RepoTransfer,
 )
 from enji_guard_cli.enji_api import add_project_repo as run_add_project_repo
+from enji_guard_cli.enji_api import audit_auto_runs as run_audit_auto_runs
 from enji_guard_cli.enji_api import audit_email_preferences as run_audit_email_preferences
 from enji_guard_cli.enji_api import audit_summary_snapshot as run_audit_summary_snapshot
 from enji_guard_cli.enji_api import catalog as run_catalog
@@ -118,13 +119,12 @@ from enji_guard_cli.enji_api import connect_project_repo as run_connect_project_
 from enji_guard_cli.enji_api import create_project as run_create_project
 from enji_guard_cli.enji_api import delete_project as run_delete_project
 from enji_guard_cli.enji_api import delete_project_repo as run_delete_project_repo
-from enji_guard_cli.enji_api import improvement_jobs as run_improvement_jobs
 from enji_guard_cli.enji_api import move_repo as run_move_repo
 from enji_guard_cli.enji_api import preflight_repo_move as run_preflight_repo_move
 from enji_guard_cli.enji_api import project_detail as run_project_detail
 from enji_guard_cli.enji_api import projects as run_projects
+from enji_guard_cli.enji_api import put_audit_auto_run as run_put_audit_auto_run
 from enji_guard_cli.enji_api import put_audit_email_preferences as run_put_audit_email_preferences
-from enji_guard_cli.enji_api import put_improvement_job as run_put_improvement_job
 from enji_guard_cli.enji_api import rename_project as run_rename_project
 from enji_guard_cli.enji_api import repo_active_runs as run_repo_active_runs
 from enji_guard_cli.enji_api import repo_audit_rerun_state as run_repo_audit_rerun_state
@@ -460,7 +460,7 @@ def set_email_preferences(
 
 
 def _list_schedules(repo_id: str) -> JsonObjectPayload:
-    return run_improvement_jobs(repo_id)
+    return run_audit_auto_runs(repo_id)
 
 
 def list_schedule_settings(repo: str | None, project: str | None) -> JsonObjectPayload:
@@ -481,7 +481,7 @@ def _set_schedule(
     audit: AuditDefinition,
     payload: object,
 ) -> JsonObjectPayload:
-    return run_put_improvement_job(repo_id, audit.runbook_kind, _json_object_payload(payload))
+    return run_put_audit_auto_run(repo_id, audit.action_key, _json_object_payload(payload))
 
 
 def set_schedule_settings(

@@ -273,13 +273,13 @@ one Enji project.
 `repo move` uses global `--project` as source project or selector
 disambiguation when needed. `--to-project` selects the destination project.
 
-`schedule` controls automatic report-audit runs. It shows one row per
-repo/report audit and can batch update all report audits for one repo or one
-explicit batch scope. Use `REPO`, `--project NAME_OR_ID --all-repos`, or
-`--all-projects`. Timezone is stored per schedule. The service/container should
-run with the host timezone, while Enji assigns the run time by default.
-`schedule set` updates enabled state, frequency, and timezone for the selected
-scope. `schedule auto-time` resets that scope back to Enji-assigned run times.
+`schedule` controls automatic report-audit runs, one row per repository and
+catalog action key. Its cadence and per-subscription IANA timezone are stored
+with each schedule; Enji assigns the run time by default. The service/container
+should run with the host timezone. Batch writes are explicit client-side loops:
+use `REPO`, `--project NAME_OR_ID --all-repos`, or `--all-projects`.
+`schedule set` updates the selected scope, and `schedule auto-time` restores
+Enji-assigned run times. Autofix `improvement-jobs` are not audit schedules.
 
 ## MCP
 

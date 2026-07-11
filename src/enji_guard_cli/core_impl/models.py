@@ -20,7 +20,7 @@ from enji_guard_cli.settings import (
 type OperationResult = object | Awaitable[object]
 type OperationExecutor = Callable[..., OperationResult]
 type RepoSort = Literal["default", "name", "weakest", "overall", "latest-report"]
-type ScheduleFrequency = Literal["daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"]
+type ScheduleCadence = Literal["daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"]
 
 OWNER_NAME_SLUG_PARTS = 2
 REPORT_ARTIFACT_SCHEMA = "upfront.audit.summary"
@@ -32,7 +32,7 @@ DEFAULT_REPO_SORT: RepoSort = SETTINGS_DEFAULT_REPO_SORT
 TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "canceled", "cancelled", "skipped"})
 WORKDAY_SCHEDULE_DAYS = ("mon", "tue", "wed", "thu", "fri")
 ALL_SCHEDULE_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-DEFAULT_SCHEDULE_DAYS_BY_FREQUENCY: dict[ScheduleFrequency, tuple[str, ...]] = {
+DEFAULT_SCHEDULE_DAYS_BY_CADENCE: dict[ScheduleCadence, tuple[str, ...]] = {
     "daily": ALL_SCHEDULE_DAYS,
     "workdays": WORKDAY_SCHEDULE_DAYS,
     "weekly-3x": ("mon", "wed", "fri"),
@@ -288,20 +288,10 @@ class ReportWaitOptions:
 
 
 @dataclass(frozen=True, slots=True)
-class ScheduleUpdate:
-    enabled: bool
-    auto_fix: bool
-    frequency: ScheduleFrequency
-    days_of_week: list[str]
-    schedule_time: str
-    timezone: str
-
-
-@dataclass(frozen=True, slots=True)
 class ScheduleSettingsUpdate:
     enabled: bool | None
-    frequency: ScheduleFrequency | None
-    days_of_week: list[str] | None
+    cadence: ScheduleCadence | None
+    window_days: list[str] | None
     schedule_time: str | None
     timezone: str | None
 

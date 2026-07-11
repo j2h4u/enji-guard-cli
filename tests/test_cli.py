@@ -1567,8 +1567,8 @@ def test_schedule_list_defaults_to_text_table(monkeypatch: MonkeyPatch) -> None:
                     "github_repo": "j2h4u/enji-guard-cli",
                     "audit": "security",
                     "enabled": True,
-                    "frequency": "weekly",
-                    "days_of_week": ["mon"],
+                    "cadence": "weekly",
+                    "window_days": ["mon"],
                     "schedule_time_source": "auto",
                     "schedule_time": "09:00",
                     "timezone": "UTC",
@@ -1644,7 +1644,7 @@ def test_schedule_set_routes_batch_update(monkeypatch: MonkeyPatch) -> None:
         captured["repo"] = repo
         captured["project"] = project
         captured["enabled"] = update.enabled
-        captured["frequency"] = update.frequency
+        captured["cadence"] = update.cadence
         captured["all_repos"] = all_repos
         captured["all_projects"] = all_projects
         return {
@@ -1654,8 +1654,8 @@ def test_schedule_set_routes_batch_update(monkeypatch: MonkeyPatch) -> None:
                     "github_repo": "j2h4u/enji-guard-cli",
                     "audit": "security",
                     "enabled": True,
-                    "frequency": "weekly-2x",
-                    "days_of_week": ["mon", "thu"],
+                    "cadence": "weekly-2x",
+                    "window_days": ["mon", "thu"],
                     "schedule_time_source": "user",
                     "schedule_time": "09:30",
                     "timezone": "Asia/Almaty",
@@ -1690,7 +1690,7 @@ def test_schedule_set_routes_batch_update(monkeypatch: MonkeyPatch) -> None:
         "repo": "j2h4u/enji-guard-cli",
         "project": "Pets",
         "enabled": True,
-        "frequency": "weekly-2x",
+        "cadence": "weekly-2x",
         "all_repos": False,
         "all_projects": False,
     }
@@ -1710,7 +1710,7 @@ def test_schedule_set_routes_timezone_batch_update(monkeypatch: MonkeyPatch) -> 
         captured["repo"] = repo
         captured["project"] = project
         captured["enabled"] = update.enabled
-        captured["frequency"] = update.frequency
+        captured["cadence"] = update.cadence
         captured["schedule_time"] = update.schedule_time
         captured["timezone"] = update.timezone
         captured["all_repos"] = all_repos
@@ -1739,7 +1739,7 @@ def test_schedule_set_routes_timezone_batch_update(monkeypatch: MonkeyPatch) -> 
         "repo": "j2h4u/enji-guard-cli",
         "project": "Pets",
         "enabled": None,
-        "frequency": None,
+        "cadence": None,
         "schedule_time": None,
         "timezone": "Asia/Almaty",
         "all_repos": False,
@@ -1768,7 +1768,7 @@ def test_schedule_auto_time_routes_batch_update(monkeypatch: MonkeyPatch) -> Non
         captured["repo"] = repo
         captured["project"] = project
         captured["enabled"] = update.enabled
-        captured["frequency"] = update.frequency
+        captured["cadence"] = update.cadence
         captured["schedule_time"] = update.schedule_time
         captured["timezone"] = update.timezone
         captured["all_repos"] = all_repos
@@ -1785,7 +1785,7 @@ def test_schedule_auto_time_routes_batch_update(monkeypatch: MonkeyPatch) -> Non
         "repo": None,
         "project": None,
         "enabled": None,
-        "frequency": None,
+        "cadence": None,
         "schedule_time": "auto",
         "timezone": None,
         "all_repos": False,

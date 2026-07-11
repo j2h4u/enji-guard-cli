@@ -183,6 +183,19 @@ AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT_SPEC = EnjiEndpointSpec(
     operation="email set",
     request_body_ref="#/components/requestBodies/EmailPreferencesPatch",
 )
+AUDIT_AUTO_RUNS_ENDPOINT_SPEC = EnjiEndpointSpec(
+    method="GET",
+    path_template="/api/ux/repos/{repoId}/audit-auto-runs",
+    operation_id="listRepoAuditAutoRuns",
+    operation="schedule list",
+)
+AUDIT_AUTO_RUN_PUT_ENDPOINT_SPEC = EnjiEndpointSpec(
+    method="PUT",
+    path_template="/api/ux/repos/{repoId}/audit-auto-runs/{actionKey}",
+    operation_id="putRepoAuditAutoRun",
+    operation="schedule set",
+    request_body_ref="#/components/requestBodies/AuditAutoRunSubscriptionUpdate",
+)
 IMPROVEMENT_JOBS_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="GET",
     path_template="/api/ux/improvement-jobs/{repoId}",
@@ -222,6 +235,8 @@ IMPLEMENTED_ENJI_ENDPOINTS = (
     REPO_AUDIT_SUMMARY_ENDPOINT_SPEC,
     AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT_SPEC,
     AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT_SPEC,
+    AUDIT_AUTO_RUNS_ENDPOINT_SPEC,
+    AUDIT_AUTO_RUN_PUT_ENDPOINT_SPEC,
     IMPROVEMENT_JOBS_ENDPOINT_SPEC,
     IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC,
 )

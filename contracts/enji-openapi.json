@@ -1059,25 +1059,56 @@
         }
       }
     },
-    "/api/ux/repos/{repoId}/audit-auto-runs/{slug}": {
+    "/api/ux/repos/{repoId}/audit-auto-runs": {
+      "get": {
+        "operationId": "listRepoAuditAutoRuns",
+        "summary": "List automatic audit-run subscriptions for a repository.",
+        "x-enji-observed": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepoId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Automatic audit-run subscriptions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditAutoRunSubscriptionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/audit-auto-runs/{actionKey}": {
       "put": {
         "operationId": "putRepoAuditAutoRun",
-        "summary": "Update audit auto-run settings through the alternate route-slug endpoint.",
+        "summary": "Create or update an automatic audit-run subscription.",
         "x-enji-observed": true,
         "parameters": [
           {
             "$ref": "#/components/parameters/RepoId"
           },
           {
-            "$ref": "#/components/parameters/AuditRouteSlug"
+            "$ref": "#/components/parameters/AuditActionKey"
           }
         ],
         "requestBody": {
-          "$ref": "#/components/requestBodies/GenericObject"
+          "$ref": "#/components/requestBodies/AuditAutoRunSubscriptionUpdate"
         },
         "responses": {
           "200": {
-            "$ref": "#/components/responses/GenericObject"
+            "description": "Updated automatic audit-run subscription.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditAutoRunSubscriptionResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -2036,6 +2067,16 @@
           }
         }
       },
+      "AuditAutoRunSubscriptionUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AuditAutoRunSubscriptionUpdate"
+            }
+          }
+        }
+      },
       "FleetProjectCreate": {
         "required": true,
         "content": {
@@ -2609,6 +2650,127 @@
         },
         "additionalProperties": true
       },
+      "AuditAutoRunSubscriptionUpdate": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "cadence",
+          "scheduleDay",
+          "scheduleDayOfMonth",
+          "scheduleTime",
+          "scheduleTimeSource",
+          "timezone",
+          "windowDays",
+          "windowEndTime",
+          "windowMode",
+          "windowStartTime"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "cadence": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scheduleDay": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scheduleDayOfMonth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 31
+          },
+          "scheduleTime": {
+            "type": "string",
+            "pattern": "^\\d{2}:\\d{2}$"
+          },
+          "scheduleTimeSource": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "user"
+            ]
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "windowDays": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DayOfWeek"
+            }
+          },
+          "windowEndTime": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\d{2}:\\d{2}$"
+          },
+          "windowMode": {
+            "type": "string",
+            "minLength": 1
+          },
+          "windowStartTime": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\d{2}:\\d{2}$"
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditAutoRunSubscription": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AuditAutoRunSubscriptionUpdate"
+          },
+          {
+            "type": "object",
+            "required": [
+              "actionKey"
+            ],
+            "properties": {
+              "actionKey": {
+                "$ref": "#/components/schemas/AuditActionKey"
+              }
+            },
+            "additionalProperties": true
+          }
+        ]
+      },
+      "AuditAutoRunSubscriptionsResponse": {
+        "type": "object",
+        "required": [
+          "subscriptions"
+        ],
+        "properties": {
+          "subscriptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditAutoRunSubscription"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditAutoRunSubscriptionResponse": {
+        "type": "object",
+        "required": [
+          "subscription"
+        ],
+        "properties": {
+          "subscription": {
+            "$ref": "#/components/schemas/AuditAutoRunSubscription"
+          }
+        },
+        "additionalProperties": true
+      },
       "EmailPreferencesResponse": {
         "type": "object",
         "properties": {
@@ -2702,15 +2864,8 @@
       },
       "AuditActionKey": {
         "type": "string",
-        "enum": [
-          "audit.security",
-          "audit.ai-readiness",
-          "audit.tests",
-          "audit.tech-health",
-          "audit.dependency-hygiene",
-          "audit.cognitive-debt",
-          "audit.dead-code"
-        ]
+        "minLength": 1,
+        "description": "Catalog-discovered audit action key; the set is published by Enji and may change."
       },
       "Frequency": {
         "type": "string",

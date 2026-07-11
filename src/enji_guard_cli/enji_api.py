@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from enji_guard_cli._enji_api_contract import (
     ACCESS_ENDPOINT_SPEC,
+    AUDIT_AUTO_RUN_PUT_ENDPOINT_SPEC,
+    AUDIT_AUTO_RUNS_ENDPOINT_SPEC,
     AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT_SPEC,
     AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT_SPEC,
     CATALOG_ENDPOINT_SPEC,
@@ -542,6 +544,36 @@ def put_audit_email_preferences(
     )
 
 
+def audit_auto_runs(
+    repo_id: str,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> JsonObjectPayload:
+    return run_api_request(
+        auth_file,
+        client,
+        AUDIT_AUTO_RUNS_ENDPOINT.request(path_params={"repoId": repo_id}),
+    )
+
+
+def put_audit_auto_run(
+    repo_id: str,
+    action_key: str,
+    subscription: JsonObjectPayload,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> JsonObjectPayload:
+    request = _audit_auto_run_request(subscription)
+    return run_api_request(
+        auth_file,
+        client,
+        AUDIT_AUTO_RUN_PUT_ENDPOINT.request(
+            path_params={"repoId": repo_id, "actionKey": action_key},
+            json_body=cast(EnjiJsonValue, request),
+        ),
+    )
+
+
 def improvement_jobs(
     repo_id: str,
     auth_file: Path | None = None,
@@ -735,6 +767,14 @@ AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT = ApiEndpoint(
     spec=AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
+AUDIT_AUTO_RUNS_ENDPOINT = ApiEndpoint(
+    spec=AUDIT_AUTO_RUNS_ENDPOINT_SPEC,
+    parser=_parse_json_object_payload,
+)
+AUDIT_AUTO_RUN_PUT_ENDPOINT = ApiEndpoint(
+    spec=AUDIT_AUTO_RUN_PUT_ENDPOINT_SPEC,
+    parser=_parse_json_object_payload,
+)
 IMPROVEMENT_JOBS_ENDPOINT = ApiEndpoint(
     spec=IMPROVEMENT_JOBS_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
@@ -758,6 +798,25 @@ def _audit_email_preference_request(patch: JsonObjectPayload) -> AuditEmailPrefe
             raise EnjiApiError("VALIDATION", "scheduledRunCompletion must be boolean")
         request["scheduledRunCompletion"] = scheduled
     return request
+
+
+AUDIT_AUTO_RUN_FIELDS = (
+    "cadence",
+    "enabled",
+    "scheduleDay",
+    "scheduleDayOfMonth",
+    "scheduleTime",
+    "scheduleTimeSource",
+    "timezone",
+    "windowDays",
+    "windowEndTime",
+    "windowMode",
+    "windowStartTime",
+)
+
+
+def _audit_auto_run_request(subscription: JsonObjectPayload) -> JsonObjectPayload:
+    return {field: subscription.get(field) for field in AUDIT_AUTO_RUN_FIELDS}
 
 
 def _normalize_str_list(value: object) -> list[str]:

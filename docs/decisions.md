@@ -11,6 +11,11 @@ agents can orient quickly before making changes.
   `curatedActions` is authoritative, and newly published report actions are
   included automatically. CLI selectors use the action-key suffix without the
   `audit.` prefix. Recon remains a separate action and workflow.
+- **Audit scheduling identity**: automatic audit schedules use
+  `audit-auto-runs/{actionKey}` with the exact catalog action key. Each
+  subscription stores its cadence, IANA timezone, and auto or user-selected
+  time. `improvement-jobs` is autofix-only and is never a scheduling fallback;
+  project-wide operations are explicit client-side batches.
 - **Narrow read-only MCP facade**: MCP stays curated and read-only. It exposes
   portfolio overview and repository report reading, not auth bootstrap,
   project/repo writes, scheduling, or other operator controls.
