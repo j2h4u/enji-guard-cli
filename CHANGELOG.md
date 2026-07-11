@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.12...v0.4.0) (2026-07-11)
+
+
+### Features
+
+* discover audits from live Enji catalog ([#115](https://github.com/j2h4u/enji-guard-cli/issues/115)) ([94f6a09](https://github.com/j2h4u/enji-guard-cli/commit/94f6a093b2150ecbfd42a15c1d9a5b2ffa1b691f))
+* migrate audit schedules to auto-runs ([#117](https://github.com/j2h4u/enji-guard-cli/issues/117)) ([b696033](https://github.com/j2h4u/enji-guard-cli/commit/b6960339ae57c561771424eeaa20f17fbccb1295))
+
 ## [0.3.12](https://github.com/j2h4u/enji-guard-cli/compare/v0.3.11...v0.3.12) (2026-07-06)
 
 
