@@ -226,9 +226,18 @@ printf '%s' "$ENJI_API_TOKEN" | docker exec -i enji-guard-cli enji-guard auth im
 Until API tokens are available, cookie auth is supported as a temporary
 compatibility path:
 
+Run in the guard.enji.ai DevTools Console:
+
+```javascript
+await fetch('https://fleet.enji.ai/api/v1/auth/refresh', { method: 'POST', credentials: 'include' });
+await fetch('https://fleet.enji.ai/api/v1/auth/me', { credentials: 'include' });
+```
+
+In DevTools Network, open the second `GET /api/v1/auth/me` and copy
+Request Headers -> Cookie, not response headers. The refresh request's Request
+Cookie contains the old refresh token.
+
 ```bash
-# In the browser, trigger Enji refresh first, then copy a current Fleet
-# request Cookie header from DevTools Network.
 pbpaste | docker exec -i enji-guard-cli enji-guard auth import-cookie --stdin
 docker exec -i enji-guard-cli enji-guard auth status
 docker exec -i enji-guard-cli enji-guard health --ready
