@@ -348,7 +348,35 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
     client = FakeEnjiHttpClient(
         [
             json_response({"project": {"id": "project_1"}, "repos": [], "webResources": []}),
-            json_response({"curatedActions": []}),
+            json_response(
+                {
+                    "curatedActions": [
+                        {
+                            "actionKey": "audit.recon",
+                            "title": "Run recon",
+                            "category": "audit",
+                            "status": "published",
+                            "runbookKind": "recon",
+                        },
+                        {
+                            "actionKey": "audit.security",
+                            "title": "Security",
+                            "category": "audit",
+                            "status": "published",
+                            "metricGroup": "security",
+                            "runbookKind": "vuln-audit",
+                        },
+                        {
+                            "actionKey": "audit.dependency-hygiene",
+                            "title": "Dependency hygiene",
+                            "category": "audit",
+                            "status": "published",
+                            "metricGroup": "dependency-hygiene",
+                            "runbookKind": "dependency-audit",
+                        },
+                    ]
+                }
+            ),
             json_response({"id": "runbook_1", "suggested_flow": "single"}),
             json_response({"repo": {"id": "repo_1"}}, status_code=201),
             empty_response(status_code=204),

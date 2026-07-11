@@ -1,8 +1,7 @@
 from collections.abc import Callable
 from typing import Never
 
-from enji_guard_cli.audits import AuditAlias
-from enji_guard_cli.audits import require_report_audit as registry_require_report_audit
+from enji_guard_cli.audits import AuditCatalog, AuditDefinition
 from enji_guard_cli.core_impl.models import (
     ReportAuditStatusPayload,
     ReportReadItemPayload,
@@ -15,14 +14,15 @@ from enji_guard_cli.core_impl.repo_status import out_of_date
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload
 
-SnapshotReader = Callable[[str, AuditAlias], JsonObjectPayload]
+SnapshotReader = Callable[[str, AuditDefinition], JsonObjectPayload]
 
 
 def selected_reports_to_read(
     status: ReportStatusPayload,
-    audits: list[AuditAlias],
+    audits: list[str],
     *,
     all_reports: bool,
+    catalog: AuditCatalog,
 ) -> list[ReportAuditStatusPayload]:
     reports_by_audit = _report_status_by_audit(status)
     if all_reports:
@@ -32,12 +32,13 @@ def selected_reports_to_read(
     if not audits:
         return [report for report in status["items"] if report["report"]["can_read"]]
 
+    audits_by_selector = {audit.selector: audit for audit in catalog.report_audits}
     selected_reports: list[ReportAuditStatusPayload] = []
-    for audit in audits:
-        registry_require_report_audit(audit)
-        report = reports_by_audit.get(audit.value)
+    for selector in audits:
+        audit = audits_by_selector.get(selector)
+        report = reports_by_audit.get(audit.action_key) if audit is not None else None
         if report is None:
-            raise EnjiApiError("NOT_FOUND", f"{audit.value} report status not found")
+            raise EnjiApiError("NOT_FOUND", f"{selector} report status not found")
         if not report["report"]["can_read"]:
             _raise_unreadable_report(report)
         selected_reports.append(report)
@@ -80,7 +81,12 @@ def _report_read_item(
             return _unavailable_report_read_item(report, reason=_unreadable_report_reason(report))
         _raise_unreadable_report(report)
 
-    audit = AuditAlias(report["audit"])
+    audit = AuditDefinition(
+        action_key=report["action_key"],
+        title=report["label"],
+        metric_group=report["metric_group"],
+        runbook_kind="",
+    )
     try:
         snapshot = json_dict(snapshot_reader(repo_id, audit).get("snapshot"))
     except EnjiApiError as exc:
@@ -89,10 +95,10 @@ def _report_read_item(
                 report,
                 reason="snapshot_not_found",
                 error_code=exc.code,
-                message=f"{audit.value} snapshot not found",
+                message=f"{audit.action_key} snapshot not found",
             )
         if exc.code == "NOT_FOUND":
-            raise EnjiApiError(exc.code, f"{audit.value} snapshot not found") from exc
+            raise EnjiApiError(exc.code, f"{audit.action_key} snapshot not found") from exc
         raise
 
     return _available_report_read_item(report, snapshot)

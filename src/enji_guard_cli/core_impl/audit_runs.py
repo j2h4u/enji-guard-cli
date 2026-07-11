@@ -2,9 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
-from enji_guard_cli.audits import REPORT_AUDITS, AuditAlias
-from enji_guard_cli.audits import require_report_audit as registry_require_report_audit
-from enji_guard_cli.audits import resolve_audit as registry_resolve_audit
+from enji_guard_cli.audits import AuditCatalog, AuditDefinition
 from enji_guard_cli.core_impl.audit_tasks import (
     action_title,
     catalog_action,
@@ -35,7 +33,6 @@ type GetRepoRerunState = Callable[[str], JsonObjectPayload]
 type StartAuditRun[TCreateRequest] = Callable[[TCreateRequest], JsonObjectPayload]
 type MakeAuditRunCreate[TCreateRequest] = Callable[[str, str, str, JsonObjectPayload], TCreateRequest]
 type ProjectDetail = Callable[[str], JsonObjectPayload]
-type Catalog = Callable[[], JsonObjectPayload]
 type Runbook = Callable[[str], JsonObjectPayload]
 type CurrentRepoActiveRuns = Callable[[str], list[JsonValue]]
 
@@ -58,7 +55,6 @@ class StartAuditDependencies[TCreateRequest]:
     make_audit_run_create: MakeAuditRunCreate[TCreateRequest]
     start_audit_run: StartAuditRun[TCreateRequest]
     project_detail: ProjectDetail
-    catalog: Catalog
     runbook: Runbook
     current_repo_active_runs: CurrentRepoActiveRuns
     record_started_run: RecordStartedRun
@@ -73,18 +69,26 @@ class AuditRunTaskContext:
     catalog: JsonObjectPayload
 
 
+@dataclass(frozen=True, slots=True)
+class StartReportAuditsContext:
+    repo_id: str
+    project_id: str
+    audits: list[AuditDefinition]
+    catalog_payload: JsonObjectPayload
+
+
 def start_audit[TCreateRequest](
     repo_id: str,
     project_id: str,
-    audit: AuditAlias,
+    audit: AuditDefinition,
+    catalog_payload: JsonObjectPayload,
     *,
     dependencies: StartAuditDependencies[TCreateRequest],
 ) -> JsonObjectPayload | AuditRunSkippedPayload:
-    resolved = registry_resolve_audit(audit)
-    action_key = resolved.action_key
+    action_key = audit.action_key
     active_runs = active_runs_for_action(dependencies.current_repo_active_runs(repo_id), action_key)
     if active_runs:
-        return skipped_audit_payload(audit.value, action_key, active_runs)
+        return skipped_audit_payload(action_key, action_key, active_runs)
     response = dependencies.start_audit_run(
         dependencies.make_audit_run_create(
             repo_id,
@@ -96,7 +100,7 @@ def start_audit[TCreateRequest](
                     repo_id=repo_id,
                     action_key=action_key,
                     project=dependencies.project_detail(project_id),
-                    catalog=dependencies.catalog(),
+                    catalog=catalog_payload,
                 ),
                 runbook=dependencies.runbook,
             ),
@@ -116,21 +120,17 @@ def start_audit[TCreateRequest](
 
 
 def start_report_audits_for_target[TCreateRequest](
-    repo_id: str,
-    project_id: str,
-    audits: list[AuditAlias],
+    context: StartReportAuditsContext,
     *,
     dependencies: StartAuditDependencies[TCreateRequest],
     get_repo_rerun_state: GetRepoRerunState,
 ) -> AuditRunBatchPayload:
     result_matrix: list[AuditRunBatchResultItem] = []
-    rerun_state = get_repo_rerun_state(repo_id)
+    rerun_state = get_repo_rerun_state(context.repo_id)
     current_sha = current_head_sha(rerun_state)
-    active_runs = dependencies.current_repo_active_runs(repo_id)
-    project = dependencies.project_detail(project_id)
-    catalog = dependencies.catalog()
-    for alias in audits:
-        audit = registry_require_report_audit(alias)
+    active_runs = dependencies.current_repo_active_runs(context.repo_id)
+    project = dependencies.project_detail(context.project_id)
+    for audit in context.audits:
         action_key = audit.action_key
         last_sha = last_audited_head_sha(rerun_state, action_key)
         matching_active_runs = active_runs_for_action(active_runs, action_key)
@@ -139,7 +139,7 @@ def start_report_audits_for_target[TCreateRequest](
             task_id, task_status = _active_run_task(matching_active_runs[0])
             result_matrix.append(
                 _batch_result_item(
-                    alias.value,
+                    audit.action_key,
                     action_key,
                     "already_running" if state == "running" else state,
                     (current_sha, last_sha),
@@ -150,7 +150,7 @@ def start_report_audits_for_target[TCreateRequest](
         if out_of_date(current_sha, last_sha) is False:
             result_matrix.append(
                 _batch_result_item(
-                    alias.value,
+                    audit.action_key,
                     action_key,
                     "up_to_date",
                     (current_sha, last_sha),
@@ -160,16 +160,16 @@ def start_report_audits_for_target[TCreateRequest](
         try:
             response = dependencies.start_audit_run(
                 dependencies.make_audit_run_create(
-                    repo_id,
-                    project_id,
+                    context.repo_id,
+                    context.project_id,
                     action_key,
                     audit_run_task_body(
                         AuditRunTaskContext(
-                            project_id=project_id,
-                            repo_id=repo_id,
+                            project_id=context.project_id,
+                            repo_id=context.repo_id,
                             action_key=action_key,
                             project=project,
-                            catalog=catalog,
+                            catalog=context.catalog_payload,
                         ),
                         runbook=dependencies.runbook,
                     ),
@@ -178,7 +178,7 @@ def start_report_audits_for_target[TCreateRequest](
         except EnjiApiError:
             result_matrix.append(
                 _batch_result_item(
-                    alias.value,
+                    audit.action_key,
                     action_key,
                     "failed",
                     (current_sha, last_sha),
@@ -188,8 +188,8 @@ def start_report_audits_for_target[TCreateRequest](
         task_id, task_status = _start_task_identity(response)
         dependencies.record_started_run(
             RecordStartedRunContext(
-                repo_id=repo_id,
-                project_id=project_id,
+                repo_id=context.repo_id,
+                project_id=context.project_id,
                 action_key=action_key,
                 response=response,
                 current_head_sha=current_sha,
@@ -198,7 +198,7 @@ def start_report_audits_for_target[TCreateRequest](
         )
         result_matrix.append(
             _batch_result_item(
-                alias.value,
+                audit.action_key,
                 action_key,
                 "started",
                 (current_sha, last_sha),
@@ -208,32 +208,34 @@ def start_report_audits_for_target[TCreateRequest](
     return {"results": result_matrix}
 
 
-def selected_report_audits(audits: list[AuditAlias], *, all_reports: bool) -> list[AuditAlias]:
+def selected_report_audits(audits: list[str], *, all_reports: bool, catalog: AuditCatalog) -> list[AuditDefinition]:
     if all_reports:
         if audits:
             raise ValueError("pass report audits or --all, not both")
-        return [audit.alias for audit in REPORT_AUDITS]
+        return list(catalog.report_audits)
     if not audits:
         raise ValueError("pass at least one report audit or --all")
-    for audit in audits:
-        registry_require_report_audit(audit)
-    return audits
+    audits_by_selector = {audit.selector: audit for audit in catalog.report_audits}
+    selected = [audits_by_selector.get(selector) for selector in audits]
+    if missing := [selector for selector, audit in zip(audits, selected, strict=True) if audit is None]:
+        raise ValueError(f"unknown report audit selector: {missing[0]}")
+    return [audit for audit in selected if audit is not None]
 
 
 def linked_running_report_results(
     status: ReportStatusPayload,
-    audits: list[AuditAlias],
+    audits: list[AuditDefinition],
 ) -> dict[str, AuditRunBatchResultItem]:
     items_by_action = {item["action_key"]: item for item in status["items"]}
     results: dict[str, AuditRunBatchResultItem] = {}
     for audit in audits:
-        action_key = registry_require_report_audit(audit).action_key
+        action_key = audit.action_key
         item = items_by_action.get(action_key)
         if item is None or not has_running_report_link(item):
             continue
         report = item["report"]
         results[action_key] = {
-            "audit": audit.value,
+            "audit": action_key,
             "action_key": action_key,
             "state": "already_running",
             "current_head_sha": report["current_head_sha"],
@@ -257,13 +259,13 @@ def has_running_report_link(item: ReportAuditStatusPayload) -> bool:
 
 
 def ordered_audit_results(
-    audits: list[AuditAlias],
+    audits: list[AuditDefinition],
     linked_results: dict[str, AuditRunBatchResultItem],
     started_results: list[AuditRunBatchResultItem],
 ) -> list[AuditRunBatchResultItem]:
     results_by_action = {result["action_key"]: result for result in started_results}
     results_by_action.update(linked_results)
-    return [results_by_action[registry_require_report_audit(audit).action_key] for audit in audits]
+    return [results_by_action[audit.action_key] for audit in audits]
 
 
 def skipped_audit_payload(audit: str, action_key: str, active_runs: list[JsonValue]) -> AuditRunSkippedPayload:

@@ -147,6 +147,34 @@ def test_implemented_endpoint_specs_match_openapi_contract() -> None:
         assert _request_body_ref(operation) == endpoint["request_body_ref"]
 
 
+def test_catalog_contract_models_live_curated_actions_without_closed_key_or_kind_enums() -> None:
+    contract = cast(object, json.loads(CONTRACT_PATH.read_text(encoding="utf-8")))
+    assert isinstance(contract, dict)
+    paths = contract.get("paths")
+    assert isinstance(paths, dict)
+    catalog_path = paths.get("/api/ux/catalog")
+    assert isinstance(catalog_path, dict)
+    catalog_operation = catalog_path.get("get")
+    assert isinstance(catalog_operation, dict)
+    catalog_response = _response_schema(catalog_operation, "200")
+    assert catalog_response == {"$ref": "#/components/schemas/CatalogResponse"}
+
+    components = contract.get("components")
+    assert isinstance(components, dict)
+    schemas = components.get("schemas")
+    assert isinstance(schemas, dict)
+    catalog_schema = schemas.get("CatalogResponse")
+    assert isinstance(catalog_schema, dict)
+    curated_actions = _schema_property(catalog_schema, "curatedActions")
+    assert curated_actions.get("items") == {"$ref": "#/components/schemas/CuratedAction"}
+    action_schema = schemas.get("CuratedAction")
+    assert isinstance(action_schema, dict)
+    for property_name in ("actionKey", "runbookKind"):
+        property_schema = _schema_property(action_schema, property_name)
+        assert property_schema.get("type") == "string"
+        assert "enum" not in property_schema
+
+
 def test_reconstructed_extended_surfaces_remain_in_openapi_contract() -> None:
     contract = cast(object, json.loads(CONTRACT_PATH.read_text(encoding="utf-8")))
     assert isinstance(contract, dict)
@@ -233,3 +261,25 @@ def _request_body_ref(operation: dict[str, object]) -> str | None:
         return None
     schema_ref = schema.get("$ref")
     return schema_ref if isinstance(schema_ref, str) else None
+
+
+def _response_schema(operation: dict[str, object], status_code: str) -> dict[str, object]:
+    responses = operation.get("responses")
+    assert isinstance(responses, dict)
+    response = responses.get(status_code)
+    assert isinstance(response, dict)
+    content = response.get("content")
+    assert isinstance(content, dict)
+    json_content = content.get("application/json")
+    assert isinstance(json_content, dict)
+    schema = json_content.get("schema")
+    assert isinstance(schema, dict)
+    return schema
+
+
+def _schema_property(schema: dict[str, object], name: str) -> dict[str, object]:
+    properties = schema.get("properties")
+    assert isinstance(properties, dict)
+    property_schema = properties.get(name)
+    assert isinstance(property_schema, dict)
+    return property_schema

@@ -148,7 +148,7 @@ class ReportAuditStatusPayload(TypedDict):
     audit: str
     label: str
     action_key: str
-    route_slug: str
+    metric_group: str | None
     report: ReportArtifactStatusPayload
     task: ReportTaskStatusPayload
     agent_action: str | None

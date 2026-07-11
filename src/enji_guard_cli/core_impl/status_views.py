@@ -2,6 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from enji_guard_cli.audits import AuditCatalog
 from enji_guard_cli.core_impl.models import (
     ProjectRuntimeStatusPayload,
     ReportStatusPayload,
@@ -19,13 +20,13 @@ type MatchingRepoTargets = Callable[[str, list[str]], list[RepoTargetPayload]]
 type SelectedProjectIds = Callable[[str | None], list[str]]
 type RepoRuntimeStatusFromTarget = Callable[[RepoTargetPayload], RepoRuntimeStatusPayload]
 type RepoTarget = Callable[[str, str | None, dict[str, JsonValue]], RepoTargetPayload]
-type EmptyReportStatus = Callable[[str], ReportStatusPayload]
+type EmptyReportStatus = Callable[[str, AuditCatalog], ReportStatusPayload]
 type RepoActiveRuns = Callable[[str], list[JsonValue]]
 type GetRepoRerunState = Callable[[str], JsonObjectPayload | None]
 type ListRepoTaskLinks = Callable[[str], JsonObjectPayload]
 type CurrentHeadSha = Callable[[JsonObjectPayload | None], str | None]
 type ReportStatusFromTaskLinks = Callable[
-    [str, JsonObjectPayload, list[JsonValue], JsonObjectPayload | None],
+    [str, JsonObjectPayload, list[JsonValue], JsonObjectPayload | None, AuditCatalog],
     ReportStatusPayload,
 ]
 
@@ -37,6 +38,15 @@ class RuntimeStatusDependencies:
     list_repo_task_links: ListRepoTaskLinks
     current_head_sha: CurrentHeadSha
     report_status_from_task_links: ReportStatusFromTaskLinks
+    catalog: AuditCatalog
+
+
+@dataclass(frozen=True, slots=True)
+class RepoInventoryStatusContext:
+    project_id: str
+    project_name: str | None
+    repo: dict[str, JsonValue]
+    catalog: AuditCatalog
 
 
 def project_runtime_status(
@@ -124,6 +134,7 @@ def repo_runtime_status_from_target(
         dependencies.list_repo_task_links(repo_id),
         active_runs,
         rerun_state,
+        dependencies.catalog,
     )
     payload: RepoRuntimeStatusPayload = {
         "project_id": target["project_id"],
@@ -147,15 +158,13 @@ def repo_runtime_status_from_target(
 
 
 def repo_inventory_status(
-    project_id: str,
-    project_name: str | None,
-    repo: dict[str, JsonValue],
+    context: RepoInventoryStatusContext,
     *,
     repo_target: RepoTarget,
     empty_report_status: EmptyReportStatus,
 ) -> RepoRuntimeStatusPayload:
-    target = repo_target(project_id, project_name, repo)
-    reports = empty_report_status(target["repo_id"])
+    target = repo_target(context.project_id, context.project_name, context.repo)
+    reports = empty_report_status(target["repo_id"], context.catalog)
     payload: RepoRuntimeStatusPayload = {
         "project_id": target["project_id"],
         "project_name": target["project_name"],

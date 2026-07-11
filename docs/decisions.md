@@ -6,6 +6,11 @@ agents can orient quickly before making changes.
 
 ## Decisions
 
+- **Live audit discovery**: every report-aware top-level command fetches
+  `GET /api/ux/catalog` once per invocation. There is no cache or fallback;
+  `curatedActions` is authoritative, and newly published report actions are
+  included automatically. CLI selectors use the action-key suffix without the
+  `audit.` prefix. Recon remains a separate action and workflow.
 - **Narrow read-only MCP facade**: MCP stays curated and read-only. It exposes
   portfolio overview and repository report reading, not auth bootstrap,
   project/repo writes, scheduling, or other operator controls.

@@ -1,6 +1,6 @@
 from typing import cast
 
-from enji_guard_cli.audits import ReportAuditDefinition
+from enji_guard_cli.audits import AuditDefinition
 from enji_guard_cli.core_impl.email_preferences import repo_count
 from enji_guard_cli.core_impl.models import (
     ALL_SCHEDULE_DAYS,
@@ -105,7 +105,7 @@ def selected_schedule_time(existing: JsonObjectPayload | None, update: ScheduleS
 
 def schedule_setting_row(
     target: RepoTargetPayload,
-    audit: ReportAuditDefinition,
+    audit: AuditDefinition,
     job: JsonObjectPayload | None,
     *,
     changed: bool | None = None,
@@ -116,8 +116,8 @@ def schedule_setting_row(
         "project_name": target["project_name"],
         "repo_id": target["repo_id"],
         "github_repo": target["github_repo"],
-        "audit": audit.alias.value,
-        "job_kind": audit.job_kind,
+        "audit": audit.action_key,
+        "runbook_kind": audit.runbook_kind,
         "configured": job is not None,
         "enabled": False,
         "frequency": None,

@@ -4,8 +4,6 @@ from typing import Annotated
 
 import typer
 
-from enji_guard_cli.audits import AuditAlias, ReportAuditAlias
-from enji_guard_cli.cli_impl.audit_aliases import report_audits
 from enji_guard_cli.cli_impl.rendering import echo_audit_start, echo_json
 
 audit_app = typer.Typer(help="Start slow report-producing audits.")
@@ -16,7 +14,7 @@ type JsonOutputResolver = Callable[[bool], bool]
 type SelectedProjectResolver = Callable[[], str | None]
 type RepoSelectorKindResolver = Callable[..., str]
 type CommandPayloadResolver = Callable[[Callable[[], object]], object]
-type StartReportAuditsAction = Callable[[str, str | None, list[AuditAlias], bool], object]
+type StartReportAuditsAction = Callable[[str, str | None, list[str], bool], object]
 
 
 @dataclass(frozen=True)
@@ -42,8 +40,8 @@ def configure_audit_commands(config: AuditCommandsCliConfig) -> None:
 def audit_start(
     repo: Annotated[str, typer.Argument(help="Repo id or owner/name.")],
     audits: Annotated[
-        list[ReportAuditAlias] | None,
-        typer.Argument(help="One or more canonical report audit aliases. Use --all for all report audits."),
+        list[str] | None,
+        typer.Argument(help="One or more report audit selectors. Use --all for all report audits."),
     ] = None,
     all_reports: Annotated[bool, typer.Option("--all", help="Start every report audit.")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
@@ -68,12 +66,12 @@ def _audit_start_body(
     *,
     repo: str,
     project: str | None,
-    audits: list[ReportAuditAlias] | None,
+    audits: list[str] | None,
     all_reports: bool,
     json_output: bool,
 ) -> object:
     payload = _require_resolve_command_payload()(
-        lambda: _require_start_report_audits()(repo, project, report_audits(audits or []), all_reports)
+        lambda: _require_start_report_audits()(repo, project, audits or [], all_reports)
     )
     if _require_json_output()(json_output):
         echo_json(payload)

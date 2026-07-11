@@ -4,13 +4,11 @@ from collections.abc import Awaitable
 from importlib.metadata import version
 from pathlib import Path
 
-from enji_guard_cli.audits import AuditAlias, AuditPayload
-from enji_guard_cli.audits import audit_catalog as registry_audit_catalog
-from enji_guard_cli.audits import audit_payload as registry_audit_payload
-from enji_guard_cli.audits import resolve_audit as registry_resolve_audit
+from enji_guard_cli.audits import AuditDefinition
 from enji_guard_cli.auth import AuthStatusPayload
 from enji_guard_cli.auth import auth_status as run_auth_status
 from enji_guard_cli.auth import auth_status_async as run_auth_status_async
+from enji_guard_cli.core_impl.catalog import parse_audit_catalog
 from enji_guard_cli.core_impl.models import OperationName, OperationPayload, OperationSpec
 from enji_guard_cli.enji_api import (
     REPORTS_LIST_DEFAULT_MIN_SEVERITY,
@@ -21,16 +19,31 @@ from enji_guard_cli.enji_api import (
 )
 from enji_guard_cli.enji_api import access as run_access
 from enji_guard_cli.enji_api import access_async as run_access_async
+from enji_guard_cli.enji_api import catalog as run_catalog
 from enji_guard_cli.enji_api import reports_list as run_reports_list
 from enji_guard_cli.enji_api import reports_list_async as run_reports_list_async
 
 
-def _catalog_audits_operation() -> list[AuditPayload]:
-    return registry_audit_catalog()
+def _catalog_audits_operation() -> list[dict[str, str | None]]:
+    catalog = parse_audit_catalog(run_catalog())
+    return [_audit_payload(audit) for audit in (*catalog.report_audits, catalog.recon)]
 
 
-def _catalog_audit_operation(audit: AuditAlias) -> AuditPayload:
-    return registry_audit_payload(registry_resolve_audit(audit))
+def _catalog_audit_operation(selector: str) -> dict[str, str | None]:
+    catalog = parse_audit_catalog(run_catalog())
+    for audit in (*catalog.report_audits, catalog.recon):
+        if audit.selector == selector:
+            return _audit_payload(audit)
+    raise ValueError(f"unknown audit selector: {selector}")
+
+
+def _audit_payload(audit: AuditDefinition) -> dict[str, str | None]:
+    return {
+        "action_key": audit.action_key,
+        "title": audit.title,
+        "metric_group": audit.metric_group,
+        "runbook_kind": audit.runbook_kind,
+    }
 
 
 def _access_operation() -> AccessPayload:

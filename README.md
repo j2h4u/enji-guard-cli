@@ -49,6 +49,14 @@ contract: readable reports include summary metadata, and unavailable reports are
 returned with `available: false` plus a reason instead of aborting the whole
 batch.
 
+Every report-aware top-level command fetches `GET /api/ux/catalog` once for its
+invocation. There is no catalog cache or fallback. `curatedActions` is
+authoritative: published report actions in the live response are the available
+audits, so newly published reports participate automatically. CLI report
+selectors use the action-key suffix without the `audit.` prefix (for example,
+`security` selects `audit.security`). Recon is a separate `audit.recon` action
+and is not a report selector.
+
 CLI output is human text and tables by default. Use `--json` only when another
 tool needs structured output.
 
