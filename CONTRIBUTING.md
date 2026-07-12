@@ -25,7 +25,7 @@ A change is ready when:
 
 Leave durable context only when it changes future work:
 
-- update `README.md` for user/operator workflow changes;
+- update `README.md` for user/operator workflow and CLI/MCP ontology changes;
 - update `AGENTS.md` for developer/QA/Ops rules;
-- update `README.md` for CLI/MCP ontology or architectural decisions;
+- update `docs/decisions.md` for architectural decisions and invariants;
 - do not keep temporary investigation backlogs after they are resolved.
