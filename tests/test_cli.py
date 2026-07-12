@@ -466,7 +466,7 @@ def test_language_show_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(
         cli,
         "show_report_language",
-        lambda: {"language": "ru", "scope": "account", "projects": []},
+        lambda: {"language": "ru", "scope": "account"},
     )
 
     result = CliRunner().invoke(app, ["language", "show", "--json"])
@@ -480,7 +480,7 @@ def test_language_set_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(
         cli,
         "set_report_language",
-        lambda language: captured.append(language) or {"language": language, "changed": True, "projects": []},
+        lambda language: captured.append(language) or {"language": language, "changed": True},
     )
 
     result = CliRunner().invoke(app, ["language", "set", "en", "--json"])
