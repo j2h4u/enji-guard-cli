@@ -23,18 +23,13 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          changed_files="$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")"
-          if [ -z "${changed_files}" ]; then
-            echo "requires-dependency-review=true" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          if echo "${changed_files}" | grep -Ev '^(\.planning/|docs/|README[.]md$|AGENTS[.]md$|CHANGELOG[.]md$|ROADMAP[.]md$|SECURITY[.]md$|.*[.]md$)' >/dev/null; then
-            echo "requires-dependency-review=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "requires-dependency-review=false" >> "${GITHUB_OUTPUT}"
-          fi
+          python3 scripts/classify_changed_files.py \
+            --event-name "${EVENT_NAME}" \
+            --base-sha "${BASE_SHA}" \
+            --head-sha "${HEAD_SHA}" \
+            --output-key requires-dependency-review
 
   dependency-review:
     needs: [changes]

@@ -51,27 +51,13 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
-          if [ "${EVENT_NAME}" = "release" ] || [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
-            echo "requires-image-publish=true" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          BASE_SHA="$(git show -s --format=%P "${HEAD_SHA}" | awk '{print $1}')"
-          if [ -z "${BASE_SHA}" ] || [[ "${BASE_SHA}" =~ ^0+$ ]]; then
-            BASE_SHA="$(git rev-list --max-parents=0 "${HEAD_SHA}")"
-          fi
-
-          changed_files="$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")"
-          if [ -z "${changed_files}" ]; then
-            echo "requires-image-publish=true" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          if echo "${changed_files}" | grep -Ev '^(\.planning/|docs/|README[.]md$|AGENTS[.]md$|CHANGELOG[.]md$|ROADMAP[.]md$|SECURITY[.]md$|.*[.]md$)' >/dev/null; then
-            echo "requires-image-publish=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "requires-image-publish=false" >> "${GITHUB_OUTPUT}"
-          fi
+          python3 scripts/classify_changed_files.py \
+            --event-name "${EVENT_NAME}" \
+            --head-sha "${HEAD_SHA}" \
+            --force-event workflow_run \
+            --force-event release \
+            --force-event workflow_dispatch \
+            --output-key requires-image-publish
 
   publish:
     needs: [changes]
