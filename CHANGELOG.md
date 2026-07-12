@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/j2h4u/enji-guard-cli/compare/v0.4.1...v0.5.0) (2026-07-12)
+
+
+### Features
+
+* add autofix management ([#121](https://github.com/j2h4u/enji-guard-cli/issues/121)) ([b8f9a47](https://github.com/j2h4u/enji-guard-cli/commit/b8f9a472a86300ae7d9824a0c1d5ffac667aecd4))
+
 ## [0.4.1](https://github.com/j2h4u/enji-guard-cli/compare/v0.4.0...v0.4.1) (2026-07-11)
 
 
