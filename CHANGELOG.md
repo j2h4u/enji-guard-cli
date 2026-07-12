@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/j2h4u/enji-guard-cli/compare/v0.6.1...v0.6.2) (2026-07-12)
+
+
+### Fixes
+
+* harden QA configuration drift checks ([#127](https://github.com/j2h4u/enji-guard-cli/issues/127)) ([22d4cf1](https://github.com/j2h4u/enji-guard-cli/commit/22d4cf1558327147649770cc80be7fdb1511796f))
+
 ## [0.6.1](https://github.com/j2h4u/enji-guard-cli/compare/v0.6.0...v0.6.1) (2026-07-12)
 
 
