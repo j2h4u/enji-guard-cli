@@ -57,6 +57,15 @@ selectors use the action-key suffix without the `audit.` prefix (for example,
 `security` selects `audit.security`). Recon is a separate `audit.recon` action
 and is not a report selector.
 
+The workflow is audit -> findings -> optional improvement. The live catalog's
+`auditAutofixes` entries describe available variants. The supported typed
+relationships are `security` -> `vuln-fix`, `tests` -> `test-writing`, and
+`dependency-hygiene` -> `dependency-update`; pentest is separate. The CLI is
+the operator surface for autofix management (`list` and `set`), while MCP
+remains read-only. Use an explicit `REPO`, `--all-repos` with `--project`, or
+`--all-projects` for batch scope. The relationship mapping is temporary and
+can be removed when Enji exposes relationships directly.
+
 CLI output is human text and tables by default. Use `--json` only when another
 tool needs structured output.
 
@@ -289,6 +298,11 @@ should run with the host timezone. Batch writes are explicit client-side loops:
 use `REPO`, `--project NAME_OR_ID --all-repos`, or `--all-projects`.
 `schedule set` updates the selected scope, and `schedule auto-time` restores
 Enji-assigned run times. Autofix `improvement-jobs` are not audit schedules.
+
+Autofix management uses `improvement-jobs` as the canonical resource. Its
+operator workflow is list/set per repository or explicit batch scope; it does
+not create or replace an audit schedule. Audit schedules remain under
+`audit-auto-runs/{actionKey}`.
 
 ## MCP
 

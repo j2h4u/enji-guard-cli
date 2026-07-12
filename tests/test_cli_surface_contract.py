@@ -11,6 +11,8 @@ EXPECTED_VISIBLE_COMMANDS = {
     ("auth", "refresh"),
     ("auth", "status"),
     ("audit", "start"),
+    ("autofix", "list"),
+    ("autofix", "set"),
     ("email", "list"),
     ("email", "set"),
     ("health",),

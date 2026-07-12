@@ -152,11 +152,11 @@
     "/api/ux/catalog": {
       "get": {
         "operationId": "getUxCatalog",
-        "summary": "Return metric groups, curated actions, and audit autofixes.",
+        "summary": "Return metric groups, curated actions, and curated audit autofixes.",
         "x-enji-observed": true,
         "responses": {
           "200": {
-            "description": "Live Enji catalog, including the current curated audit actions.",
+            "description": "Live Enji catalog, including current curated audit actions and autofix variants.",
             "content": {
               "application/json": {
                 "schema": {
@@ -360,7 +360,7 @@
     "/api/ux/improvement-jobs/{repoId}": {
       "get": {
         "operationId": "listImprovementJobs",
-        "summary": "Return all audit schedule jobs for a repository.",
+        "summary": "Return all autofix improvement jobs for a repository.",
         "x-enji-observed": true,
         "parameters": [
           {
@@ -401,7 +401,7 @@
     "/api/ux/improvement-jobs/{repoId}/{kind}": {
       "put": {
         "operationId": "putImprovementJob",
-        "summary": "Create or update an audit schedule job.",
+        "summary": "Create or update an autofix improvement job.",
         "x-enji-observed": true,
         "parameters": [
           {
@@ -438,7 +438,7 @@
     "/api/ux/improvement-jobs/{repoId}/{kind}/resume": {
       "post": {
         "operationId": "resumeImprovementJob",
-        "summary": "Resume a paused audit schedule job.",
+        "summary": "Resume a paused autofix improvement job.",
         "x-enji-observed": false,
         "parameters": [
           {
@@ -458,7 +458,7 @@
     "/api/ux/improvement-jobs/{repoId}/{kind}/binding": {
       "put": {
         "operationId": "putImprovementJobBinding",
-        "summary": "Bind an audit job to a Fleet schedule.",
+        "summary": "Bind an autofix improvement job to a Fleet schedule.",
         "x-enji-observed": false,
         "parameters": [
           {
@@ -3322,7 +3322,9 @@
           },
           "auditAutofixes": {
             "type": "array",
-            "items": {}
+            "items": {
+              "$ref": "#/components/schemas/AuditAutofix"
+            }
           }
         },
         "additionalProperties": true
@@ -3363,6 +3365,46 @@
           },
           "fleetRunbookId": {
             "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "AuditAutofix": {
+        "type": "object",
+        "required": [
+          "actionKey",
+          "variantKey",
+          "title",
+          "description",
+          "fleetRunbookId",
+          "status",
+          "sortOrder"
+        ],
+        "properties": {
+          "actionKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "variantKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "fleetRunbookId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "type": "integer"
           }
         },
         "additionalProperties": true

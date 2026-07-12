@@ -13,7 +13,13 @@ from enji_guard_cli import cli
 from enji_guard_cli.cli import app
 from enji_guard_cli.cli_impl import runtime_controls
 from enji_guard_cli.cli_impl.durations import format_duration_seconds
-from enji_guard_cli.core import EmailPreferenceUpdate, ReportWaitOptions, ScheduleSettingsUpdate
+from enji_guard_cli.core import (
+    AutofixSettingsUpdate,
+    AutofixWriteScope,
+    EmailPreferenceUpdate,
+    ReportWaitOptions,
+    ScheduleSettingsUpdate,
+)
 from enji_guard_cli.core_impl import operations
 from enji_guard_cli.enji_api import EnjiApiError
 from enji_guard_cli.readiness import ReadinessVerdict
@@ -1588,6 +1594,77 @@ def test_schedule_list_defaults_to_text_table(monkeypatch: MonkeyPatch) -> None:
     assert "weekly" in result.output
     assert "09:00 (auto)" in result.output
     assert captured == {"repo": "j2h4u/enji-guard-cli", "project": "Pets"}
+
+
+def test_autofix_set_routes_explicit_selector_and_scope(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_set(
+        repo: str | None,
+        project: str | None,
+        selectors: list[str],
+        update: object,
+        *,
+        scope: object,
+    ) -> dict[str, object]:
+        captured.update({"repo": repo, "project": project, "selectors": selectors, "update": update, "scope": scope})
+        return {
+            "autofixes": [
+                {
+                    "project_name": "Pets",
+                    "github_repo": "j2h4u/enji-guard-cli",
+                    "source_audit": "audit.security",
+                    "autofix": "vuln-fix",
+                    "enabled": False,
+                    "frequency": "workdays",
+                    "schedule_time": "09:00",
+                    "schedule_time_source": "auto",
+                    "timezone": "Asia/Almaty",
+                    "status": "changed",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(cli, "set_autofix_settings", fake_set)
+
+    result = CliRunner().invoke(
+        app,
+        ["--project", "Pets", "autofix", "set", "j2h4u/enji-guard-cli", "vuln-fix", "--enabled", "off"],
+    )
+
+    assert result.exit_code == 0
+    assert "source audit" in result.output
+    assert "vuln-fix" in result.output
+    assert captured["repo"] == "j2h4u/enji-guard-cli"
+    assert captured["project"] == "Pets"
+    assert captured["selectors"] == ["vuln-fix"]
+    assert captured["update"] == AutofixSettingsUpdate(False, None, None)
+    assert captured["scope"] == AutofixWriteScope()
+
+
+def test_autofix_set_accepts_selectors_for_explicit_batch_scope(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        cli,
+        "set_autofix_settings",
+        lambda repo, project, selectors, update, *, scope: (
+            captured.update({"repo": repo, "project": project, "selectors": selectors, "scope": scope})
+            or {"autofixes": []}
+        ),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["--project", "Pets", "autofix", "set", "--all-repos", "vuln-fix", "--enabled", "on", "--json"],
+    )
+
+    assert result.exit_code == 0
+    assert captured == {
+        "repo": None,
+        "project": "Pets",
+        "selectors": ["vuln-fix"],
+        "scope": AutofixWriteScope(all_repos=True),
+    }
 
 
 def test_schedule_list_warns_about_timezone_divergence(monkeypatch: MonkeyPatch) -> None:

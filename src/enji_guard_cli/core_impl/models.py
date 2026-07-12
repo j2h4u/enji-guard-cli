@@ -300,3 +300,16 @@ class ScheduleSettingsUpdate:
 class EmailPreferenceUpdate:
     manual_run_completion: bool | None
     scheduled_run_completion: bool | None
+
+
+@dataclass(frozen=True, slots=True)
+class AutofixSettingsUpdate:
+    enabled: bool | None
+    frequency: ScheduleCadence | None
+    timezone: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class AutofixWriteScope:
+    all_repos: bool = False
+    all_projects: bool = False

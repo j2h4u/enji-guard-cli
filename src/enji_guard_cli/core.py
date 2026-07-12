@@ -13,11 +13,18 @@ from enji_guard_cli.auth import import_cookie as import_cookie
 from enji_guard_cli.auth import refresh_auth as refresh_auth
 from enji_guard_cli.core_impl import audit_runs as _audit_runs
 from enji_guard_cli.core_impl import report_workflows as _report_workflows
+from enji_guard_cli.core_impl.autofixes import AutofixWriteContext as _AutofixWriteContext
+from enji_guard_cli.core_impl.autofixes import AutofixWriteDependencies as _AutofixWriteDependencies
+from enji_guard_cli.core_impl.autofixes import autofix_definitions as _autofix_definitions
+from enji_guard_cli.core_impl.autofixes import list_autofixes as _list_autofixes
+from enji_guard_cli.core_impl.autofixes import set_autofixes as _set_autofixes
 from enji_guard_cli.core_impl.catalog import parse_audit_catalog as _parse_audit_catalog
 from enji_guard_cli.core_impl.models import (
     DEFAULT_REPO_SORT,
     AuditRunBatchPayload,
     AuditRunSkippedPayload,
+    AutofixSettingsUpdate,
+    AutofixWriteScope,
     EmailPreferenceUpdate,
     ProjectRuntimeStatusPayload,
     RepoResolvePayload,
@@ -119,12 +126,14 @@ from enji_guard_cli.enji_api import connect_project_repo as run_connect_project_
 from enji_guard_cli.enji_api import create_project as run_create_project
 from enji_guard_cli.enji_api import delete_project as run_delete_project
 from enji_guard_cli.enji_api import delete_project_repo as run_delete_project_repo
+from enji_guard_cli.enji_api import improvement_jobs as run_improvement_jobs
 from enji_guard_cli.enji_api import move_repo as run_move_repo
 from enji_guard_cli.enji_api import preflight_repo_move as run_preflight_repo_move
 from enji_guard_cli.enji_api import project_detail as run_project_detail
 from enji_guard_cli.enji_api import projects as run_projects
 from enji_guard_cli.enji_api import put_audit_auto_run as run_put_audit_auto_run
 from enji_guard_cli.enji_api import put_audit_email_preferences as run_put_audit_email_preferences
+from enji_guard_cli.enji_api import put_improvement_job as run_put_improvement_job
 from enji_guard_cli.enji_api import rename_project as run_rename_project
 from enji_guard_cli.enji_api import repo_active_runs as run_repo_active_runs
 from enji_guard_cli.enji_api import repo_audit_rerun_state as run_repo_audit_rerun_state
@@ -506,6 +515,44 @@ def set_schedule_settings(
             list_schedules=_list_schedules,
             set_schedule=_set_schedule,
         ),
+    )
+
+
+def list_autofix_settings(repo: str | None, project: str | None) -> JsonObjectPayload:
+    catalog = run_catalog()
+    return _list_autofixes(
+        repo,
+        project,
+        selected_repo_targets=_selected_repo_targets,
+        list_improvement_jobs=run_improvement_jobs,
+        definitions=_autofix_definitions(catalog),
+    )
+
+
+def set_autofix_settings(
+    repo: str | None,
+    project: str | None,
+    selectors: list[str],
+    update: AutofixSettingsUpdate,
+    *,
+    scope: AutofixWriteScope | None = None,
+) -> JsonObjectPayload:
+    catalog = run_catalog()
+    resolved_scope = scope or AutofixWriteScope()
+    return _set_autofixes(
+        _AutofixWriteContext(repo, project, selectors, update),
+        dependencies=_AutofixWriteDependencies(
+            selected_write_repo_targets=lambda selected_repo, selected_project: _selected_write_repo_targets(
+                selected_repo,
+                selected_project,
+                all_repos=resolved_scope.all_repos,
+                all_projects=resolved_scope.all_projects,
+                operation="autofix set",
+            ),
+            list_improvement_jobs=run_improvement_jobs,
+            put_improvement_job=run_put_improvement_job,
+        ),
+        definitions=_autofix_definitions(catalog),
     )
 
 

@@ -16,6 +16,13 @@ agents can orient quickly before making changes.
   subscription stores its cadence, IANA timezone, and auto or user-selected
   time. `improvement-jobs` is autofix-only and is never a scheduling fallback;
   project-wide operations are explicit client-side batches.
+- **Curated autofix management**: the mental model is audit -> findings ->
+  optional improvement. `auditAutofixes` is the typed catalog of available
+  variants, while `improvement-jobs` is the canonical CLI operator resource
+  for list/set. The temporary typed relationships are `security`/`vuln-fix`,
+  `tests`/`test-writing`, and `dependency-hygiene`/`dependency-update`;
+  pentest remains separate. MCP stays read-only, and the registry is removable
+  when Enji publishes relationships directly.
 - **Narrow read-only MCP facade**: MCP stays curated and read-only. It exposes
   portfolio overview and repository report reading, not auth bootstrap,
   project/repo writes, scheduling, or other operator controls.
