@@ -73,6 +73,25 @@ def echo_project_table(payload: object) -> None:
     echo_table(headers, [project_row(project) for project in payload_projects(payload)], "No projects.")
 
 
+def echo_report_language(payload: object) -> None:
+    data = object_dict(payload)
+    typer.echo(f"language: {text_cell(data.get('language'))}")
+    typer.echo(f"scope: {text_cell(data.get('scope'))}")
+    if "changed" in data:
+        typer.echo(f"changed: {text_cell(data.get('changed'))}")
+    rows = [report_language_row(object_dict(project)) for project in object_list(data.get("projects"))]
+    typer.echo("")
+    echo_table(("project", "id", "effective language"), rows, "No projects.")
+
+
+def report_language_row(project: dict[str, object]) -> tuple[str, ...]:
+    return (
+        text_cell(project.get("project_name")),
+        text_cell(project.get("project_id")),
+        text_cell(project.get("language")),
+    )
+
+
 def echo_repo_resolve_table(payload: object) -> None:
     data = object_dict(payload)
     headers = ("selector", "resolved", "project", "repo", "repo_id", "state")

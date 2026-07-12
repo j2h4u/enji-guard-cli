@@ -24,6 +24,7 @@ from enji_guard_cli.cli_impl.rendering import (
     echo_repo_resolve_table,
     echo_repo_score_table,
     echo_repo_status_table,
+    echo_report_language,
     echo_wait_heartbeat,
     echo_wait_status,
 )
@@ -68,7 +69,9 @@ from enji_guard_cli.core import (
     runtime_status,
     set_autofix_settings,
     set_email_preferences,
+    set_report_language,
     set_schedule_settings,
+    show_report_language,
     start_recon,
     start_report_audits,
     wait_for_reports,
@@ -103,6 +106,8 @@ app.add_typer(autofix_app, name="autofix")
 app.add_typer(report_app, name="report")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(email_app, name="email")
+language_app = typer.Typer(help="Show or change the account-wide report language.")
+app.add_typer(language_app, name="language")
 
 ACCESS_OPERATION = resolve_operation_spec(OperationName.ACCESS)
 AUTH_STATUS_OPERATION = resolve_operation_spec(OperationName.AUTH_STATUS)
@@ -476,6 +481,31 @@ def _project_delete_body(*, project: str, json_output: bool) -> object:
     else:
         echo_key_values(cast(dict[str, object], payload))
     return payload
+
+
+@language_app.command("show", help="Show the preferred and effective report language.")
+def language_show(
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    _run_human_or_json_command(
+        show_report_language,
+        _json_output(json_output),
+        echo_report_language,
+        journey=_cli_journey(command_path=_command_path("language", "show"), selector_kind="account"),
+    )
+
+
+@language_app.command("set", help="Set the report language for all projects.")
+def language_set(
+    language: Annotated[Literal["en", "ru"], typer.Argument(help="Report language: en or ru.")],
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    _run_human_or_json_command(
+        lambda: set_report_language(language),
+        _json_output(json_output),
+        echo_report_language,
+        journey=_cli_journey(command_path=_command_path("language", "set"), selector_kind="account"),
+    )
 
 
 @repo_app.command("list", help="List connected repositories with triage scores.")

@@ -28,8 +28,10 @@ from enji_guard_cli.enji_api import (
     move_repo,
     preflight_repo_move,
     project_detail,
+    project_run_language,
     put_audit_auto_run,
     put_audit_email_preferences,
+    put_user_language,
     rename_project,
     repo_active_runs,
     repo_audit_rerun_state,
@@ -38,6 +40,7 @@ from enji_guard_cli.enji_api import (
     runbook,
     start_audit_run,
     task_detail,
+    user_preferences,
 )
 from enji_guard_cli.enji_api_impl.client import get_json_object
 from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER
@@ -123,6 +126,28 @@ def test_access_returns_normalized_payload_and_uses_stored_auth_headers(tmp_path
             operation="access",
             headers={"Authorization": "Bearer token-123", "Origin": AUTH_REFRESH_ORIGIN},
         )
+    ]
+
+
+def test_report_language_endpoints_use_observed_paths_and_payloads(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_bearer_token("token-123", auth_file)
+    client = FakeEnjiHttpClient(
+        [
+            json_response({"preferences": {"language": "ru"}}),
+            json_response({"language": "ru"}),
+            json_response({"preferences": {"language": "en"}}),
+        ]
+    )
+
+    assert user_preferences(auth_file, client) == {"preferences": {"language": "ru"}}
+    assert project_run_language("project_1", auth_file, client) == {"language": "ru"}
+    assert put_user_language("en", auth_file, client) == {"preferences": {"language": "en"}}
+
+    assert [(request.method, request.url, request.json_body) for request in client.requests] == [
+        ("GET", "https://fleet.enji.ai/api/ux/user-preferences", None),
+        ("GET", "https://fleet.enji.ai/api/ux/projects/project_1/run-language", None),
+        ("PUT", "https://fleet.enji.ai/api/ux/user-preferences", {"language": "en"}),
     ]
 
 

@@ -36,6 +36,19 @@ ACCESS_ENDPOINT_SPEC = EnjiEndpointSpec(
     operation_id="getUxMeAccess",
     operation="access",
 )
+USER_PREFERENCES_GET_ENDPOINT_SPEC = EnjiEndpointSpec(
+    method="GET",
+    path_template="/api/ux/user-preferences",
+    operation_id="getUserPreferences",
+    operation="language show",
+)
+USER_PREFERENCES_PUT_ENDPOINT_SPEC = EnjiEndpointSpec(
+    method="PUT",
+    path_template="/api/ux/user-preferences",
+    operation_id="putUserPreferences",
+    operation="language set",
+    request_body_ref="#/components/requestBodies/UserLanguageUpdate",
+)
 REPORTS_LIST_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="GET",
     path_template="/api/ux/projects",
@@ -53,6 +66,12 @@ PROJECT_DETAIL_ENDPOINT_SPEC = EnjiEndpointSpec(
     path_template="/api/ux/projects/{projectId}",
     operation_id="getProject",
     operation="project detail",
+)
+PROJECT_RUN_LANGUAGE_ENDPOINT_SPEC = EnjiEndpointSpec(
+    method="GET",
+    path_template="/api/ux/projects/{projectId}/run-language",
+    operation_id="getProjectRunLanguage",
+    operation="language show",
 )
 FLEET_PROJECT_CREATE_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="POST",

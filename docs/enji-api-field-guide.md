@@ -95,6 +95,15 @@ report group. Each point contains `when`, `score`, `fleetTaskId`, and the
 `bad`/`warn`/`good`/`skip` band counts. Treat score deltas as noisy; reductions
 in high-value negative bands are the more useful trend signal.
 
+### Report Language
+
+Report language is account-wide, not independently writable per project.
+`GET /api/ux/user-preferences` returns `preferences.language`; `PUT` to the same
+resource with `{"language":"en"}` or `{"language":"ru"}` changes it. The
+project-scoped `GET /api/ux/projects/{projectId}/run-language` returns the
+effective language Enji will use for that project's future runs. There is no
+observed project-scoped language write endpoint.
+
 ## Curated Autofix Management
 
 The workflow is audit -> findings -> optional improvement. `GET /api/ux/catalog`
