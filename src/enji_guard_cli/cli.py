@@ -24,7 +24,6 @@ from enji_guard_cli.cli_impl.rendering import (
     echo_repo_resolve_table,
     echo_repo_score_table,
     echo_repo_status_table,
-    echo_report_language,
     echo_wait_heartbeat,
     echo_wait_status,
 )
@@ -490,7 +489,7 @@ def language_show(
     _run_human_or_json_command(
         show_report_language,
         _json_output(json_output),
-        echo_report_language,
+        lambda payload: echo_key_values(cast(dict[str, object], payload)),
         journey=_cli_journey(command_path=_command_path("language", "show"), selector_kind="account"),
     )
 
@@ -503,7 +502,7 @@ def language_set(
     _run_human_or_json_command(
         lambda: set_report_language(language),
         _json_output(json_output),
-        echo_report_language,
+        lambda payload: echo_key_values(cast(dict[str, object], payload)),
         journey=_cli_journey(command_path=_command_path("language", "set"), selector_kind="account"),
     )
 

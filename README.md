@@ -67,8 +67,7 @@ remains read-only. Use an explicit `REPO`, `--all-repos` with `--project`, or
 can be removed when Enji exposes relationships directly.
 
 Report language is an account-wide preference (`en` or `ru`) shared by all
-projects. The CLI also reads each project's effective run language after a
-change so agents can verify what Enji will use for future reports.
+projects.
 
 CLI output is human text and tables by default. Use `--json` only when another
 tool needs structured output.
@@ -310,9 +309,9 @@ operator workflow is list/set per repository or explicit batch scope; it does
 not create or replace an audit schedule. Audit schedules remain under
 `audit-auto-runs/{actionKey}`.
 
-`language show` reports the account preference and effective value for every
-project. `language set en|ru` is idempotent and changes the account-wide report
-language; Enji does not expose an independent per-project language setter.
+`language show` reports the account preference. `language set en|ru` is
+idempotent and changes the account-wide report language; Enji does not expose
+an independent per-project language setter.
 
 ## MCP
 

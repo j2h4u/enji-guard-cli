@@ -133,7 +133,6 @@ from enji_guard_cli.enji_api import improvement_jobs as run_improvement_jobs
 from enji_guard_cli.enji_api import move_repo as run_move_repo
 from enji_guard_cli.enji_api import preflight_repo_move as run_preflight_repo_move
 from enji_guard_cli.enji_api import project_detail as run_project_detail
-from enji_guard_cli.enji_api import project_run_language as run_project_run_language
 from enji_guard_cli.enji_api import projects as run_projects
 from enji_guard_cli.enji_api import put_audit_auto_run as run_put_audit_auto_run
 from enji_guard_cli.enji_api import put_audit_email_preferences as run_put_audit_email_preferences
@@ -189,10 +188,8 @@ def delete_project(project: str) -> JsonObjectPayload:
 
 def _report_language_dependencies() -> _ReportLanguageDependencies:
     return _ReportLanguageDependencies(
-        list_projects=run_projects,
         get_user_preferences=run_user_preferences,
         put_user_language=run_put_user_language,
-        get_project_run_language=run_project_run_language,
     )
 
 
