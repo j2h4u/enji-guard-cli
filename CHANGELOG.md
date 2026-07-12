@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/j2h4u/enji-guard-cli/compare/v0.5.0...v0.6.0) (2026-07-12)
+
+
+### Features
+
+* manage report language ([#123](https://github.com/j2h4u/enji-guard-cli/issues/123)) ([bf37e14](https://github.com/j2h4u/enji-guard-cli/commit/bf37e14d9f0693521df9e4dc8ff67bd292563de2))
+
 ## [0.5.0](https://github.com/j2h4u/enji-guard-cli/compare/v0.4.1...v0.5.0) (2026-07-12)
 
 
