@@ -462,6 +462,34 @@ def test_project_list_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
     assert json.loads(result.output) == {"projects": [{"id": "project_1"}]}
 
 
+def test_language_show_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "show_report_language",
+        lambda: {"language": "ru", "scope": "account", "projects": []},
+    )
+
+    result = CliRunner().invoke(app, ["language", "show", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["language"] == "ru"
+
+
+def test_language_set_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
+    captured: list[str] = []
+    monkeypatch.setattr(
+        cli,
+        "set_report_language",
+        lambda language: captured.append(language) or {"language": language, "changed": True, "projects": []},
+    )
+
+    result = CliRunner().invoke(app, ["language", "set", "en", "--json"])
+
+    assert result.exit_code == 0
+    assert captured == ["en"]
+    assert json.loads(result.stdout)["changed"] is True
+
+
 def test_project_create_routes_to_core_facade(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, str] = {}
 

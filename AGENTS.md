@@ -42,6 +42,8 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
   scheduling fallback. Batch scheduling must remain an explicit client-side
   loop over the selected repositories and audits.
 - Surface stale/mixed report freshness explicitly; never hide it behind aggregate status.
+- Treat report language as account-wide. After changing it, verify the effective
+  run language returned for each project.
 - Before starting fresh audits, save/read every currently available report you
   may need. Starting audits can temporarily hide old snapshots behind running state.
 - When reports are stale, compare audited and current git SHAs before judging

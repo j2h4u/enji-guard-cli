@@ -16,6 +16,8 @@ EXPECTED_VISIBLE_COMMANDS = {
     ("email", "list"),
     ("email", "set"),
     ("health",),
+    ("language", "set"),
+    ("language", "show"),
     ("project", "create"),
     ("project", "delete"),
     ("project", "list"),

@@ -2,7 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NotRequired, TypedDict, cast
+from typing import Literal, NotRequired, TypedDict, cast
 from uuid import uuid4
 
 from enji_guard_cli._enji_api_contract import (
@@ -21,6 +21,7 @@ from enji_guard_cli._enji_api_contract import (
     PROJECT_REPO_CONNECTION_ENDPOINT_SPEC,
     PROJECT_REPO_DELETE_ENDPOINT_SPEC,
     PROJECT_REPOS_ADD_ENDPOINT_SPEC,
+    PROJECT_RUN_LANGUAGE_ENDPOINT_SPEC,
     PROJECTS_ENDPOINT_SPEC,
     REPO_ACTIVE_RUNS_ENDPOINT_SPEC,
     REPO_AUDIT_RERUN_STATE_ENDPOINT_SPEC,
@@ -32,6 +33,8 @@ from enji_guard_cli._enji_api_contract import (
     REPORTS_LIST_ENDPOINT_SPEC,
     RUNBOOK_ENDPOINT_SPEC,
     TASK_DETAIL_ENDPOINT_SPEC,
+    USER_PREFERENCES_GET_ENDPOINT_SPEC,
+    USER_PREFERENCES_PUT_ENDPOINT_SPEC,
     UX_PROJECT_CREATE_ENDPOINT_SPEC,
     UX_PROJECT_DELETE_ENDPOINT_SPEC,
 )
@@ -60,6 +63,7 @@ HTTP_NO_CONTENT_ONLY = frozenset({HTTP_NO_CONTENT})
 HTTP_OK_OR_NO_CONTENT = frozenset({HTTP_OK, HTTP_NO_CONTENT})
 
 type JsonObjectParser[T] = Callable[[dict[str, object]], T]
+type LanguageCode = Literal["en", "ru"]
 
 
 class AccessLimitsPayload(TypedDict):
@@ -125,6 +129,10 @@ class UxProjectCreateRequest(TypedDict):
 
 class ProjectPatchRequest(TypedDict, total=False):
     name: str
+
+
+class UserLanguageUpdateRequest(TypedDict):
+    language: LanguageCode
 
 
 class RepoTransferPreflightRequest(TypedDict):
@@ -240,6 +248,38 @@ def project_detail(
         auth_file,
         client,
         PROJECT_DETAIL_ENDPOINT.request(path_params={"projectId": project_id}),
+    )
+
+
+def user_preferences(
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> JsonObjectPayload:
+    return run_api_request(auth_file, client, USER_PREFERENCES_GET_ENDPOINT.request())
+
+
+def put_user_language(
+    language: LanguageCode,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> JsonObjectPayload:
+    request: UserLanguageUpdateRequest = {"language": language}
+    return run_api_request(
+        auth_file,
+        client,
+        USER_PREFERENCES_PUT_ENDPOINT.request(json_body=cast(EnjiJsonValue, request)),
+    )
+
+
+def project_run_language(
+    project_id: str,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+) -> JsonObjectPayload:
+    return run_api_request(
+        auth_file,
+        client,
+        PROJECT_RUN_LANGUAGE_ENDPOINT.request(path_params={"projectId": project_id}),
     )
 
 
@@ -671,6 +711,14 @@ ACCESS_ENDPOINT = ApiEndpoint(
     spec=ACCESS_ENDPOINT_SPEC,
     parser=_parse_access_payload,
 )
+USER_PREFERENCES_GET_ENDPOINT = ApiEndpoint(
+    spec=USER_PREFERENCES_GET_ENDPOINT_SPEC,
+    parser=_parse_json_object_payload,
+)
+USER_PREFERENCES_PUT_ENDPOINT = ApiEndpoint(
+    spec=USER_PREFERENCES_PUT_ENDPOINT_SPEC,
+    parser=_parse_json_object_payload,
+)
 REPORTS_LIST_ENDPOINT = ApiEndpoint(
     spec=REPORTS_LIST_ENDPOINT_SPEC,
     parser=_reports_list_parser(REPORTS_LIST_DEFAULT_SELECTOR),
@@ -681,6 +729,10 @@ PROJECTS_ENDPOINT = ApiEndpoint(
 )
 PROJECT_DETAIL_ENDPOINT = ApiEndpoint(
     spec=PROJECT_DETAIL_ENDPOINT_SPEC,
+    parser=_parse_json_object_payload,
+)
+PROJECT_RUN_LANGUAGE_ENDPOINT = ApiEndpoint(
+    spec=PROJECT_RUN_LANGUAGE_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 FLEET_PROJECT_CREATE_ENDPOINT = ApiEndpoint(

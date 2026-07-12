@@ -77,6 +77,9 @@ from enji_guard_cli.core_impl.repo_status import current_head_sha as _current_he
 from enji_guard_cli.core_impl.repo_status import empty_report_status as _empty_report_status
 from enji_guard_cli.core_impl.repo_status import report_status_from_task_links as _report_status_from_task_links
 from enji_guard_cli.core_impl.repo_status import sort_project_repos as _sort_project_repos
+from enji_guard_cli.core_impl.report_language import ReportLanguageDependencies as _ReportLanguageDependencies
+from enji_guard_cli.core_impl.report_language import set_report_language as _set_report_language_impl
+from enji_guard_cli.core_impl.report_language import show_report_language as _show_report_language_impl
 from enji_guard_cli.core_impl.selectors import parse_github_repo as _parse_github_repo
 from enji_guard_cli.core_impl.selectors import repo_candidate as _repo_candidate
 from enji_guard_cli.core_impl.selectors import repo_target as _repo_target
@@ -130,10 +133,12 @@ from enji_guard_cli.enji_api import improvement_jobs as run_improvement_jobs
 from enji_guard_cli.enji_api import move_repo as run_move_repo
 from enji_guard_cli.enji_api import preflight_repo_move as run_preflight_repo_move
 from enji_guard_cli.enji_api import project_detail as run_project_detail
+from enji_guard_cli.enji_api import project_run_language as run_project_run_language
 from enji_guard_cli.enji_api import projects as run_projects
 from enji_guard_cli.enji_api import put_audit_auto_run as run_put_audit_auto_run
 from enji_guard_cli.enji_api import put_audit_email_preferences as run_put_audit_email_preferences
 from enji_guard_cli.enji_api import put_improvement_job as run_put_improvement_job
+from enji_guard_cli.enji_api import put_user_language as run_put_user_language
 from enji_guard_cli.enji_api import rename_project as run_rename_project
 from enji_guard_cli.enji_api import repo_active_runs as run_repo_active_runs
 from enji_guard_cli.enji_api import repo_audit_rerun_state as run_repo_audit_rerun_state
@@ -141,6 +146,7 @@ from enji_guard_cli.enji_api import repo_task_links as run_repo_task_links
 from enji_guard_cli.enji_api import runbook as run_runbook
 from enji_guard_cli.enji_api import start_audit_run as run_start_audit_run
 from enji_guard_cli.enji_api import task_detail as run_task_detail
+from enji_guard_cli.enji_api import user_preferences as run_user_preferences
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.settings import default_settings
@@ -179,6 +185,23 @@ def rename_project(project: str, name: str) -> JsonObjectPayload:
 
 def delete_project(project: str) -> JsonObjectPayload:
     return _delete_project_impl(project, dependencies=_project_crud_dependencies())
+
+
+def _report_language_dependencies() -> _ReportLanguageDependencies:
+    return _ReportLanguageDependencies(
+        list_projects=run_projects,
+        get_user_preferences=run_user_preferences,
+        put_user_language=run_put_user_language,
+        get_project_run_language=run_project_run_language,
+    )
+
+
+def show_report_language() -> JsonObjectPayload:
+    return _show_report_language_impl(dependencies=_report_language_dependencies())
+
+
+def set_report_language(language: str) -> JsonObjectPayload:
+    return _set_report_language_impl(language, dependencies=_report_language_dependencies())
 
 
 def list_project_inventory(project: str | None, sort: RepoSort = DEFAULT_REPO_SORT) -> RepoStatusAllPayload:

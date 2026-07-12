@@ -124,24 +124,38 @@
     "/api/ux/user-preferences": {
       "get": {
         "operationId": "getUserPreferences",
-        "summary": "Return UI user preferences.",
+        "summary": "Return account preferences including report language.",
         "x-enji-observed": true,
         "responses": {
           "200": {
-            "$ref": "#/components/responses/GenericObject"
+            "description": "Current account preferences.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreferencesResponse"
+                }
+              }
+            }
           }
         }
       },
       "put": {
         "operationId": "putUserPreferences",
-        "summary": "Update UI user preferences.",
+        "summary": "Update account preferences including report language.",
         "x-enji-observed": true,
         "requestBody": {
-          "$ref": "#/components/requestBodies/GenericObject"
+          "$ref": "#/components/requestBodies/UserLanguageUpdate"
         },
         "responses": {
           "200": {
-            "$ref": "#/components/responses/GenericObject"
+            "description": "Updated account preferences.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreferencesResponse"
+                }
+              }
+            }
           },
           "204": {
             "$ref": "#/components/responses/NoContent"
@@ -1279,7 +1293,14 @@
         ],
         "responses": {
           "200": {
-            "$ref": "#/components/responses/GenericObject"
+            "description": "Effective output language for project runs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRunLanguage"
+                }
+              }
+            }
           }
         }
       }
@@ -2047,6 +2068,16 @@
       }
     },
     "requestBodies": {
+      "UserLanguageUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/UserLanguageUpdate"
+            }
+          }
+        }
+      },
       "EmailPreferencesPatch": {
         "required": true,
         "content": {
@@ -2250,6 +2281,55 @@
       }
     },
     "schemas": {
+      "ReportLanguage": {
+        "type": "string",
+        "enum": [
+          "en",
+          "ru"
+        ]
+      },
+      "UserLanguageUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "language"
+        ],
+        "properties": {
+          "language": {
+            "$ref": "#/components/schemas/ReportLanguage"
+          }
+        }
+      },
+      "UserPreferencesResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "preferences"
+        ],
+        "properties": {
+          "preferences": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "language": {
+                "$ref": "#/components/schemas/ReportLanguage"
+              }
+            }
+          }
+        }
+      },
+      "ProjectRunLanguage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "language"
+        ],
+        "properties": {
+          "language": {
+            "$ref": "#/components/schemas/ReportLanguage"
+          }
+        }
+      },
       "AuthMe": {
         "type": "object",
         "additionalProperties": true,

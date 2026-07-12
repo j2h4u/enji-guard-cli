@@ -23,6 +23,9 @@ agents can orient quickly before making changes.
   `tests`/`test-writing`, and `dependency-hygiene`/`dependency-update`;
   pentest remains separate. MCP stays read-only, and the registry is removable
   when Enji publishes relationships directly.
+- **Report language scope**: language is an account-wide `en`/`ru` preference,
+  not a project mutation. CLI writes user preferences idempotently and reads
+  every project's effective run language after the change.
 - **Narrow read-only MCP facade**: MCP stays curated and read-only. It exposes
   portfolio overview and repository report reading, not auth bootstrap,
   project/repo writes, scheduling, or other operator controls.

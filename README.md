@@ -66,6 +66,10 @@ remains read-only. Use an explicit `REPO`, `--all-repos` with `--project`, or
 `--all-projects` for batch scope. The relationship mapping is temporary and
 can be removed when Enji exposes relationships directly.
 
+Report language is an account-wide preference (`en` or `ru`) shared by all
+projects. The CLI also reads each project's effective run language after a
+change so agents can verify what Enji will use for future reports.
+
 CLI output is human text and tables by default. Use `--json` only when another
 tool needs structured output.
 
@@ -266,6 +270,8 @@ docker exec -i enji-guard-cli enji-guard project list
 docker exec -i enji-guard-cli enji-guard project create Pets
 docker exec -i enji-guard-cli enji-guard project rename Pets Friends
 docker exec -i enji-guard-cli enji-guard project delete Pets
+docker exec -i enji-guard-cli enji-guard language show
+docker exec -i enji-guard-cli enji-guard language set ru
 docker exec -i enji-guard-cli enji-guard repo add j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard repo remove j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard repo resolve j2h4u/enji-guard-cli
@@ -303,6 +309,10 @@ Autofix management uses `improvement-jobs` as the canonical resource. Its
 operator workflow is list/set per repository or explicit batch scope; it does
 not create or replace an audit schedule. Audit schedules remain under
 `audit-auto-runs/{actionKey}`.
+
+`language show` reports the account preference and effective value for every
+project. `language set en|ru` is idempotent and changes the account-wide report
+language; Enji does not expose an independent per-project language setter.
 
 ## MCP
 
