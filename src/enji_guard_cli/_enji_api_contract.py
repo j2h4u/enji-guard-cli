@@ -200,13 +200,13 @@ IMPROVEMENT_JOBS_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="GET",
     path_template="/api/ux/improvement-jobs/{repoId}",
     operation_id="listImprovementJobs",
-    operation="schedule list",
+    operation="autofix list",
 )
 IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="PUT",
     path_template="/api/ux/improvement-jobs/{repoId}/{kind}",
     operation_id="putImprovementJob",
-    operation="schedule set",
+    operation="autofix set",
     request_body_ref="#/components/schemas/ImprovementJobUpdate",
 )
 

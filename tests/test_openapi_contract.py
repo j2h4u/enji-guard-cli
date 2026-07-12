@@ -4,7 +4,11 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
-from enji_guard_cli._enji_api_contract import implemented_api_endpoints
+from enji_guard_cli._enji_api_contract import (
+    IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC,
+    IMPROVEMENT_JOBS_ENDPOINT_SPEC,
+    implemented_api_endpoints,
+)
 from enji_guard_cli.auth import import_bearer_token
 from enji_guard_cli.enji_api import (
     AuditRunCreate,
@@ -173,6 +177,52 @@ def test_catalog_contract_models_live_curated_actions_without_closed_key_or_kind
         property_schema = _schema_property(action_schema, property_name)
         assert property_schema.get("type") == "string"
         assert "enum" not in property_schema
+
+    autofixes = _schema_property(catalog_schema, "auditAutofixes")
+    assert autofixes.get("items") == {"$ref": "#/components/schemas/AuditAutofix"}
+    autofix_schema = schemas.get("AuditAutofix")
+    assert isinstance(autofix_schema, dict)
+    assert set(autofix_schema.get("required", [])) == {
+        "actionKey",
+        "variantKey",
+        "title",
+        "description",
+        "fleetRunbookId",
+        "status",
+        "sortOrder",
+    }
+    autofix_properties = autofix_schema.get("properties")
+    assert isinstance(autofix_properties, dict)
+    assert autofix_properties["sortOrder"] == {"type": "integer"}
+    for property_name in ("actionKey", "variantKey", "title", "description", "fleetRunbookId", "status"):
+        assert autofix_properties[property_name].get("type") == "string"
+
+
+def test_improvement_job_summaries_describe_autofix_management() -> None:
+    contract = cast(object, json.loads(CONTRACT_PATH.read_text(encoding="utf-8")))
+    assert isinstance(contract, dict)
+    paths = contract.get("paths")
+    assert isinstance(paths, dict)
+    expected_summaries = {
+        ("get", "/api/ux/improvement-jobs/{repoId}"): "Return all autofix improvement jobs for a repository.",
+        ("put", "/api/ux/improvement-jobs/{repoId}/{kind}"): "Create or update an autofix improvement job.",
+        ("post", "/api/ux/improvement-jobs/{repoId}/{kind}/resume"): "Resume a paused autofix improvement job.",
+        (
+            "put",
+            "/api/ux/improvement-jobs/{repoId}/{kind}/binding",
+        ): "Bind an autofix improvement job to a Fleet schedule.",
+    }
+    for (method, path), summary in expected_summaries.items():
+        path_item = paths.get(path)
+        assert isinstance(path_item, dict)
+        operation = path_item.get(method)
+        assert isinstance(operation, dict)
+        assert operation.get("summary") == summary
+
+
+def test_improvement_job_endpoint_operations_use_the_autofix_ontology() -> None:
+    assert IMPROVEMENT_JOBS_ENDPOINT_SPEC.operation == "autofix list"
+    assert IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC.operation == "autofix set"
 
 
 def test_audit_auto_run_contract_models_dynamic_action_keys_and_subscriptions() -> None:

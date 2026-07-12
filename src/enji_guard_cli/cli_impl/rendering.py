@@ -127,6 +127,26 @@ def echo_schedule_settings_table(payload: object) -> None:
         typer.echo(warning)
 
 
+def echo_autofix_settings_table(payload: object) -> None:
+    rows = [object_dict(item) for item in object_list(object_dict(payload).get("autofixes"))]
+    headers = ("project", "repo", "source audit", "autofix", "enabled", "schedule")
+    if any("status" in row for row in rows):
+        headers = (*headers, "status")
+    table_rows = [
+        (
+            text_cell(row.get("project_name")),
+            text_cell(row.get("github_repo")),
+            text_cell(row.get("source_audit"), fallback="unsupported"),
+            text_cell(row.get("autofix")),
+            text_cell(row.get("enabled")),
+            autofix_schedule_cell(row),
+            *(() if "status" not in headers else (text_cell(row.get("status")),)),
+        )
+        for row in rows
+    ]
+    echo_table(headers, table_rows, "No autofixes.")
+
+
 def schedule_settings_headers(rows: list[dict[str, object]]) -> tuple[str, ...]:
     base = ("project", "repo", "audit", "enabled", "cadence", "window_days", "at", "timezone")
     if any("status" in row for row in rows):
@@ -548,6 +568,13 @@ def schedule_at_cell(row: dict[str, object]) -> str:
             return "manual"
         return f"{schedule_time} (manual)"
     return schedule_time
+
+
+def autofix_schedule_cell(row: dict[str, object]) -> str:
+    frequency = text_cell(row.get("frequency"))
+    at = schedule_at_cell(row)
+    timezone = text_cell(row.get("timezone"))
+    return f"{frequency} {at} {timezone}" if frequency != "-" else "-"
 
 
 def score_cell(value: object) -> str:

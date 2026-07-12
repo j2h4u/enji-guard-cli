@@ -12,6 +12,7 @@ from enji_guard_cli.cli_impl.auth_catalog import (
     set_auth_refresh_action,
     set_auth_status_action,
 )
+from enji_guard_cli.cli_impl.autofix_commands import AutofixCliConfig, autofix_app, configure_autofix_commands
 from enji_guard_cli.cli_impl.durations import parse_duration_seconds
 from enji_guard_cli.cli_impl.rendering import (
     echo_access,
@@ -50,6 +51,7 @@ from enji_guard_cli.core import (
     add_repo,
     create_project,
     delete_project,
+    list_autofix_settings,
     list_email_preferences,
     list_project_inventory,
     list_projects,
@@ -64,6 +66,7 @@ from enji_guard_cli.core import (
     resolve_operation_spec,
     resolve_repo,
     runtime_status,
+    set_autofix_settings,
     set_email_preferences,
     set_schedule_settings,
     start_recon,
@@ -96,6 +99,7 @@ app.add_typer(project_app, name="project")
 app.add_typer(repo_app, name="repo")
 app.add_typer(recon_app, name="recon")
 app.add_typer(audit_app, name="audit")
+app.add_typer(autofix_app, name="autofix")
 app.add_typer(report_app, name="report")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(email_app, name="email")
@@ -608,6 +612,21 @@ configure_write_preferences_commands(
         list_email_preferences=lambda repo, project: list_email_preferences(repo, project),
         set_email_preferences=lambda repo, project, update, **kwargs: set_email_preferences(
             repo, project, update, **kwargs
+        ),
+    )
+)
+configure_autofix_commands(
+    AutofixCliConfig(
+        run_cli_journey=_run_cli_journey,
+        command_path=_command_path,
+        json_output=_json_output,
+        echo_error=_echo_error,
+        selected_project=_selected_project,
+        selector_kind_for_repo=_selector_kind_for_repo,
+        resolve_command_payload=_resolve_command_payload,
+        list_autofix_settings=lambda repo, project: list_autofix_settings(repo, project),
+        set_autofix_settings=lambda repo, project, selectors, update, **kwargs: set_autofix_settings(
+            repo, project, selectors, update, **kwargs
         ),
     )
 )

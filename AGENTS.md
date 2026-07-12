@@ -27,6 +27,14 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
   do not cache or fall back. Treat `curatedActions` as authoritative so newly
   published reports participate automatically. CLI report selectors are action
   key suffixes without `audit.`; recon remains separate.
+- Treat catalog `auditAutofixes` as the source for curated autofix variants
+  (`actionKey`, `variantKey`, `title`, `description`, `fleetRunbookId`,
+  `status`, `sortOrder`). Manage them through canonical
+  `improvement-jobs` list/set operations on the operator CLI. The temporary
+  relationships are security/vuln-fix, tests/test-writing, and
+  dependency-hygiene/dependency-update; pentest is separate. MCP remains
+  read-only, and explicit `REPO`, `--all-repos` with `--project`, or
+  `--all-projects` scope is required for batch writes.
 - Keep schedule timezone stored per schedule, run the container with the host
   timezone, and use `schedule auto-time` to restore Enji-assigned run times.
 - Audit schedules use `audit-auto-runs/{actionKey}` with the exact action key

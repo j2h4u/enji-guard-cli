@@ -95,6 +95,22 @@ report group. Each point contains `when`, `score`, `fleetTaskId`, and the
 `bad`/`warn`/`good`/`skip` band counts. Treat score deltas as noisy; reductions
 in high-value negative bands are the more useful trend signal.
 
+## Curated Autofix Management
+
+The workflow is audit -> findings -> optional improvement. `GET /api/ux/catalog`
+publishes `auditAutofixes` entries with `actionKey`, `variantKey`, `title`,
+`description`, `fleetRunbookId`, `status`, and `sortOrder`.
+`improvement-jobs` is the canonical autofix management resource, exposed to the
+operator CLI as list/set; retain its GET/PUT job schemas. It is not an audit
+schedule and does not replace `audit-auto-runs`.
+
+The current typed relationship registry supports `security` -> `vuln-fix`,
+`tests` -> `test-writing`, and `dependency-hygiene` -> `dependency-update`.
+Pentest is separate. Batch operations are explicit client-side loops over a
+single `REPO`, `--all-repos` within `--project`, or `--all-projects`; no wider
+scope is inferred. MCP remains read-only. Remove the temporary relationship
+registry when Enji exposes relationships directly.
+
 ## Scheduling
 
 There are two schedule families:
