@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/j2h4u/enji-guard-cli/compare/v0.6.0...v0.6.1) (2026-07-12)
+
+
+### Fixes
+
+* simplify report language output ([#125](https://github.com/j2h4u/enji-guard-cli/issues/125)) ([ae7afe4](https://github.com/j2h4u/enji-guard-cli/commit/ae7afe47a333ca00ff2b45bc75bbbcf878ce77a1))
+
 ## [0.6.0](https://github.com/j2h4u/enji-guard-cli/compare/v0.5.0...v0.6.0) (2026-07-12)
 
 
