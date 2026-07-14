@@ -2,6 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import cast
 
+from enji_guard_cli.audit import published_audit_action_keys, published_autofix_keys
 from enji_guard_cli.core_impl.models import AutofixSettingsUpdate, RepoTargetPayload, ScheduleCadence
 from enji_guard_cli.core_impl.payloads import json_bool, json_list_of_str, json_object_list, json_str, json_str_values
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
@@ -57,8 +58,8 @@ class AutofixWriteDependencies:
 
 
 def autofix_definitions(catalog: JsonObjectPayload) -> tuple[AutofixDefinition, ...]:
-    published_audits = _published_audit_action_keys(catalog)
-    declared = _published_autofix_keys(catalog)
+    published_audits = published_audit_action_keys(catalog)
+    declared = published_autofix_keys(catalog)
     return tuple(
         _definition(action_key, variant_key, published_audits)
         for action_key, variant_key in declared
@@ -208,27 +209,6 @@ def autofix_payload(rows: list[dict[str, JsonValue]]) -> JsonObjectPayload:
             "unchanged_count": sum(row.get("status") == "unchanged" for row in rows),
         },
     }
-
-
-def _published_audit_action_keys(catalog: JsonObjectPayload) -> set[str]:
-    return {
-        action_key
-        for action in json_object_list(catalog.get("curatedActions"))
-        if json_str(action.get("status")) == "published"
-        if json_str(action.get("category")) == "audit"
-        if (action_key := json_str(action.get("actionKey"))) is not None
-    }
-
-
-def _published_autofix_keys(catalog: JsonObjectPayload) -> list[tuple[str, str]]:
-    keys: list[tuple[str, str]] = []
-    for autofix in json_object_list(catalog.get("auditAutofixes")):
-        action_key = json_str(autofix.get("actionKey"))
-        variant_key = json_str(autofix.get("variantKey"))
-        key = (action_key, variant_key) if action_key is not None and variant_key is not None else None
-        if json_str(autofix.get("status")) == "published" and key is not None and key not in keys:
-            keys.append(key)
-    return keys
 
 
 def _definition(action_key: str, variant_key: str, published: set[str]) -> AutofixDefinition:

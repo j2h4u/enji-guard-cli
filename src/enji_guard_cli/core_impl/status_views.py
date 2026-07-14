@@ -2,7 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from enji_guard_cli.audits import AuditCatalog
+from enji_guard_cli.audit import AuditCatalog
 from enji_guard_cli.core_impl.models import (
     ProjectRuntimeStatusPayload,
     ReportStatusPayload,

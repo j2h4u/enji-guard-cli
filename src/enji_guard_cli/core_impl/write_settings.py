@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from enji_guard_cli.audits import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit import AuditCatalog, AuditDefinition
 from enji_guard_cli.core_impl.email_preferences import (
     email_preference_row,
     email_preferences_patch,

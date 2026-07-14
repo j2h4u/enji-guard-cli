@@ -1,7 +1,7 @@
 import time
 from datetime import UTC, datetime
 
-from enji_guard_cli.audits import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit import AuditCatalog, AuditDefinition
 from enji_guard_cli.core_impl.models import (
     FAILED_REPORT_WAIT_STATUSES,
     REPORT_ARTIFACT_SCHEMA,

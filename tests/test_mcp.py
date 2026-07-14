@@ -10,8 +10,7 @@ from mcp.types import Tool
 import enji_guard_cli.core as core
 import enji_guard_cli.mcp_facade as mcp_facade
 import enji_guard_cli.mcp_server as mcp_server
-from enji_guard_cli.audits import AuditCatalog
-from enji_guard_cli.core_impl.catalog import parse_audit_catalog
+from enji_guard_cli.audit import AuditCatalog, parse_audit_catalog
 from enji_guard_cli.json_types import JsonObjectPayload
 from enji_guard_cli.mcp_server import create_mcp_server
 from enji_guard_cli.settings import LogFormat, LogLevelName, TelemetrySettings

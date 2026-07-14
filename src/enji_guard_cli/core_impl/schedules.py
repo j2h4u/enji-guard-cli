@@ -1,6 +1,6 @@
 from typing import cast
 
-from enji_guard_cli.audits import AuditDefinition
+from enji_guard_cli.audit import AuditDefinition
 from enji_guard_cli.core_impl.email_preferences import repo_count
 from enji_guard_cli.core_impl.models import (
     ALL_SCHEDULE_DAYS,

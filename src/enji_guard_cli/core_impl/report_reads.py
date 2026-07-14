@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from typing import Never
 
-from enji_guard_cli.audits import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit import AuditCatalog, AuditDefinition
 from enji_guard_cli.core_impl.models import (
     ReportAuditStatusPayload,
     ReportReadItemPayload,

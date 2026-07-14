@@ -8,7 +8,7 @@ from pytest import MonkeyPatch
 
 import enji_guard_cli.core as core
 import enji_guard_cli.core_impl.operations as operations
-from enji_guard_cli.audits import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit import AuditCatalog, AuditDefinition, parse_audit_catalog
 from enji_guard_cli.core import (
     READ_OPERATION_SPECS,
     EmailPreferenceUpdate,
@@ -20,7 +20,6 @@ from enji_guard_cli.core import (
     resolve_operation_spec,
 )
 from enji_guard_cli.core_impl import active_run_ledger
-from enji_guard_cli.core_impl.catalog import parse_audit_catalog
 from enji_guard_cli.core_impl.models import (
     ReportAuditStatusPayload,
     ReportReadState,

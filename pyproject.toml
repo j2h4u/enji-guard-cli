@@ -183,7 +183,7 @@ layers = [
     "enji_guard_cli.mcp_facade",
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
-    "enji_guard_cli.audits",
+    "enji_guard_cli.audit",
     "enji_guard_cli.enji_api",
     "enji_guard_cli.enji_api_impl",
     "enji_guard_cli._enji_api_contract",
@@ -290,10 +290,10 @@ forbidden_modules = ["enji_guard_cli.auth"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
-id = "audit-registry-stays-domain-pure"
+id = "audit-context-stays-domain-pure"
 name = "Audit registry stays pure domain metadata"
 type = "forbidden"
-source_modules = ["enji_guard_cli.audits"]
+source_modules = ["enji_guard_cli.audit"]
 forbidden_modules = [
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
@@ -350,7 +350,7 @@ source_modules = [
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
     "enji_guard_cli.auth_impl",
-    "enji_guard_cli.audits",
+    "enji_guard_cli.audit",
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
     "enji_guard_cli.enji_api",
@@ -375,7 +375,7 @@ source_modules = ["enji_guard_cli.auth_impl"]
 forbidden_modules = [
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
-    "enji_guard_cli.audits",
+    "enji_guard_cli.audit",
     "enji_guard_cli.cli",
     "enji_guard_cli.cli_impl",
     "enji_guard_cli.core",
@@ -406,7 +406,7 @@ forbidden_modules = [
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
     "enji_guard_cli.auth_impl",
-    "enji_guard_cli.audits",
+    "enji_guard_cli.audit",
     "enji_guard_cli.cli",
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
@@ -434,7 +434,7 @@ forbidden_modules = [
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
     "enji_guard_cli.auth_impl",
-    "enji_guard_cli.audits",
+    "enji_guard_cli.audit",
     "enji_guard_cli.cli",
     "enji_guard_cli.cli_impl",
     "enji_guard_cli.core",
@@ -463,7 +463,7 @@ forbidden_modules = [
     "enji_guard_cli._enji_api_contract",
     "enji_guard_cli.auth",
     "enji_guard_cli.auth_impl",
-    "enji_guard_cli.audits",
+    "enji_guard_cli.audit",
     "enji_guard_cli.cli",
     "enji_guard_cli.cli_impl",
     "enji_guard_cli.core",

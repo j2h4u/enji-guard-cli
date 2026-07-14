@@ -4,11 +4,10 @@ from collections.abc import Awaitable
 from importlib.metadata import version
 from pathlib import Path
 
-from enji_guard_cli.audits import AuditDefinition
+from enji_guard_cli.audit import AuditDefinition, parse_audit_catalog
 from enji_guard_cli.auth import AuthStatusPayload
 from enji_guard_cli.auth import auth_status as run_auth_status
 from enji_guard_cli.auth import auth_status_async as run_auth_status_async
-from enji_guard_cli.core_impl.catalog import parse_audit_catalog
 from enji_guard_cli.core_impl.models import OperationName, OperationPayload, OperationSpec
 from enji_guard_cli.enji_api import (
     REPORTS_LIST_DEFAULT_MIN_SEVERITY,

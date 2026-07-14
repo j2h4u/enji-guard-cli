@@ -1,8 +1,7 @@
 import pytest
 
-from enji_guard_cli.audits import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit import AuditCatalog, AuditDefinition, parse_audit_catalog
 from enji_guard_cli.core_impl.audit_runs import selected_audits
-from enji_guard_cli.core_impl.catalog import parse_audit_catalog
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 

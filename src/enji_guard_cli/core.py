@@ -3,7 +3,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Never, cast
 
-from enji_guard_cli.audits import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit import parse_audit_catalog as _parse_audit_catalog
 from enji_guard_cli.auth import AuthError as AuthError
 from enji_guard_cli.auth import AuthRefreshPayload as AuthRefreshPayload
 from enji_guard_cli.auth import AuthStatusPayload as AuthStatusPayload
@@ -18,7 +19,6 @@ from enji_guard_cli.core_impl.autofixes import AutofixWriteDependencies as _Auto
 from enji_guard_cli.core_impl.autofixes import autofix_definitions as _autofix_definitions
 from enji_guard_cli.core_impl.autofixes import list_autofixes as _list_autofixes
 from enji_guard_cli.core_impl.autofixes import set_autofixes as _set_autofixes
-from enji_guard_cli.core_impl.catalog import parse_audit_catalog as _parse_audit_catalog
 from enji_guard_cli.core_impl.models import (
     DEFAULT_REPO_SORT,
     AuditRunBatchPayload,

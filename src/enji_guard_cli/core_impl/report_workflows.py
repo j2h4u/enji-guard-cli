@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import cast
 
-from enji_guard_cli.audits import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit import AuditCatalog, AuditDefinition
 from enji_guard_cli.core_impl import active_run_ledger as _active_run_ledger
 from enji_guard_cli.core_impl import audit_runs as _audit_runs
 from enji_guard_cli.core_impl import report_reads as _report_reads

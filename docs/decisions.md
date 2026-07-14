@@ -6,6 +6,11 @@ agents can orient quickly before making changes.
 
 ## Decisions
 
+- **Audit bounded-context vocabulary and migration**: the approved incremental
+  design is in [Audit Bounded Contexts Refactor](plans/audit-bounded-contexts-refactor.md).
+  Product language uses `audit`; `report` is reserved for Enji/OpenAPI wire
+  contracts, raw upstream translators, and documentation explicitly naming
+  external integration vocabulary. No compatibility aliases are required.
 - **Audit Catalog authority and notification**: every command in the Audit
   Catalog context fetches `GET /api/ux/catalog` once per invocation.
   `curatedActions` is authoritative: published audits in the live response

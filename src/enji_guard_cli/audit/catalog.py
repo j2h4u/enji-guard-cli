@@ -1,5 +1,4 @@
-from enji_guard_cli.audits import AuditCatalog, AuditDefinition
-from enji_guard_cli.core_impl.payloads import json_list, required_str
+from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 RECON_ACTION_KEY = "audit.recon"
@@ -8,13 +7,38 @@ PUBLISHED_STATUS = "published"
 
 
 def parse_audit_catalog(payload: JsonObjectPayload) -> AuditCatalog:
-    """Parse the current live audit catalog without retaining stale definitions."""
+    """Interpret the current live catalog as Audit domain definitions."""
 
     actions = _curated_actions(payload)
     recon = _require_recon(actions)
     published_audits = tuple(_published_audit(action) for action in actions if _is_published_audit_action(action))
     _require_unique_action_keys((recon, *published_audits))
     return AuditCatalog(published_audits=published_audits, recon=recon)
+
+
+def published_audit_action_keys(catalog: JsonObjectPayload) -> set[str]:
+    """Return published audit action keys used by catalog-driven autofixes."""
+
+    return {
+        action_key
+        for action in _json_object_list(catalog.get("curatedActions"))
+        if action.get("status") == PUBLISHED_STATUS
+        if action.get("category") == AUDIT_CATEGORY
+        if isinstance(action_key := action.get("actionKey"), str)
+    }
+
+
+def published_autofix_keys(catalog: JsonObjectPayload) -> list[tuple[str, str]]:
+    """Return published, unique autofix action/variant keys in catalog order."""
+
+    keys: list[tuple[str, str]] = []
+    for autofix in _json_object_list(catalog.get("auditAutofixes")):
+        action_key = autofix.get("actionKey")
+        variant_key = autofix.get("variantKey")
+        key = (action_key, variant_key) if isinstance(action_key, str) and isinstance(variant_key, str) else None
+        if autofix.get("status") == PUBLISHED_STATUS and key is not None and key not in keys:
+            keys.append(key)
+    return keys
 
 
 def _require_recon(actions: list[dict[str, JsonValue]]) -> AuditDefinition:
@@ -56,14 +80,22 @@ def _require_unique_action_keys(audits: tuple[AuditDefinition, ...]) -> None:
 
 
 def _curated_actions(payload: JsonObjectPayload) -> list[dict[str, JsonValue]]:
-    actions = json_list(payload.get("curatedActions"))
+    actions = payload.get("curatedActions")
+    if not isinstance(actions, list):
+        return []
     if any(not isinstance(action, dict) for action in actions):
         raise ValueError("catalog curatedActions entries must be JSON objects")
     return [action for action in actions if isinstance(action, dict)]
 
 
+def _json_object_list(value: JsonValue | None) -> list[dict[str, JsonValue]]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
 def _required_nonempty_str(payload: dict[str, JsonValue], key: str, message: str) -> str:
-    value = required_str(payload, key, message)
+    value = payload.get(key)
+    if not isinstance(value, str):
+        raise ValueError(message)
     if not value.strip():
         raise ValueError(message)
     return value
