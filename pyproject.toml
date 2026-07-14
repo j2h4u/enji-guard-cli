@@ -184,6 +184,7 @@ layers = [
     "enji_guard_cli.core",
     "enji_guard_cli.core_impl",
     "enji_guard_cli.audit",
+    "enji_guard_cli.enji_gateway",
     "enji_guard_cli.enji_api",
     "enji_guard_cli.enji_api_impl",
     "enji_guard_cli._enji_api_contract",
@@ -303,6 +304,7 @@ forbidden_modules = [
     "enji_guard_cli.core_impl",
     "enji_guard_cli.enji_api",
     "enji_guard_cli.enji_api_impl",
+    "enji_guard_cli.enji_gateway",
     "enji_guard_cli.errors",
     "enji_guard_cli.journey",
     "enji_guard_cli.mcp_facade",
@@ -316,6 +318,23 @@ forbidden_modules = [
     "httpx",
     "mcp",
     "typer",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "audit-gateway-stays-below-application"
+name = "Audit Gateway stays below application contexts and above Enji API"
+type = "forbidden"
+source_modules = ["enji_guard_cli.enji_gateway"]
+forbidden_modules = [
+    "enji_guard_cli.cli",
+    "enji_guard_cli.cli_impl",
+    "enji_guard_cli.core",
+    "enji_guard_cli.core_impl",
+    "enji_guard_cli.mcp_facade",
+    "enji_guard_cli.mcp_server",
+    "enji_guard_cli.runtime",
+    "enji_guard_cli.journey",
 ]
 allow_indirect_imports = true
 
