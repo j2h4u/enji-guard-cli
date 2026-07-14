@@ -395,10 +395,13 @@ def test_catalog_audits_reports_canonical_identifier_map(monkeypatch: MonkeyPatc
     result = CliRunner().invoke(app, ["catalog", "audits", "--json"])
 
     assert result.exit_code == 0
-    audits = cast(list[AuditPayload], json.loads(result.output))
+    output = cast(dict[str, object], json.loads(result.output))
+    audits = cast(list[AuditPayload], output["audits"])
     assert audits[0]["action_key"] == "audit.security"
     assert {audit["action_key"] for audit in audits} >= {"audit.security", "audit.recon"}
     assert all(audit["title"] and audit["runbook_kind"] for audit in audits)
+    assert set(output) == {"audits", "audit_catalog"}
+    assert output["audit_catalog"] == {"changes": []}
 
 
 def test_catalog_audit_reports_live_action_key(monkeypatch: MonkeyPatch) -> None:

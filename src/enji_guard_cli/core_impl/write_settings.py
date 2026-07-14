@@ -88,7 +88,7 @@ def list_email_preferences(
                 dependencies.get_audit_email_preferences(target["repo_id"], audit.action_key),
             )
             for target in dependencies.selected_repo_targets(repo, project)
-            for audit in catalog.report_audits
+            for audit in catalog.published_audits
         ]
     )
 
@@ -104,7 +104,7 @@ def set_email_preferences(
         [
             set_email_preference(target, audit, patch, dependencies=dependencies)
             for target in selected_write_repo_targets(context.repo, context.project)
-            for audit in context.catalog.report_audits
+            for audit in context.catalog.published_audits
         ]
     )
 
@@ -147,7 +147,7 @@ def list_schedule_settings(
         schedule_setting_row(target, audit, schedule_subscription_by_action_key(subscriptions, audit.action_key))
         for target in dependencies.selected_repo_targets(repo, project)
         for subscriptions in (dependencies.list_schedules(target["repo_id"]),)
-        for audit in catalog.report_audits
+        for audit in catalog.published_audits
     ]
     return schedule_settings_payload(rows)
 
@@ -163,7 +163,7 @@ def set_schedule_settings(
         set_schedule_setting(target, audit, subscriptions, context.update, set_schedule=dependencies.set_schedule)
         for target in selected_write_repo_targets(context.repo, context.project)
         for subscriptions in (dependencies.list_schedules(target["repo_id"]),)
-        for audit in context.catalog.report_audits
+        for audit in context.catalog.published_audits
     ]
     return schedule_settings_payload(rows)
 

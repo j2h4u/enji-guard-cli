@@ -208,17 +208,17 @@ def start_report_audits_for_target[TCreateRequest](
     return {"results": result_matrix}
 
 
-def selected_report_audits(audits: list[str], *, all_reports: bool, catalog: AuditCatalog) -> list[AuditDefinition]:
+def selected_audits(audits: list[str], *, all_reports: bool, catalog: AuditCatalog) -> list[AuditDefinition]:
     if all_reports:
         if audits:
-            raise ValueError("pass report audits or --all, not both")
-        return list(catalog.report_audits)
+            raise ValueError("pass audit selectors or --all, not both")
+        return list(catalog.published_audits)
     if not audits:
-        raise ValueError("pass at least one report audit or --all")
-    audits_by_selector = {audit.selector: audit for audit in catalog.report_audits}
+        raise ValueError("pass at least one audit selector or --all")
+    audits_by_selector = {audit.selector: audit for audit in catalog.published_audits}
     selected = [audits_by_selector.get(selector) for selector in audits]
     if missing := [selector for selector, audit in zip(audits, selected, strict=True) if audit is None]:
-        raise ValueError(f"unknown report audit selector: {missing[0]}")
+        raise ValueError(f"unknown audit selector: {missing[0]}")
     return [audit for audit in selected if audit is not None]
 
 

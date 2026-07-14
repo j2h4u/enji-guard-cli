@@ -131,7 +131,7 @@ def start_report_audits[TCreateRequest](
     dependencies: ReportWorkflowDependencies[TCreateRequest],
 ) -> dict[str, object]:
     target = dependencies.resolve_single_repo_target(repo, project)
-    selected_audits = selected_report_audits(audits, all_reports=all_reports, dependencies=dependencies)
+    selected_audits = selected_audits_for_start(audits, all_reports=all_reports, dependencies=dependencies)
     status = dependencies.report_status(target["repo_id"])
     preflight = _report_start_preflight_payload(status)
     linked_running_results = _audit_runs.linked_running_report_results(status, selected_audits)
@@ -230,13 +230,13 @@ def wait_for_reports[TCreateRequest](
     return dependencies.targeted_run_payload(target, payload)
 
 
-def selected_report_audits[TCreateRequest](
+def selected_audits_for_start[TCreateRequest](
     audits: list[str],
     *,
     all_reports: bool,
     dependencies: ReportWorkflowDependencies[TCreateRequest],
 ) -> list[AuditDefinition]:
-    return _audit_runs.selected_report_audits(audits, all_reports=all_reports, catalog=dependencies.catalog)
+    return _audit_runs.selected_audits(audits, all_reports=all_reports, catalog=dependencies.catalog)
 
 
 def merged_repo_active_runs[TCreateRequest](

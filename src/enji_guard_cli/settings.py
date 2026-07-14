@@ -15,6 +15,7 @@ LOG_FILE_NAME = "telemetry.jsonl"
 STATE_DIR_NAME = "state"
 READINESS_STATE_FILE_NAME = "readiness.json"
 ACTIVE_RUN_LEDGER_FILE_NAME = "active-runs.json"
+AUDIT_CATALOG_STATE_FILE_NAME = "audit-catalog.json"
 
 DEFAULT_BASE_URL = "https://fleet.enji.ai"
 DEFAULT_GUARD_ORIGIN = "https://guard.enji.ai"
@@ -22,11 +23,15 @@ DEFAULT_GUARD_REFERER = "https://guard.enji.ai/"
 DEFAULT_AUTO_REFRESH_ENABLED = True
 DEFAULT_AUTO_REFRESH_LEAD_SECONDS = 300
 DEFAULT_AUTO_REFRESH_FALLBACK_SECONDS = 900
-DEFAULT_AUTO_REFRESH_RETRY_SECONDS = 60
+DEFAULT_AUTO_REFRESH_RETRY_SECONDS = 900
+DEFAULT_AUTO_REFRESH_RETRY_INITIAL_SECONDS = 30.0
+DEFAULT_AUTO_REFRESH_RETRY_MAX_SECONDS = 3600.0
+DEFAULT_AUTO_REFRESH_RETRY_JITTER_SECONDS = 30.0
 DEFAULT_TRANSPORT_TIMEOUT_SECONDS = 20.0
-DEFAULT_TRANSPORT_RETRY_TOTAL = 0
-DEFAULT_TRANSPORT_RETRY_BACKOFF_FACTOR = 0.0
-DEFAULT_TRANSPORT_RETRYABLE_METHODS = ("GET", "HEAD", "OPTIONS")
+DEFAULT_TRANSPORT_RETRY_TOTAL = 3
+DEFAULT_TRANSPORT_RETRY_BACKOFF_FACTOR = 0.5
+DEFAULT_TRANSPORT_RETRY_MAX_DELAY_SECONDS = 30.0
+DEFAULT_TRANSPORT_RETRY_JITTER_SECONDS = 0.5
 DEFAULT_TRANSPORT_RETRYABLE_STATUS_CODES = (429, 500, 502, 503, 504)
 DEFAULT_LOG_LEVEL_NAME: LogLevelName = "INFO"
 DEFAULT_LOG_FORMAT: LogFormat = "json"
@@ -64,13 +69,18 @@ class AutoRefreshSettings:
     lead_seconds: int
     fallback_seconds: int
     retry_seconds: int
+    retry_initial_seconds: float = DEFAULT_AUTO_REFRESH_RETRY_INITIAL_SECONDS
+    retry_max_seconds: float = DEFAULT_AUTO_REFRESH_RETRY_MAX_SECONDS
+    retry_jitter_seconds: float = DEFAULT_AUTO_REFRESH_RETRY_JITTER_SECONDS
+    auth_required_retry_seconds: int = DEFAULT_AUTO_REFRESH_RETRY_SECONDS
 
 
 @dataclass(frozen=True, slots=True)
 class TransportRetrySettings:
     total: int
     backoff_factor: float
-    retryable_methods: tuple[str, ...]
+    max_delay_seconds: float
+    jitter_seconds: float
     retryable_status_codes: tuple[int, ...]
     respect_retry_after_header: bool
 
@@ -130,6 +140,11 @@ class ActiveRunLedgerSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class AuditCatalogSettings:
+    state_file: Path
+
+
+@dataclass(frozen=True, slots=True)
 class EnjiGuardSettings:
     auth: AuthSettings
     auto_refresh: AutoRefreshSettings
@@ -140,6 +155,7 @@ class EnjiGuardSettings:
     report_wait: ReportWaitSettings
     repo: RepoSettings
     active_run_ledger: ActiveRunLedgerSettings
+    audit_catalog: AuditCatalogSettings
 
 
 def default_settings() -> EnjiGuardSettings:
@@ -162,7 +178,8 @@ def default_settings() -> EnjiGuardSettings:
             retry=TransportRetrySettings(
                 total=DEFAULT_TRANSPORT_RETRY_TOTAL,
                 backoff_factor=DEFAULT_TRANSPORT_RETRY_BACKOFF_FACTOR,
-                retryable_methods=DEFAULT_TRANSPORT_RETRYABLE_METHODS,
+                max_delay_seconds=DEFAULT_TRANSPORT_RETRY_MAX_DELAY_SECONDS,
+                jitter_seconds=DEFAULT_TRANSPORT_RETRY_JITTER_SECONDS,
                 retryable_status_codes=DEFAULT_TRANSPORT_RETRYABLE_STATUS_CODES,
                 respect_retry_after_header=True,
             ),
@@ -198,6 +215,9 @@ def default_settings() -> EnjiGuardSettings:
             state_file=config_root / STATE_DIR_NAME / ACTIVE_RUN_LEDGER_FILE_NAME,
             ttl_seconds=DEFAULT_ACTIVE_RUN_LEDGER_TTL_SECONDS,
             lookup_grace_seconds=DEFAULT_ACTIVE_RUN_LOOKUP_GRACE_SECONDS,
+        ),
+        audit_catalog=AuditCatalogSettings(
+            state_file=config_root / STATE_DIR_NAME / AUDIT_CATALOG_STATE_FILE_NAME,
         ),
     )
 

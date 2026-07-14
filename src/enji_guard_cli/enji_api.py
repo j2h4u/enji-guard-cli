@@ -38,6 +38,27 @@ from enji_guard_cli._enji_api_contract import (
     UX_PROJECT_CREATE_ENDPOINT_SPEC,
     UX_PROJECT_DELETE_ENDPOINT_SPEC,
 )
+from enji_guard_cli.enji_api_impl.audit_catalog_snapshot import (
+    AuditCatalogChange as AuditCatalogChange,
+)
+from enji_guard_cli.enji_api_impl.audit_catalog_snapshot import (
+    AuditCatalogChangeNotifier as AuditCatalogChangeNotifier,
+)
+from enji_guard_cli.enji_api_impl.audit_catalog_snapshot import (
+    AuditCatalogObservationToken as AuditCatalogObservationToken,
+)
+from enji_guard_cli.enji_api_impl.audit_catalog_snapshot import (
+    active_audit_catalog_changes as _active_audit_catalog_changes,
+)
+from enji_guard_cli.enji_api_impl.audit_catalog_snapshot import (
+    begin_audit_catalog_observation as _begin_audit_catalog_observation,
+)
+from enji_guard_cli.enji_api_impl.audit_catalog_snapshot import (
+    end_audit_catalog_observation as _end_audit_catalog_observation,
+)
+from enji_guard_cli.enji_api_impl.audit_catalog_snapshot import (
+    observe_active_audit_catalog as _observe_active_audit_catalog,
+)
 from enji_guard_cli.enji_api_impl.client import (
     ApiEndpoint,
     EnjiApiSession,
@@ -51,6 +72,10 @@ from enji_guard_cli.enji_api_impl.client import (
 from enji_guard_cli.errors import EnjiApiError, EnjiPartialStateError, PartialStateDetails
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.transport import EnjiHttpClient, EnjiHttpError, EnjiJsonValue
+
+begin_audit_catalog_observation = _begin_audit_catalog_observation
+end_audit_catalog_observation = _end_audit_catalog_observation
+active_audit_catalog_changes = _active_audit_catalog_changes
 
 HTTP_OK = 200
 HTTP_CREATED = 201
@@ -399,7 +424,9 @@ def move_repo(
 
 
 def catalog(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> JsonObjectPayload:
-    return run_api_request(auth_file, client, CATALOG_ENDPOINT.request())
+    payload = run_api_request(auth_file, client, CATALOG_ENDPOINT.request())
+    _observe_active_audit_catalog(payload)
+    return payload
 
 
 def runbook(

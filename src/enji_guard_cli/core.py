@@ -117,18 +117,36 @@ from enji_guard_cli.core_impl.write_settings import set_email_preferences as _se
 from enji_guard_cli.core_impl.write_settings import set_schedule_settings as _set_schedule_settings
 from enji_guard_cli.enji_api import REPORTS_LIST_DEFAULT_SELECTOR as REPORTS_LIST_DEFAULT_SELECTOR
 from enji_guard_cli.enji_api import (
+    AuditCatalogChange as AuditCatalogChange,
+)
+from enji_guard_cli.enji_api import (
+    AuditCatalogChangeNotifier as AuditCatalogChangeNotifier,
+)
+from enji_guard_cli.enji_api import (
+    AuditCatalogObservationToken as AuditCatalogObservationToken,
+)
+from enji_guard_cli.enji_api import (
     AuditRunCreate,
     RepoTransfer,
+)
+from enji_guard_cli.enji_api import (
+    active_audit_catalog_changes as _active_audit_catalog_changes,
 )
 from enji_guard_cli.enji_api import add_project_repo as run_add_project_repo
 from enji_guard_cli.enji_api import audit_auto_runs as run_audit_auto_runs
 from enji_guard_cli.enji_api import audit_email_preferences as run_audit_email_preferences
 from enji_guard_cli.enji_api import audit_summary_snapshot as run_audit_summary_snapshot
+from enji_guard_cli.enji_api import (
+    begin_audit_catalog_observation as _begin_audit_catalog_observation,
+)
 from enji_guard_cli.enji_api import catalog as run_catalog
 from enji_guard_cli.enji_api import connect_project_repo as run_connect_project_repo
 from enji_guard_cli.enji_api import create_project as run_create_project
 from enji_guard_cli.enji_api import delete_project as run_delete_project
 from enji_guard_cli.enji_api import delete_project_repo as run_delete_project_repo
+from enji_guard_cli.enji_api import (
+    end_audit_catalog_observation as _end_audit_catalog_observation,
+)
 from enji_guard_cli.enji_api import improvement_jobs as run_improvement_jobs
 from enji_guard_cli.enji_api import move_repo as run_move_repo
 from enji_guard_cli.enji_api import preflight_repo_move as run_preflight_repo_move
@@ -153,6 +171,20 @@ from enji_guard_cli.settings import default_settings
 
 def list_projects() -> JsonObjectPayload:
     return run_projects()
+
+
+def begin_audit_catalog_observation(
+    *, notifier: AuditCatalogChangeNotifier | None = None
+) -> AuditCatalogObservationToken:
+    return _begin_audit_catalog_observation(state_file=default_settings().audit_catalog.state_file, notifier=notifier)
+
+
+def end_audit_catalog_observation(token: AuditCatalogObservationToken) -> None:
+    _end_audit_catalog_observation(token)
+
+
+def current_audit_catalog_changes() -> tuple[AuditCatalogChange, ...]:
+    return _active_audit_catalog_changes()
 
 
 def _catalog_context() -> tuple[AuditCatalog, JsonObjectPayload]:

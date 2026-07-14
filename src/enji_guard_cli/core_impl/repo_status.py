@@ -39,7 +39,7 @@ def report_status_from_task_links(
     current_sha = current_head_sha(rerun_state)
     reports = [
         _report_audit_status(audit, links_by_action, active_runs_by_action, current_sha, rerun_state)
-        for audit in catalog.report_audits
+        for audit in catalog.published_audits
     ]
     latest_report_at = last_report_at(reports)
     readable = _audits_with_readable_reports(reports)
@@ -433,7 +433,7 @@ def report_timestamp(value: str | None) -> float | None:
 
 
 def empty_report_status(repo_id: str, catalog: AuditCatalog) -> ReportStatusPayload:
-    reports = [_empty_report_audit_status(audit) for audit in catalog.report_audits]
+    reports = [_empty_report_audit_status(audit) for audit in catalog.published_audits]
     return {
         "schema_version": 2,
         "repo_id": repo_id,

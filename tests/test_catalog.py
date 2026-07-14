@@ -1,12 +1,12 @@
 import pytest
 
 from enji_guard_cli.audits import AuditCatalog, AuditDefinition
-from enji_guard_cli.core_impl.audit_runs import selected_report_audits
+from enji_guard_cli.core_impl.audit_runs import selected_audits
 from enji_guard_cli.core_impl.catalog import parse_audit_catalog
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 
-def test_parse_audit_catalog_selects_live_published_reports_and_recon() -> None:
+def test_parse_audit_catalog_selects_live_published_audits_and_recon() -> None:
     catalog = parse_audit_catalog(
         _catalog(
             [
@@ -54,7 +54,7 @@ def test_parse_audit_catalog_selects_live_published_reports_and_recon() -> None:
         metric_group=None,
         runbook_kind="recon",
     )
-    assert catalog.report_audits == (
+    assert catalog.published_audits == (
         AuditDefinition(
             action_key="audit.security",
             title="Security",
@@ -68,7 +68,7 @@ def test_parse_audit_catalog_selects_live_published_reports_and_recon() -> None:
             runbook_kind="cicd-audit",
         ),
     )
-    assert [audit.selector for audit in catalog.report_audits] == ["security", "cicd"]
+    assert [audit.selector for audit in catalog.published_audits] == ["security", "cicd"]
 
 
 def test_parse_audit_catalog_requires_a_live_recon_action() -> None:
@@ -156,7 +156,7 @@ def test_parse_audit_catalog_rejects_non_object_curated_action() -> None:
         parse_audit_catalog(payload)
 
 
-def test_report_selector_resolution_rejects_full_keys_and_legacy_aliases() -> None:
+def test_audit_selector_resolution_rejects_full_keys_and_legacy_aliases() -> None:
     catalog = parse_audit_catalog(
         _catalog(
             [
@@ -191,14 +191,12 @@ def test_report_selector_resolution_rejects_full_keys_and_legacy_aliases() -> No
 
     assert [
         audit.action_key
-        for audit in selected_report_audits(
-            ["security", "cicd", "dependency-hygiene"], all_reports=False, catalog=catalog
-        )
+        for audit in selected_audits(["security", "cicd", "dependency-hygiene"], all_reports=False, catalog=catalog)
     ] == ["audit.security", "audit.cicd", "audit.dependency-hygiene"]
-    with pytest.raises(ValueError, match="unknown report audit selector: deps"):
-        selected_report_audits(["deps"], all_reports=False, catalog=catalog)
-    with pytest.raises(ValueError, match=r"unknown report audit selector: audit\.security"):
-        selected_report_audits(["audit.security"], all_reports=False, catalog=catalog)
+    with pytest.raises(ValueError, match="unknown audit selector: deps"):
+        selected_audits(["deps"], all_reports=False, catalog=catalog)
+    with pytest.raises(ValueError, match=r"unknown audit selector: audit\.security"):
+        selected_audits(["audit.security"], all_reports=False, catalog=catalog)
 
 
 def _action(

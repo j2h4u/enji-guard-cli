@@ -49,13 +49,20 @@ contract: readable reports include summary metadata, and unavailable reports are
 returned with `available: false` plus a reason instead of aborting the whole
 batch.
 
-Every report-aware top-level command fetches `GET /api/ux/catalog` once for its
-invocation. There is no catalog cache or fallback. `curatedActions` is
-authoritative: published report actions in the live response are the available
-audits, so newly published reports participate automatically. CLI report
-selectors use the action-key suffix without the `audit.` prefix (for example,
-`security` selects `audit.security`). Recon is a separate `audit.recon` action
-and is not a report selector.
+Every command in the Audit Catalog context fetches `GET /api/ux/catalog` once
+for its invocation. `curatedActions` is authoritative: published audits in the
+live response are the available audits, so newly published audits participate
+automatically. The CLI keeps a best-effort previous observation at
+`~/.config/enji-guard/state/audit-catalog.json`; it is never an API fallback and
+never supplies selectors. The first valid catalog establishes a baseline
+without a business notice. Later added, removed, or changed audits are emitted
+as a text business notice on stdout. With `--json`, the same information is
+under the stable top-level `audit_catalog` business section, whose `changes`
+field is an array and is empty when there are no changes. stderr is reserved for
+errors. CLI report selectors use
+the action-key suffix without the `audit.` prefix (for example, `security`
+selects `audit.security`). Recon is a separate `audit.recon` action and is not
+a report selector.
 
 The workflow is audit -> findings -> optional improvement. The live catalog's
 `auditAutofixes` entries describe available variants. The supported typed
@@ -223,13 +230,15 @@ Enji backend readiness. The supervisor refreshes cookie auth and probes backend
 readiness as separate sibling tasks; the probe records failures but does not
 perform refresh itself. Repeated auth/backend failures make the container
 `unhealthy`, so `docker ps` is a passive dashboard for Enji connectivity.
+Bearer/API-token auth is preferred. Cookie-session auto refresh is supervisor-
+owned and is not an MCP responsibility.
 
 For registry-based deployment, use the GHCR image and compose example in
 `docs/deployment.md`.
 
 ## Authentication
 
-Preferred future path is an Enji API token:
+Bearer/API-token auth is the preferred stable path:
 
 ```bash
 printf '%s' "$ENJI_API_TOKEN" | docker exec -i enji-guard-cli enji-guard auth import-token --stdin
@@ -260,6 +269,46 @@ Do not paste credentials directly into shell history. The auth file defaults to
 Keep that directory writable by the container user because Enji rotates refresh
 cookies. Credentials belong in the configured auth file, not in checked-in env
 templates or persistent `.env` files.
+
+Cookie refresh reserves a durable, private pending-replacement journal under the
+configured credential storage before contacting Enji. It contains protected
+recovery state and must be treated as credential storage; this documentation
+does not describe its secret fields. If auth-file replacement is interrupted,
+the supervisor retries recovery from that journal; do not delete it or copy its
+contents elsewhere.
+
+Transport retries are profile-aware. Reads, safe probes, and idempotent
+mutations may retry transient transport or 429/5xx failures; unsafe mutations
+and cookie refresh are not retried by the transport layer. Transport backoff
+uses exponential delay with jitter and a 30-second cap (including a bounded
+`Retry-After`). Supervisor cookie-refresh recovery uses exponential jitter,
+continues until it succeeds, and caps any individual delay at one hour. An
+`AUTH_REQUIRED` failure uses the configured re-auth retry interval instead of
+exponential growth.
+
+Useful telemetry events are written to
+`~/.config/enji-guard/logs/telemetry.jsonl`: `enji_http_retry`,
+`enji_auth_auto_refresh_scheduled`, `enji_auth_auto_refresh_retry`,
+`enji_auth_auto_refresh_succeeded`, `enji_auth_auto_refresh_schedule_failed`,
+`enji_auth_refresh_rotation_deferred`,
+`enji_auth_refresh_rotation_recovered`, and
+`enji_auth_refresh_rotation_superseded`. Records contain retry classification
+and timing fields; credentials are not an operator-facing log output.
+
+After a real cookie re-authentication, refresh the session in the browser,
+request `/api/v1/auth/me`, and import the current `Cookie` request header using
+the procedure above. Then validate the running service with:
+
+```bash
+docker exec -i enji-guard-cli enji-guard auth refresh
+docker exec -i enji-guard-cli enji-guard auth status
+docker exec -i enji-guard-cli enji-guard health --ready
+```
+
+Treat these commands and the telemetry events as runtime validation, not as a
+claim that the current Enji session is valid. If validation remains unhealthy,
+check the configured credential-storage ownership and write permissions, then
+repeat the browser re-auth/import and validation sequence.
 
 ## CLI
 

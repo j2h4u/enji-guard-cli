@@ -12,9 +12,9 @@ def parse_audit_catalog(payload: JsonObjectPayload) -> AuditCatalog:
 
     actions = _curated_actions(payload)
     recon = _require_recon(actions)
-    report_audits = tuple(_report_audit(action) for action in actions if _is_published_report_action(action))
-    _require_unique_action_keys((recon, *report_audits))
-    return AuditCatalog(report_audits=report_audits, recon=recon)
+    published_audits = tuple(_published_audit(action) for action in actions if _is_published_audit_action(action))
+    _require_unique_action_keys((recon, *published_audits))
+    return AuditCatalog(published_audits=published_audits, recon=recon)
 
 
 def _require_recon(actions: list[dict[str, JsonValue]]) -> AuditDefinition:
@@ -24,7 +24,7 @@ def _require_recon(actions: list[dict[str, JsonValue]]) -> AuditDefinition:
     return _audit_definition(recon_actions[0], metric_group=None)
 
 
-def _is_published_report_action(action: dict[str, JsonValue]) -> bool:
+def _is_published_audit_action(action: dict[str, JsonValue]) -> bool:
     return (
         action.get("actionKey") != RECON_ACTION_KEY
         and action.get("category") == AUDIT_CATEGORY
@@ -32,7 +32,7 @@ def _is_published_report_action(action: dict[str, JsonValue]) -> bool:
     )
 
 
-def _report_audit(action: dict[str, JsonValue]) -> AuditDefinition:
+def _published_audit(action: dict[str, JsonValue]) -> AuditDefinition:
     metric_group = _required_nonempty_str(action, "metricGroup", "published audit action is missing metricGroup")
     return _audit_definition(action, metric_group=metric_group)
 

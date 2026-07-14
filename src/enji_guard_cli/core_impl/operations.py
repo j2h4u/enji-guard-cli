@@ -26,12 +26,12 @@ from enji_guard_cli.enji_api import reports_list_async as run_reports_list_async
 
 def _catalog_audits_operation() -> list[dict[str, str | None]]:
     catalog = parse_audit_catalog(run_catalog())
-    return [_audit_payload(audit) for audit in (*catalog.report_audits, catalog.recon)]
+    return [_audit_payload(audit) for audit in (*catalog.published_audits, catalog.recon)]
 
 
 def _catalog_audit_operation(selector: str) -> dict[str, str | None]:
     catalog = parse_audit_catalog(run_catalog())
-    for audit in (*catalog.report_audits, catalog.recon):
+    for audit in (*catalog.published_audits, catalog.recon):
         if audit.selector == selector:
             return _audit_payload(audit)
     raise ValueError(f"unknown audit selector: {selector}")

@@ -6,10 +6,18 @@ agents can orient quickly before making changes.
 
 ## Decisions
 
-- **Live audit discovery**: every report-aware top-level command fetches
-  `GET /api/ux/catalog` once per invocation. There is no cache or fallback;
-  `curatedActions` is authoritative, and newly published report actions are
-  included automatically. CLI selectors use the action-key suffix without the
+- **Audit Catalog authority and notification**: every command in the Audit
+  Catalog context fetches `GET /api/ux/catalog` once per invocation.
+  `curatedActions` is authoritative: published audits in the live response
+  define the available audits, and newly published audits participate
+  automatically. The local
+  `~/.config/enji-guard/state/audit-catalog.json` stores only the previous
+  observation for change detection; it is never an API fallback or selector
+  source. The first valid catalog establishes a baseline without a business
+  notice. Later added, removed, or changed audits produce a text business
+  notice on stdout. JSON exposes a stable top-level `audit_catalog` business
+  section with `changes`, using an empty array when there are no changes; stderr
+  is reserved for errors. CLI selectors use the action-key suffix without the
   `audit.` prefix. Recon remains a separate action and workflow.
 - **Audit scheduling identity**: automatic audit schedules use
   `audit-auto-runs/{actionKey}` with the exact catalog action key. Each
@@ -35,6 +43,25 @@ agents can orient quickly before making changes.
 - **Temporary cookie auth with first-class API tokens**: cookie auth is a
   compatibility path. Bearer/API-token support is the preferred stable auth
   path and should remain first-class.
+- **Supervisor-owned cookie-session resilience**: cookie auto refresh belongs to
+  the `enji-guard run` supervisor, not MCP. Refresh rotation reserves a durable,
+  private pending-replacement journal below configured credential storage so a
+  replacement can be recovered after an interrupted auth-file write. The
+  journal stores protected recovery state and must be treated as credential
+  storage; its secret fields are intentionally not described here.
+  HTTP retry profiles allow retries only for reads, safe probes, and idempotent
+  mutations; unsafe mutations and auth refresh are not retried by transport.
+  Transport delay is exponential with jitter and a 30-second cap. Supervisor
+  recovery retries indefinitely with exponential jitter, caps each delay at one
+  hour, and uses the configured re-auth interval for `AUTH_REQUIRED` failures.
+- **Auth resilience observability**: runtime diagnosis uses telemetry events
+  `enji_http_retry`, `enji_auth_auto_refresh_scheduled`,
+  `enji_auth_auto_refresh_retry`, `enji_auth_auto_refresh_succeeded`,
+  `enji_auth_auto_refresh_schedule_failed`,
+  `enji_auth_refresh_rotation_deferred`,
+  `enji_auth_refresh_rotation_recovered`, and
+  `enji_auth_refresh_rotation_superseded`; event payloads contain classification
+  and timing, not secret details.
 - **Supply-chain conservatism**: new Python packages stay quarantined for
   7 to 14 days unless an owner approves earlier adoption; lifecycle and
   install scripts are disabled by default or explicitly allowlisted;

@@ -82,11 +82,11 @@ CATALOG_PAYLOAD: JsonObjectPayload = {
 }
 LIVE_CATALOG = parse_audit_catalog(CATALOG_PAYLOAD)
 RECON_AUDIT = LIVE_CATALOG.recon
-REPORT_AUDITS = LIVE_CATALOG.report_audits
+PUBLISHED_AUDITS = LIVE_CATALOG.published_audits
 
 
 def _audit(action_key: str) -> AuditDefinition:
-    return next(audit for audit in (*REPORT_AUDITS, RECON_AUDIT) if audit.action_key == action_key)
+    return next(audit for audit in (*PUBLISHED_AUDITS, RECON_AUDIT) if audit.action_key == action_key)
 
 
 @pytest.fixture(autouse=True)
@@ -180,7 +180,7 @@ def test_operation_specs_are_executable_bindings(monkeypatch: MonkeyPatch) -> No
             "metric_group": audit.metric_group,
             "runbook_kind": audit.runbook_kind,
         }
-        for audit in (*REPORT_AUDITS, RECON_AUDIT)
+        for audit in (*PUBLISHED_AUDITS, RECON_AUDIT)
     ]
     assert resolve_operation_spec(OperationName.CATALOG_AUDIT).execute("deps") == {
         "action_key": "audit.deps",
@@ -231,7 +231,7 @@ def test_runtime_status_fetches_live_catalog_exactly_once(monkeypatch: MonkeyPat
             "project_id": project_id,
             "project_name": "Pets",
             "repos": [],
-            "catalog_size": len(catalog.report_audits),
+            "catalog_size": len(catalog.published_audits),
         },
     )
 
@@ -1676,9 +1676,9 @@ def test_start_report_audits_skips_up_to_date_audits(monkeypatch: MonkeyPatch) -
 @pytest.mark.parametrize(
     ("audits", "all_reports", "message"),
     [
-        ([], False, "pass at least one report audit or --all"),
-        (["security"], True, "pass report audits or --all, not both"),
-        (["recon"], False, "unknown report audit selector"),
+        ([], False, "pass at least one audit selector or --all"),
+        (["security"], True, "pass audit selectors or --all, not both"),
+        (["recon"], False, "unknown audit selector"),
     ],
 )
 def test_start_report_audits_rejects_invalid_selection(
@@ -1889,7 +1889,7 @@ def test_read_reports_for_repo_can_read_all_report_audits(monkeypatch: MonkeyPat
             repo_id,
             [
                 _report_status_item(audit.action_key.removeprefix("audit."), "ready", last_audited_head_sha=None)
-                for audit in REPORT_AUDITS
+                for audit in PUBLISHED_AUDITS
             ],
         ),
     )

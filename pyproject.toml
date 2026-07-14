@@ -6,8 +6,8 @@ license = "PolyForm-Noncommercial-1.0.0"
 requires-python = ">=3.14"
 dependencies = [
     "httpx>=0.28.1,<1",
-    "httpx-retries>=0.6.0,<1",
     "mcp[cli]>=1.28.1,<2",
+    "tenacity>=9.1.2,<10",
     "typer>=0.26.7",
 ]
 
@@ -239,7 +239,6 @@ forbidden_modules = [
     "enji_guard_cli.enji_api_impl",
     "enji_guard_cli.transport",
     "httpx",
-    "httpx_retries",
 ]
 allow_indirect_imports = true
 
@@ -248,7 +247,7 @@ id = "core-avoids-transport-internals"
 name = "Core uses Enji API adapter instead of transport internals"
 type = "forbidden"
 source_modules = ["enji_guard_cli.core", "enji_guard_cli.core_impl"]
-forbidden_modules = ["enji_guard_cli.enji_api_impl", "enji_guard_cli.transport", "httpx", "httpx_retries"]
+forbidden_modules = ["enji_guard_cli.enji_api_impl", "enji_guard_cli.transport", "httpx"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -315,7 +314,6 @@ forbidden_modules = [
     "enji_guard_cli.telemetry_sink",
     "enji_guard_cli.transport",
     "httpx",
-    "httpx_retries",
     "mcp",
     "typer",
 ]
@@ -341,7 +339,7 @@ source_modules = [
     "enji_guard_cli.telemetry",
     "enji_guard_cli.telemetry_sink",
 ]
-forbidden_modules = ["httpx", "httpx_retries"]
+forbidden_modules = ["httpx"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -394,7 +392,6 @@ forbidden_modules = [
     "enji_guard_cli.telemetry",
     "enji_guard_cli.transport",
     "httpx",
-    "httpx_retries",
     "mcp",
     "typer",
 ]
@@ -423,7 +420,6 @@ forbidden_modules = [
     "enji_guard_cli.telemetry_sink",
     "enji_guard_cli.transport",
     "httpx",
-    "httpx_retries",
     "mcp",
     "typer",
 ]
@@ -453,7 +449,6 @@ forbidden_modules = [
     "enji_guard_cli.telemetry_sink",
     "enji_guard_cli.transport",
     "httpx",
-    "httpx_retries",
     "mcp",
     "typer",
 ]
@@ -484,7 +479,6 @@ forbidden_modules = [
     "enji_guard_cli.telemetry_sink",
     "enji_guard_cli.transport",
     "httpx",
-    "httpx_retries",
     "mcp",
     "typer",
 ]
