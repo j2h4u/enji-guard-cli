@@ -91,14 +91,30 @@ class _GatewayHarness:
             "state": {
                 "currentHeadSha": "abc",
                 "lastAuditedSha": "def",
+                "actions": {"audit.security": {"lastAuditedHeadSha": "def"}},
                 "canRerun": True,
                 "lastFleetTaskId": "task-0",
             }
         }
         self.links_payload: JsonObjectPayload = {
-            "links": [{"fleetTaskId": "task-1", "actionKey": "audit.security", "status": "running"}]
+            "links": [
+                {
+                    "fleetTaskId": "task-1",
+                    "actionKey": "audit.security",
+                    "status": "running",
+                    "artifactSchemaName": "upfront.audit.summary",
+                    "createdAt": "2026-07-15T08:00:00Z",
+                }
+            ]
         }
-        self.task_payload: JsonObjectPayload = {"task": {"id": "task-1", "status": "running"}}
+        self.task_payload: JsonObjectPayload = {
+            "task": {
+                "id": "task-1",
+                "status": "running",
+                "createdAt": "2026-07-15T08:00:00Z",
+                "startedAt": "2026-07-15T08:01:00Z",
+            }
+        }
         self.start_payload: JsonObjectPayload = {"task": {"id": "task-2", "status": "queued"}}
         self.snapshot_payload: JsonObjectPayload = {"snapshot": {"content": {"report": "findings", "score": 80}}}
         self.auth_file = Path("auth.json")
@@ -128,7 +144,7 @@ class _GatewayHarness:
 
     def fake_runbook(self, runbook_id: str, auth_file: object, client: object) -> JsonObjectPayload:
         self.calls.append(("runbook", (runbook_id, auth_file, client)))
-        return {"title": "Security audit"}
+        return {"title": "Security audit", "suggested_flow": "single", "suggested_flow_config": {"retries": 1}}
 
     def fake_start_audit_run(self, request: AuditRunCreate, auth_file: object, client: object) -> JsonObjectPayload:
         self.calls.append(("start_audit_run", (request, auth_file, client)))
@@ -171,11 +187,88 @@ def test_audit_gateway_reads_active_runs(gateway_harness: _GatewayHarness) -> No
     assert gateway_harness.calls == [("active_runs", ("repo-1", gateway_harness.auth_file, gateway_harness.client))]
 
 
+def test_audit_gateway_drops_wire_extensions_from_active_run_projection(
+    gateway_harness: _GatewayHarness,
+) -> None:
+    gateway_harness.active_runs_payload = {
+        "activeRuns": [
+            {
+                "id": "task-root",
+                "actionKey": "audit.security",
+                "status": "running",
+                "customField": {"source": "fleet"},
+            }
+        ]
+    }
+
+    run = gateway_harness.gateway.active_runs("repo-1").runs[0]
+
+    assert run.task_id == "task-root"
+    assert run.action_key == "audit.security"
+    assert run.status == "running"
+    assert run.created_at is None
+    assert not hasattr(run, "upstream_payload")
+
+
+@pytest.mark.parametrize(
+    ("task_payload", "expected_id", "expected_status", "expected_completed_at"),
+    [
+        (
+            {"task": {"id": "task-nested", "status": "completed", "completedAt": "2026-07-15T08:02:00Z"}},
+            "task-nested",
+            "completed",
+            "2026-07-15T08:02:00Z",
+        ),
+        (
+            {"id": "task-root", "status": "completed", "completedAt": "2026-07-15T08:03:00Z"},
+            "task-root",
+            "completed",
+            "2026-07-15T08:03:00Z",
+        ),
+    ],
+)
+def test_audit_gateway_normalizes_nested_and_root_task_detail_payloads(
+    gateway_harness: _GatewayHarness,
+    task_payload: JsonObjectPayload,
+    expected_id: str,
+    expected_status: str,
+    expected_completed_at: str,
+) -> None:
+    gateway_harness.task_payload = task_payload
+
+    detail = gateway_harness.gateway.task_detail("fallback-task")
+
+    assert detail.task_id == expected_id
+    assert detail.status == expected_status
+    assert detail.completed_at == expected_completed_at
+
+
+@pytest.mark.parametrize(
+    ("start_payload", "expected_id", "expected_status"),
+    [
+        ({"task": {"id": "task-nested", "status": "queued"}}, "task-nested", "queued"),
+        ({"id": "task-root", "status": "queued"}, "task-root", "queued"),
+    ],
+)
+def test_audit_gateway_normalizes_nested_and_root_start_payloads(
+    gateway_harness: _GatewayHarness,
+    start_payload: JsonObjectPayload,
+    expected_id: str,
+    expected_status: str,
+) -> None:
+    gateway_harness.start_payload = start_payload
+
+    result = gateway_harness.gateway.start_audit_run(gateway_harness.request)
+
+    assert result == AuditRunResult(task_id=expected_id, status=expected_status)
+
+
 def test_audit_gateway_reads_rerun_state(gateway_harness: _GatewayHarness) -> None:
     rerun_state = gateway_harness.gateway.rerun_state("repo-1")
     assert isinstance(rerun_state, AuditRerunState)
     assert rerun_state.current_head_sha == "abc"
     assert rerun_state.rerun_allowed is True
+    assert rerun_state.audited_head_shas == {"audit.security": "def"}
     assert gateway_harness.calls == [("rerun_state", ("repo-1", gateway_harness.auth_file, gateway_harness.client))]
 
 
@@ -183,6 +276,7 @@ def test_audit_gateway_reads_task_links(gateway_harness: _GatewayHarness) -> Non
     task_links = gateway_harness.gateway.task_links("repo-1")
     assert isinstance(task_links, AuditTaskLinksResult)
     assert task_links.links[0].action_key == "audit.security"
+    assert task_links.links[0].artifact_schema_name == "upfront.audit.summary"
     assert gateway_harness.calls == [("task_links", ("repo-1", gateway_harness.auth_file, gateway_harness.client))]
 
 
@@ -191,6 +285,7 @@ def test_audit_gateway_reads_task_detail(gateway_harness: _GatewayHarness) -> No
     assert isinstance(task_detail, AuditTaskDetail)
     assert task_detail.task_id == "task-1"
     assert task_detail.status == "running"
+    assert task_detail.started_at == "2026-07-15T08:01:00Z"
     assert gateway_harness.calls == [("task_detail", ("task-1", gateway_harness.auth_file, gateway_harness.client))]
 
 
@@ -199,6 +294,7 @@ def test_audit_gateway_reads_runbook_metadata(gateway_harness: _GatewayHarness) 
     assert isinstance(runbook, AuditRunbookMetadata)
     assert runbook.runbook_id == "runbook-1"
     assert runbook.title == "Security audit"
+    assert runbook.suggested_flow == "single"
     assert gateway_harness.calls == [("runbook", ("runbook-1", gateway_harness.auth_file, gateway_harness.client))]
 
 

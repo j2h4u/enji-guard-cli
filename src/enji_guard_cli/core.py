@@ -125,10 +125,7 @@ from enji_guard_cli.enji_api import (
 from enji_guard_cli.enji_api import (
     AuditCatalogObservationToken as AuditCatalogObservationToken,
 )
-from enji_guard_cli.enji_api import (
-    AuditRunCreate,
-    RepoTransfer,
-)
+from enji_guard_cli.enji_api import RepoTransfer
 from enji_guard_cli.enji_api import (
     active_audit_catalog_changes as _active_audit_catalog_changes,
 )
@@ -157,13 +154,8 @@ from enji_guard_cli.enji_api import put_audit_email_preferences as run_put_audit
 from enji_guard_cli.enji_api import put_improvement_job as run_put_improvement_job
 from enji_guard_cli.enji_api import put_user_language as run_put_user_language
 from enji_guard_cli.enji_api import rename_project as run_rename_project
-from enji_guard_cli.enji_api import repo_active_runs as run_repo_active_runs
-from enji_guard_cli.enji_api import repo_audit_rerun_state as run_repo_audit_rerun_state
-from enji_guard_cli.enji_api import repo_task_links as run_repo_task_links
-from enji_guard_cli.enji_api import runbook as run_runbook
-from enji_guard_cli.enji_api import start_audit_run as run_start_audit_run
-from enji_guard_cli.enji_api import task_detail as run_task_detail
 from enji_guard_cli.enji_api import user_preferences as run_user_preferences
+from enji_guard_cli.enji_gateway import AuditGateway, AuditGatewayPort, AuditRun, AuditRunRequest
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.settings import default_settings
@@ -192,6 +184,99 @@ def _catalog_context() -> tuple[AuditCatalog, JsonObjectPayload]:
 
     payload = run_catalog()
     return _parse_audit_catalog(payload), payload
+
+
+def _audit_gateway() -> AuditGatewayPort:
+    return AuditGateway()
+
+
+def _repo_active_runs_via_gateway(repo_id: str) -> JsonObjectPayload:
+    return {"activeRuns": [_audit_run_status_projection(run) for run in _audit_gateway().active_runs(repo_id).runs]}
+
+
+def _repo_rerun_state_via_gateway(repo_id: str) -> JsonObjectPayload:
+    state = _audit_gateway().rerun_state(repo_id)
+    return {
+        "state": {
+            "currentHeadSha": state.current_head_sha,
+            "actions": {
+                action_key: {"lastAuditedHeadSha": audited_sha}
+                for action_key, audited_sha in state.audited_head_shas.items()
+            },
+            "lastAuditedSha": state.audited_head_sha,
+            "canRerun": state.rerun_allowed,
+            "lastFleetTaskId": state.last_task_id,
+        }
+    }
+
+
+def _repo_task_links_via_gateway(repo_id: str) -> JsonObjectPayload:
+    return {
+        "links": [
+            {
+                "fleetTaskId": link.task_id,
+                "actionKey": link.action_key,
+                "status": link.status,
+                "artifactSchemaName": link.artifact_schema_name,
+                "createdAt": link.created_at,
+                "startedAt": link.started_at,
+                "completedAt": link.completed_at,
+            }
+            for link in _audit_gateway().task_links(repo_id).links
+        ]
+    }
+
+
+def _task_detail_via_gateway(task_id: str) -> JsonObjectPayload:
+    detail = _audit_gateway().task_detail(task_id)
+    return {
+        "task": {
+            "id": detail.task_id,
+            "status": detail.status,
+            "createdAt": detail.created_at,
+            "startedAt": detail.started_at,
+            "completedAt": detail.completed_at,
+        }
+    }
+
+
+def _runbook_via_gateway(runbook_id: str) -> JsonObjectPayload:
+    metadata = _audit_gateway().runbook_metadata(runbook_id)
+    return {
+        "title": metadata.title,
+        "description": metadata.description,
+        "suggested_flow": metadata.suggested_flow,
+        "suggested_flow_config": metadata.suggested_flow_config,
+    }
+
+
+def _start_audit_run_via_gateway(request: AuditRunRequest) -> JsonObjectPayload:
+    result = _audit_gateway().start_audit_run(request)
+    return {"task": {"id": result.task_id, "status": result.status}}
+
+
+def _audit_run_status_projection(run: AuditRun) -> JsonObjectPayload:
+    """Project the typed gateway run into the application status shape."""
+
+    return {
+        "fleetTaskId": run.task_id,
+        "actionKey": run.action_key,
+        "status": run.status,
+        "createdAt": run.created_at,
+        "startedAt": run.started_at,
+        "completedAt": run.completed_at,
+    }
+
+
+# These names remain local composition seams so existing unit tests can inject
+# lifecycle fakes without importing the Enji API facade.
+AuditRunCreate = AuditRunRequest
+run_repo_active_runs = _repo_active_runs_via_gateway
+run_repo_audit_rerun_state = _repo_rerun_state_via_gateway
+run_repo_task_links = _repo_task_links_via_gateway
+run_task_detail = _task_detail_via_gateway
+run_runbook = _runbook_via_gateway
+run_start_audit_run = _start_audit_run_via_gateway
 
 
 def _project_crud_dependencies() -> _ProjectCrudDependencies:
@@ -779,7 +864,7 @@ def _merged_repo_active_runs(
 def _report_workflow_dependencies(
     catalog: AuditCatalog,
     catalog_payload: JsonObjectPayload,
-) -> _report_workflows.ReportWorkflowDependencies[AuditRunCreate]:
+) -> _report_workflows.ReportWorkflowDependencies[AuditRunRequest]:
     return _report_workflows.ReportWorkflowDependencies(
         list_repo_active_runs=run_repo_active_runs,
         get_repo_rerun_state=run_repo_audit_rerun_state,
@@ -821,19 +906,19 @@ def _make_audit_run_create(
     project_id: str,
     action_key: str,
     fleet_task_body: JsonObjectPayload,
-) -> AuditRunCreate:
-    return AuditRunCreate(
+) -> AuditRunRequest:
+    return AuditRunRequest(
         repo_id=repo_id,
         project_id=project_id,
         action_key=action_key,
-        fleet_task_body=fleet_task_body,
+        task_body=fleet_task_body,
     )
 
 
 def _start_audit_dependencies(
     catalog: AuditCatalog,
     catalog_payload: JsonObjectPayload,
-) -> _audit_runs.StartAuditDependencies[AuditRunCreate]:
+) -> _audit_runs.StartAuditDependencies[AuditRunRequest]:
     return _audit_runs.StartAuditDependencies(
         make_audit_run_create=_make_audit_run_create,
         start_audit_run=run_start_audit_run,

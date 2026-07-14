@@ -1,6 +1,6 @@
 """Typed Audit-facing operations exposed by the Enji Gateway."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -16,6 +16,12 @@ class AuditRunRequest:
     project_id: str
     action_key: str
     task_body: JsonObjectPayload
+
+    @property
+    def fleet_task_body(self) -> JsonObjectPayload:
+        """Compatibility name for the pre-gateway internal request shape."""
+
+        return self.task_body
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +70,7 @@ class AuditRerunState:
     audited_head_sha: str | None
     rerun_allowed: bool | None
     last_task_id: str | None
+    audited_head_shas: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +80,10 @@ class AuditTaskLink:
     task_id: str | None
     action_key: str | None
     status: str | None
+    artifact_schema_name: str | None = None
+    created_at: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +99,9 @@ class AuditTaskDetail:
 
     task_id: str
     status: str | None
+    created_at: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +119,8 @@ class AuditRunbookMetadata:
     runbook_id: str
     title: str | None
     description: str | None
+    suggested_flow: str | None = None
+    suggested_flow_config: JsonObjectPayload = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

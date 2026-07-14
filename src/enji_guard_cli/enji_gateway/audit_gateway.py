@@ -76,6 +76,11 @@ class AuditGateway(AuditGatewayPort):
             audited_head_sha=_optional_str(state.get("lastAuditedSha")),
             rerun_allowed=_optional_bool(state.get("canRerun")),
             last_task_id=_optional_str(state.get("lastFleetTaskId")),
+            audited_head_shas={
+                action_key: audited_sha
+                for action_key, action in _object(state.get("actions")).items()
+                if (audited_sha := _optional_str(_object(action).get("lastAuditedHeadSha"))) is not None
+            },
         )
 
     def task_links(self, repo_id: str) -> AuditTaskLinksResult:
@@ -86,15 +91,24 @@ class AuditGateway(AuditGatewayPort):
                     task_id=_optional_str(link.get("fleetTaskId")),
                     action_key=_optional_str(link.get("actionKey")),
                     status=_optional_str(link.get("status")),
+                    artifact_schema_name=_optional_str(link.get("artifactSchemaName")),
+                    created_at=_optional_str(link.get("createdAt")),
+                    started_at=_optional_str(link.get("startedAt")),
+                    completed_at=_optional_str(link.get("completedAt")),
                 )
                 for link in _object_list(payload.get("links"))
             )
         )
 
     def task_detail(self, task_id: str) -> AuditTaskDetail:
-        task = _object(_task_detail(task_id, self._auth_file, self._client).get("task"))
+        payload = _task_detail(task_id, self._auth_file, self._client)
+        task = _task_payload(payload)
         return AuditTaskDetail(
-            task_id=_optional_str(task.get("id")) or task_id, status=_optional_str(task.get("status"))
+            task_id=_optional_str(task.get("id")) or task_id,
+            status=_optional_str(task.get("status")),
+            created_at=_optional_str(task.get("createdAt")),
+            started_at=_optional_str(task.get("startedAt")),
+            completed_at=_optional_str(task.get("completedAt")),
         )
 
     def runbook_metadata(self, runbook_id: str) -> AuditRunbookMetadata:
@@ -103,6 +117,8 @@ class AuditGateway(AuditGatewayPort):
             runbook_id=runbook_id,
             title=_optional_str(payload.get("title")),
             description=_optional_str(payload.get("description")),
+            suggested_flow=_optional_str(payload.get("suggested_flow")),
+            suggested_flow_config=_object(payload.get("suggested_flow_config")),
         )
 
     def start_audit_run(self, request: AuditRunRequest) -> AuditRunResult:
@@ -116,7 +132,7 @@ class AuditGateway(AuditGatewayPort):
             self._auth_file,
             self._client,
         )
-        task = _object(payload.get("task"))
+        task = _task_payload(payload)
         return AuditRunResult(task_id=_optional_str(task.get("id")), status=_optional_str(task.get("status")))
 
     def read_audit_snapshot(self, repo_id: str, audit_key: str) -> AuditArtifact:
@@ -127,13 +143,14 @@ class AuditGateway(AuditGatewayPort):
 
 
 def _audit_run(payload: dict[str, JsonValue]) -> AuditRun:
+    task = _task_payload(payload)
     return AuditRun(
-        task_id=_optional_str(payload.get("fleetTaskId")),
-        action_key=_optional_str(payload.get("actionKey")),
-        status=_optional_str(payload.get("status")),
-        created_at=_optional_str(payload.get("createdAt")),
-        started_at=_optional_str(payload.get("startedAt")),
-        completed_at=_optional_str(payload.get("completedAt")),
+        task_id=_optional_str(payload.get("fleetTaskId")) or _optional_str(task.get("id")),
+        action_key=_optional_str(payload.get("actionKey")) or _optional_str(task.get("actionKey")),
+        status=_optional_str(payload.get("status")) or _optional_str(task.get("status")),
+        created_at=_optional_str(payload.get("createdAt")) or _optional_str(task.get("createdAt")),
+        started_at=_optional_str(payload.get("startedAt")) or _optional_str(task.get("startedAt")),
+        completed_at=_optional_str(payload.get("completedAt")) or _optional_str(task.get("completedAt")),
     )
 
 
@@ -158,6 +175,11 @@ def _object(value: JsonValue | None) -> dict[str, JsonValue]:
 
 def _object_list(value: JsonValue | None) -> list[dict[str, JsonValue]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _task_payload(payload: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    task = _object(payload.get("task"))
+    return task or payload
 
 
 def _optional_str(value: JsonValue | None) -> str | None:
