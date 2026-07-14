@@ -29,6 +29,7 @@ from enji_guard_cli.transport import (
     HttpxEnjiHttpClient,
     raise_for_response_status,
 )
+from enji_guard_cli.transport_types import RetryProfile
 
 HTTP_OK = 200
 HTTP_UNAUTHORIZED = 401
@@ -63,6 +64,7 @@ class ApiRequestSpec[T]:
     path: str
     operation: str
     parser: JsonObjectParser[T]
+    retry_profile: RetryProfile = RetryProfile.READ
     json_body: EnjiJsonValue | None = None
     expected_statuses: Collection[int] = HTTP_OK_ONLY
 
@@ -88,6 +90,7 @@ class ApiEndpoint[T]:
             method=self.spec.method,
             path=path,
             operation=self.spec.operation,
+            retry_profile=self.spec.retry_profile,
             parser=parser if parser is not None else self.parser,
             json_body=json_body,
             expected_statuses=self.expected_statuses,
@@ -184,6 +187,7 @@ async def request_no_content(
             url=f"{session.base_url}{spec.path}",
             operation=spec.operation,
             headers=dict(session.headers),
+            profile=spec.retry_profile,
             json_body=spec.json_body,
         ),
     )
@@ -206,7 +210,13 @@ async def get_json_object(
     return await request_json_object(
         session,
         client,
-        ApiRequestSpec(method="GET", path=path, operation=operation, parser=normalize_json_object),
+        ApiRequestSpec(
+            method="GET",
+            path=path,
+            operation=operation,
+            retry_profile=RetryProfile.READ,
+            parser=normalize_json_object,
+        ),
     )
 
 
@@ -223,6 +233,7 @@ async def request_json_object[T](
             url=f"{session.base_url}{spec.path}",
             operation=spec.operation,
             headers=dict(session.headers),
+            profile=spec.retry_profile,
             json_body=spec.json_body,
         ),
     )
@@ -244,6 +255,8 @@ async def request_with_refresh(
         return response
 
     await refresh_session_once(session, client, refresh_epoch)
+    if not request.profile.replay_safe:
+        return response
     retry_response = await client.request(request_with_current_headers(request, session))
     if is_auth_invalid_response(retry_response):
         raise EnjiHttpError(AUTH_INVALID_CODE, "invalid access token after refresh", status_code=HTTP_UNAUTHORIZED)
@@ -286,6 +299,7 @@ def request_with_current_headers(request: EnjiHttpRequest, session: EnjiApiSessi
         url=request.url,
         operation=request.operation,
         headers=dict(session.headers),
+        profile=request.profile,
         json_body=request.json_body,
         timeout_seconds=request.timeout_seconds,
     )

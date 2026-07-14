@@ -3,6 +3,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from time import monotonic
 
+from enji_guard_cli.core import (
+    AuditCatalogChangeNotifier,
+    begin_audit_catalog_observation,
+    current_audit_catalog_changes,
+    end_audit_catalog_observation,
+)
 from enji_guard_cli.telemetry import log_event, telemetry_provenance
 
 type JourneyBody = Callable[[], object]
@@ -49,9 +55,11 @@ def run_agent_journey(
     journey: AgentJourney,
     *,
     exit_code_for_exception: ExitCodeResolver | None = None,
+    audit_catalog_change_renderer: AuditCatalogChangeNotifier | None = None,
 ) -> object:
     record = _StartedJourney(journey=journey, started_at=monotonic())
     result: object | None = None
+    audit_catalog_observation = begin_audit_catalog_observation() if journey.surface == "cli" else None
     with telemetry_provenance(journey.provenance):
         log_event(_LOGGER, logging.INFO, f"{journey.event_prefix}_started", _start_fields(journey))
         try:
@@ -62,6 +70,11 @@ def run_agent_journey(
         else:
             return result
         finally:
+            changes = current_audit_catalog_changes()
+            if audit_catalog_observation is not None:
+                end_audit_catalog_observation(audit_catalog_observation)
+            if changes and audit_catalog_change_renderer is not None:
+                audit_catalog_change_renderer(changes)
             _log_finished(record, result)
 
 

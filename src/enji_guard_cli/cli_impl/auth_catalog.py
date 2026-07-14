@@ -105,7 +105,7 @@ def catalog_audits(
 def _catalog_audits_body(*, json_output: bool) -> object:
     payload = resolve_operation_result(resolve_operation_spec(OperationName.CATALOG_AUDITS).execute())
     if _require_json_output()(json_output):
-        echo_json(payload)
+        echo_json(payload, list_key="audits", include_audit_catalog=True)
     else:
         echo_audit_catalog(payload)
     return payload
@@ -127,7 +127,7 @@ def catalog_audit(
 def _catalog_audit_body(*, audit: str, json_output: bool) -> object:
     payload = resolve_operation_result(resolve_operation_spec(OperationName.CATALOG_AUDIT).execute(audit))
     if _require_json_output()(json_output):
-        echo_json(payload)
+        echo_json(payload, include_audit_catalog=True)
     else:
         echo_key_values(object_dict(payload))
     return payload

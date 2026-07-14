@@ -34,6 +34,15 @@ class StoredAuth(TypedDict):
     imported_at: str
 
 
+class PendingRefreshRotation(TypedDict):
+    version: Literal[1]
+    state: Literal["reserved", "rotated"]
+    previous_auth: StoredAuth
+    replacement_cookie_header: str | None
+    error_type: str | None
+    errno: int | None
+
+
 def stored_auth(base_url: str, credential: Credential) -> StoredAuth:
     return {
         "version": 1,
@@ -102,6 +111,90 @@ def replace_cookie_credential(path: Path, stored: StoredAuth, cookie_header: str
     return updated_auth
 
 
+def pending_rotation_path(auth_path: Path) -> Path:
+    return auth_path.with_name(f".{auth_path.name}.rotation.pending")
+
+
+def reserve_pending_rotation(auth_path: Path, previous_auth: StoredAuth) -> PendingRefreshRotation:
+    journal_path = pending_rotation_path(auth_path)
+    if journal_path.exists():
+        raise FileExistsError(journal_path)
+    pending: PendingRefreshRotation = {
+        "version": 1,
+        "state": "reserved",
+        "previous_auth": previous_auth,
+        "replacement_cookie_header": None,
+        "error_type": None,
+        "errno": None,
+    }
+    _write_json_file(journal_path, pending)
+    return pending
+
+
+def load_pending_rotation(auth_path: Path) -> PendingRefreshRotation | None:
+    journal_path = pending_rotation_path(auth_path)
+    try:
+        loaded = cast(object, json.loads(journal_path.read_text(encoding="utf-8")))
+    except OSError, json.JSONDecodeError:
+        return None
+    return _pending_rotation_from_loaded(loaded)
+
+
+def _pending_rotation_from_loaded(loaded: object) -> PendingRefreshRotation | None:
+    if not isinstance(loaded, dict) or loaded.get("version") != 1:
+        return None
+    state = loaded.get("state")
+    previous_auth = loaded.get("previous_auth")
+    replacement = loaded.get("replacement_cookie_header")
+    if state not in {"reserved", "rotated"} or not isinstance(previous_auth, dict):
+        return None
+    validated_auth = _load_stored_auth(previous_auth)
+    if validated_auth is None or (replacement is not None and not isinstance(replacement, str)):
+        return None
+    if state == "rotated" and not isinstance(replacement, str):
+        return None
+    return {
+        "version": 1,
+        "state": cast(Literal["reserved", "rotated"], state),
+        "previous_auth": validated_auth,
+        "replacement_cookie_header": replacement,
+        "error_type": loaded.get("error_type") if isinstance(loaded.get("error_type"), str) else None,
+        "errno": loaded.get("errno") if isinstance(loaded.get("errno"), int) else None,
+    }
+
+
+def mark_pending_rotation_rotated(
+    auth_path: Path, pending: PendingRefreshRotation, replacement_cookie_header: str
+) -> PendingRefreshRotation:
+    updated: PendingRefreshRotation = {
+        **pending,
+        "state": "rotated",
+        "replacement_cookie_header": replacement_cookie_header,
+        "error_type": None,
+        "errno": None,
+    }
+    _write_json_file(pending_rotation_path(auth_path), updated)
+    return updated
+
+
+def record_pending_rotation_error(
+    auth_path: Path, pending: PendingRefreshRotation, error_type: str, errno: int | None
+) -> None:
+    _write_json_file(
+        pending_rotation_path(auth_path),
+        {**pending, "error_type": error_type, "errno": errno},
+    )
+
+
+def consume_pending_rotation(auth_path: Path) -> None:
+    journal_path = pending_rotation_path(auth_path)
+    try:
+        journal_path.unlink()
+    except FileNotFoundError:
+        return
+    _fsync_directory(journal_path.parent)
+
+
 def _load_stored_auth(loaded: dict[object, object]) -> StoredAuth | None:
     raw_credential = loaded.get("credential")
     if not isinstance(raw_credential, dict):
@@ -137,3 +230,32 @@ def _fsync_directory(path: Path) -> None:
         fsync(directory_fd)
     finally:
         close(directory_fd)
+
+
+def _write_json_file(path: Path, payload: object) -> None:
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
+    serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            temp_file.write(serialized)
+            temp_file.flush()
+            fsync(temp_file.fileno())
+        temp_path.chmod(0o600)
+        temp_path.replace(path)
+        _fsync_directory(path.parent)
+    except OSError:
+        if temp_path is not None:
+            with contextlib.suppress(OSError):
+                temp_path.unlink()
+        raise
+    path.chmod(0o600)

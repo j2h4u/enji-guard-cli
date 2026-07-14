@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Annotated, Literal, cast
 
 import typer
@@ -45,6 +45,7 @@ from enji_guard_cli.cli_impl.write_preferences_commands import (
     schedule_app,
 )
 from enji_guard_cli.core import (
+    AuditCatalogChange,
     OperationName,
     OperationResult,
     ReportWaitOptions,
@@ -125,6 +126,37 @@ def _echo_error(code: str, message: str) -> None:
     typer.echo(f"{code}: {message}", err=True)
 
 
+def _echo_audit_catalog_changes(changes: tuple[AuditCatalogChange, ...]) -> None:
+    details = "; ".join(_audit_catalog_change_text(change) for change in changes)
+    typer.echo(f"audit catalog changed: {details}")
+
+
+def _audit_catalog_change_text(change: AuditCatalogChange) -> str:
+    if change.kind == "added":
+        return f'added audit {change.selector} ("{_audit_catalog_title(change.current, change.selector)}")'
+    if change.kind == "removed":
+        return f'removed audit {change.selector} ("{_audit_catalog_title(change.previous, change.selector)}")'
+    fields = ", ".join(
+        f"{field}: {_audit_catalog_value(change.previous, field)} -> {_audit_catalog_value(change.current, field)}"
+        for field in change.changed_fields
+    )
+    return f"changed audit {change.selector} ({fields or 'catalog metadata'})"
+
+
+def _audit_catalog_title(payload: Mapping[str, object] | None, fallback: str) -> str:
+    if payload is None:
+        return fallback
+    title = payload.get("title")
+    return title if isinstance(title, str) and title else fallback
+
+
+def _audit_catalog_value(payload: Mapping[str, object] | None, field: str) -> str:
+    if payload is None:
+        return "-"
+    value = payload.get(field)
+    return repr(value)
+
+
 def _run_human_or_json_command(
     action: JsonCommandAction,
     json_output: bool,
@@ -183,7 +215,12 @@ def _run_cli_journey(
         selector_kind=selector_kind,
         all_flag=all_flag,
     )
-    return run_agent_journey(body, resolved_journey, exit_code_for_exception=_cli_exit_code_for_exception)
+    return run_agent_journey(
+        body,
+        resolved_journey,
+        exit_code_for_exception=_cli_exit_code_for_exception,
+        audit_catalog_change_renderer=None if resolved_journey.json_output else _echo_audit_catalog_changes,
+    )
 
 
 def _cli_journey(

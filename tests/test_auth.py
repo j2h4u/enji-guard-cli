@@ -85,7 +85,7 @@ def test_import_bearer_token_stores_token_credential(tmp_path: Path) -> None:
 
 
 def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    slept_with: list[int] = []
+    slept_with: list[float] = []
 
     class FakeHttpxEnjiHttpClient:
         async def __aenter__(self) -> FakeHttpxEnjiHttpClient:
@@ -100,7 +100,7 @@ def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch
     def fake_sleep_seconds(*, auth_file: Path, refresh_settings: AutoRefreshSettings, **_kwargs: object) -> int:
         raise ValueError("invalid auth state")
 
-    async def fake_sleep(seconds: int) -> None:
+    async def fake_sleep(seconds: float) -> None:
         slept_with.append(seconds)
         raise asyncio.CancelledError
 

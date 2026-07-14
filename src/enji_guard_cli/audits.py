@@ -22,7 +22,7 @@ class AuditDefinition:
 
 @dataclass(frozen=True, slots=True)
 class AuditCatalog:
-    """Live audit actions, with recon kept outside the published report set."""
+    """Live published audits, with recon kept separate."""
 
-    report_audits: tuple[AuditDefinition, ...]
+    published_audits: tuple[AuditDefinition, ...]
     recon: AuditDefinition

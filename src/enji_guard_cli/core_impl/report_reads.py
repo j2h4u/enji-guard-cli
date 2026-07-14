@@ -32,7 +32,7 @@ def selected_reports_to_read(
     if not audits:
         return [report for report in status["items"] if report["report"]["can_read"]]
 
-    audits_by_selector = {audit.selector: audit for audit in catalog.report_audits}
+    audits_by_selector = {audit.selector: audit for audit in catalog.published_audits}
     selected_reports: list[ReportAuditStatusPayload] = []
     for selector in audits:
         audit = audits_by_selector.get(selector)

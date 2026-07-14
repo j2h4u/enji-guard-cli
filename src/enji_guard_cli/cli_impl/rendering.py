@@ -6,14 +6,38 @@ import typer
 
 from enji_guard_cli.cli_impl.durations import format_duration_seconds
 from enji_guard_cli.cli_impl.rendering_support import object_dict, object_list
+from enji_guard_cli.core import current_audit_catalog_changes
 
 type JsonCommandAction = Callable[[], object]
 
 MIN_TIMEZONE_DIVERGENCE_COUNT = 2
 
 
-def echo_json(payload: object) -> None:
-    typer.echo(json.dumps(payload, sort_keys=True))
+def echo_json(payload: object, *, list_key: str = "items", include_audit_catalog: bool = False) -> None:
+    rendered_payload = (
+        _json_payload_with_audit_catalog(payload, list_key=list_key) if include_audit_catalog else payload
+    )
+    typer.echo(json.dumps(rendered_payload, sort_keys=True))
+
+
+def _json_payload_with_audit_catalog(payload: object, *, list_key: str) -> object:
+    changes = [
+        {
+            "action_key": change.action_key,
+            "changed_fields": list(change.changed_fields),
+            "current": change.current,
+            "kind": change.kind,
+            "previous": change.previous,
+            "selector": change.selector,
+        }
+        for change in current_audit_catalog_changes()
+    ]
+    audit_catalog = {"changes": changes}
+    if isinstance(payload, dict):
+        return {**payload, "audit_catalog": audit_catalog}
+    if isinstance(payload, list):
+        return {list_key: payload, "audit_catalog": audit_catalog}
+    return {"value": payload, "audit_catalog": audit_catalog}
 
 
 def echo_table(headers: tuple[str, ...], rows: list[tuple[str, ...]], empty_message: str = "No rows.") -> None:

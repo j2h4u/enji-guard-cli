@@ -74,7 +74,7 @@ def _audit_start_body(
         lambda: _require_start_report_audits()(repo, project, audits or [], all_reports)
     )
     if _require_json_output()(json_output):
-        echo_json(payload)
+        echo_json(payload, include_audit_catalog=True)
     else:
         echo_audit_start(payload)
     return payload

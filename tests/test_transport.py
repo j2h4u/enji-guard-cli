@@ -136,10 +136,15 @@ def test_retry_after_seconds_accepts_delta_seconds() -> None:
     assert retry_after_seconds({"Retry-After": "9"}) == 9
 
 
-def test_retry_config_build_defaults_to_no_retries() -> None:
+def test_retry_config_build_defaults_to_bounded_retries() -> None:
     retry = RetryConfig().build()
 
-    assert retry.total == 0
+    assert retry.total == 3
+    assert retry.backoff_factor == 0.5
+    assert retry.max_delay_seconds == 30.0
+    assert retry.jitter_seconds == 0.5
+    assert retry.status_forcelist == (429, 500, 502, 503, 504)
+    assert retry.respect_retry_after_header is True
 
 
 def _response_from_httpx(response: httpx.Response) -> EnjiHttpResponse:

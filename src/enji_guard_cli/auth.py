@@ -4,7 +4,6 @@ import fcntl
 import logging
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import NotRequired, TypedDict, TypeGuard, cast
@@ -33,8 +32,14 @@ from enji_guard_cli.auth_impl.payloads import (
 )
 from enji_guard_cli.auth_impl.store import (
     CredentialType,
+    PendingRefreshRotation,
     StoredAuth,
+    consume_pending_rotation,
     load_auth_file,
+    load_pending_rotation,
+    mark_pending_rotation_rotated,
+    record_pending_rotation_error,
+    reserve_pending_rotation,
     stored_auth,
     write_auth_file,
 )
@@ -52,6 +57,7 @@ from enji_guard_cli.transport import (
     HttpxEnjiHttpClient,
     raise_for_response_status,
 )
+from enji_guard_cli.transport_types import RetryProfile
 
 AUTH_REFRESH_PATH = "/api/v1/auth/refresh"
 AUTH_INVALID_CODE = "AUTH_INVALID"
@@ -72,17 +78,6 @@ class AuthError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
-
-
-@dataclass(frozen=True)
-class _PendingRefreshRotation:
-    previous_auth: StoredAuth
-    cookie_header: str
-    error_type: str
-    errno: int | None
-
-
-_PENDING_REFRESH_ROTATIONS: dict[Path, _PendingRefreshRotation] = {}
 
 
 class ImportCredentialPayload(TypedDict):
@@ -440,9 +435,13 @@ async def refresh_cookie_auth(path: Path, stored_auth: StoredAuth, client: EnjiH
     async with _COOKIE_REFRESH_LOCK:
         with _cookie_refresh_file_lock(path):
             latest_auth = _latest_auth_for_refresh(path, stored_auth)
-            pending_rotation = _PENDING_REFRESH_ROTATIONS.get(_pending_rotation_key(path))
-            if pending_rotation is not None:
+            if latest_auth["credential"]["type"] != CredentialType.COOKIE.value:
+                raise EnjiHttpError("AUTH_REQUIRED", "stored credential is not cookie based")
+            pending_rotation = load_pending_rotation(path)
+            if pending_rotation is not None and pending_rotation["state"] == "rotated":
                 return _recover_pending_refresh_rotation(path, latest_auth, pending_rotation)
+            if pending_rotation is not None:
+                consume_pending_rotation(path)
             if latest_auth is not stored_auth:
                 return latest_auth
             return await _refresh_cookie_auth_unlocked(path, stored_auth, client)
@@ -459,12 +458,17 @@ async def _refresh_cookie_auth_unlocked(path: Path, stored_auth: StoredAuth, cli
     credential = stored_auth["credential"]
     if credential["type"] != CredentialType.COOKIE.value:
         raise EnjiHttpError("AUTH_REQUIRED", "stored credential is not cookie based")
+    try:
+        reserve_pending_rotation(path, stored_auth)
+    except OSError as exc:
+        raise EnjiHttpError("STORAGE", f"failed to reserve refreshed cookie: {exc}") from exc
     response = await client.request(
         EnjiHttpRequest(
             method="POST",
             url=f"{stored_auth['base_url']}{AUTH_REFRESH_PATH}",
             operation="auth refresh",
             headers=_auth_refresh_headers(stored_auth),
+            profile=RetryProfile.AUTH_REFRESH,
         )
     )
     if response.status_code in {HTTP_UNAUTHORIZED, HTTP_FORBIDDEN}:
@@ -519,11 +523,16 @@ def _persist_refresh_response_cookies(
     except ValueError as exc:
         raise EnjiHttpError("AUTH_REQUIRED", str(exc)) from exc
     try:
+        pending_rotation = load_pending_rotation(path)
+        if pending_rotation is None:
+            raise OSError("pending refresh rotation journal is missing")
+        mark_pending_rotation_rotated(path, pending_rotation, cookie_header.value)
         return replace_cookie_credential(path, stored_auth, cookie_header.value)
     except OSError as exc:
-        _PENDING_REFRESH_ROTATIONS[_pending_rotation_key(path)] = _pending_refresh_rotation(
-            stored_auth, cookie_header.value, exc
-        )
+        pending_rotation = load_pending_rotation(path)
+        if pending_rotation is not None:
+            with contextlib.suppress(OSError):
+                record_pending_rotation_error(path, pending_rotation, type(exc).__name__, exc.errno)
         _log_refresh_rotation_persistence("enji_auth_refresh_rotation_deferred", logging.WARNING, exc)
         raise EnjiHttpError("STORAGE", f"failed to persist refreshed cookie: {exc}") from exc
     except ValueError as exc:
@@ -541,36 +550,32 @@ def _should_persist_transient_refresh_cookies(response: EnjiHttpResponse) -> boo
 def _recover_pending_refresh_rotation(
     path: Path,
     latest_auth: StoredAuth,
-    pending_rotation: _PendingRefreshRotation,
+    pending_rotation: PendingRefreshRotation,
 ) -> StoredAuth:
-    pending_key = _pending_rotation_key(path)
-    if _cookie_auth_matches(latest_auth, pending_rotation.previous_auth):
+    cookie_header = pending_rotation["replacement_cookie_header"]
+    if cookie_header is None:
+        consume_pending_rotation(path)
+        return latest_auth
+    if _cookie_auth_matches(latest_auth, pending_rotation["previous_auth"]):
         try:
-            recovered_auth = replace_cookie_credential(path, latest_auth, pending_rotation.cookie_header)
+            recovered_auth = replace_cookie_credential(path, latest_auth, cookie_header)
         except OSError as exc:
-            _PENDING_REFRESH_ROTATIONS[pending_key] = replace(
-                pending_rotation,
-                error_type=type(exc).__name__,
-                errno=exc.errno,
-            )
+            with contextlib.suppress(OSError):
+                record_pending_rotation_error(path, pending_rotation, type(exc).__name__, exc.errno)
             _log_refresh_rotation_persistence("enji_auth_refresh_rotation_deferred", logging.WARNING, exc)
             raise EnjiHttpError("STORAGE", f"failed to persist refreshed cookie: {exc}") from exc
-        _PENDING_REFRESH_ROTATIONS.pop(pending_key, None)
+        consume_pending_rotation(path)
         _log_pending_refresh_rotation("enji_auth_refresh_rotation_recovered", logging.INFO, pending_rotation)
         return recovered_auth
 
-    if _cookie_auth_matches_header(latest_auth, pending_rotation.cookie_header):
-        _PENDING_REFRESH_ROTATIONS.pop(pending_key, None)
+    if _cookie_auth_matches_header(latest_auth, cookie_header):
+        consume_pending_rotation(path)
         _log_pending_refresh_rotation("enji_auth_refresh_rotation_recovered", logging.INFO, pending_rotation)
         return latest_auth
 
-    _PENDING_REFRESH_ROTATIONS.pop(pending_key, None)
+    consume_pending_rotation(path)
     _log_pending_refresh_rotation("enji_auth_refresh_rotation_superseded", logging.WARNING, pending_rotation)
     return latest_auth
-
-
-def _pending_rotation_key(path: Path) -> Path:
-    return path.resolve()
 
 
 def _cookie_auth_matches(left: StoredAuth, right: StoredAuth) -> bool:
@@ -591,16 +596,12 @@ def _log_refresh_rotation_persistence(event: str, level: int, exc: OSError) -> N
     log_event(_LOGGER, level, event, _storage_error_fields(type(exc).__name__, exc.errno))
 
 
-def _pending_refresh_rotation(stored_auth: StoredAuth, cookie_header: str, exc: OSError) -> _PendingRefreshRotation:
-    return _PendingRefreshRotation(stored_auth, cookie_header, type(exc).__name__, exc.errno)
+def _log_pending_refresh_rotation(event: str, level: int, pending_rotation: PendingRefreshRotation) -> None:
+    log_event(_LOGGER, level, event, _storage_error_fields(pending_rotation["error_type"], pending_rotation["errno"]))
 
 
-def _log_pending_refresh_rotation(event: str, level: int, pending_rotation: _PendingRefreshRotation) -> None:
-    log_event(_LOGGER, level, event, _storage_error_fields(pending_rotation.error_type, pending_rotation.errno))
-
-
-def _storage_error_fields(error_type: str, errno: int | None) -> dict[str, object]:
-    fields: dict[str, object] = {"error_type": error_type}
+def _storage_error_fields(error_type: str | None, errno: int | None) -> dict[str, object]:
+    fields: dict[str, object] = {"error_type": error_type or "unknown"}
     if errno is not None:
         fields["errno"] = errno
     return fields
@@ -682,6 +683,7 @@ async def _request_auth_status(
             method="GET",
             url=f"{stored_auth['base_url']}/api/v1/auth/me",
             headers=auth_headers(stored_auth),
+            profile=RetryProfile.READ,
             timeout_seconds=request_timeout,
             operation="auth status",
         )

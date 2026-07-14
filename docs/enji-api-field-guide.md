@@ -34,11 +34,17 @@ authentication path.
 
 ## Audit Discovery
 
-Every report-aware top-level command fetches `GET /api/ux/catalog` once per
-invocation. The client does not cache the response and has no fallback. The
-`curatedActions` array is authoritative: published actions in the live response
-define the available report audits, so newly published reports participate
-automatically.
+Every command in the Audit Catalog context fetches `GET /api/ux/catalog` once
+per invocation. The `curatedActions` array is authoritative: published audits
+in the live response define the available audits, so newly published audits
+participate automatically. The CLI maintains
+`~/.config/enji-guard/state/audit-catalog.json` only as the previous observation
+for detecting added, removed, or changed audits. It is never an API fallback or
+selector source. The first valid response establishes a baseline without a
+business notice; later differences are emitted as a text business notice on
+stdout. JSON places the notice data in the stable top-level `audit_catalog`
+business section, with `changes: []` when there are no changes. stderr is
+reserved for errors.
 
 CLI report selectors are action-key suffixes without the `audit.` prefix. For
 example, selector `security` identifies action key `audit.security`; the exact
