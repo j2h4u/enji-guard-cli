@@ -9,12 +9,11 @@ from enji_guard_cli.core_impl.models import (
     ReportReadState,
     ReportStatusPayload,
 )
-from enji_guard_cli.core_impl.payloads import json_dict
 from enji_guard_cli.core_impl.repo_status import out_of_date
+from enji_guard_cli.enji_gateway import AuditArtifact
 from enji_guard_cli.errors import EnjiApiError
-from enji_guard_cli.json_types import JsonObjectPayload
 
-SnapshotReader = Callable[[str, AuditDefinition], JsonObjectPayload]
+SnapshotReader = Callable[[str, AuditDefinition], AuditArtifact]
 
 
 def selected_reports_to_read(
@@ -88,7 +87,7 @@ def _report_read_item(
         runbook_kind="",
     )
     try:
-        snapshot = json_dict(snapshot_reader(repo_id, audit).get("snapshot"))
+        artifact = snapshot_reader(repo_id, audit)
     except EnjiApiError as exc:
         if exc.code == "NOT_FOUND" and tolerate_unavailable:
             return _unavailable_report_read_item(
@@ -101,12 +100,12 @@ def _report_read_item(
             raise EnjiApiError(exc.code, f"{audit.action_key} snapshot not found") from exc
         raise
 
-    return _available_report_read_item(report, snapshot)
+    return _available_report_read_item(report, artifact)
 
 
 def _available_report_read_item(
     report: ReportAuditStatusPayload,
-    snapshot: JsonObjectPayload,
+    artifact: AuditArtifact,
 ) -> ReportReadItemPayload:
     report_status = report["report"]
     current_head_sha = report_status["current_head_sha"]
@@ -125,7 +124,15 @@ def _available_report_read_item(
         "state": "ready",
         "reason": None,
         "message": None,
-        "snapshot": snapshot,
+        # Keep the pre-Phase-5 wire-shaped public payload stable.  These are
+        # fixed, application-owned fields; artifact data cannot overwrite the body.
+        "snapshot": {
+            "content": {
+                "report": artifact.body,
+                **({"score": artifact.score} if artifact.score is not None else {}),
+                **({"generatedAt": artifact.generated_at} if artifact.generated_at is not None else {}),
+            }
+        },
     }
 
 

@@ -21,13 +21,14 @@ from enji_guard_cli.core_impl.payloads import json_object_payload as _json_objec
 from enji_guard_cli.core_impl.payloads import json_str as _json_str
 from enji_guard_cli.core_impl.preflight import report_start_preflight_payload as _report_start_preflight_payload
 from enji_guard_cli.core_impl.repo_status import current_active_runs as _current_active_runs
+from enji_guard_cli.enji_gateway import AuditArtifact, AuditRerunState, AuditRun, AuditTaskDetail, AuditTaskLink
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.settings import ActiveRunLedgerSettings
 
 type ResolveSingleRepoTarget = Callable[[str, str | None], RepoTargetPayload]
 type TargetedRunPayload = Callable[[RepoTargetPayload, object], dict[str, object]]
-type ReportSnapshot = Callable[[str, str], JsonObjectPayload]
+type ReportSnapshot = Callable[[str, str], AuditArtifact]
 type StartReportAuditsForTarget = Callable[[str, str, list[AuditDefinition]], AuditRunBatchPayload]
 type WaitForReportCompletion = Callable[..., ReportWaitPayload]
 type ActiveRunLedgerSettingsProvider = Callable[[], ActiveRunLedgerSettings]
@@ -40,15 +41,11 @@ class ReportWorkflowDependencies[TCreateRequest]:
     list_repo_active_runs: Callable[[str], JsonObjectPayload]
     get_repo_rerun_state: Callable[[str], JsonObjectPayload]
     list_repo_task_links: Callable[[str], JsonObjectPayload]
-    report_status_from_task_links: Callable[
-        [str, JsonObjectPayload, list[JsonValue], JsonObjectPayload, AuditCatalog],
-        ReportStatusPayload,
-    ]
     resolve_single_repo_target: ResolveSingleRepoTarget
     targeted_run_payload: TargetedRunPayload
     report_status: Callable[[str], ReportStatusPayload]
     report_snapshot: ReportSnapshot
-    read_report_snapshot: Callable[[str, AuditDefinition], JsonObjectPayload]
+    read_report_snapshot: Callable[[str, AuditDefinition], AuditArtifact]
     wait_for_report_completion: WaitForReportCompletion
     start_report_audits_for_target: StartReportAuditsForTarget
     monotonic: Callable[[], float]
@@ -59,6 +56,10 @@ class ReportWorkflowDependencies[TCreateRequest]:
     start_audit_dependencies: StartAuditDependenciesFactory[TCreateRequest]
     catalog: AuditCatalog
     catalog_payload: JsonObjectPayload
+    list_repo_active_run_models: Callable[[str], tuple[AuditRun, ...]]
+    get_repo_rerun_state_model: Callable[[str], AuditRerunState]
+    list_repo_task_link_models: Callable[[str], tuple[AuditTaskLink, ...]]
+    get_task_model: Callable[[str], AuditTaskDetail]
 
 
 def list_repo_active_runs[TCreateRequest](
@@ -83,24 +84,6 @@ def list_repo_task_links[TCreateRequest](
     dependencies: ReportWorkflowDependencies[TCreateRequest],
 ) -> JsonObjectPayload:
     return dependencies.list_repo_task_links(repo_id)
-
-
-def report_status[TCreateRequest](
-    repo_id: str,
-    *,
-    dependencies: ReportWorkflowDependencies[TCreateRequest],
-) -> ReportStatusPayload:
-    rerun_state = dependencies.get_repo_rerun_state(repo_id)
-    task_links = dependencies.list_repo_task_links(repo_id)
-    active_runs = merged_repo_active_runs(
-        repo_id,
-        rerun_state=rerun_state,
-        task_links=task_links,
-        dependencies=dependencies,
-    )
-    return dependencies.report_status_from_task_links(
-        repo_id, task_links, active_runs, rerun_state, dependencies.catalog
-    )
 
 
 def wait_for_report_completion[TCreateRequest](
@@ -198,7 +181,7 @@ def read_report_snapshot[TCreateRequest](
     audit: AuditDefinition,
     *,
     dependencies: ReportWorkflowDependencies[TCreateRequest],
-) -> JsonObjectPayload:
+) -> AuditArtifact:
     metric_group = audit.metric_group
     if metric_group is None:
         raise ValueError(f"{audit.action_key} is not a report audit")
@@ -266,6 +249,30 @@ def merged_repo_active_runs[TCreateRequest](
             task_links_payload=resolved_task_links,
             get_task=dependencies.get_task,
             settings=ledger_settings,
+            now=dependencies.now_utc(),
+        )
+    )
+
+
+def merged_repo_active_run_models[TCreateRequest](
+    repo_id: str,
+    *,
+    typed_rerun_state: AuditRerunState | None = None,
+    typed_task_links: tuple[AuditTaskLink, ...] | None = None,
+    dependencies: ReportWorkflowDependencies[TCreateRequest],
+) -> tuple[AuditRun, ...]:
+    """Return reconciled active runs as application DTOs."""
+
+    return _active_run_ledger.merged_active_run_models(
+        _active_run_ledger.TypedMergedActiveRunsRequest(
+            repo_id=repo_id,
+            upstream_active_runs=dependencies.list_repo_active_run_models(repo_id),
+            rerun_state=typed_rerun_state or dependencies.get_repo_rerun_state_model(repo_id),
+            task_links=typed_task_links
+            if typed_task_links is not None
+            else dependencies.list_repo_task_link_models(repo_id),
+            get_task=dependencies.get_task_model,
+            settings=dependencies.active_run_ledger_settings(),
             now=dependencies.now_utc(),
         )
     )

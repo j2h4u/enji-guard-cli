@@ -25,8 +25,10 @@ from enji_guard_cli.core_impl.models import (
     ReportReadState,
     ReportTaskLifecycleState,
 )
+from enji_guard_cli.core_impl.report_reads import read_reports_for_target
 from enji_guard_cli.core_impl.schedules import schedule_settings_payload_for_subscription
 from enji_guard_cli.core_impl.selectors import parse_github_repo
+from enji_guard_cli.enji_gateway import AuditArtifact, AuditRerunState, AuditRun, AuditTaskLink
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload
 from enji_guard_cli.settings import default_settings
@@ -432,6 +434,73 @@ def test_report_status_derives_ready_and_missing_reports_from_task_links(monkeyp
             "completed_at": None,
         },
         "agent_action": "audit.security",
+    }
+
+
+def test_typed_report_status_preserves_stale_partial_and_active_semantics() -> None:
+    payload = core._report_status_from_gateway(
+        "repo_1",
+        (
+            AuditTaskLink(
+                task_id="task_security",
+                action_key="audit.security",
+                status="completed",
+                artifact_schema_name="upfront.audit.summary",
+                created_at="2026-06-29T12:00:00Z",
+            ),
+        ),
+        (
+            AuditRun(
+                task_id="task_tests",
+                action_key="audit.tests",
+                status="in_progress",
+                created_at="2026-06-29T12:01:00Z",
+                started_at="2026-06-29T12:01:01Z",
+                completed_at=None,
+            ),
+        ),
+        AuditRerunState(
+            current_head_sha="head_2",
+            audited_head_sha="head_1",
+            rerun_allowed=True,
+            last_task_id="task_tests",
+            audited_head_shas={"audit.security": "head_1"},
+        ),
+        LIVE_CATALOG,
+    )
+
+    security = payload["items"][0]
+    tests = next(item for item in payload["items"] if item["action_key"] == "audit.tests")
+    assert security["report"]["stale"] is True
+    assert security["report"]["can_read"] is True
+    assert tests["task"]["lifecycle_state"] == "running"
+    assert payload["complete"] is False
+    assert payload["counts"]["stale"] == 1
+    assert payload["counts"]["running"] == 1
+
+
+def test_report_read_compatibility_projection_cannot_be_overwritten_by_artifact_fields() -> None:
+    report = next(
+        item
+        for item in core._report_status_from_gateway(
+            "repo_1",
+            (AuditTaskLink("task", "audit.security", "completed", "upfront.audit.summary"),),
+            (),
+            AuditRerunState("head", "head", None, None, {"audit.security": "head"}),
+            LIVE_CATALOG,
+        )["items"]
+        if item["action_key"] == "audit.security"
+    )
+    read = read_reports_for_target(
+        "repo_1",
+        [report],
+        snapshot_reader=lambda repo_id, audit: AuditArtifact(
+            audit.action_key, "safe body", score=80, generated_at="2026-07-15T08:00:00Z"
+        ),
+        tolerate_unavailable=False,
+    )
+    assert read["reports"][0].get("snapshot") == {
+        "content": {"report": "safe body", "score": 80, "generatedAt": "2026-07-15T08:00:00Z"}
     }
 
 
@@ -1810,10 +1879,10 @@ def test_read_reports_for_repo_defaults_to_ready_reports(monkeypatch: MonkeyPatc
         ),
     )
 
-    def fake_show_report(repo_id: str, audit: AuditDefinition, *_: object) -> dict[str, object]:
+    def fake_show_report(repo_id: str, audit: AuditDefinition, *_: object) -> AuditArtifact:
         name = audit.action_key.removeprefix("audit.")
         captured_audits.append(name)
-        return {"snapshot": {"content": {"report": f"# {name}"}}}
+        return AuditArtifact(audit.action_key, f"# {name}")
 
     monkeypatch.setattr(core, "_read_report_snapshot", fake_show_report)
 
@@ -1879,7 +1948,7 @@ def test_read_reports_for_repo_can_read_all_report_audits(monkeypatch: MonkeyPat
     monkeypatch.setattr(
         core,
         "_read_report_snapshot",
-        lambda repo_id, audit, *_: {"snapshot": {"content": {"report": audit.action_key.removeprefix("audit.")}}},
+        lambda repo_id, audit, *_: AuditArtifact(audit.action_key, audit.action_key.removeprefix("audit.")),
     )
     monkeypatch.setattr(
         core,
@@ -1938,10 +2007,10 @@ def test_read_reports_for_repo_all_marks_missing_reports_unavailable(monkeypatch
         ),
     )
 
-    def fake_show_report(repo_id: str, audit: AuditDefinition, *_: object) -> dict[str, object]:
+    def fake_show_report(repo_id: str, audit: AuditDefinition, *_: object) -> AuditArtifact:
         name = audit.action_key.removeprefix("audit.")
         captured_audits.append(name)
-        return {"snapshot": {"content": {"report": f"# {name}"}}}
+        return AuditArtifact(audit.action_key, f"# {name}")
 
     monkeypatch.setattr(core, "_read_report_snapshot", fake_show_report)
 
@@ -2944,6 +3013,81 @@ def test_report_status_projects_ledger_task_with_task_detail(tmp_path: Path, mon
         "completed_at": None,
     }
     assert payload["items"][0]["report"]["stale"] is True
+
+
+def test_repo_status_preserves_typed_ledger_run_compatibility_fields(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    settings = _ledger_test_settings(tmp_path)
+    monkeypatch.setattr(core, "default_settings", lambda: settings)
+    observed_at = datetime(2026, 7, 15, 10, 0, tzinfo=UTC)
+    active_run_ledger.record_started_run(
+        settings.active_run_ledger,
+        active_run_ledger.new_entry(
+            active_run_ledger.NewActiveRunLedgerEntryRequest(
+                repo_id="repo_1",
+                project_id="project_1",
+                action_key="audit.security",
+                task_id="task_security",
+                task_status="pending",
+                current_head_sha="head_current",
+                last_audited_head_sha="head_audited",
+                observed_at=observed_at,
+                started_at=None,
+                ttl_seconds=settings.active_run_ledger.ttl_seconds,
+            )
+        ),
+    )
+    monkeypatch.setattr(core, "run_projects", lambda: {"projects": [{"id": "project_1"}]})
+    monkeypatch.setattr(
+        core,
+        "run_project_detail",
+        lambda project_id: {
+            "project": {"id": project_id, "name": "pets"},
+            "repos": [{"id": "repo_1", "githubOwner": "j2h4u", "githubName": "enji-guard-cli"}],
+        },
+    )
+    monkeypatch.setattr(core, "run_repo_active_runs", lambda _repo_id: {"activeRuns": []})
+    monkeypatch.setattr(core, "run_repo_task_links", lambda _repo_id: {"links": []})
+    monkeypatch.setattr(
+        core,
+        "run_repo_audit_rerun_state",
+        lambda _repo_id: {"state": {"currentHeadSha": "head_current", "actions": {}}},
+    )
+    monkeypatch.setattr(
+        core,
+        "run_task_detail",
+        lambda task_id: {"task": {"id": task_id, "status": "pending", "completedAt": None}},
+    )
+
+    run = core.repo_status_all(None)["projects"][0]["repos"][0]["active_runs"][0]
+
+    assert run == {
+        "fleetTaskId": "task_security",
+        "actionKey": "audit.security",
+        "status": "pending",
+        "createdAt": observed_at.isoformat(),
+        "startedAt": None,
+        "completedAt": None,
+        "projectionSource": "local_started_task_ledger",
+        "projectionStatusSource": "task_by_id",
+        "expiresAt": "2026-07-15T16:00:00+00:00",
+        "currentHeadSha": "head_current",
+        "lastAuditedHeadSha": "head_audited",
+    }
+
+
+def test_repo_status_omits_typed_upstream_compatibility_fields_when_absent() -> None:
+    from enji_guard_cli.core_impl.status_views import _active_run_status_view
+
+    run = AuditRun("task_upstream", "audit.security", "running", None, None, None)
+
+    assert _active_run_status_view(run) == {
+        "fleetTaskId": "task_upstream",
+        "actionKey": "audit.security",
+        "status": "running",
+        "createdAt": None,
+        "startedAt": None,
+        "completedAt": None,
+    }
 
 
 def test_start_audit_skips_when_ledger_task_is_still_active(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:

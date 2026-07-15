@@ -151,6 +151,11 @@ def _audit_run(payload: dict[str, JsonValue]) -> AuditRun:
         created_at=_optional_str(payload.get("createdAt")) or _optional_str(task.get("createdAt")),
         started_at=_optional_str(payload.get("startedAt")) or _optional_str(task.get("startedAt")),
         completed_at=_optional_str(payload.get("completedAt")) or _optional_str(task.get("completedAt")),
+        projection_source=_optional_str(payload.get("projectionSource")),
+        projection_status_source=_optional_str(payload.get("projectionStatusSource")),
+        expires_at=_optional_str(payload.get("expiresAt")),
+        current_head_sha=_optional_str(payload.get("currentHeadSha")),
+        last_audited_head_sha=_optional_str(payload.get("lastAuditedHeadSha")),
     )
 
 

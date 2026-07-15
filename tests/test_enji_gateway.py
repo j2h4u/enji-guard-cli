@@ -22,7 +22,7 @@ from enji_guard_cli.json_types import JsonObjectPayload
 from enji_guard_cli.transport import EnjiHttpClient
 
 
-def test_audit_artifact_translates_report_and_keeps_only_artifact_metadata() -> None:
+def test_audit_artifact_translates_only_explicit_application_fields() -> None:
     artifact = audit_artifact_from_snapshot(
         {
             "snapshot": {
@@ -30,6 +30,8 @@ def test_audit_artifact_translates_report_and_keeps_only_artifact_metadata() -> 
                     "report": "# Findings\n\nNo issues found.",
                     "score": 98,
                     "generatedAt": "2026-07-15T08:00:00Z",
+                    "metadata": {"report": "hostile replacement", "body": "hostile replacement"},
+                    "arbitrary": "must stay at the wire boundary",
                 }
             }
         },
@@ -38,11 +40,9 @@ def test_audit_artifact_translates_report_and_keeps_only_artifact_metadata() -> 
 
     assert artifact.audit_key == "audit.security"
     assert artifact.body == "# Findings\n\nNo issues found."
-    assert artifact.metadata == {
-        "score": 98,
-        "generatedAt": "2026-07-15T08:00:00Z",
-    }
-    assert "report" not in artifact.metadata
+    assert artifact.score == 98
+    assert artifact.generated_at == "2026-07-15T08:00:00Z"
+    assert not hasattr(artifact, "metadata")
 
 
 @pytest.mark.parametrize(
@@ -320,8 +320,8 @@ def test_audit_gateway_reads_snapshot(gateway_harness: _GatewayHarness) -> None:
     assert isinstance(artifact, AuditArtifact)
     assert artifact.audit_key == "audit.security"
     assert artifact.body == "findings"
-    assert artifact.metadata == {"score": 80}
-    assert "report" not in artifact.metadata
+    assert artifact.score == 80
+    assert artifact.generated_at is None
     assert gateway_harness.calls == [
         ("snapshot", ("repo-1", "audit.security", gateway_harness.auth_file, gateway_harness.client))
     ]

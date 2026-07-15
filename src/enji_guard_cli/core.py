@@ -21,6 +21,7 @@ from enji_guard_cli.core_impl.autofixes import list_autofixes as _list_autofixes
 from enji_guard_cli.core_impl.autofixes import set_autofixes as _set_autofixes
 from enji_guard_cli.core_impl.models import (
     DEFAULT_REPO_SORT,
+    TERMINAL_RUN_STATUSES,
     AuditRunBatchPayload,
     AuditRunSkippedPayload,
     AutofixSettingsUpdate,
@@ -75,7 +76,7 @@ from enji_guard_cli.core_impl.project_admin import remove_repo_payload as _remov
 from enji_guard_cli.core_impl.project_admin import rename_project as _rename_project_impl
 from enji_guard_cli.core_impl.repo_status import current_head_sha as _current_head_sha
 from enji_guard_cli.core_impl.repo_status import empty_report_status as _empty_report_status
-from enji_guard_cli.core_impl.repo_status import report_status_from_task_links as _report_status_from_task_links
+from enji_guard_cli.core_impl.repo_status import report_status_from_gateway as _report_status_from_gateway
 from enji_guard_cli.core_impl.repo_status import sort_project_repos as _sort_project_repos
 from enji_guard_cli.core_impl.report_language import ReportLanguageDependencies as _ReportLanguageDependencies
 from enji_guard_cli.core_impl.report_language import set_report_language as _set_report_language_impl
@@ -132,7 +133,6 @@ from enji_guard_cli.enji_api import (
 from enji_guard_cli.enji_api import add_project_repo as run_add_project_repo
 from enji_guard_cli.enji_api import audit_auto_runs as run_audit_auto_runs
 from enji_guard_cli.enji_api import audit_email_preferences as run_audit_email_preferences
-from enji_guard_cli.enji_api import audit_summary_snapshot as run_audit_summary_snapshot
 from enji_guard_cli.enji_api import (
     begin_audit_catalog_observation as _begin_audit_catalog_observation,
 )
@@ -155,7 +155,20 @@ from enji_guard_cli.enji_api import put_improvement_job as run_put_improvement_j
 from enji_guard_cli.enji_api import put_user_language as run_put_user_language
 from enji_guard_cli.enji_api import rename_project as run_rename_project
 from enji_guard_cli.enji_api import user_preferences as run_user_preferences
-from enji_guard_cli.enji_gateway import AuditGateway, AuditGatewayPort, AuditRun, AuditRunRequest
+from enji_guard_cli.enji_gateway import (
+    AuditArtifact,
+    AuditGateway,
+    AuditGatewayPort,
+    AuditRun,
+    AuditRunRequest,
+    AuditTaskDetail,
+)
+from enji_guard_cli.enji_gateway.wire import (
+    audit_rerun_state_from_legacy_payload,
+    audit_runs_from_legacy_payload,
+    audit_task_detail_from_legacy_payload,
+    audit_task_links_from_legacy_payload,
+)
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.settings import default_settings
@@ -238,6 +251,40 @@ def _task_detail_via_gateway(task_id: str) -> JsonObjectPayload:
             "completedAt": detail.completed_at,
         }
     }
+
+
+def _read_audit_snapshot_via_gateway(repo_id: str, audit_key: str) -> AuditArtifact:
+    return _audit_gateway().read_audit_snapshot(repo_id, audit_key)
+
+
+def _status_active_runs(repo_id: str) -> tuple[AuditRun, ...]:
+    if run_repo_active_runs is _repo_active_runs_via_gateway:
+        runs = _audit_gateway().active_runs(repo_id).runs
+    else:
+        runs = audit_runs_from_legacy_payload(run_repo_active_runs(repo_id))
+    return tuple(
+        run
+        for run in runs
+        if run.completed_at is None and (run.status or "").strip().lower() not in TERMINAL_RUN_STATUSES
+    )
+
+
+def _status_rerun_state(repo_id: str):
+    if run_repo_audit_rerun_state is _repo_rerun_state_via_gateway:
+        return _audit_gateway().rerun_state(repo_id)
+    return audit_rerun_state_from_legacy_payload(run_repo_audit_rerun_state(repo_id))
+
+
+def _status_task_links(repo_id: str):
+    if run_repo_task_links is _repo_task_links_via_gateway:
+        return _audit_gateway().task_links(repo_id).links
+    return audit_task_links_from_legacy_payload(run_repo_task_links(repo_id))
+
+
+def _status_task_detail(task_id: str) -> AuditTaskDetail:
+    if run_task_detail is _task_detail_via_gateway:
+        return _audit_gateway().task_detail(task_id)
+    return audit_task_detail_from_legacy_payload(run_task_detail(task_id), task_id)
 
 
 def _runbook_via_gateway(runbook_id: str) -> JsonObjectPayload:
@@ -430,8 +477,21 @@ def _list_repo_task_links(repo_id: str, catalog: AuditCatalog) -> JsonObjectPayl
 
 
 def _report_status(repo_id: str, catalog: AuditCatalog) -> ReportStatusPayload:
-    return _report_workflows.report_status(
-        repo_id, dependencies=_report_workflow_dependencies(catalog, {"curatedActions": []})
+    dependencies = _report_workflow_dependencies(catalog, {"curatedActions": []})
+    links = _status_task_links(repo_id)
+    rerun_state = _status_rerun_state(repo_id)
+    active_runs = _report_workflows.merged_repo_active_run_models(
+        repo_id,
+        typed_rerun_state=rerun_state,
+        typed_task_links=links,
+        dependencies=dependencies,
+    )
+    return _report_status_from_gateway(
+        repo_id,
+        links,
+        active_runs,
+        rerun_state,
+        catalog,
     )
 
 
@@ -557,7 +617,7 @@ def read_reports_for_repo(
 
 def _read_report_snapshot(
     repo_id: str, audit: AuditDefinition, catalog: AuditCatalog, catalog_payload: JsonObjectPayload
-) -> JsonObjectPayload:
+) -> AuditArtifact:
     return _report_workflows.read_report_snapshot(
         repo_id, audit, dependencies=_report_workflow_dependencies(catalog, catalog_payload)
     )
@@ -823,8 +883,20 @@ def _repo_runtime_status_from_target(target: RepoTargetPayload, catalog: AuditCa
             get_repo_rerun_state=lambda repo_id: _get_repo_rerun_state(repo_id, catalog),
             list_repo_task_links=lambda repo_id: _list_repo_task_links(repo_id, catalog),
             current_head_sha=_current_head_sha,
-            report_status_from_task_links=_report_status_from_task_links,
             catalog=catalog,
+            typed_repo_active_runs=lambda repo_id, rerun_state, task_links: (
+                _report_workflows.merged_repo_active_run_models(
+                    repo_id,
+                    typed_rerun_state=rerun_state,
+                    typed_task_links=task_links,
+                    dependencies=_report_workflow_dependencies(catalog, {"curatedActions": []}),
+                )
+            ),
+            typed_repo_rerun_state=_status_rerun_state,
+            typed_repo_task_links=_status_task_links,
+            typed_report_status=lambda repo_id, links, runs, rerun, selected_catalog: _report_status_from_gateway(
+                repo_id, links, runs, rerun, selected_catalog
+            ),
         ),
     )
 
@@ -869,13 +941,10 @@ def _report_workflow_dependencies(
         list_repo_active_runs=run_repo_active_runs,
         get_repo_rerun_state=run_repo_audit_rerun_state,
         list_repo_task_links=run_repo_task_links,
-        report_status_from_task_links=_report_status_from_task_links,
         resolve_single_repo_target=_resolve_single_repo_target,
         targeted_run_payload=_targeted_run_payload,
-        report_status=lambda repo_id: _report_workflows.report_status(
-            repo_id, dependencies=_report_workflow_dependencies(catalog, catalog_payload)
-        ),
-        report_snapshot=run_audit_summary_snapshot,
+        report_status=lambda repo_id: _report_status(repo_id, catalog),
+        report_snapshot=_read_audit_snapshot_via_gateway,
         read_report_snapshot=lambda repo_id, audit: _read_report_snapshot(repo_id, audit, catalog, catalog_payload),
         wait_for_report_completion=lambda repo_id, *, options, heartbeat: wait_for_report_completion(
             repo_id,
@@ -894,6 +963,10 @@ def _report_workflow_dependencies(
         start_audit_dependencies=lambda: _start_audit_dependencies(catalog, catalog_payload),
         catalog=catalog,
         catalog_payload=catalog_payload,
+        list_repo_active_run_models=_status_active_runs,
+        get_repo_rerun_state_model=_status_rerun_state,
+        list_repo_task_link_models=_status_task_links,
+        get_task_model=_status_task_detail,
     )
 
 

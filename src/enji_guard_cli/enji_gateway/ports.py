@@ -53,6 +53,11 @@ class AuditRun:
     created_at: str | None
     started_at: str | None
     completed_at: str | None
+    projection_source: str | None = None
+    projection_status_source: str | None = None
+    expires_at: str | None = None
+    current_head_sha: str | None = None
+    last_audited_head_sha: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +134,8 @@ class AuditArtifact:
 
     audit_key: str
     body: str
-    metadata: JsonObjectPayload
+    score: int | float | None = None
+    generated_at: str | None = None
 
 
 class MalformedAuditSnapshotError(ValueError):

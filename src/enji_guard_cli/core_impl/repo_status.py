@@ -23,22 +23,35 @@ from enji_guard_cli.core_impl.models import (
     ScoreGrade,
     ScoreSummaryPayload,
 )
-from enji_guard_cli.core_impl.payloads import json_dict, json_list, json_object_list, json_str
+from enji_guard_cli.core_impl.payloads import json_dict, json_list, json_str
+from enji_guard_cli.enji_gateway import AuditRerunState, AuditRun, AuditTaskLink
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 
-def report_status_from_task_links(
+def report_status_from_gateway(
     repo_id: str,
-    payload: JsonObjectPayload,
-    active_runs: list[JsonValue],
-    rerun_state: JsonObjectPayload | None,
+    links: tuple[AuditTaskLink, ...],
+    active_runs: tuple[AuditRun, ...],
+    rerun_state: AuditRerunState | None,
     catalog: AuditCatalog,
 ) -> ReportStatusPayload:
-    links_by_action = _report_links_by_action(payload)
-    active_runs_by_action = active_runs_by_action_map(active_runs)
-    current_sha = current_head_sha(rerun_state)
+    """Build the legacy status projection from typed gateway results."""
+
+    links_by_action = {
+        link.action_key: link
+        for link in links
+        if link.action_key is not None and link.artifact_schema_name == REPORT_ARTIFACT_SCHEMA
+    }
+    active_runs_by_action = {run.action_key: run for run in active_runs if run.action_key is not None}
+    current_sha = rerun_state.current_head_sha if rerun_state is not None else None
     reports = [
-        _report_audit_status(audit, links_by_action, active_runs_by_action, current_sha, rerun_state)
+        _report_audit_status_from_gateway(
+            audit,
+            links_by_action,
+            active_runs_by_action,
+            current_sha,
+            rerun_state,
+        )
         for audit in catalog.published_audits
     ]
     latest_report_at = last_report_at(reports)
@@ -77,33 +90,22 @@ def report_status_from_task_links(
     }
 
 
-def _report_links_by_action(payload: JsonObjectPayload) -> dict[str, dict[str, JsonValue]]:
-    links_by_action: dict[str, dict[str, JsonValue]] = {}
-    for link in json_object_list(payload.get("links")):
-        action_key = json_str(link.get("actionKey"))
-        artifact_schema = json_str(link.get("artifactSchemaName"))
-        if action_key is not None and artifact_schema == REPORT_ARTIFACT_SCHEMA:
-            links_by_action[action_key] = link
-    return links_by_action
-
-
-def _report_audit_status(
+def _report_audit_status_from_gateway(
     audit: AuditDefinition,
-    links_by_action: dict[str, dict[str, JsonValue]],
-    active_runs_by_action: dict[str, dict[str, JsonValue]],
+    links_by_action: dict[str, AuditTaskLink],
+    active_runs_by_action: dict[str, AuditRun],
     current_sha: str | None,
-    rerun_state: JsonObjectPayload | None,
+    rerun_state: AuditRerunState | None,
 ) -> ReportAuditStatusPayload:
-    action_key = audit.action_key
-    link = links_by_action.get(action_key)
-    active_run = active_runs_by_action.get(action_key)
-    audited_head_sha = last_audited_head_sha(rerun_state, action_key)
+    link = links_by_action.get(audit.action_key)
+    active_run = active_runs_by_action.get(audit.action_key)
+    audited_head_sha = rerun_state.audited_head_shas.get(audit.action_key) if rerun_state is not None else None
     stale = out_of_date(current_sha, audited_head_sha)
-    task_lifecycle_state = _task_lifecycle_state(active_run)
+    task_lifecycle_state = _typed_task_lifecycle_state(active_run)
     return {
         "audit": audit.action_key,
         "label": audit.title,
-        "action_key": action_key,
+        "action_key": audit.action_key,
         "metric_group": audit.metric_group,
         "report": {
             "readability_state": "readable" if link is not None else "unavailable",
@@ -111,24 +113,34 @@ def _report_audit_status(
             "freshness_state": _freshness_state(link, stale),
             "current_head_sha": current_sha,
             "audited_head_sha": audited_head_sha,
-            "created_at": _link_value(link, "createdAt"),
-            "started_at": _link_value(link, "startedAt"),
-            "completed_at": _link_value(link, "completedAt"),
-            "run_status": _link_value(link, "status"),
-            "fleet_task_id": _link_value(link, "fleetTaskId"),
+            "created_at": link.created_at if link is not None else None,
+            "started_at": link.started_at if link is not None else None,
+            "completed_at": link.completed_at if link is not None else None,
+            "run_status": link.status if link is not None else None,
+            "fleet_task_id": link.task_id if link is not None else None,
             "stale": stale,
         },
         "task": {
             "lifecycle_state": task_lifecycle_state,
             "active": task_lifecycle_state in {"queued", "running"},
-            "fleet_task_id": _active_run_value(active_run, "fleetTaskId"),
-            "run_status": _active_run_value(active_run, "status"),
-            "created_at": _active_run_value(active_run, "createdAt"),
-            "started_at": _active_run_value(active_run, "startedAt"),
-            "completed_at": _active_run_value(active_run, "completedAt"),
+            "fleet_task_id": active_run.task_id if active_run is not None else None,
+            "run_status": active_run.status if active_run is not None else None,
+            "created_at": active_run.created_at if active_run is not None else None,
+            "started_at": active_run.started_at if active_run is not None else None,
+            "completed_at": active_run.completed_at if active_run is not None else None,
         },
-        "agent_action": action_key,
+        "agent_action": audit.action_key,
     }
+
+
+def _typed_task_lifecycle_state(active_run: AuditRun | None) -> ReportTaskLifecycleState:
+    if active_run is None:
+        return "none"
+    if _normalized_run_status(active_run.status) in FAILED_REPORT_WAIT_STATUSES:
+        return "failed"
+    if active_run.started_at is not None:
+        return "running"
+    return "queued"
 
 
 def current_head_sha(rerun_state: JsonObjectPayload | None) -> str | None:
@@ -153,7 +165,7 @@ def out_of_date(current_sha: str | None, last_audited_sha: str | None) -> bool |
     return current_sha != last_audited_sha
 
 
-def _freshness_state(link: dict[str, JsonValue] | None, stale: bool | None) -> ReportFreshnessState:
+def _freshness_state(link: object | None, stale: bool | None) -> ReportFreshnessState:
     if link is None:
         return "unknown"
     if stale is None:
@@ -161,28 +173,6 @@ def _freshness_state(link: dict[str, JsonValue] | None, stale: bool | None) -> R
     if stale is True:
         return "stale"
     return "fresh"
-
-
-def _task_lifecycle_state(active_run: dict[str, JsonValue] | None) -> ReportTaskLifecycleState:
-    if active_run is None:
-        return "none"
-    if _normalized_run_status(_active_run_value(active_run, "status")) in FAILED_REPORT_WAIT_STATUSES:
-        return "failed"
-    if _active_run_value(active_run, "startedAt") is not None:
-        return "running"
-    return "queued"
-
-
-def _link_value(link: dict[str, JsonValue] | None, key: str) -> str | None:
-    if link is None:
-        return None
-    return json_str(link.get(key))
-
-
-def _active_run_value(active_run: dict[str, JsonValue] | None, key: str) -> str | None:
-    if active_run is None:
-        return None
-    return json_str(active_run.get(key))
 
 
 def active_runs_for_action(active_runs: list[JsonValue], action_key: str) -> list[JsonValue]:

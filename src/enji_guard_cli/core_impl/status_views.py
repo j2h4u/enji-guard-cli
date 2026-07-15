@@ -12,6 +12,7 @@ from enji_guard_cli.core_impl.models import (
     RepoTargetPayload,
 )
 from enji_guard_cli.core_impl.payloads import json_dict, json_object_list, json_str
+from enji_guard_cli.enji_gateway import AuditRerunState, AuditRun, AuditTaskLink
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 type ProjectDetail = Callable[[str], JsonObjectPayload]
@@ -25,9 +26,11 @@ type RepoActiveRuns = Callable[[str], list[JsonValue]]
 type GetRepoRerunState = Callable[[str], JsonObjectPayload | None]
 type ListRepoTaskLinks = Callable[[str], JsonObjectPayload]
 type CurrentHeadSha = Callable[[JsonObjectPayload | None], str | None]
-type ReportStatusFromTaskLinks = Callable[
-    [str, JsonObjectPayload, list[JsonValue], JsonObjectPayload | None, AuditCatalog],
-    ReportStatusPayload,
+type TypedRepoActiveRuns = Callable[[str, AuditRerunState, tuple[AuditTaskLink, ...]], tuple[AuditRun, ...]]
+type TypedRepoRerunState = Callable[[str], AuditRerunState]
+type TypedRepoTaskLinks = Callable[[str], tuple[AuditTaskLink, ...]]
+type TypedReportStatus = Callable[
+    [str, tuple[AuditTaskLink, ...], tuple[AuditRun, ...], AuditRerunState, AuditCatalog], ReportStatusPayload
 ]
 
 
@@ -37,8 +40,11 @@ class RuntimeStatusDependencies:
     get_repo_rerun_state: GetRepoRerunState
     list_repo_task_links: ListRepoTaskLinks
     current_head_sha: CurrentHeadSha
-    report_status_from_task_links: ReportStatusFromTaskLinks
     catalog: AuditCatalog
+    typed_repo_active_runs: TypedRepoActiveRuns
+    typed_repo_rerun_state: TypedRepoRerunState
+    typed_repo_task_links: TypedRepoTaskLinks
+    typed_report_status: TypedReportStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,15 +133,10 @@ def repo_runtime_status_from_target(
     dependencies: RuntimeStatusDependencies,
 ) -> RepoRuntimeStatusPayload:
     repo_id = target["repo_id"]
-    active_runs = dependencies.repo_active_runs(repo_id)
-    rerun_state = dependencies.get_repo_rerun_state(repo_id)
-    reports = dependencies.report_status_from_task_links(
-        repo_id,
-        dependencies.list_repo_task_links(repo_id),
-        active_runs,
-        rerun_state,
-        dependencies.catalog,
-    )
+    rerun_state = dependencies.typed_repo_rerun_state(repo_id)
+    task_links = dependencies.typed_repo_task_links(repo_id)
+    active_runs = dependencies.typed_repo_active_runs(repo_id, rerun_state, task_links)
+    reports = dependencies.typed_report_status(repo_id, task_links, active_runs, rerun_state, dependencies.catalog)
     payload: RepoRuntimeStatusPayload = {
         "project_id": target["project_id"],
         "project_name": target["project_name"],
@@ -149,12 +150,33 @@ def repo_runtime_status_from_target(
         "score_grades": target["score_grades"],
         "score_summary": target["score_summary"],
         "active_run_count": len(active_runs),
-        "active_runs": active_runs,
-        "current_head_sha": dependencies.current_head_sha(rerun_state),
+        "active_runs": [_active_run_status_view(run) for run in active_runs],
+        "current_head_sha": rerun_state.current_head_sha,
         "last_report_at": reports["last_report_at"],
         "reports": reports,
     }
     return payload
+
+
+def _active_run_status_view(run: AuditRun) -> JsonObjectPayload:
+    view: JsonObjectPayload = {
+        "fleetTaskId": run.task_id,
+        "actionKey": run.action_key,
+        "status": run.status,
+        "createdAt": run.created_at,
+        "startedAt": run.started_at,
+        "completedAt": run.completed_at,
+    }
+    compatibility_fields = {
+        "projectionSource": run.projection_source,
+        "projectionStatusSource": run.projection_status_source,
+        "expiresAt": run.expires_at,
+        "currentHeadSha": run.current_head_sha,
+        "lastAuditedHeadSha": run.last_audited_head_sha,
+    }
+    if run.projection_source is not None or any(value is not None for value in compatibility_fields.values()):
+        view.update(compatibility_fields)
+    return view
 
 
 def repo_inventory_status(

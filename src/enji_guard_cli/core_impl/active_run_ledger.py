@@ -6,9 +6,10 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import cast
 
-from enji_guard_cli.core_impl.models import REPORT_ARTIFACT_SCHEMA
+from enji_guard_cli.core_impl.models import REPORT_ARTIFACT_SCHEMA, TERMINAL_RUN_STATUSES
 from enji_guard_cli.core_impl.payloads import json_dict, json_object_list, json_str
 from enji_guard_cli.core_impl.repo_status import current_head_sha, last_audited_head_sha, out_of_date, run_is_active
+from enji_guard_cli.enji_gateway import AuditRerunState, AuditRun, AuditTaskDetail, AuditTaskLink
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.settings import ActiveRunLedgerSettings
@@ -44,6 +45,17 @@ class MergedActiveRunsRequest:
     rerun_state: JsonObjectPayload | None
     task_links_payload: JsonObjectPayload
     get_task: GetTask
+    settings: ActiveRunLedgerSettings
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class TypedMergedActiveRunsRequest:
+    repo_id: str
+    upstream_active_runs: tuple[AuditRun, ...]
+    rerun_state: AuditRerunState
+    task_links: tuple[AuditTaskLink, ...]
+    get_task: Callable[[str], AuditTaskDetail]
     settings: ActiveRunLedgerSettings
     now: datetime
 
@@ -106,6 +118,45 @@ def merged_active_runs(request: MergedActiveRunsRequest) -> list[JsonValue]:
     if changed:
         write_active_run_ledger(request.settings.state_file, ActiveRunLedger(entries=retained_entries))
     return [*request.upstream_active_runs, *projected_runs]
+
+
+def merged_active_run_models(request: TypedMergedActiveRunsRequest) -> tuple[AuditRun, ...]:
+    """Reconcile the local ledger without crossing back through JSON payloads."""
+
+    ledger = read_active_run_ledger(request.settings)
+    report_links = {
+        link.action_key: link
+        for link in request.task_links
+        if link.action_key is not None and link.artifact_schema_name == REPORT_ARTIFACT_SCHEMA
+    }
+    upstream_by_action = {run.action_key: run for run in request.upstream_active_runs if run.action_key is not None}
+    retained_entries: list[ActiveRunLedgerEntry] = []
+    projected_runs: list[AuditRun] = []
+    changed = False
+    for entry in ledger.entries:
+        if entry.repo_id != request.repo_id:
+            retained_entries.append(entry)
+            continue
+        if _entry_expired(entry, request.now) or _typed_entry_fresh(entry, request.rerun_state, report_links):
+            changed = True
+            continue
+        if entry.action_key in upstream_by_action:
+            retained_entries.append(entry)
+            continue
+        task_run = _typed_task_lookup_active_run(
+            entry,
+            get_task=request.get_task,
+            now=request.now,
+            lookup_grace_seconds=request.settings.lookup_grace_seconds,
+        )
+        if task_run is None:
+            changed = True
+            continue
+        retained_entries.append(entry)
+        projected_runs.append(task_run)
+    if changed:
+        write_active_run_ledger(request.settings.state_file, ActiveRunLedger(entries=retained_entries))
+    return (*request.upstream_active_runs, *projected_runs)
 
 
 def projected_active_run(entry: ActiveRunLedgerEntry) -> JsonObjectPayload:
@@ -237,6 +288,22 @@ def _entry_fresh(
     return out_of_date(current_head_sha(rerun_state), last_audited_head_sha(rerun_state, entry.action_key)) is False
 
 
+def _typed_entry_fresh(
+    entry: ActiveRunLedgerEntry,
+    rerun_state: AuditRerunState,
+    report_links: dict[str, AuditTaskLink],
+) -> bool:
+    if entry.action_key not in report_links:
+        return False
+    return (
+        out_of_date(
+            rerun_state.current_head_sha,
+            rerun_state.audited_head_shas.get(entry.action_key),
+        )
+        is False
+    )
+
+
 def _task_lookup_active_run(
     entry: ActiveRunLedgerEntry,
     *,
@@ -267,6 +334,57 @@ def _task_lookup_active_run(
         "lastAuditedHeadSha": entry.last_audited_head_sha,
     }
     return active_run if run_is_active(active_run) else None
+
+
+def _typed_task_lookup_active_run(
+    entry: ActiveRunLedgerEntry,
+    *,
+    get_task: Callable[[str], AuditTaskDetail],
+    now: datetime,
+    lookup_grace_seconds: int,
+) -> AuditRun | None:
+    if entry.task_id is None:
+        return _audit_run_from_ledger(entry)
+    try:
+        task = get_task(entry.task_id)
+    except EnjiApiError:
+        if _entry_age_seconds(entry, now) <= lookup_grace_seconds:
+            return _audit_run_from_ledger(entry)
+        return None
+    active_run = AuditRun(
+        task_id=task.task_id or entry.task_id,
+        action_key=entry.action_key,
+        status=task.status or entry.task_status,
+        created_at=task.created_at or entry.observed_at,
+        started_at=task.started_at or entry.started_at,
+        completed_at=task.completed_at,
+        projection_source=LOCAL_ACTIVE_RUN_SOURCE,
+        projection_status_source=TASK_LOOKUP_SOURCE,
+        expires_at=entry.expires_at,
+        current_head_sha=entry.current_head_sha,
+        last_audited_head_sha=entry.last_audited_head_sha,
+    )
+    return active_run if _typed_run_is_active(active_run) else None
+
+
+def _audit_run_from_ledger(entry: ActiveRunLedgerEntry) -> AuditRun:
+    return AuditRun(
+        task_id=entry.task_id,
+        action_key=entry.action_key,
+        status=entry.task_status,
+        created_at=entry.observed_at,
+        started_at=entry.started_at,
+        completed_at=None,
+        projection_source=LOCAL_ACTIVE_RUN_SOURCE,
+        projection_status_source="ledger",
+        expires_at=entry.expires_at,
+        current_head_sha=entry.current_head_sha,
+        last_audited_head_sha=entry.last_audited_head_sha,
+    )
+
+
+def _typed_run_is_active(run: AuditRun) -> bool:
+    return run.completed_at is None and (run.status or "").strip().lower() not in TERMINAL_RUN_STATUSES
 
 
 def _task_payload(payload: JsonObjectPayload) -> Mapping[str, object]:
