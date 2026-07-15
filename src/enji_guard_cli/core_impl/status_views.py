@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from enji_guard_cli.audit import AuditCatalog
+from enji_guard_cli.audit.ports import AuditRerunState, AuditRun, AuditTaskLink
 from enji_guard_cli.core_impl.models import (
     ProjectRuntimeStatusPayload,
     ReportStatusPayload,
@@ -12,7 +13,6 @@ from enji_guard_cli.core_impl.models import (
     RepoTargetPayload,
 )
 from enji_guard_cli.core_impl.payloads import json_dict, json_object_list, json_str
-from enji_guard_cli.enji_gateway import AuditRerunState, AuditRun, AuditTaskLink
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 type ProjectDetail = Callable[[str], JsonObjectPayload]

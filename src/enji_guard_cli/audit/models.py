@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class AuditDefinition:
-    """One live Enji audit action discovered from ``catalog.curatedActions``."""
+    """One live audit action discovered from the upstream catalog."""
 
     action_key: str
     title: str

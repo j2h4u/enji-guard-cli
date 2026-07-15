@@ -5,6 +5,7 @@ from typing import Never, cast
 
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit import parse_audit_catalog as _parse_audit_catalog
+from enji_guard_cli.audit.ports import AuditArtifact, AuditGatewayPort, AuditRun, AuditRunRequest, AuditTaskDetail
 from enji_guard_cli.auth import AuthError as AuthError
 from enji_guard_cli.auth import AuthRefreshPayload as AuthRefreshPayload
 from enji_guard_cli.auth import AuthStatusPayload as AuthStatusPayload
@@ -155,14 +156,7 @@ from enji_guard_cli.enji_api import put_improvement_job as run_put_improvement_j
 from enji_guard_cli.enji_api import put_user_language as run_put_user_language
 from enji_guard_cli.enji_api import rename_project as run_rename_project
 from enji_guard_cli.enji_api import user_preferences as run_user_preferences
-from enji_guard_cli.enji_gateway import (
-    AuditArtifact,
-    AuditGateway,
-    AuditGatewayPort,
-    AuditRun,
-    AuditRunRequest,
-    AuditTaskDetail,
-)
+from enji_guard_cli.enji_gateway import AuditGateway
 from enji_guard_cli.enji_gateway.wire import (
     audit_rerun_state_from_legacy_payload,
     audit_runs_from_legacy_payload,
@@ -978,13 +972,13 @@ def _make_audit_run_create(
     repo_id: str,
     project_id: str,
     action_key: str,
-    fleet_task_body: JsonObjectPayload,
+    task_body: JsonObjectPayload,
 ) -> AuditRunRequest:
     return AuditRunRequest(
         repo_id=repo_id,
         project_id=project_id,
         action_key=action_key,
-        task_body=fleet_task_body,
+        task_body=task_body,
     )
 
 

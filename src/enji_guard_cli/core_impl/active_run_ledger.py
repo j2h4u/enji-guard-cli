@@ -6,10 +6,10 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import cast
 
+from enji_guard_cli.audit.ports import AuditRerunState, AuditRun, AuditTaskDetail, AuditTaskLink
 from enji_guard_cli.core_impl.models import REPORT_ARTIFACT_SCHEMA, TERMINAL_RUN_STATUSES
 from enji_guard_cli.core_impl.payloads import json_dict, json_object_list, json_str
 from enji_guard_cli.core_impl.repo_status import current_head_sha, last_audited_head_sha, out_of_date, run_is_active
-from enji_guard_cli.enji_gateway import AuditRerunState, AuditRun, AuditTaskDetail, AuditTaskLink
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.settings import ActiveRunLedgerSettings

@@ -9,6 +9,7 @@ from pytest import MonkeyPatch
 import enji_guard_cli.core as core
 import enji_guard_cli.core_impl.operations as operations
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition, parse_audit_catalog
+from enji_guard_cli.audit.ports import AuditArtifact, AuditRerunState, AuditRun, AuditTaskLink
 from enji_guard_cli.core import (
     READ_OPERATION_SPECS,
     EmailPreferenceUpdate,
@@ -28,7 +29,6 @@ from enji_guard_cli.core_impl.models import (
 from enji_guard_cli.core_impl.report_reads import read_reports_for_target
 from enji_guard_cli.core_impl.schedules import schedule_settings_payload_for_subscription
 from enji_guard_cli.core_impl.selectors import parse_github_repo
-from enji_guard_cli.enji_gateway import AuditArtifact, AuditRerunState, AuditRun, AuditTaskLink
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload
 from enji_guard_cli.settings import default_settings
@@ -2838,7 +2838,7 @@ def test_start_audit_builds_spa_compatible_fleet_task_body(monkeypatch: MonkeyPa
     assert request.repo_id == "repo_1"
     assert request.project_id == "project_1"
     assert request.action_key == "audit.recon"
-    assert request.fleet_task_body == {
+    assert request.task_body == {
         "title": "Run recon for j2h4u/enji-guard-cli",
         "description": "Repo j2h4u/enji-guard-cli\n- https://example.test\nupfront.recon.report",
         "project_id": "project_1",

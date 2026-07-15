@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import cast
 
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit.ports import AuditArtifact, AuditRerunState, AuditRun, AuditTaskDetail, AuditTaskLink
 from enji_guard_cli.core_impl import active_run_ledger as _active_run_ledger
 from enji_guard_cli.core_impl import audit_runs as _audit_runs
 from enji_guard_cli.core_impl import report_reads as _report_reads
@@ -21,7 +22,6 @@ from enji_guard_cli.core_impl.payloads import json_object_payload as _json_objec
 from enji_guard_cli.core_impl.payloads import json_str as _json_str
 from enji_guard_cli.core_impl.preflight import report_start_preflight_payload as _report_start_preflight_payload
 from enji_guard_cli.core_impl.repo_status import current_active_runs as _current_active_runs
-from enji_guard_cli.enji_gateway import AuditArtifact, AuditRerunState, AuditRun, AuditTaskDetail, AuditTaskLink
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.settings import ActiveRunLedgerSettings

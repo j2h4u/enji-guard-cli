@@ -1,5 +1,20 @@
 """Concrete Enji Gateway adapter for Audit endpoint access."""
 
+from enji_guard_cli.audit.ports import (
+    AuditArtifact,
+    AuditCatalogAction,
+    AuditCatalogResult,
+    AuditGatewayPort,
+    AuditRerunState,
+    AuditRun,
+    AuditRunbookMetadata,
+    AuditRunRequest,
+    AuditRunResult,
+    AuditRunsResult,
+    AuditTaskDetail,
+    AuditTaskLink,
+    AuditTaskLinksResult,
+)
 from enji_guard_cli.enji_api import (
     AuditRunCreate,
 )
@@ -27,23 +42,7 @@ from enji_guard_cli.enji_api import (
 from enji_guard_cli.enji_api import (
     task_detail as _task_detail,
 )
-from enji_guard_cli.enji_gateway.ports import (
-    AuditArtifact,
-    AuditCatalogAction,
-    AuditCatalogResult,
-    AuditGatewayPort,
-    AuditRerunState,
-    AuditRun,
-    AuditRunbookMetadata,
-    AuditRunRequest,
-    AuditRunResult,
-    AuditRunsResult,
-    AuditTaskDetail,
-    AuditTaskLink,
-    AuditTaskLinksResult,
-    GatewayAuthFile,
-    GatewayClient,
-)
+from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayClient
 from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot
 from enji_guard_cli.json_types import JsonValue
 

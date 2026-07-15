@@ -2,6 +2,7 @@ import time
 from datetime import UTC, datetime
 
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit.ports import AuditRerunState, AuditRun, AuditTaskLink
 from enji_guard_cli.core_impl.models import (
     FAILED_REPORT_WAIT_STATUSES,
     REPORT_ARTIFACT_SCHEMA,
@@ -24,7 +25,6 @@ from enji_guard_cli.core_impl.models import (
     ScoreSummaryPayload,
 )
 from enji_guard_cli.core_impl.payloads import json_dict, json_list, json_str
-from enji_guard_cli.enji_gateway import AuditRerunState, AuditRun, AuditTaskLink
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 

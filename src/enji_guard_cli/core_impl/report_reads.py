@@ -2,6 +2,7 @@ from collections.abc import Callable
 from typing import Never
 
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit.ports import AuditArtifact
 from enji_guard_cli.core_impl.models import (
     ReportAuditStatusPayload,
     ReportReadItemPayload,
@@ -10,7 +11,6 @@ from enji_guard_cli.core_impl.models import (
     ReportStatusPayload,
 )
 from enji_guard_cli.core_impl.repo_status import out_of_date
-from enji_guard_cli.enji_gateway import AuditArtifact
 from enji_guard_cli.errors import EnjiApiError
 
 SnapshotReader = Callable[[str, AuditDefinition], AuditArtifact]

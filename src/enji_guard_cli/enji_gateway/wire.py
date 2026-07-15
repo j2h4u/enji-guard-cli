@@ -1,6 +1,6 @@
 """Translation of Enji wire payloads into Audit gateway results."""
 
-from enji_guard_cli.enji_gateway.ports import (
+from enji_guard_cli.audit.ports import (
     AuditArtifact,
     AuditRerunState,
     AuditRun,

@@ -3,11 +3,9 @@ from typing import cast
 
 import pytest
 
-from enji_guard_cli.enji_api import AuditRunCreate
-from enji_guard_cli.enji_gateway import (
+from enji_guard_cli.audit.ports import (
     AuditArtifact,
     AuditCatalogResult,
-    AuditGateway,
     AuditRerunState,
     AuditRunbookMetadata,
     AuditRunRequest,
@@ -17,6 +15,8 @@ from enji_guard_cli.enji_gateway import (
     AuditTaskLinksResult,
     MalformedAuditSnapshotError,
 )
+from enji_guard_cli.enji_api import AuditRunCreate
+from enji_guard_cli.enji_gateway import AuditGateway
 from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot
 from enji_guard_cli.json_types import JsonObjectPayload
 from enji_guard_cli.transport import EnjiHttpClient
