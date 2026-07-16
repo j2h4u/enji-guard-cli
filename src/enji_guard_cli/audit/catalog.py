@@ -67,6 +67,10 @@ def _audit_definition(action: dict[str, JsonValue], *, metric_group: str | None)
         title=_required_nonempty_str(action, "title", "curated action is missing title"),
         metric_group=metric_group,
         runbook_kind=_required_nonempty_str(action, "runbookKind", "curated action is missing runbookKind"),
+        runbook_id=_optional_str(action.get("fleetRunbookId")),
+        artifact_schema_name=_optional_str(action.get("artifactSchemaName")),
+        artifact_schema_version=_optional_str(action.get("artifactSchemaVersion")),
+        task_description_template=_optional_str(action.get("taskDescriptionTemplate")),
     )
 
 
@@ -99,3 +103,7 @@ def _required_nonempty_str(payload: dict[str, JsonValue], key: str, message: str
     if not value.strip():
         raise ValueError(message)
     return value
+
+
+def _optional_str(value: JsonValue | None) -> str | None:
+    return value if isinstance(value, str) else None

@@ -2,7 +2,7 @@ import time
 from datetime import UTC, datetime
 
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition
-from enji_guard_cli.audit.ports import AuditRerunState, AuditRun, AuditTaskLink
+from enji_guard_cli.audit.ports import AuditReportStatus, AuditRerunState, AuditRun, AuditTaskLink
 from enji_guard_cli.core_impl.models import (
     FAILED_REPORT_WAIT_STATUSES,
     REPORT_ARTIFACT_SCHEMA,
@@ -88,6 +88,24 @@ def report_status_from_gateway(
         },
         "items": reports,
     }
+
+
+def report_status_models_from_legacy(status: ReportStatusPayload) -> tuple[AuditReportStatus, ...]:
+    """Temporary core compatibility projection for legacy public status payloads."""
+
+    return tuple(
+        AuditReportStatus(
+            action_key=item["action_key"],
+            current_head_sha=item["report"]["current_head_sha"],
+            audited_head_sha=item["report"]["audited_head_sha"],
+            can_read=item["report"]["can_read"],
+            completed_at=item["report"]["completed_at"],
+            task_id=item["report"]["fleet_task_id"] or item["task"]["fleet_task_id"],
+            task_status=item["report"]["run_status"] or item["task"]["run_status"],
+            task_active=item["task"]["active"],
+        )
+        for item in status["items"]
+    )
 
 
 def _report_audit_status_from_gateway(

@@ -11,13 +11,14 @@ from enji_guard_cli.audit.ports import (
     AuditRunRequest,
     AuditRunResult,
     AuditRunsResult,
+    AuditTaskBody,
     AuditTaskDetail,
     AuditTaskLinksResult,
     MalformedAuditSnapshotError,
 )
 from enji_guard_cli.enji_api import AuditRunCreate
 from enji_guard_cli.enji_gateway import AuditGateway
-from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot
+from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot, audit_project_from_legacy_payload
 from enji_guard_cli.json_types import JsonObjectPayload
 from enji_guard_cli.transport import EnjiHttpClient
 
@@ -120,7 +121,14 @@ class _GatewayHarness:
         self.auth_file = Path("auth.json")
         self.client = cast(EnjiHttpClient, object())
         self.gateway = AuditGateway(auth_file=self.auth_file, client=self.client)
-        self.request = AuditRunRequest("repo-1", "project-1", "audit.security", {"title": "Run security"})
+        self.request = AuditRunRequest(
+            "repo-1",
+            "project-1",
+            "audit.security",
+            AuditTaskBody(
+                "Run security", "description", "project-1", "single", {}, "runbook-1", "project-1", "org/repo"
+            ),
+        )
 
     def fake_catalog(self, auth_file: object, client: object) -> JsonObjectPayload:
         self.calls.append(("catalog", (auth_file, client)))
@@ -187,6 +195,52 @@ def test_audit_gateway_reads_active_runs(gateway_harness: _GatewayHarness) -> No
     assert gateway_harness.calls == [("active_runs", ("repo-1", gateway_harness.auth_file, gateway_harness.client))]
 
 
+def test_wire_preserves_linked_site_repository_associations() -> None:
+    project = audit_project_from_legacy_payload(
+        {
+            "repos": [],
+            "webResources": [
+                {"url": "https://one.example", "repoIds": ["repo-1"]},
+                {"url": "https://two.example", "repoIds": ["repo-2"]},
+            ],
+        },
+        "project-1",
+    )
+
+    assert [site.url for site in project.linked_websites if "repo-1" in site.repo_ids] == ["https://one.example"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "task_id", "status"),
+    [
+        ({"taskId": "task-root", "actionKey": "audit.security", "state": "queued"}, "task-root", "queued"),
+        ({"taskId": "task-root", "actionKey": "audit.security", "lifecycle_state": "running"}, "task-root", "running"),
+        (
+            {"task": {"taskId": "task-nested", "lifecycle_state": "running"}, "actionKey": "audit.security"},
+            "task-nested",
+            "running",
+        ),
+        (
+            {"task": {"fleetTaskId": "task-nested", "state": "queued"}, "actionKey": "audit.security"},
+            "task-nested",
+            "queued",
+        ),
+    ],
+)
+def test_audit_gateway_normalizes_legacy_active_run_identity_and_state(
+    gateway_harness: _GatewayHarness,
+    payload: JsonObjectPayload,
+    task_id: str,
+    status: str,
+) -> None:
+    gateway_harness.active_runs_payload = {"activeRuns": [payload]}
+
+    run = gateway_harness.gateway.active_runs("repo-1").runs[0]
+
+    assert run.task_id == task_id
+    assert run.status == status
+
+
 def test_audit_gateway_drops_wire_extensions_from_active_run_projection(
     gateway_harness: _GatewayHarness,
 ) -> None:
@@ -248,6 +302,11 @@ def test_audit_gateway_normalizes_nested_and_root_task_detail_payloads(
     [
         ({"task": {"id": "task-nested", "status": "queued"}}, "task-nested", "queued"),
         ({"id": "task-root", "status": "queued"}, "task-root", "queued"),
+        ({"task": {"taskId": "task-nested", "state": "queued"}}, "task-nested", "queued"),
+        ({"task": {"fleetTaskId": "task-nested", "lifecycle_state": "running"}}, "task-nested", "running"),
+        ({"fleetTaskId": "task-root", "status": "queued"}, "task-root", "queued"),
+        ({"taskId": "task-wire", "state": "queued"}, "task-wire", "queued"),
+        ({"taskId": "task-wire", "lifecycle_state": "running"}, "task-wire", "running"),
     ],
 )
 def test_audit_gateway_normalizes_nested_and_root_start_payloads(
@@ -307,7 +366,23 @@ def test_audit_gateway_starts_audit_run(gateway_harness: _GatewayHarness) -> Non
         (
             "start_audit_run",
             (
-                AuditRunCreate("repo-1", "project-1", "audit.security", {"title": "Run security"}),
+                AuditRunCreate(
+                    "repo-1",
+                    "project-1",
+                    "audit.security",
+                    {
+                        "title": "Run security",
+                        "description": "description",
+                        "project_id": "project-1",
+                        "execution_flow": "single",
+                        "flow_config": {},
+                        "runbook_id": "runbook-1",
+                        "scope_type": "project",
+                        "scope_owner": "project-1",
+                        "origin_type": "manual",
+                        "repo_access_contexts": [{"provider": "github", "repo_full_name": "org/repo"}],
+                    },
+                ),
                 gateway_harness.auth_file,
                 gateway_harness.client,
             ),

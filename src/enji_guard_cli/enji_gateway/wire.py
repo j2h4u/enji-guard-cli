@@ -1,11 +1,18 @@
 """Translation of Enji wire payloads into Audit gateway results."""
 
+from typing import cast
+
 from enji_guard_cli.audit.ports import (
     AuditArtifact,
+    AuditFlowConfig,
+    AuditProject,
+    AuditRepository,
     AuditRerunState,
     AuditRun,
+    AuditRunbookMetadata,
     AuditTaskDetail,
     AuditTaskLink,
+    AuditWebsite,
     MalformedAuditSnapshotError,
 )
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
@@ -15,9 +22,19 @@ def audit_run_from_legacy_payload(payload: dict[str, JsonValue]) -> AuditRun:
     task = payload.get("task")
     task_payload = task if isinstance(task, dict) else {}
     return AuditRun(
-        task_id=_optional_str(payload.get("fleetTaskId")) or _optional_str(task_payload.get("id")),
+        task_id=_optional_str(payload.get("fleetTaskId"))
+        or _optional_str(payload.get("taskId"))
+        or _optional_str(payload.get("id"))
+        or _optional_str(task_payload.get("fleetTaskId"))
+        or _optional_str(task_payload.get("taskId"))
+        or _optional_str(task_payload.get("id")),
         action_key=_optional_str(payload.get("actionKey")) or _optional_str(task_payload.get("actionKey")),
-        status=_optional_str(payload.get("status")) or _optional_str(task_payload.get("status")),
+        status=_optional_str(payload.get("status"))
+        or _optional_str(payload.get("state"))
+        or _optional_str(payload.get("lifecycle_state"))
+        or _optional_str(task_payload.get("status"))
+        or _optional_str(task_payload.get("state"))
+        or _optional_str(task_payload.get("lifecycle_state")),
         created_at=_optional_str(payload.get("createdAt")) or _optional_str(task_payload.get("createdAt")),
         started_at=_optional_str(payload.get("startedAt")) or _optional_str(task_payload.get("startedAt")),
         completed_at=_optional_str(payload.get("completedAt")) or _optional_str(task_payload.get("completedAt")),
@@ -27,6 +44,43 @@ def audit_run_from_legacy_payload(payload: dict[str, JsonValue]) -> AuditRun:
         current_head_sha=_optional_str(payload.get("currentHeadSha")),
         last_audited_head_sha=_optional_str(payload.get("lastAuditedHeadSha")),
     )
+
+
+def audit_project_from_legacy_payload(payload: JsonObjectPayload, project_id: str) -> AuditProject:
+    return AuditProject(
+        project_id=project_id,
+        repositories=tuple(
+            AuditRepository(
+                repo_id=_optional_str(repo.get("id")) or "",
+                full_name=f"{_optional_str(repo.get('githubOwner')) or ''}/{_optional_str(repo.get('githubName')) or ''}",
+                connected=repo.get("connected") is True,
+            )
+            for repo in _object_list(payload.get("repos"))
+        ),
+        linked_websites=tuple(
+            AuditWebsite(
+                url=url,
+                repo_ids=_string_tuple(resource.get("repoIds")),
+            )
+            for resource in _object_list(payload.get("webResources"))
+            if (url := _optional_str(resource.get("url")))
+        ),
+    )
+
+
+def audit_runbook_from_legacy_payload(payload: JsonObjectPayload, runbook_id: str) -> AuditRunbookMetadata:
+    config = payload.get("suggested_flow_config")
+    return AuditRunbookMetadata(
+        runbook_id=runbook_id,
+        title=_optional_str(payload.get("title")),
+        description=_optional_str(payload.get("description")),
+        suggested_flow=_optional_str(payload.get("suggested_flow")),
+        suggested_flow_config=cast(AuditFlowConfig, config) if isinstance(config, dict) else {},
+    )
+
+
+def _object_list(value: JsonValue | None) -> list[dict[str, JsonValue]]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
 def audit_runs_from_legacy_payload(payload: JsonObjectPayload) -> tuple[AuditRun, ...]:
@@ -121,3 +175,7 @@ def _optional_str(value: JsonValue | None) -> str | None:
 
 def _optional_bool(value: JsonValue | None) -> bool | None:
     return value if isinstance(value, bool) else None
+
+
+def _string_tuple(value: JsonValue | None) -> tuple[str, ...]:
+    return tuple(item for item in value if isinstance(item, str)) if isinstance(value, list) else ()

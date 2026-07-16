@@ -11,6 +11,7 @@ from enji_guard_cli.audit.ports import (
     AuditRunRequest,
     AuditRunResult,
     AuditRunsResult,
+    AuditTaskBody,
     AuditTaskDetail,
     AuditTaskLink,
     AuditTaskLinksResult,
@@ -43,7 +44,7 @@ from enji_guard_cli.enji_api import (
     task_detail as _task_detail,
 )
 from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayClient
-from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot
+from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot, audit_run_from_legacy_payload
 from enji_guard_cli.json_types import JsonValue
 
 
@@ -126,13 +127,28 @@ class AuditGateway(AuditGatewayPort):
                 repo_id=request.repo_id,
                 project_id=request.project_id,
                 action_key=request.action_key,
-                fleet_task_body=request.task_body,
+                fleet_task_body=_fleet_task_body(request.task_body),
             ),
             self._auth_file,
             self._client,
         )
         task = _task_payload(payload)
-        return AuditRunResult(task_id=_optional_str(task.get("id")), status=_optional_str(task.get("status")))
+        return AuditRunResult(
+            task_id=_optional_str(task.get("id"))
+            or _optional_str(task.get("fleetTaskId"))
+            or _optional_str(task.get("taskId"))
+            or _optional_str(payload.get("fleetTaskId"))
+            or _optional_str(payload.get("id"))
+            or _optional_str(payload.get("taskId")),
+            status=(
+                _optional_str(task.get("status"))
+                or _optional_str(task.get("lifecycle_state"))
+                or _optional_str(task.get("state"))
+                or _optional_str(payload.get("status"))
+                or _optional_str(payload.get("lifecycle_state"))
+                or _optional_str(payload.get("state"))
+            ),
+        )
 
     def read_audit_snapshot(self, repo_id: str, audit_key: str) -> AuditArtifact:
         return audit_artifact_from_snapshot(
@@ -142,20 +158,7 @@ class AuditGateway(AuditGatewayPort):
 
 
 def _audit_run(payload: dict[str, JsonValue]) -> AuditRun:
-    task = _task_payload(payload)
-    return AuditRun(
-        task_id=_optional_str(payload.get("fleetTaskId")) or _optional_str(task.get("id")),
-        action_key=_optional_str(payload.get("actionKey")) or _optional_str(task.get("actionKey")),
-        status=_optional_str(payload.get("status")) or _optional_str(task.get("status")),
-        created_at=_optional_str(payload.get("createdAt")) or _optional_str(task.get("createdAt")),
-        started_at=_optional_str(payload.get("startedAt")) or _optional_str(task.get("startedAt")),
-        completed_at=_optional_str(payload.get("completedAt")) or _optional_str(task.get("completedAt")),
-        projection_source=_optional_str(payload.get("projectionSource")),
-        projection_status_source=_optional_str(payload.get("projectionStatusSource")),
-        expires_at=_optional_str(payload.get("expiresAt")),
-        current_head_sha=_optional_str(payload.get("currentHeadSha")),
-        last_audited_head_sha=_optional_str(payload.get("lastAuditedHeadSha")),
-    )
+    return audit_run_from_legacy_payload(payload)
 
 
 def _catalog_action(payload: dict[str, JsonValue]) -> AuditCatalogAction | None:
@@ -192,3 +195,20 @@ def _optional_str(value: JsonValue | None) -> str | None:
 
 def _optional_bool(value: JsonValue | None) -> bool | None:
     return value if isinstance(value, bool) else None
+
+
+def _fleet_task_body(task: AuditTaskBody) -> dict[str, JsonValue]:
+    """Translate the neutral Audit task into the Enji/Fleet wire schema."""
+
+    return {
+        "title": task.title,
+        "description": task.description,
+        "project_id": task.project_id,
+        "execution_flow": task.execution_flow,
+        "flow_config": dict(task.flow_config),
+        "runbook_id": task.runbook_id,
+        "scope_type": "project",
+        "scope_owner": task.scope_owner,
+        "origin_type": "manual",
+        "repo_access_contexts": [{"provider": "github", "repo_full_name": task.repository_full_name}],
+    }

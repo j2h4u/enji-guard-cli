@@ -5,7 +5,16 @@ from typing import Never, cast
 
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit import parse_audit_catalog as _parse_audit_catalog
-from enji_guard_cli.audit.ports import AuditArtifact, AuditGatewayPort, AuditRun, AuditRunRequest, AuditTaskDetail
+from enji_guard_cli.audit import runs as _audit_runs
+from enji_guard_cli.audit.ports import (
+    AuditArtifact,
+    AuditGatewayPort,
+    AuditRun,
+    AuditRunRequest,
+    AuditRunResult,
+    AuditTaskBody,
+    AuditTaskDetail,
+)
 from enji_guard_cli.auth import AuthError as AuthError
 from enji_guard_cli.auth import AuthRefreshPayload as AuthRefreshPayload
 from enji_guard_cli.auth import AuthStatusPayload as AuthStatusPayload
@@ -13,7 +22,6 @@ from enji_guard_cli.auth import ImportCredentialPayload as ImportCredentialPaylo
 from enji_guard_cli.auth import import_bearer_token as import_bearer_token
 from enji_guard_cli.auth import import_cookie as import_cookie
 from enji_guard_cli.auth import refresh_auth as refresh_auth
-from enji_guard_cli.core_impl import audit_runs as _audit_runs
 from enji_guard_cli.core_impl import report_workflows as _report_workflows
 from enji_guard_cli.core_impl.autofixes import AutofixWriteContext as _AutofixWriteContext
 from enji_guard_cli.core_impl.autofixes import AutofixWriteDependencies as _AutofixWriteDependencies
@@ -78,6 +86,7 @@ from enji_guard_cli.core_impl.project_admin import rename_project as _rename_pro
 from enji_guard_cli.core_impl.repo_status import current_head_sha as _current_head_sha
 from enji_guard_cli.core_impl.repo_status import empty_report_status as _empty_report_status
 from enji_guard_cli.core_impl.repo_status import report_status_from_gateway as _report_status_from_gateway
+from enji_guard_cli.core_impl.repo_status import report_status_models_from_legacy as _report_status_models_from_legacy
 from enji_guard_cli.core_impl.repo_status import sort_project_repos as _sort_project_repos
 from enji_guard_cli.core_impl.report_language import ReportLanguageDependencies as _ReportLanguageDependencies
 from enji_guard_cli.core_impl.report_language import set_report_language as _set_report_language_impl
@@ -158,7 +167,9 @@ from enji_guard_cli.enji_api import rename_project as run_rename_project
 from enji_guard_cli.enji_api import user_preferences as run_user_preferences
 from enji_guard_cli.enji_gateway import AuditGateway
 from enji_guard_cli.enji_gateway.wire import (
+    audit_project_from_legacy_payload,
     audit_rerun_state_from_legacy_payload,
+    audit_runbook_from_legacy_payload,
     audit_runs_from_legacy_payload,
     audit_task_detail_from_legacy_payload,
     audit_task_links_from_legacy_payload,
@@ -287,13 +298,20 @@ def _runbook_via_gateway(runbook_id: str) -> JsonObjectPayload:
         "title": metadata.title,
         "description": metadata.description,
         "suggested_flow": metadata.suggested_flow,
-        "suggested_flow_config": metadata.suggested_flow_config,
+        "suggested_flow_config": dict(metadata.suggested_flow_config),
     }
 
 
-def _start_audit_run_via_gateway(request: AuditRunRequest) -> JsonObjectPayload:
-    result = _audit_gateway().start_audit_run(request)
-    return {"task": {"id": result.task_id, "status": result.status}}
+def _audit_project(project_id: str):
+    return audit_project_from_legacy_payload(run_project_detail(project_id), project_id)
+
+
+def _audit_runbook(runbook_id: str):
+    return audit_runbook_from_legacy_payload(run_runbook(runbook_id), runbook_id)
+
+
+def _start_audit_run_via_gateway(request: AuditRunRequest) -> AuditRunResult:
+    return _audit_gateway().start_audit_run(request)
 
 
 def _audit_run_status_projection(run: AuditRun) -> JsonObjectPayload:
@@ -544,13 +562,14 @@ def start_audit(
 ) -> JsonObjectPayload | AuditRunSkippedPayload:
     if catalog is None or catalog_payload is None:
         catalog, catalog_payload = _catalog_context()
-    return _audit_runs.start_audit(
+    result = _audit_runs.start_audit(
         repo_id,
         project_id,
         audit,
-        catalog_payload,
+        catalog,
         dependencies=_start_audit_dependencies(catalog, catalog_payload),
     )
+    return cast(JsonObjectPayload, _audit_run_result_payload(result))
 
 
 def start_recon(repo: str, project: str | None) -> dict[str, object]:
@@ -938,6 +957,7 @@ def _report_workflow_dependencies(
         resolve_single_repo_target=_resolve_single_repo_target,
         targeted_run_payload=_targeted_run_payload,
         report_status=lambda repo_id: _report_status(repo_id, catalog),
+        report_status_models=_report_status_models_from_legacy,
         report_snapshot=_read_audit_snapshot_via_gateway,
         read_report_snapshot=lambda repo_id, audit: _read_report_snapshot(repo_id, audit, catalog, catalog_payload),
         wait_for_report_completion=lambda repo_id, *, options, heartbeat: wait_for_report_completion(
@@ -972,7 +992,7 @@ def _make_audit_run_create(
     repo_id: str,
     project_id: str,
     action_key: str,
-    task_body: JsonObjectPayload,
+    task_body: AuditTaskBody,
 ) -> AuditRunRequest:
     return AuditRunRequest(
         repo_id=repo_id,
@@ -982,6 +1002,52 @@ def _make_audit_run_create(
     )
 
 
+def _audit_task_identity(response: object) -> tuple[str | None, str | None]:
+    if isinstance(response, AuditRunResult):
+        return response.task_id, response.status
+    if isinstance(response, dict):
+        task = response.get("task")
+        if isinstance(task, dict):
+            task_id = task.get("id") if isinstance(task.get("id"), str) else None
+            status = task.get("status") if isinstance(task.get("status"), str) else None
+            return task_id, status
+        task_id = response.get("id") if isinstance(response.get("id"), str) else None
+        status = response.get("status") if isinstance(response.get("status"), str) else None
+        return task_id, status
+    raise TypeError("audit start returned an unsupported result")
+
+
+def _audit_run_result_payload(result: object) -> object:
+    if isinstance(result, AuditRunResult):
+        return {"task": {"id": result.task_id, "status": result.status}}
+    if isinstance(result, dict):
+        payload = dict(result)
+        active_runs = payload.get("active_runs")
+        if isinstance(active_runs, (list, tuple)):
+            payload["active_runs"] = [
+                _audit_run_start_compatibility_projection(run) if isinstance(run, AuditRun) else run
+                for run in active_runs
+            ]
+        return payload
+    return result
+
+
+def _audit_run_start_compatibility_projection(run: AuditRun) -> JsonObjectPayload:
+    """Translate a neutral Audit run into the legacy start-command payload."""
+
+    projection: JsonObjectPayload = {
+        "fleetTaskId": run.task_id,
+        "actionKey": run.action_key,
+        "status": run.status,
+        "completedAt": run.completed_at,
+    }
+    if run.created_at is not None:
+        projection["createdAt"] = run.created_at
+    if run.started_at is not None:
+        projection["startedAt"] = run.started_at
+    return projection
+
+
 def _start_audit_dependencies(
     catalog: AuditCatalog,
     catalog_payload: JsonObjectPayload,
@@ -989,11 +1055,15 @@ def _start_audit_dependencies(
     return _audit_runs.StartAuditDependencies(
         make_audit_run_create=_make_audit_run_create,
         start_audit_run=run_start_audit_run,
-        project_detail=run_project_detail,
-        runbook=run_runbook,
-        current_repo_active_runs=lambda repo_id: _merged_repo_active_runs(repo_id, catalog),
+        project_detail=_audit_project,
+        runbook=_audit_runbook,
+        current_repo_active_runs=lambda repo_id: tuple(
+            audit_runs_from_legacy_payload({"activeRuns": _merged_repo_active_runs(repo_id, catalog)})
+        ),
         record_started_run=lambda context: _report_workflows.record_started_run(
             context,
             dependencies=_report_workflow_dependencies(catalog, catalog_payload),
         ),
+        start_error=EnjiApiError,
+        task_identity=_audit_task_identity,
     )

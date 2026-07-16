@@ -9,6 +9,10 @@ class AuditDefinition:
     title: str
     metric_group: str | None
     runbook_kind: str
+    runbook_id: str | None = None
+    artifact_schema_name: str | None = None
+    artifact_schema_version: str | None = None
+    task_description_template: str | None = None
 
     @property
     def selector(self) -> str:

@@ -3,7 +3,45 @@
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from enji_guard_cli.json_types import JsonObjectPayload
+from enji_guard_cli.json_types import JsonValue
+
+type AuditFlowConfig = dict[str, JsonValue]
+
+
+@dataclass(frozen=True, slots=True)
+class AuditTaskBody:
+    """Neutral task description assembled by the Audit application."""
+
+    title: str
+    description: str
+    project_id: str
+    execution_flow: str
+    flow_config: AuditFlowConfig
+    runbook_id: str
+    scope_owner: str
+    repository_full_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class AuditRepository:
+    repo_id: str
+    full_name: str
+    connected: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AuditWebsite:
+    url: str
+    repo_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AuditProject:
+    """Project information required to create an Audit task."""
+
+    project_id: str
+    repositories: tuple[AuditRepository, ...]
+    linked_websites: tuple[AuditWebsite, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,7 +51,7 @@ class AuditRunRequest:
     repo_id: str
     project_id: str
     action_key: str
-    task_body: JsonObjectPayload
+    task_body: AuditTaskBody
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +88,20 @@ class AuditRun:
     expires_at: str | None = None
     current_head_sha: str | None = None
     last_audited_head_sha: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AuditReportStatus:
+    """Neutral report/task status used by Audit run orchestration."""
+
+    action_key: str
+    current_head_sha: str | None
+    audited_head_sha: str | None
+    can_read: bool
+    completed_at: str | None
+    task_id: str | None
+    task_status: str | None
+    task_active: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,7 +169,7 @@ class AuditRunbookMetadata:
     title: str | None
     description: str | None
     suggested_flow: str | None = None
-    suggested_flow_config: JsonObjectPayload = field(default_factory=dict)
+    suggested_flow_config: AuditFlowConfig = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

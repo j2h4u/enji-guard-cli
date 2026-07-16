@@ -2838,18 +2838,16 @@ def test_start_audit_builds_spa_compatible_fleet_task_body(monkeypatch: MonkeyPa
     assert request.repo_id == "repo_1"
     assert request.project_id == "project_1"
     assert request.action_key == "audit.recon"
-    assert request.task_body == {
-        "title": "Run recon for j2h4u/enji-guard-cli",
-        "description": "Repo j2h4u/enji-guard-cli\n- https://example.test\nupfront.recon.report",
-        "project_id": "project_1",
-        "execution_flow": "single",
-        "flow_config": {},
-        "runbook_id": "runbook_1",
-        "scope_type": "project",
-        "scope_owner": "project_1",
-        "origin_type": "manual",
-        "repo_access_contexts": [{"provider": "github", "repo_full_name": "j2h4u/enji-guard-cli"}],
-    }
+    assert request.task_body == core.AuditTaskBody(
+        title="Run recon for j2h4u/enji-guard-cli",
+        description="Repo j2h4u/enji-guard-cli\n- https://example.test\nupfront.recon.report",
+        project_id="project_1",
+        execution_flow="single",
+        flow_config={},
+        runbook_id="runbook_1",
+        scope_owner="project_1",
+        repository_full_name="j2h4u/enji-guard-cli",
+    )
 
 
 def test_start_audit_skips_already_running_audit(monkeypatch: MonkeyPatch) -> None:

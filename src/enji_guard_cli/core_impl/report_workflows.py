@@ -4,9 +4,16 @@ from datetime import datetime
 from typing import cast
 
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition
-from enji_guard_cli.audit.ports import AuditArtifact, AuditRerunState, AuditRun, AuditTaskDetail, AuditTaskLink
+from enji_guard_cli.audit import runs as _audit_runs
+from enji_guard_cli.audit.ports import (
+    AuditArtifact,
+    AuditReportStatus,
+    AuditRerunState,
+    AuditRun,
+    AuditTaskDetail,
+    AuditTaskLink,
+)
 from enji_guard_cli.core_impl import active_run_ledger as _active_run_ledger
-from enji_guard_cli.core_impl import audit_runs as _audit_runs
 from enji_guard_cli.core_impl import report_reads as _report_reads
 from enji_guard_cli.core_impl import report_wait as _report_wait
 from enji_guard_cli.core_impl.models import (
@@ -17,9 +24,6 @@ from enji_guard_cli.core_impl.models import (
     ReportWaitPayload,
     RepoTargetPayload,
 )
-from enji_guard_cli.core_impl.payloads import json_dict as _json_dict
-from enji_guard_cli.core_impl.payloads import json_object_payload as _json_object_payload
-from enji_guard_cli.core_impl.payloads import json_str as _json_str
 from enji_guard_cli.core_impl.preflight import report_start_preflight_payload as _report_start_preflight_payload
 from enji_guard_cli.core_impl.repo_status import current_active_runs as _current_active_runs
 from enji_guard_cli.errors import EnjiApiError
@@ -44,6 +48,7 @@ class ReportWorkflowDependencies[TCreateRequest]:
     resolve_single_repo_target: ResolveSingleRepoTarget
     targeted_run_payload: TargetedRunPayload
     report_status: Callable[[str], ReportStatusPayload]
+    report_status_models: Callable[[ReportStatusPayload], tuple[AuditReportStatus, ...]]
     report_snapshot: ReportSnapshot
     read_report_snapshot: Callable[[str, AuditDefinition], AuditArtifact]
     wait_for_report_completion: WaitForReportCompletion
@@ -117,7 +122,9 @@ def start_report_audits[TCreateRequest](
     selected_audits = selected_audits_for_start(audits, all_reports=all_reports, dependencies=dependencies)
     status = dependencies.report_status(target["repo_id"])
     preflight = _report_start_preflight_payload(status)
-    linked_running_results = _audit_runs.linked_running_report_results(status, selected_audits)
+    linked_running_results = _audit_runs.linked_running_report_results(
+        dependencies.report_status_models(status), selected_audits
+    )
     remaining_audits = [audit for audit in selected_audits if audit.action_key not in linked_running_results]
     started_results = dependencies.start_report_audits_for_target(
         target["repo_id"], target["project_id"], remaining_audits
@@ -127,7 +134,7 @@ def start_report_audits[TCreateRequest](
         {
             "preflight": preflight,
             "results": _audit_runs.ordered_audit_results(
-                selected_audits, linked_running_results, started_results["results"]
+                selected_audits, linked_running_results, cast(list[dict[str, object]], started_results["results"])
             ),
         },
     )
@@ -140,15 +147,18 @@ def start_report_audits_for_target[TCreateRequest](
     *,
     dependencies: ReportWorkflowDependencies[TCreateRequest],
 ) -> AuditRunBatchPayload:
-    return _audit_runs.start_report_audits_for_target(
-        _audit_runs.StartReportAuditsContext(
-            repo_id=repo_id,
-            project_id=project_id,
-            audits=audits,
-            catalog_payload=dependencies.catalog_payload,
+    return cast(
+        AuditRunBatchPayload,
+        _audit_runs.start_report_audits_for_target(
+            _audit_runs.StartReportAuditsContext(
+                repo_id=repo_id,
+                project_id=project_id,
+                audits=audits,
+                catalog=dependencies.catalog,
+            ),
+            dependencies=dependencies.start_audit_dependencies(),
+            get_repo_rerun_state=dependencies.get_repo_rerun_state_model,
         ),
-        dependencies=dependencies.start_audit_dependencies(),
-        get_repo_rerun_state=dependencies.get_repo_rerun_state,
     )
 
 
@@ -283,8 +293,6 @@ def record_started_run[TCreateRequest](
     *,
     dependencies: ReportWorkflowDependencies[TCreateRequest],
 ) -> None:
-    normalized = _json_object_payload(context.response)
-    task_payload = _json_dict(normalized.get("task"))
     ledger_settings = dependencies.active_run_ledger_settings()
     _active_run_ledger.record_started_run(
         ledger_settings,
@@ -293,8 +301,8 @@ def record_started_run[TCreateRequest](
                 repo_id=context.repo_id,
                 project_id=context.project_id,
                 action_key=context.action_key,
-                task_id=_json_str(normalized.get("id")) or _json_str(task_payload.get("id")),
-                task_status=_json_str(normalized.get("status")) or _json_str(task_payload.get("status")),
+                task_id=context.task_id,
+                task_status=context.task_status,
                 current_head_sha=context.current_head_sha,
                 last_audited_head_sha=context.last_audited_head_sha,
                 observed_at=dependencies.now_utc(),
