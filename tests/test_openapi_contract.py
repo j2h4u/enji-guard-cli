@@ -4,13 +4,13 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
-from enji_guard_cli._enji_api_contract import (
+from enji_guard_cli.auth_session.api import import_bearer_token
+from enji_guard_cli.enji_gateway.contract import (
     IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC,
     IMPROVEMENT_JOBS_ENDPOINT_SPEC,
     implemented_api_endpoints,
 )
-from enji_guard_cli.auth import import_bearer_token
-from enji_guard_cli.enji_api import (
+from enji_guard_cli.enji_gateway.http import (
     AuditRunCreate,
     RepoTransfer,
     access,

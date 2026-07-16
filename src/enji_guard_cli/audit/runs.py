@@ -6,8 +6,8 @@ from typing import Literal
 
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.ports import (
+    AuditItemStatus,
     AuditProject,
-    AuditReportStatus,
     AuditRerunState,
     AuditRun,
     AuditRunbookMetadata,
@@ -63,11 +63,18 @@ class AuditRunTaskContext:
 
 
 @dataclass(frozen=True, slots=True)
-class StartReportAuditsContext:
+class StartAuditsContext:
     repo_id: str
     project_id: str
     audits: list[AuditDefinition]
     catalog: AuditCatalog
+
+
+@dataclass(frozen=True, slots=True)
+class _StartOneState:
+    rerun_state: AuditRerunState
+    active_runs: tuple[AuditRun, ...]
+    project: AuditProject
 
 
 def start_audit[TCreateRequest](
@@ -101,62 +108,73 @@ def start_audit[TCreateRequest](
     return response
 
 
-def start_report_audits_for_target[TCreateRequest](
-    context: StartReportAuditsContext,
+def start_audits_for_target[TCreateRequest](
+    context: StartAuditsContext,
     *,
     dependencies: StartAuditDependencies[TCreateRequest],
     get_repo_rerun_state: GetRepoRerunState,
 ) -> AuditRunBatchPayload:
-    results: list[AuditRunBatchResultItem] = []
     rerun_state = get_repo_rerun_state(context.repo_id)
-    current_sha = rerun_state.current_head_sha
     active_runs = dependencies.current_repo_active_runs(context.repo_id)
     project = dependencies.project_detail(context.project_id)
-    for audit in context.audits:
-        action_key = audit.action_key
-        last_sha = rerun_state.audited_head_shas.get(action_key)
-        matching = active_runs_for_action(active_runs, action_key)
-        if matching:
-            task_id, task_status = _active_run_task(matching[0])
-            state: Literal["queued", "already_running"] = (
-                "queued" if matching[0].started_at is None else "already_running"
-            )
-            results.append(
-                _batch_result_item(audit.action_key, action_key, state, (current_sha, last_sha), (task_id, task_status))
-            )
-            continue
-        if out_of_date(current_sha, last_sha) is False:
-            results.append(_batch_result_item(audit.action_key, action_key, "up_to_date", (current_sha, last_sha)))
-            continue
-        try:
-            response = dependencies.start_audit_run(
-                dependencies.make_audit_run_create(
-                    context.repo_id,
-                    context.project_id,
-                    action_key,
-                    audit_run_task_body(
-                        AuditRunTaskContext(context.project_id, context.repo_id, action_key, project, context.catalog),
-                        runbook=dependencies.runbook,
-                    ),
-                )
-            )
-        except dependencies.start_error:
-            results.append(_batch_result_item(audit.action_key, action_key, "failed", (current_sha, last_sha)))
-            continue
-        task_id, task_status = dependencies.task_identity(response)
-        dependencies.record_started_run(
-            RecordStartedRunContext(
-                context.repo_id, context.project_id, action_key, task_id, task_status, current_sha, last_sha
-            )
+    results = [
+        _start_one_audit(
+            audit,
+            context=context,
+            state=_StartOneState(rerun_state, active_runs, project),
+            dependencies=dependencies,
         )
-        results.append(
-            _batch_result_item(audit.action_key, action_key, "started", (current_sha, last_sha), (task_id, task_status))
-        )
+        for audit in context.audits
+    ]
     return {"results": results}
 
 
-def selected_audits(audits: list[str], *, all_reports: bool, catalog: AuditCatalog) -> list[AuditDefinition]:
-    if all_reports:
+def _start_one_audit[TCreateRequest](
+    audit: AuditDefinition,
+    *,
+    context: StartAuditsContext,
+    state: _StartOneState,
+    dependencies: StartAuditDependencies[TCreateRequest],
+) -> AuditRunBatchResultItem:
+    action_key = audit.action_key
+    current_sha = state.rerun_state.current_head_sha
+    last_sha = state.rerun_state.audited_head_shas.get(action_key)
+    matching = active_runs_for_action(state.active_runs, action_key)
+    if matching:
+        task_id, task_status = _active_run_task(matching[0])
+        run_state: Literal["queued", "already_running"] = (
+            "queued" if matching[0].started_at is None else "already_running"
+        )
+        return _batch_result_item(action_key, action_key, run_state, (current_sha, last_sha), (task_id, task_status))
+    if out_of_date(current_sha, last_sha) is False:
+        return _batch_result_item(action_key, action_key, "up_to_date", (current_sha, last_sha))
+    try:
+        response = dependencies.start_audit_run(
+            dependencies.make_audit_run_create(
+                context.repo_id,
+                context.project_id,
+                action_key,
+                audit_run_task_body(
+                    AuditRunTaskContext(
+                        context.project_id, context.repo_id, action_key, state.project, context.catalog
+                    ),
+                    runbook=dependencies.runbook,
+                ),
+            )
+        )
+    except dependencies.start_error:
+        return _batch_result_item(action_key, action_key, "failed", (current_sha, last_sha))
+    task_id, task_status = dependencies.task_identity(response)
+    dependencies.record_started_run(
+        RecordStartedRunContext(
+            context.repo_id, context.project_id, action_key, task_id, task_status, current_sha, last_sha
+        )
+    )
+    return _batch_result_item(action_key, action_key, "started", (current_sha, last_sha), (task_id, task_status))
+
+
+def selected_audits(audits: list[str], *, all_audits: bool, catalog: AuditCatalog) -> list[AuditDefinition]:
+    if all_audits:
         if audits:
             raise ValueError("pass audit selectors or --all, not both")
         return list(catalog.published_audits)
@@ -169,14 +187,14 @@ def selected_audits(audits: list[str], *, all_reports: bool, catalog: AuditCatal
     return [audit for audit in selected if audit is not None]
 
 
-def linked_running_report_results(
-    status: tuple[AuditReportStatus, ...], audits: list[AuditDefinition]
+def linked_running_audit_results(
+    status: tuple[AuditItemStatus, ...], audits: list[AuditDefinition]
 ) -> dict[str, AuditRunBatchResultItem]:
     items = {item.action_key: item for item in status}
     results: dict[str, AuditRunBatchResultItem] = {}
     for audit in audits:
         item = items.get(audit.action_key)
-        if item is None or not has_running_report_link(item):
+        if item is None or not has_running_audit_link(item):
             continue
         results[audit.action_key] = {
             "audit": audit.action_key,
@@ -190,7 +208,7 @@ def linked_running_report_results(
     return results
 
 
-def has_running_report_link(item: AuditReportStatus) -> bool:
+def has_running_audit_link(item: AuditItemStatus) -> bool:
     return (
         item.task_active is False
         and item.can_read

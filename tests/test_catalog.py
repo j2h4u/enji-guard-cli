@@ -1,7 +1,7 @@
 import pytest
 
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition, parse_audit_catalog
-from enji_guard_cli.core_impl.audit_runs import selected_audits
+from enji_guard_cli.audit.runs import selected_audits
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 
 
@@ -190,12 +190,12 @@ def test_audit_selector_resolution_rejects_full_keys_and_legacy_aliases() -> Non
 
     assert [
         audit.action_key
-        for audit in selected_audits(["security", "cicd", "dependency-hygiene"], all_reports=False, catalog=catalog)
+        for audit in selected_audits(["security", "cicd", "dependency-hygiene"], all_audits=False, catalog=catalog)
     ] == ["audit.security", "audit.cicd", "audit.dependency-hygiene"]
     with pytest.raises(ValueError, match="unknown audit selector: deps"):
-        selected_audits(["deps"], all_reports=False, catalog=catalog)
+        selected_audits(["deps"], all_audits=False, catalog=catalog)
     with pytest.raises(ValueError, match=r"unknown audit selector: audit\.security"):
-        selected_audits(["audit.security"], all_reports=False, catalog=catalog)
+        selected_audits(["audit.security"], all_audits=False, catalog=catalog)
 
 
 def _action(

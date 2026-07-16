@@ -5,7 +5,7 @@ from typing import Literal
 type LogFormat = Literal["text", "json"]
 type LogLevelName = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
 type McpTransportName = Literal["stdio", "sse", "streamable-http"]
-type RepoSortName = Literal["default", "name", "weakest", "overall", "latest-report"]
+type RepositorySortName = Literal["default", "name", "weakest", "overall", "latest-audit"]
 
 APP_CONFIG_PARENT_DIR_NAME = ".config"
 APP_CONFIG_DIR_NAME = "enji-guard"
@@ -37,7 +37,12 @@ DEFAULT_LOG_LEVEL_NAME: LogLevelName = "INFO"
 DEFAULT_LOG_FORMAT: LogFormat = "json"
 DEFAULT_LOG_MAX_BYTES = 10_000_000
 DEFAULT_LOG_BACKUP_COUNT = 5
-DEFAULT_MCP_TRANSPORT: McpTransportName = "stdio"
+# The executable's default is a long-lived local HTTP service.  Stdio remains
+# available as an explicit transport for an interactive MCP client, but it
+# exits normally when stdin closes (which is exactly what happens for
+# ``docker run image`` without ``-i``).  Keeping the service default HTTP is
+# required for the supervisor/readiness contract and the image healthcheck.
+DEFAULT_MCP_TRANSPORT: McpTransportName = "streamable-http"
 DEFAULT_HTTP_HOST = "127.0.0.1"
 DEFAULT_HTTP_PORT = 8000
 DEFAULT_LOCAL_READINESS_TIMEOUT_SECONDS = 2.0
@@ -46,11 +51,11 @@ DEFAULT_BACKEND_READINESS_INTERVAL_SECONDS = 300
 DEFAULT_BACKEND_READINESS_TIMEOUT_SECONDS = 5.0
 DEFAULT_BACKEND_READINESS_FAILURE_THRESHOLD = 3
 DEFAULT_BACKEND_READINESS_STALE_AFTER_SECONDS = 900
-DEFAULT_REPORT_WAIT_POLL_SECONDS = 30
-DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS = 2700
-DEFAULT_REPORT_WAIT_TIMEOUT_TEXT = "45m"
-DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS = 120
-DEFAULT_REPO_SORT: RepoSortName = "default"
+DEFAULT_AUDIT_WAIT_POLL_SECONDS = 30
+DEFAULT_AUDIT_WAIT_TIMEOUT_SECONDS = 2700
+DEFAULT_AUDIT_WAIT_TIMEOUT_TEXT = "45m"
+DEFAULT_AUDIT_WAIT_HEARTBEAT_SECONDS = 120
+DEFAULT_REPO_SORT: RepositorySortName = "default"
 DEFAULT_ACTIVE_RUN_LEDGER_TTL_SECONDS = 6 * 60 * 60
 DEFAULT_ACTIVE_RUN_LOOKUP_GRACE_SECONDS = 300
 
@@ -120,7 +125,7 @@ class ReadinessSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class ReportWaitSettings:
+class AuditWaitSettings:
     poll_seconds: int
     timeout_seconds: int
     timeout_text: str
@@ -129,7 +134,7 @@ class ReportWaitSettings:
 
 @dataclass(frozen=True, slots=True)
 class RepoSettings:
-    default_sort: RepoSortName
+    default_sort: RepositorySortName
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,7 +157,7 @@ class EnjiGuardSettings:
     telemetry: TelemetrySettings
     service: ServiceSettings
     readiness: ReadinessSettings
-    report_wait: ReportWaitSettings
+    audit_wait: AuditWaitSettings
     repo: RepoSettings
     active_run_ledger: ActiveRunLedgerSettings
     audit_catalog: AuditCatalogSettings
@@ -202,11 +207,11 @@ def default_settings() -> EnjiGuardSettings:
             failure_threshold=DEFAULT_BACKEND_READINESS_FAILURE_THRESHOLD,
             state_stale_after_seconds=DEFAULT_BACKEND_READINESS_STALE_AFTER_SECONDS,
         ),
-        report_wait=ReportWaitSettings(
-            poll_seconds=DEFAULT_REPORT_WAIT_POLL_SECONDS,
-            timeout_seconds=DEFAULT_REPORT_WAIT_TIMEOUT_SECONDS,
-            timeout_text=DEFAULT_REPORT_WAIT_TIMEOUT_TEXT,
-            heartbeat_seconds=DEFAULT_REPORT_WAIT_HEARTBEAT_SECONDS,
+        audit_wait=AuditWaitSettings(
+            poll_seconds=DEFAULT_AUDIT_WAIT_POLL_SECONDS,
+            timeout_seconds=DEFAULT_AUDIT_WAIT_TIMEOUT_SECONDS,
+            timeout_text=DEFAULT_AUDIT_WAIT_TIMEOUT_TEXT,
+            heartbeat_seconds=DEFAULT_AUDIT_WAIT_HEARTBEAT_SECONDS,
         ),
         repo=RepoSettings(
             default_sort=DEFAULT_REPO_SORT,

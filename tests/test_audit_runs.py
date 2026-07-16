@@ -47,7 +47,7 @@ def test_audit_task_body_is_neutral_until_gateway_translation() -> None:
         scope_owner="project_1",
         repository_full_name="j2h4u/example",
     )
-    assert _fleet_task_body(body) == {
+    assert _fleet_task_body("audit.security", body) == {
         "title": "Security for j2h4u/example",
         "description": "Repo j2h4u/example\n- https://example.test",
         "project_id": "project_1",

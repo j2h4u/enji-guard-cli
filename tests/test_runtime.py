@@ -3,9 +3,12 @@ from pathlib import Path
 
 import pytest
 
-import enji_guard_cli.runtime as runtime
-from enji_guard_cli.mcp_server import McpTransport
-from enji_guard_cli.readiness import backend_readiness_starting_state, read_backend_readiness_state
+import enji_guard_cli.runtime_observability.runtime as runtime
+from enji_guard_cli.delivery.mcp.server import McpTransport
+from enji_guard_cli.runtime_observability.readiness import (
+    backend_readiness_starting_state,
+    read_backend_readiness_state,
+)
 from enji_guard_cli.settings import ReadinessSettings
 
 

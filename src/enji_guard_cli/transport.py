@@ -13,8 +13,8 @@ import httpx
 from tenacity import AsyncRetrying, RetryCallState, retry_if_exception, stop_after_attempt
 from tenacity.wait import wait_base
 
+from enji_guard_cli.runtime_observability.telemetry import log_event
 from enji_guard_cli.settings import default_settings
-from enji_guard_cli.telemetry import log_event
 from enji_guard_cli.transport_types import RetryProfile
 
 RATE_LIMIT_STATUS_CODE = 429

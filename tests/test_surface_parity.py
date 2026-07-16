@@ -5,9 +5,9 @@ from typing import cast
 
 from mcp.types import Tool
 
-from enji_guard_cli.mcp_server import MCP_TOOL_NAMES, create_mcp_server
+from enji_guard_cli.delivery.mcp.server import MCP_TOOL_NAMES, create_mcp_server
 
-REQUIRED_MCP_TOOLS = {"enji_portfolio_overview", "enji_repo_reports"}
+REQUIRED_MCP_TOOLS = {"enji_portfolio_overview", "enji_repo_audits"}
 
 
 def test_mcp_tool_names_match_curated_mcp_surface() -> None:
@@ -19,7 +19,7 @@ def test_mcp_tool_names_match_curated_mcp_surface() -> None:
     assert set(MCP_TOOL_NAMES) == REQUIRED_MCP_TOOLS
 
 
-def test_registered_mcp_tools_include_portfolio_and_reports() -> None:
+def test_registered_mcp_tools_include_portfolio_and_audits() -> None:
     server = create_mcp_server()
 
     tools = cast(list[Tool], asyncio.run(server.list_tools()))
@@ -29,7 +29,7 @@ def test_registered_mcp_tools_include_portfolio_and_reports() -> None:
 
 
 def test_mcp_server_does_not_import_broad_core_module() -> None:
-    module_path = Path(__file__).resolve().parents[1] / "src" / "enji_guard_cli" / "mcp_server.py"
+    module_path = Path(__file__).resolve().parents[1] / "src" / "enji_guard_cli" / "delivery" / "mcp" / "server.py"
     tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
 
     forbidden_imports: list[str] = []

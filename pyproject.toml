@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-enji-guard = "enji_guard_cli.cli:app"
+enji-guard = "enji_guard_cli.delivery.cli:app"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -131,189 +131,14 @@ root_package = "enji_guard_cli"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-id = "core-independent-from-entrypoints"
-name = "Core stays independent from CLI and MCP entrypoints"
+id = "bounded-contexts-stay-domain-pure"
+name = "Audit and Portfolio contexts stay independent from delivery and infrastructure"
 type = "forbidden"
-source_modules = ["enji_guard_cli.core", "enji_guard_cli.core_impl"]
+source_modules = ["enji_guard_cli.audit", "enji_guard_cli.portfolio"]
 forbidden_modules = [
-    "enji_guard_cli.cli",
-    "enji_guard_cli.cli_impl",
-    "enji_guard_cli.journey",
-    "enji_guard_cli.mcp_facade",
-    "enji_guard_cli.runtime",
-    "enji_guard_cli.mcp_server",
-]
-
-[[tool.importlinter.contracts]]
-id = "adapter-and-infrastructure-independent-from-core-and-entrypoints"
-name = "API adapter and infrastructure stay below core and entrypoints"
-type = "forbidden"
-source_modules = [
-    "enji_guard_cli._enji_api_contract",
-    "enji_guard_cli.auth",
-    "enji_guard_cli.auth_impl",
-    "enji_guard_cli.enji_api",
-    "enji_guard_cli.enji_api_impl",
-    "enji_guard_cli.errors",
-    "enji_guard_cli.readiness",
-    "enji_guard_cli.telemetry",
-    "enji_guard_cli.telemetry_sink",
-    "enji_guard_cli.transport",
-]
-forbidden_modules = [
-    "enji_guard_cli.core",
-    "enji_guard_cli.core_impl",
-    "enji_guard_cli.cli",
-    "enji_guard_cli.cli_impl",
-    "enji_guard_cli.mcp_facade",
-    "enji_guard_cli.runtime",
-    "enji_guard_cli.mcp_server",
-]
-
-[[tool.importlinter.contracts]]
-id = "package-dependency-direction"
-name = "Package imports flow from entrypoints toward transport"
-type = "layers"
-layers = [
-    "enji_guard_cli.cli",
-    "enji_guard_cli.cli_impl",
-    "enji_guard_cli.runtime",
-    "enji_guard_cli.mcp_server",
-    "enji_guard_cli.journey",
-    "enji_guard_cli.mcp_facade",
-    "enji_guard_cli.core",
-    "enji_guard_cli.core_impl",
+    "enji_guard_cli.application",
+    "enji_guard_cli.delivery",
     "enji_guard_cli.enji_gateway",
-    "enji_guard_cli.audit",
-    "enji_guard_cli.enji_api",
-    "enji_guard_cli.enji_api_impl",
-    "enji_guard_cli._enji_api_contract",
-    "enji_guard_cli.auth",
-    "enji_guard_cli.auth_impl",
-    "enji_guard_cli.transport",
-    "enji_guard_cli.telemetry",
-    "enji_guard_cli.telemetry_sink",
-    "enji_guard_cli.readiness",
-    "enji_guard_cli.errors",
-    "enji_guard_cli.json_types",
-    "enji_guard_cli.settings",
-]
-
-[[tool.importlinter.contracts]]
-id = "entrypoints-use-core-facade"
-name = "CLI and MCP entrypoints use the core facade"
-type = "forbidden"
-source_modules = [
-    "enji_guard_cli.cli",
-    "enji_guard_cli.cli_impl",
-    "enji_guard_cli.runtime",
-    "enji_guard_cli.mcp_server",
-    "enji_guard_cli.mcp_facade",
-    "enji_guard_cli.journey",
-]
-forbidden_modules = ["enji_guard_cli.core_impl"]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "mcp-server-uses-readonly-facade"
-name = "MCP server uses the read-only facade, not broad core"
-type = "forbidden"
-source_modules = ["enji_guard_cli.mcp_server"]
-forbidden_modules = ["enji_guard_cli.core", "enji_guard_cli.core_impl"]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "entrypoints-avoid-api-transport-and-http-clients"
-name = "CLI and MCP entrypoints avoid API adapter, transport internals, and HTTP clients"
-type = "forbidden"
-source_modules = [
-    "enji_guard_cli.cli",
-    "enji_guard_cli.cli_impl",
-    "enji_guard_cli.journey",
-    "enji_guard_cli.runtime",
-    "enji_guard_cli.mcp_server",
-    "enji_guard_cli.mcp_facade",
-]
-forbidden_modules = [
-    "enji_guard_cli._enji_api_contract",
-    "enji_guard_cli.enji_api",
-    "enji_guard_cli.enji_api_impl",
-    "enji_guard_cli.transport",
-    "httpx",
-]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "core-avoids-transport-internals"
-name = "Core uses Enji API adapter instead of transport internals"
-type = "forbidden"
-source_modules = ["enji_guard_cli.core", "enji_guard_cli.core_impl"]
-forbidden_modules = ["enji_guard_cli.enji_api_impl", "enji_guard_cli.transport", "httpx"]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "core-avoids-enji-api-contract-internals"
-name = "Core uses Enji API behavior, not endpoint contract metadata"
-type = "forbidden"
-source_modules = ["enji_guard_cli.core", "enji_guard_cli.core_impl"]
-forbidden_modules = ["enji_guard_cli._enji_api_contract"]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "core-impl-avoids-enji-api"
-name = "Core implementation helpers keep JSON typing out of the adapter"
-type = "forbidden"
-source_modules = [
-    "enji_guard_cli.core_impl.models",
-    "enji_guard_cli.core_impl.audit_runs",
-    "enji_guard_cli.core_impl.audit_tasks",
-    "enji_guard_cli.core_impl.email_preferences",
-    "enji_guard_cli.core_impl.payloads",
-    "enji_guard_cli.core_impl.project_admin",
-    "enji_guard_cli.core_impl.repo_status",
-    "enji_guard_cli.core_impl.report_wait",
-    "enji_guard_cli.core_impl.report_reads",
-    "enji_guard_cli.core_impl.schedules",
-    "enji_guard_cli.core_impl.selectors",
-    "enji_guard_cli.core_impl.status_views",
-    "enji_guard_cli.core_impl.targets",
-    "enji_guard_cli.core_impl.write_settings",
-]
-forbidden_modules = ["enji_guard_cli.enji_api", "enji_guard_cli.enji_api_impl"]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "entrypoints-use-core-for-auth"
-name = "CLI entrypoint uses core operations for auth"
-type = "forbidden"
-source_modules = ["enji_guard_cli.cli"]
-forbidden_modules = ["enji_guard_cli.auth"]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "audit-context-stays-domain-pure"
-name = "Audit registry stays pure domain metadata"
-type = "forbidden"
-source_modules = ["enji_guard_cli.audit"]
-forbidden_modules = [
-    "enji_guard_cli._enji_api_contract",
-    "enji_guard_cli.auth",
-    "enji_guard_cli.cli",
-    "enji_guard_cli.cli_impl",
-    "enji_guard_cli.core",
-    "enji_guard_cli.core_impl",
-    "enji_guard_cli.enji_api",
-    "enji_guard_cli.enji_api_impl",
-    "enji_guard_cli.enji_gateway",
-    "enji_guard_cli.errors",
-    "enji_guard_cli.journey",
-    "enji_guard_cli.mcp_facade",
-    "enji_guard_cli.mcp_server",
-    "enji_guard_cli.readiness",
-    "enji_guard_cli.runtime",
-    "enji_guard_cli.settings",
-    "enji_guard_cli.telemetry",
-    "enji_guard_cli.telemetry_sink",
     "enji_guard_cli.transport",
     "httpx",
     "mcp",
@@ -322,185 +147,44 @@ forbidden_modules = [
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
-id = "audit-gateway-stays-below-application"
-name = "Audit Gateway stays below application contexts and above Enji API"
+id = "application-avoids-wire-and-frameworks"
+name = "Application composes typed adapters without wire or delivery dependencies"
+type = "forbidden"
+source_modules = ["enji_guard_cli.application"]
+forbidden_modules = [
+    "enji_guard_cli.delivery",
+    "enji_guard_cli.enji_gateway.client",
+    "enji_guard_cli.enji_gateway.contract",
+    "enji_guard_cli.enji_gateway.http",
+    "enji_guard_cli.enji_gateway.wire",
+    "enji_guard_cli.transport",
+    "httpx",
+    "mcp",
+    "typer",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "delivery-avoids-gateway-internals"
+name = "Delivery enters through Application rather than gateway internals"
+type = "forbidden"
+source_modules = ["enji_guard_cli.delivery"]
+forbidden_modules = [
+    "enji_guard_cli.enji_gateway.client",
+    "enji_guard_cli.enji_gateway.contract",
+    "enji_guard_cli.enji_gateway.http",
+    "enji_guard_cli.enji_gateway.wire",
+    "enji_guard_cli.transport",
+    "httpx",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "gateway-stays-below-application"
+name = "Enji gateway stays independent from application and delivery"
 type = "forbidden"
 source_modules = ["enji_guard_cli.enji_gateway"]
-forbidden_modules = [
-    "enji_guard_cli.cli",
-    "enji_guard_cli.cli_impl",
-    "enji_guard_cli.core",
-    "enji_guard_cli.core_impl",
-    "enji_guard_cli.mcp_facade",
-    "enji_guard_cli.mcp_server",
-    "enji_guard_cli.runtime",
-    "enji_guard_cli.journey",
-]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "httpx-stays-behind-transport"
-name = "HTTP client dependency stays behind transport"
-type = "forbidden"
-source_modules = [
-    "enji_guard_cli.auth",
-    "enji_guard_cli.auth_impl",
-    "enji_guard_cli.cli",
-    "enji_guard_cli.core",
-    "enji_guard_cli.core_impl",
-    "enji_guard_cli.enji_api",
-    "enji_guard_cli.enji_api_impl",
-    "enji_guard_cli.journey",
-    "enji_guard_cli.mcp_facade",
-    "enji_guard_cli.mcp_server",
-    "enji_guard_cli.runtime",
-    "enji_guard_cli.settings",
-    "enji_guard_cli.telemetry",
-    "enji_guard_cli.telemetry_sink",
-]
-forbidden_modules = ["httpx"]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "frameworks-stay-in-entrypoints"
-name = "Typer and MCP frameworks stay out of core, adapter, auth, and transport"
-type = "forbidden"
-source_modules = [
-    "enji_guard_cli._enji_api_contract",
-    "enji_guard_cli.auth",
-    "enji_guard_cli.auth_impl",
-    "enji_guard_cli.audit",
-    "enji_guard_cli.core",
-    "enji_guard_cli.core_impl",
-    "enji_guard_cli.enji_api",
-    "enji_guard_cli.enji_api_impl",
-    "enji_guard_cli.errors",
-    "enji_guard_cli.journey",
-    "enji_guard_cli.mcp_facade",
-    "enji_guard_cli.readiness",
-    "enji_guard_cli.settings",
-    "enji_guard_cli.telemetry",
-    "enji_guard_cli.telemetry_sink",
-    "enji_guard_cli.transport",
-]
-forbidden_modules = ["typer", "mcp"]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "auth-impl-stays-pure"
-name = "Auth implementation details stay below the auth facade"
-type = "forbidden"
-source_modules = ["enji_guard_cli.auth_impl"]
-forbidden_modules = [
-    "enji_guard_cli._enji_api_contract",
-    "enji_guard_cli.auth",
-    "enji_guard_cli.audit",
-    "enji_guard_cli.cli",
-    "enji_guard_cli.cli_impl",
-    "enji_guard_cli.core",
-    "enji_guard_cli.core_impl",
-    "enji_guard_cli.enji_api",
-    "enji_guard_cli.enji_api_impl",
-    "enji_guard_cli.errors",
-    "enji_guard_cli.json_types",
-    "enji_guard_cli.mcp_facade",
-    "enji_guard_cli.mcp_server",
-    "enji_guard_cli.readiness",
-    "enji_guard_cli.runtime",
-    "enji_guard_cli.settings",
-    "enji_guard_cli.telemetry",
-    "enji_guard_cli.transport",
-    "httpx",
-    "mcp",
-    "typer",
-]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "settings-stays-pure"
-name = "Settings stay pure and below application code"
-type = "forbidden"
-source_modules = ["enji_guard_cli.settings"]
-forbidden_modules = [
-    "enji_guard_cli._enji_api_contract",
-    "enji_guard_cli.auth",
-    "enji_guard_cli.auth_impl",
-    "enji_guard_cli.audit",
-    "enji_guard_cli.cli",
-    "enji_guard_cli.core",
-    "enji_guard_cli.core_impl",
-    "enji_guard_cli.enji_api",
-    "enji_guard_cli.enji_api_impl",
-    "enji_guard_cli.errors",
-    "enji_guard_cli.mcp_facade",
-    "enji_guard_cli.mcp_server",
-    "enji_guard_cli.runtime",
-    "enji_guard_cli.telemetry",
-    "enji_guard_cli.telemetry_sink",
-    "enji_guard_cli.transport",
-    "httpx",
-    "mcp",
-    "typer",
-]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "readiness-stays-runtime-cache"
-name = "Readiness state stays a small runtime cache"
-type = "forbidden"
-source_modules = ["enji_guard_cli.readiness"]
-forbidden_modules = [
-    "enji_guard_cli._enji_api_contract",
-    "enji_guard_cli.auth",
-    "enji_guard_cli.auth_impl",
-    "enji_guard_cli.audit",
-    "enji_guard_cli.cli",
-    "enji_guard_cli.cli_impl",
-    "enji_guard_cli.core",
-    "enji_guard_cli.core_impl",
-    "enji_guard_cli.enji_api",
-    "enji_guard_cli.enji_api_impl",
-    "enji_guard_cli.errors",
-    "enji_guard_cli.mcp_facade",
-    "enji_guard_cli.mcp_server",
-    "enji_guard_cli.runtime",
-    "enji_guard_cli.telemetry",
-    "enji_guard_cli.telemetry_sink",
-    "enji_guard_cli.transport",
-    "httpx",
-    "mcp",
-    "typer",
-]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "json-types-stays-pure"
-name = "JSON type aliases stay pure and below application code"
-type = "forbidden"
-source_modules = ["enji_guard_cli.json_types"]
-forbidden_modules = [
-    "enji_guard_cli._enji_api_contract",
-    "enji_guard_cli.auth",
-    "enji_guard_cli.auth_impl",
-    "enji_guard_cli.audit",
-    "enji_guard_cli.cli",
-    "enji_guard_cli.cli_impl",
-    "enji_guard_cli.core",
-    "enji_guard_cli.core_impl",
-    "enji_guard_cli.enji_api",
-    "enji_guard_cli.enji_api_impl",
-    "enji_guard_cli.errors",
-    "enji_guard_cli.mcp_facade",
-    "enji_guard_cli.mcp_server",
-    "enji_guard_cli.runtime",
-    "enji_guard_cli.settings",
-    "enji_guard_cli.telemetry",
-    "enji_guard_cli.telemetry_sink",
-    "enji_guard_cli.transport",
-    "httpx",
-    "mcp",
-    "typer",
-]
+forbidden_modules = ["enji_guard_cli.application", "enji_guard_cli.delivery", "mcp", "typer"]
 allow_indirect_imports = true
 
 [dependency-groups]

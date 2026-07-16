@@ -1,17 +1,12 @@
 import json
-from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 import pytest
-from typer.testing import CliRunner
 
-import enji_guard_cli.core as core
-import enji_guard_cli.enji_api as enji_api
-from enji_guard_cli.cli import app
-from enji_guard_cli.enji_api_impl import audit_catalog_snapshot
+import enji_guard_cli.enji_gateway.catalog_snapshot as audit_catalog_snapshot
+import enji_guard_cli.enji_gateway.http as enji_api
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
-from enji_guard_cli.settings import default_settings
 
 
 def test_audit_catalog_snapshot_baselines_and_detects_audit_changes(tmp_path: Path) -> None:
@@ -83,79 +78,6 @@ def test_active_audit_catalog_observation_notifies_only_after_a_live_catalog_fet
 
     assert len(events) == 1
     assert [(change.kind, change.selector) for change in events[0]] == [("changed", "security")]
-
-
-def test_catalog_audits_json_baseline_repeat_and_added_audit_use_audit_catalog_envelope(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    settings = default_settings()
-    state_file = tmp_path / "json" / "audit-catalog.json"
-    selected_state_file = state_file
-    monkeypatch.setattr(
-        core,
-        "default_settings",
-        lambda: replace(settings, audit_catalog=replace(settings.audit_catalog, state_file=selected_state_file)),
-    )
-    baseline = _catalog(_action("audit.security", title="Security", metric_group="vulns"))
-    added = _catalog(
-        _action("audit.security", title="Security", metric_group="vulns"),
-        _action("audit.open-source", title="Open source", metric_group="open-source"),
-    )
-    payloads = [baseline, baseline, added, baseline, added]
-    monkeypatch.setattr(enji_api, "run_api_request", lambda *_args: payloads.pop(0))
-
-    first = CliRunner().invoke(app, ["catalog", "audits", "--json"])
-    second = CliRunner().invoke(app, ["catalog", "audits", "--json"])
-    third = CliRunner().invoke(app, ["catalog", "audits", "--json"])
-
-    assert first.exit_code == 0
-    assert second.exit_code == 0
-    assert first.stderr == ""
-    assert second.stderr == ""
-    first_output = _catalog_audits_output(first.stdout)
-    second_output = _catalog_audits_output(second.stdout)
-    assert first_output["audit_catalog"] == {"changes": []}
-    assert second_output["audit_catalog"] == {"changes": []}
-    assert set(first_output) == {"audits", "audit_catalog"}
-    assert "audit.recon" in {audit["action_key"] for audit in cast(list[dict[str, object]], first_output["audits"])}
-
-    assert third.exit_code == 0
-    assert third.stderr == ""
-    third_output = _catalog_audits_output(third.stdout)
-    assert set(third_output) == {"audits", "audit_catalog"}
-    changes = cast(list[dict[str, object]], cast(dict[str, object], third_output["audit_catalog"])["changes"])
-    assert changes == [
-        {
-            "action_key": "audit.open-source",
-            "changed_fields": [],
-            "current": {
-                "actionKey": "audit.open-source",
-                "category": "audit",
-                "metricGroup": "open-source",
-                "runbookKind": "open-source-audit",
-                "status": "published",
-                "title": "Open source",
-            },
-            "kind": "added",
-            "previous": None,
-            "selector": "open-source",
-        }
-    ]
-
-    selected_state_file = tmp_path / "human" / "audit-catalog.json"
-    human_baseline = CliRunner().invoke(app, ["catalog", "audits"])
-    human_added = CliRunner().invoke(app, ["catalog", "audits"])
-
-    assert human_baseline.exit_code == 0
-    assert human_added.exit_code == 0
-    assert human_baseline.stderr == ""
-    assert human_added.stderr == ""
-    assert 'audit catalog changed: added audit open-source ("Open source")' in human_added.stdout
-
-
-def _catalog_audits_output(stdout: str) -> dict[str, object]:
-    return cast(dict[str, object], json.loads(stdout))
 
 
 def _action(action_key: str, *, title: str, metric_group: str) -> JsonObjectPayload:

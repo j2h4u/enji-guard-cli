@@ -10,10 +10,10 @@ import httpx
 import pytest
 from pytest import MonkeyPatch
 
-import enji_guard_cli.auth as auth_module
-from enji_guard_cli.auth import AuthError, import_cookie, refresh_auth_async
+import enji_guard_cli.auth_session.api as auth_module
+from enji_guard_cli.auth_session.api import AuthError, import_cookie, refresh_auth_async
+from enji_guard_cli.runtime_observability.telemetry import configure_logging, log_event
 from enji_guard_cli.settings import LogFormat, LogLevelName, TelemetrySettings
-from enji_guard_cli.telemetry import configure_logging, log_event
 from enji_guard_cli.transport import HttpxEnjiHttpClient
 
 

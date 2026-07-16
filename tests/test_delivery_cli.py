@@ -1,0 +1,170 @@
+import importlib
+from typing import cast
+
+import pytest
+from typer.testing import CliRunner
+
+from enji_guard_cli.application import AutofixWriteScope
+from enji_guard_cli.delivery.cli.app import app
+
+cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
+
+
+def test_operator_command_tree_uses_audit_vocabulary() -> None:
+    result = CliRunner().invoke(app, ["--help"])
+    assert result.exit_code == 0
+    for command in ("auth", "project", "repo", "recon", "audit", "schedule", "improvement-jobs", "email", "language"):
+        assert command in result.stdout
+    assert "│ report " not in result.stdout
+
+
+def test_audit_read_and_summary_are_public_commands() -> None:
+    runner = CliRunner()
+    assert runner.invoke(app, ["audit", "read", "--help"]).exit_code == 0
+    assert runner.invoke(app, ["audit", "summary", "--help"]).exit_code == 0
+
+
+def test_operator_surface_removes_report_and_legacy_auth_aliases() -> None:
+    runner = CliRunner()
+    for args in (("report", "read"), ("report", "summary"), ("auth", "import-token"), ("language", "get")):
+        result = runner.invoke(app, list(args))
+        assert result.exit_code != 0
+    assert runner.invoke(app, ["auth", "import-bearer", "--help"]).exit_code == 0
+
+
+def test_repository_sort_rejects_legacy_value() -> None:
+    result = CliRunner().invoke(app, ["repo", "list", "--sort", "latest-report"])
+
+    assert result.exit_code != 0
+    assert "latest-audit" in result.stderr
+
+
+def test_run_defaults_to_long_lived_http_transport(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_service(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(cli_module, "run_service", fake_run_service)
+
+    result = CliRunner().invoke(app, ["run", "--port", "18080"])
+
+    assert result.exit_code == 0
+    assert captured["transport"] == "streamable-http"
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 18080
+
+
+def test_run_keeps_stdio_as_an_explicit_interactive_transport(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_service(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(cli_module, "run_service", fake_run_service)
+
+    result = CliRunner().invoke(app, ["run", "--transport", "stdio"])
+
+    assert result.exit_code == 0
+    assert captured["transport"] == "stdio"
+
+
+class _FakeAuth:
+    def status(self) -> dict[str, object]:
+        return {"authenticated": True, "credential_type": "bearer"}
+
+    def refresh(self) -> dict[str, object]:
+        return {"ok": True, "credential_type": "cookie"}
+
+    def import_cookie(self, value: str) -> dict[str, object]:
+        return {"ok": True, "credential_type": "cookie", "length": len(value)}
+
+    def import_bearer_token(self, value: str) -> dict[str, object]:
+        return {"ok": True, "credential_type": "bearer", "length": len(value)}
+
+
+class _FakeApplication:
+    def __init__(self) -> None:
+        self.auth = _FakeAuth()
+        self.calls: list[tuple[str, object]] = []
+
+    def project_settings(self, project: str | None) -> object:
+        self.calls.append(("project_settings", project))
+        return {"project": project, "repositories": []}
+
+    def access(self) -> object:
+        self.calls.append(("access", None))
+        return {"full_access": True}
+
+    def audit_start(self, repo: str, project: str | None, selectors: list[str], *, all_audits: bool) -> object:
+        self.calls.append(("audit_start", (repo, project, selectors, all_audits)))
+        return {"repo_id": repo, "project_id": project, "results": [{"state": "started"}]}
+
+    def set_schedules(self, repo: str | None, project: str | None, update: object, *, scope: object) -> object:
+        self.calls.append(("set_schedules", (repo, project, update, scope)))
+        return [{"state": "unchanged"}]
+
+    def set_email_preferences(self, repo: str | None, project: str | None, update: object, *, scope: object) -> object:
+        self.calls.append(("set_email_preferences", (repo, project, update, scope)))
+        return [{"state": "changed"}]
+
+    def set_autofixes(
+        self, repo: str | None, project: str | None, selectors: list[str], update: object, *, scope: object
+    ) -> object:
+        self.calls.append(("set_autofixes", (repo, project, selectors, update, scope)))
+        return [{"state": "unchanged"}]
+
+
+def test_audit_start_calls_typed_application_and_emits_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    result = CliRunner().invoke(app, ["audit", "start", "org/repo", "security", "--project", "Pets", "--json"])
+    assert result.exit_code == 0
+    assert result.exception is None
+    assert '"repo_id": "org/repo"' in result.stdout
+    assert fake.calls == [("audit_start", ("org/repo", "Pets", ["security"], False))]
+
+
+def test_project_settings_and_access_use_typed_application_methods(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    settings = CliRunner().invoke(app, ["project", "settings", "--project", "Pets", "--json"])
+    access = CliRunner().invoke(app, ["access", "--json"])
+    assert settings.exit_code == 0
+    assert access.exit_code == 0
+    assert fake.calls[:2] == [("project_settings", "Pets"), ("access", None)]
+
+
+def test_batch_write_options_are_forwarded_with_explicit_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    result = CliRunner().invoke(
+        app,
+        ["--project", "Pets", "schedule", "set", "--all-repos", "--enabled", "on", "--frequency", "daily"],
+    )
+    assert result.exit_code == 0
+    name, args = fake.calls[-1]
+    assert name == "set_schedules"
+    values = cast(tuple[object, object, object, object], args)
+    assert values[0:2] == (None, "Pets")
+    assert cast(AutofixWriteScope, values[3]).all_repos is True
+
+
+def test_batch_write_rejects_ambiguous_scope_before_application(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    result = CliRunner().invoke(app, ["email", "set", "--all-repos", "--all-projects", "--manual", "on"])
+    assert result.exit_code == 1
+    assert "pass --all-repos or --all-projects" in result.stderr
+    assert fake.calls == []
+
+
+def test_auth_import_bearer_requires_stdin_and_never_prints_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    missing = CliRunner().invoke(app, ["auth", "import-bearer"])
+    assert missing.exit_code == 1
+    assert "use --stdin" in missing.stderr
+    result = CliRunner().invoke(app, ["auth", "import-bearer", "--stdin", "--json"], input="Bearer secret-token\n")
+    assert result.exit_code == 0
+    assert "secret-token" not in result.stdout

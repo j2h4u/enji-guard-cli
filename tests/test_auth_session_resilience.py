@@ -6,30 +6,30 @@ from typing import cast
 import httpx
 import pytest
 
-import enji_guard_cli.auth as auth_module
-import enji_guard_cli.auth_impl.auto_refresh as auto_refresh_module
-import enji_guard_cli.enji_api_impl.client as api_client_module
-from enji_guard_cli._enji_api_contract import (
-    IMPLEMENTED_ENJI_ENDPOINTS,
-    RetryProfile,
-)
-from enji_guard_cli.auth import (
+import enji_guard_cli.auth_session.api as auth_module
+import enji_guard_cli.auth_session.auto_refresh as auto_refresh_module
+import enji_guard_cli.enji_gateway.client as api_client_module
+from enji_guard_cli.auth_session.api import (
     backend_readiness_probe_async,
     import_cookie,
     load_stored_auth,
     refresh_cookie_auth,
 )
-from enji_guard_cli.auth_impl.store import (
+from enji_guard_cli.auth_session.store import (
     load_pending_rotation,
     mark_pending_rotation_rotated,
     pending_rotation_path,
     reserve_pending_rotation,
 )
-from enji_guard_cli.enji_api_impl.client import (
+from enji_guard_cli.enji_gateway.client import (
     ApiEndpoint,
     ApiRequestSpec,
     EnjiApiSession,
     request_json_object,
+)
+from enji_guard_cli.enji_gateway.contract import (
+    IMPLEMENTED_ENJI_ENDPOINTS,
+    RetryProfile,
 )
 from enji_guard_cli.settings import AutoRefreshSettings
 from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient, RetryConfig

@@ -10,9 +10,9 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
-import enji_guard_cli.auth as auth_module
-import enji_guard_cli.auth_impl.auto_refresh as auto_refresh_module
-from enji_guard_cli.auth import (
+import enji_guard_cli.auth_session.api as auth_module
+import enji_guard_cli.auth_session.auto_refresh as auto_refresh_module
+from enji_guard_cli.auth_session.api import (
     AUTH_REFRESH_USER_AGENT,
     AuthError,
     AuthRefreshPayload,
@@ -30,9 +30,9 @@ from enji_guard_cli.auth import (
     set_cookie_names,
     start_auto_refresh_task,
 )
-from enji_guard_cli.auth import StoredAuth as RuntimeStoredAuth
-from enji_guard_cli.cli import app
-from enji_guard_cli.readiness import BackendReadinessProbe
+from enji_guard_cli.auth_session.api import StoredAuth as RuntimeStoredAuth
+from enji_guard_cli.delivery.cli.app import app
+from enji_guard_cli.runtime_observability.readiness import BackendReadinessProbe
 from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER, AutoRefreshSettings
 from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient
 
@@ -760,7 +760,7 @@ def test_start_auto_refresh_task_skips_bearer_credentials(monkeypatch: pytest.Mo
     import_bearer_token("token-123", auth_file)
 
     monkeypatch.setattr(
-        "enji_guard_cli.auth.default_settings",
+        "enji_guard_cli.auth_session.api.default_settings",
         lambda: type(
             "Settings",
             (),
@@ -786,9 +786,9 @@ def test_start_auto_refresh_task_runs_without_bootstrapped_auth_file(
         captured["auth_file"] = auth_file
         captured["refresh_settings"] = refresh_settings
 
-    monkeypatch.setattr("enji_guard_cli.auth_impl.auto_refresh._auto_refresh_loop", fake_auto_refresh_loop)
+    monkeypatch.setattr("enji_guard_cli.auth_session.auto_refresh._auto_refresh_loop", fake_auto_refresh_loop)
     monkeypatch.setattr(
-        "enji_guard_cli.auth.default_settings",
+        "enji_guard_cli.auth_session.api.default_settings",
         lambda: type(
             "Settings",
             (),
@@ -809,11 +809,11 @@ def test_start_auto_refresh_task_runs_without_bootstrapped_auth_file(
     assert captured == {"auth_file": auth_file, "refresh_settings": auto_refresh_settings()}
 
 
-def test_cli_import_token_reads_from_stdin(tmp_path: Path) -> None:
+def test_cli_import_bearer_reads_from_stdin(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     result = CliRunner().invoke(
         app,
-        ["auth", "import-token", "--stdin", "--auth-file", str(auth_file), "--json"],
+        ["auth", "import-bearer", "--stdin", "--auth-file", str(auth_file), "--json"],
         input="Bearer token-123\n",
     )
 

@@ -6,8 +6,6 @@ from enji_guard_cli.audit.models import AuditDefinition
 from enji_guard_cli.audit.ports import AuditProject, AuditRunbookMetadata, AuditTaskBody
 
 DEFAULT_EXECUTION_FLOW = "single"
-AUDIT_REPORT_SCHEMA = "upfront.audit.report"
-RECON_REPORT_SCHEMA = "upfront.recon.report"
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,8 +64,8 @@ def _description(context: AuditTaskContext, full_name: str, repo_id: str | None 
         "linkedSites": "\n".join(f"- {url}" for url in linked) if linked else "- none linked yet",
         "artifactSchemaName": context.artifact_schema_name,
         "artifactSchemaVersion": context.artifact_schema_version,
-        "reportSchemaName": RECON_REPORT_SCHEMA if context.audit.runbook_kind == "recon" else AUDIT_REPORT_SCHEMA,
-        "constraintsSection": "- use task title/description only",
+        "artifactContract": "structured artifact metadata is machine-readable and deterministic",
+        "constraintsSection": "- use task title and description only",
     }
     for name, value in values.items():
         template = template.replace(f"{{{{{name}}}}}", value)
@@ -80,6 +78,5 @@ def _default_template() -> str:
         "- url: {{repoUrl}}\n\nLinked websites:\n{{linkedSites}}\n\n"
         "Artifact contract for this run:\n- structured artifact metadata.schema_name={{artifactSchemaName}}\n"
         "- structured artifact metadata.schema_version={{artifactSchemaVersion}}\n"
-        "- markdown report metadata.schema_name={{reportSchemaName}}\n"
-        "- artifacts must remain machine-readable and deterministic\n\nConstraints:\n{{constraintsSection}}"
+        "- {{artifactContract}}\n\nConstraints:\n{{constraintsSection}}"
     )

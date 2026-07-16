@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from enji_guard_cli.readiness import (
+from enji_guard_cli.runtime_observability.readiness import (
     INITIAL_BACKEND_READINESS_STATE,
     BackendReadinessProbe,
     backend_readiness_state_after_probe,

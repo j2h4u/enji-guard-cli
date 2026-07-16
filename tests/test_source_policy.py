@@ -70,14 +70,17 @@ def test_container_publish_workflow_run_requires_trusted_source() -> None:
 
 
 def test_audit_schedule_domain_has_no_improvement_job_fallback() -> None:
-    schedules = (ROOT / "src" / "enji_guard_cli" / "core_impl" / "schedules.py").read_text(encoding="utf-8")
-    write_settings = (ROOT / "src" / "enji_guard_cli" / "core_impl" / "write_settings.py").read_text(encoding="utf-8")
-    core = (ROOT / "src" / "enji_guard_cli" / "core.py").read_text(encoding="utf-8")
+    schedules = (ROOT / "src" / "enji_guard_cli" / "audit" / "schedules.py").read_text(encoding="utf-8")
 
-    assert "subscriptions" in schedules
-    assert "schedule_subscription_by_action_key" in write_settings
-    assert "audit_auto_runs" in core
-    for source in (schedules, write_settings):
-        assert "improvement" not in source
-        assert "runbook" not in source
-        assert "autofix" not in source.lower()
+    assert "audit_auto_run_key" in schedules
+    assert "improvement" not in schedules
+    assert "runbook" not in schedules
+
+
+def test_legacy_facades_are_deleted() -> None:
+    package = ROOT / "src" / "enji_guard_cli"
+
+    assert not (package / "core.py").exists()
+    assert not (package / "core_impl").exists()
+    assert not (package / "cli.py").exists()
+    assert not (package / "cli_impl").exists()

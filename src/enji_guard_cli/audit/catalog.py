@@ -1,12 +1,14 @@
+from collections.abc import Mapping
+
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
-from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
+from enji_guard_cli.audit.ports import AuditCatalogResult
 
 RECON_ACTION_KEY = "audit.recon"
 AUDIT_CATEGORY = "audit"
 PUBLISHED_STATUS = "published"
 
 
-def parse_audit_catalog(payload: JsonObjectPayload) -> AuditCatalog:
+def parse_audit_catalog(payload: Mapping[str, object]) -> AuditCatalog:
     """Interpret the current live catalog as Audit domain definitions."""
 
     actions = _curated_actions(payload)
@@ -16,7 +18,28 @@ def parse_audit_catalog(payload: JsonObjectPayload) -> AuditCatalog:
     return AuditCatalog(published_audits=published_audits, recon=recon)
 
 
-def published_audit_action_keys(catalog: JsonObjectPayload) -> set[str]:
+def parse_catalog_result(result: AuditCatalogResult) -> AuditCatalog:
+    """Apply the same strict catalog invariants to the typed gateway result."""
+
+    actions = [
+        {
+            "actionKey": item.action_key,
+            "title": item.title,
+            "category": item.category,
+            "status": item.status,
+            "metricGroup": item.metric_group,
+            "runbookKind": item.runbook_kind,
+            "fleetRunbookId": item.runbook_id,
+            "artifactSchemaName": item.artifact_schema_name,
+            "artifactSchemaVersion": item.artifact_schema_version,
+            "taskDescriptionTemplate": item.task_description_template,
+        }
+        for item in result.actions
+    ]
+    return parse_audit_catalog({"curatedActions": actions})
+
+
+def published_audit_action_keys(catalog: Mapping[str, object]) -> set[str]:
     """Return published audit action keys used by catalog-driven autofixes."""
 
     return {
@@ -28,7 +51,7 @@ def published_audit_action_keys(catalog: JsonObjectPayload) -> set[str]:
     }
 
 
-def published_autofix_keys(catalog: JsonObjectPayload) -> list[tuple[str, str]]:
+def published_autofix_keys(catalog: Mapping[str, object]) -> list[tuple[str, str]]:
     """Return published, unique autofix action/variant keys in catalog order."""
 
     keys: list[tuple[str, str]] = []
@@ -41,14 +64,14 @@ def published_autofix_keys(catalog: JsonObjectPayload) -> list[tuple[str, str]]:
     return keys
 
 
-def _require_recon(actions: list[dict[str, JsonValue]]) -> AuditDefinition:
+def _require_recon(actions: list[dict[str, object]]) -> AuditDefinition:
     recon_actions = [action for action in actions if action.get("actionKey") == RECON_ACTION_KEY]
     if len(recon_actions) != 1:
         raise ValueError(f"catalog must contain exactly one {RECON_ACTION_KEY} action")
     return _audit_definition(recon_actions[0], metric_group=None)
 
 
-def _is_published_audit_action(action: dict[str, JsonValue]) -> bool:
+def _is_published_audit_action(action: dict[str, object]) -> bool:
     return (
         action.get("actionKey") != RECON_ACTION_KEY
         and action.get("category") == AUDIT_CATEGORY
@@ -56,12 +79,12 @@ def _is_published_audit_action(action: dict[str, JsonValue]) -> bool:
     )
 
 
-def _published_audit(action: dict[str, JsonValue]) -> AuditDefinition:
+def _published_audit(action: dict[str, object]) -> AuditDefinition:
     metric_group = _required_nonempty_str(action, "metricGroup", "published audit action is missing metricGroup")
     return _audit_definition(action, metric_group=metric_group)
 
 
-def _audit_definition(action: dict[str, JsonValue], *, metric_group: str | None) -> AuditDefinition:
+def _audit_definition(action: dict[str, object], *, metric_group: str | None) -> AuditDefinition:
     return AuditDefinition(
         action_key=_required_nonempty_str(action, "actionKey", "curated action is missing actionKey"),
         title=_required_nonempty_str(action, "title", "curated action is missing title"),
@@ -83,7 +106,7 @@ def _require_unique_action_keys(audits: tuple[AuditDefinition, ...]) -> None:
         raise ValueError("catalog contains duplicate audit selectors")
 
 
-def _curated_actions(payload: JsonObjectPayload) -> list[dict[str, JsonValue]]:
+def _curated_actions(payload: Mapping[str, object]) -> list[dict[str, object]]:
     actions = payload.get("curatedActions")
     if not isinstance(actions, list):
         return []
@@ -92,11 +115,11 @@ def _curated_actions(payload: JsonObjectPayload) -> list[dict[str, JsonValue]]:
     return [action for action in actions if isinstance(action, dict)]
 
 
-def _json_object_list(value: JsonValue | None) -> list[dict[str, JsonValue]]:
+def _json_object_list(value: object) -> list[dict[str, object]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
-def _required_nonempty_str(payload: dict[str, JsonValue], key: str, message: str) -> str:
+def _required_nonempty_str(payload: dict[str, object], key: str, message: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str):
         raise ValueError(message)
@@ -105,5 +128,5 @@ def _required_nonempty_str(payload: dict[str, JsonValue], key: str, message: str
     return value
 
 
-def _optional_str(value: JsonValue | None) -> str | None:
+def _optional_str(value: object) -> str | None:
     return value if isinstance(value, str) else None

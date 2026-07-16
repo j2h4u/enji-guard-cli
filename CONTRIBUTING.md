@@ -7,7 +7,7 @@ scenario-shaped, and verified through the shared gate.
 
 Before editing, identify:
 
-- scope: core, CLI, MCP, Enji adapter, auth, Docker, CI, docs, or tests;
+- scope: Audit, Portfolio, Application, CLI, MCP, Enji gateway, auth, runtime, Docker, CI, docs, or tests;
 - user workflow affected;
 - acceptance criteria;
 - docs, OpenAPI, tests, or import-linter contracts that must change together.

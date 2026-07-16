@@ -16,8 +16,8 @@ from enji_guard_cli.audit.ports import (
     AuditTaskLinksResult,
     MalformedAuditSnapshotError,
 )
-from enji_guard_cli.enji_api import AuditRunCreate
 from enji_guard_cli.enji_gateway import AuditGateway
+from enji_guard_cli.enji_gateway.http import AuditRunCreate
 from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot, audit_project_from_legacy_payload
 from enji_guard_cli.json_types import JsonObjectPayload
 from enji_guard_cli.transport import EnjiHttpClient
@@ -388,6 +388,25 @@ def test_audit_gateway_starts_audit_run(gateway_harness: _GatewayHarness) -> Non
             ),
         )
     ]
+
+
+def test_audit_gateway_resolves_external_schema_placeholder_at_wire_boundary(
+    gateway_harness: _GatewayHarness,
+) -> None:
+    request = AuditRunRequest(
+        "repo-1",
+        "project-1",
+        "audit.recon",
+        AuditTaskBody(
+            "Run recon", "schema={{reportSchemaName}}", "project-1", "single", {}, "runbook-1", "project-1", "org/repo"
+        ),
+    )
+
+    gateway_harness.gateway.start_audit_run(request)
+
+    create_request = gateway_harness.calls[-1][1][0]
+    assert isinstance(create_request, AuditRunCreate)
+    assert create_request.fleet_task_body["description"] == "schema=upfront.recon.report"
 
 
 def test_audit_gateway_reads_snapshot(gateway_harness: _GatewayHarness) -> None:
