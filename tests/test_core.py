@@ -3018,7 +3018,7 @@ def test_report_status_projects_ledger_task_with_task_detail(tmp_path: Path, mon
 def test_repo_status_preserves_typed_ledger_run_compatibility_fields(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     settings = _ledger_test_settings(tmp_path)
     monkeypatch.setattr(core, "default_settings", lambda: settings)
-    observed_at = datetime(2026, 7, 15, 10, 0, tzinfo=UTC)
+    observed_at = datetime.now(UTC) - timedelta(minutes=1)
     active_run_ledger.record_started_run(
         settings.active_run_ledger,
         active_run_ledger.new_entry(
@@ -3069,7 +3069,7 @@ def test_repo_status_preserves_typed_ledger_run_compatibility_fields(tmp_path: P
         "completedAt": None,
         "projectionSource": "local_started_task_ledger",
         "projectionStatusSource": "task_by_id",
-        "expiresAt": "2026-07-15T16:00:00+00:00",
+        "expiresAt": (observed_at + timedelta(hours=6)).isoformat(),
         "currentHeadSha": "head_current",
         "lastAuditedHeadSha": "head_audited",
     }
