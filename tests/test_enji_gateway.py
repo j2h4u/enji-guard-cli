@@ -16,6 +16,7 @@ from enji_guard_cli.audit.ports import (
     AuditTaskLinksResult,
     MalformedAuditSnapshotError,
 )
+from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
 from enji_guard_cli.enji_gateway import AuditGateway
 from enji_guard_cli.enji_gateway.http import AuditRunCreate
 from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot, audit_project_from_legacy_payload
@@ -120,7 +121,7 @@ class _GatewayHarness:
         self.snapshot_payload: JsonObjectPayload = {"snapshot": {"content": {"report": "findings", "score": 80}}}
         self.auth_file = Path("auth.json")
         self.client = cast(EnjiHttpClient, object())
-        self.gateway = AuditGateway(auth_file=self.auth_file, client=self.client)
+        self.gateway = AuditGateway(auth_file=self.auth_file, client=self.client, auth_port=AuthSessionAdapter())
         self.request = AuditRunRequest(
             "repo-1",
             "project-1",
@@ -130,35 +131,49 @@ class _GatewayHarness:
             ),
         )
 
-    def fake_catalog(self, auth_file: object, client: object) -> JsonObjectPayload:
+    def fake_catalog(self, auth_file: object, client: object, *, auth_port: object) -> JsonObjectPayload:
         self.calls.append(("catalog", (auth_file, client)))
         return self.catalog_payload
 
-    def fake_active_runs(self, repo_id: str, auth_file: object, client: object) -> JsonObjectPayload:
+    def fake_active_runs(
+        self, repo_id: str, auth_file: object, client: object, *, auth_port: object
+    ) -> JsonObjectPayload:
         self.calls.append(("active_runs", (repo_id, auth_file, client)))
         return self.active_runs_payload
 
-    def fake_rerun_state(self, repo_id: str, auth_file: object, client: object) -> JsonObjectPayload:
+    def fake_rerun_state(
+        self, repo_id: str, auth_file: object, client: object, *, auth_port: object
+    ) -> JsonObjectPayload:
         self.calls.append(("rerun_state", (repo_id, auth_file, client)))
         return self.rerun_payload
 
-    def fake_task_links(self, repo_id: str, auth_file: object, client: object) -> JsonObjectPayload:
+    def fake_task_links(
+        self, repo_id: str, auth_file: object, client: object, *, auth_port: object
+    ) -> JsonObjectPayload:
         self.calls.append(("task_links", (repo_id, auth_file, client)))
         return self.links_payload
 
-    def fake_task_detail(self, task_id: str, auth_file: object, client: object) -> JsonObjectPayload:
+    def fake_task_detail(
+        self, task_id: str, auth_file: object, client: object, *, auth_port: object
+    ) -> JsonObjectPayload:
         self.calls.append(("task_detail", (task_id, auth_file, client)))
         return self.task_payload
 
-    def fake_runbook(self, runbook_id: str, auth_file: object, client: object) -> JsonObjectPayload:
+    def fake_runbook(
+        self, runbook_id: str, auth_file: object, client: object, *, auth_port: object
+    ) -> JsonObjectPayload:
         self.calls.append(("runbook", (runbook_id, auth_file, client)))
         return {"title": "Security audit", "suggested_flow": "single", "suggested_flow_config": {"retries": 1}}
 
-    def fake_start_audit_run(self, request: AuditRunCreate, auth_file: object, client: object) -> JsonObjectPayload:
+    def fake_start_audit_run(
+        self, request: AuditRunCreate, auth_file: object, client: object, *, auth_port: object
+    ) -> JsonObjectPayload:
         self.calls.append(("start_audit_run", (request, auth_file, client)))
         return self.start_payload
 
-    def fake_snapshot(self, repo_id: str, audit_key: str, auth_file: object, client: object) -> JsonObjectPayload:
+    def fake_snapshot(
+        self, repo_id: str, audit_key: str, auth_file: object, client: object, *, auth_port: object
+    ) -> JsonObjectPayload:
         self.calls.append(("snapshot", (repo_id, audit_key, auth_file, client)))
         return self.snapshot_payload
 

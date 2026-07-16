@@ -1,9 +1,10 @@
 """Application ports for Portfolio and its narrow Audit dependency."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
-from enji_guard_cli.audit.ports import AuditItemStatus, AuditRun, AuditRunResult
+from enji_guard_cli.audit.ports import AuditRun, AuditRunResult, AuditStatus
 from enji_guard_cli.portfolio.models import (
     AccessInfo,
     AccountPreferences,
@@ -43,15 +44,44 @@ class SelectorResolver(Protocol):
     def resolve_repository(self, selector: str, *, project: str | None = None) -> RepositoryRef: ...
 
 
+class PortfolioTargetService(Protocol):
+    """Portfolio-owned target and scope selection for application use-cases.
+
+    The application coordinates audit operations, but it must not duplicate
+    project/repository selection rules.  Implementations resolve selectors
+    against one gateway snapshot and expand only the explicitly requested
+    mutation scope.
+    """
+
+    def resolve_project(self, selector: str | None = None) -> ProjectRef: ...
+
+    def resolve_repository(self, selector: str, *, project: str | None = None) -> RepositoryRef: ...
+
+    def targets(self, repo: str | None = None, project: str | None = None) -> tuple[RepositoryRef, ...]: ...
+
+    def write_targets(
+        self,
+        repo: str | None,
+        project: str | None,
+        *,
+        all_repos: bool = False,
+        all_projects: bool = False,
+        operation: str = "mutation",
+    ) -> tuple[RepositoryRef, ...]: ...
+
+    def linked_website_mapping(self, project_id: str) -> Mapping[str, tuple[str, ...]]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class PortfolioAuditStatus:
-    """The small audit projection needed by Portfolio status and recon."""
+    """Audit-owned status aggregate plus active-run identity for recon."""
 
-    current_head_sha: str | None
-    audited_head_shas: dict[str, str | None]
-    audits: tuple[AuditItemStatus, ...] = ()
+    summary: AuditStatus
     active_runs: tuple[AuditRun, ...] = ()
-    last_audit_at: str | None = None
+
+    @classmethod
+    def from_audit_status(cls, status: AuditStatus, *, active_runs: tuple[AuditRun, ...] = ()) -> PortfolioAuditStatus:
+        return cls(summary=status, active_runs=active_runs)
 
 
 class AuditStatusReader(Protocol):

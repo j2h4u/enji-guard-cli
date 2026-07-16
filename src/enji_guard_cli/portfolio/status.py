@@ -3,58 +3,24 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from enji_guard_cli.audit.ports import AuditItemStatus, AuditRun
 from enji_guard_cli.portfolio.models import ProjectDetail, ProjectRef, RepositoryRef
-from enji_guard_cli.portfolio.ports import AuditStatusReader, PortfolioGatewayPort, PortfolioStatusPort
+from enji_guard_cli.portfolio.ports import (
+    AuditStatusReader,
+    PortfolioAuditStatus,
+    PortfolioGatewayPort,
+    PortfolioStatusPort,
+)
 from enji_guard_cli.settings import RepositorySortName
 
 
 @dataclass(frozen=True, slots=True)
 class RepositoryStatus:
     repository: RepositoryRef
-    current_head_sha: str | None
-    audited_head_shas: dict[str, str | None]
-    audits: tuple[AuditItemStatus, ...]
-    active_runs: tuple[AuditRun, ...]
-    last_audit_at: str | None
-
-    @property
-    def stale_actions(self) -> tuple[str, ...]:
-        return tuple(
-            item.action_key
-            for item in self.audits
-            if item.current_head_sha is not None
-            and item.audited_head_sha is not None
-            and item.current_head_sha != item.audited_head_sha
-        )
-
-    @property
-    def fresh(self) -> bool:
-        return not self.stale_actions
-
-    @property
-    def freshness(self) -> str:
-        states = {
-            "stale"
-            if item.current_head_sha is not None
-            and item.audited_head_sha is not None
-            and item.current_head_sha != item.audited_head_sha
-            else "fresh"
-            if item.current_head_sha is not None and item.audited_head_sha is not None
-            else "unknown"
-            for item in self.audits
-        }
-        if len(states) > 1:
-            return "mixed"
-        return next(iter(states), "unknown")
+    audit: PortfolioAuditStatus
 
     @property
     def active(self) -> bool:
-        return bool(self.active_runs)
-
-    @property
-    def complete(self) -> bool:
-        return not self.active and bool(self.audits) and all(item.can_read for item in self.audits)
+        return bool(self.audit.active_runs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,14 +41,7 @@ class PortfolioStatus:
 
 def repository_status(repository: RepositoryRef, *, audits: AuditStatusReader) -> RepositoryStatus:
     status = audits.status(repository.repo_id)
-    return RepositoryStatus(
-        repository=repository,
-        current_head_sha=status.current_head_sha,
-        audited_head_shas=dict(status.audited_head_shas),
-        audits=status.audits,
-        active_runs=status.active_runs,
-        last_audit_at=status.last_audit_at,
-    )
+    return RepositoryStatus(repository=repository, audit=status)
 
 
 def project_status(
@@ -119,8 +78,12 @@ def _sort_repositories(
 
         return tuple(sorted(repositories, key=lambda item: (score(item), item.repository.full_name or "")))
     if sort == "latest-audit":
-        return tuple(sorted(repositories, key=lambda item: item.last_audit_at or "", reverse=True))
+        return tuple(sorted(repositories, key=_latest_audit_at, reverse=True))
     raise ValueError(f"unknown repository sort: {sort}")
+
+
+def _latest_audit_at(item: RepositoryStatus) -> str:
+    return max((audit.completed_at or "" for audit in item.audit.summary.items), default="")
 
 
 def status_for_repo(

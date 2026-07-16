@@ -1,9 +1,83 @@
 """Audit scheduling rules and idempotent update planning."""
 
-from dataclasses import replace
-from typing import Literal, cast
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
+from typing import Literal, Protocol, cast
 
 from enji_guard_cli.audit.ports import AuditSchedule, AuditScheduleUpdate
+
+
+class AuditScheduleTarget(Protocol):
+    @property
+    def repo_id(self) -> str: ...
+
+
+class AuditScheduleGateway(Protocol):
+    def list_schedules(self, repo_id: str) -> tuple[AuditSchedule, ...]: ...
+
+    def set_schedule(self, repo_id: str, audit_key: str, schedule: AuditSchedule) -> AuditSchedule: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleTargetResult:
+    repo_id: str
+    schedules: tuple[AuditSchedule, ...]
+
+
+def list_for_targets(
+    targets: Sequence[AuditScheduleTarget],
+    published_audits: Sequence[str],
+    gateway: AuditScheduleGateway,
+) -> tuple[ScheduleTargetResult, ...]:
+    """Project configured and unconfigured rows for every selected target."""
+
+    return tuple(
+        ScheduleTargetResult(
+            target.repo_id,
+            tuple(
+                schedule_for_audit(audit_key, gateway.list_schedules(target.repo_id)) for audit_key in published_audits
+            ),
+        )
+        for target in targets
+    )
+
+
+def set_for_targets(
+    targets: Sequence[AuditScheduleTarget],
+    published_audits: Sequence[str],
+    update: AuditScheduleUpdate,
+    gateway: AuditScheduleGateway,
+) -> tuple[AuditSchedule, ...]:
+    validate_schedule_update(update)
+    result: list[AuditSchedule] = []
+    for target in targets:
+        existing = {item.audit_key: item for item in gateway.list_schedules(target.repo_id)}
+        for audit_key in published_audits:
+            desired = plan_schedule_update(existing.get(audit_key), audit_key, update)
+            if desired is None:
+                continue
+            current = existing.get(audit_key)
+            result.append(desired if current == desired else gateway.set_schedule(target.repo_id, audit_key, desired))
+    return tuple(result)
+
+
+def auto_time_for_targets(
+    targets: Sequence[AuditScheduleTarget],
+    published_audits: Sequence[str],
+    gateway: AuditScheduleGateway,
+) -> tuple[AuditSchedule, ...]:
+    published = frozenset(published_audits)
+    result: list[AuditSchedule] = []
+    for target in targets:
+        for current in gateway.list_schedules(target.repo_id):
+            if current.audit_key not in published:
+                continue
+            desired = auto_time(current)
+            result.append(
+                current if desired == current else gateway.set_schedule(target.repo_id, current.audit_key, desired)
+            )
+    return tuple(result)
+
 
 CADENCES = frozenset({"daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"})
 WEEK_DAYS = frozenset({"mon", "tue", "wed", "thu", "fri", "sat", "sun"})
@@ -100,6 +174,13 @@ def plan_schedule_update(
         window_end_time=existing.window_end_time if existing else None,
         window_mode=existing.window_mode if existing else "anytime",
     )
+
+
+def schedule_for_audit(audit_key: str, schedules: tuple[AuditSchedule, ...]) -> AuditSchedule:
+    """Project one configured or unconfigured row for a published audit."""
+
+    current = next((item for item in schedules if item.audit_key == audit_key), None)
+    return current or AuditSchedule(audit_key, False, None, None, None, None, None, None)
 
 
 def auto_time(existing: AuditSchedule, *, timezone: str | None = None) -> AuditSchedule:

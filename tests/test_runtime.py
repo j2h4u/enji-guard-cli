@@ -3,8 +3,9 @@ from pathlib import Path
 
 import pytest
 
-import enji_guard_cli.runtime_observability.runtime as runtime
+import enji_guard_cli.runtime_observability.supervisor as runtime
 from enji_guard_cli.delivery.mcp.server import McpTransport
+from enji_guard_cli.runtime_observability.ports import BackendReadinessObservation
 from enji_guard_cli.runtime_observability.readiness import (
     backend_readiness_starting_state,
     read_backend_readiness_state,
@@ -44,7 +45,8 @@ def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypat
         refresh_tasks.append(refresh_task)
         return refresh_task
 
-    def fake_start_backend_readiness_task() -> asyncio.Task[None]:
+    def fake_start_backend_readiness_task(*, observer: object) -> asyncio.Task[None]:
+        assert observer is auth
         readiness_task = asyncio.create_task(fake_readiness_loop())
         readiness_tasks.append(readiness_task)
         return readiness_task
@@ -70,12 +72,27 @@ def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypat
             and not readiness_tasks[0].done()
         )
 
-    monkeypatch.setattr(runtime, "create_mcp_server", lambda host, port: "server")
-    monkeypatch.setattr(runtime, "start_auto_refresh_task", fake_start_auto_refresh_task)
     monkeypatch.setattr(runtime, "start_backend_readiness_task", fake_start_backend_readiness_task)
-    monkeypatch.setattr(runtime, "run_mcp_server_async", fake_run_mcp_server_async)
 
-    asyncio.run(runtime.run_service_async(transport="streamable-http", host="0.0.0.0", port=8000))
+    class FakeRuntimeAuth:
+        def start_auto_refresh_task(self) -> asyncio.Task[None]:
+            return fake_start_auto_refresh_task()
+
+        async def observe_backend_readiness(self) -> BackendReadinessObservation:
+            return BackendReadinessObservation(ready=True)
+
+    auth = FakeRuntimeAuth()
+
+    asyncio.run(
+        runtime.run_service_async(
+            transport="streamable-http",
+            host="0.0.0.0",
+            port=8000,
+            runtime_auth=auth,
+            mcp_server_factory=lambda host, port: "server",
+            mcp_server_runner=fake_run_mcp_server_async,
+        )
+    )
 
     assert served_while_refresh_was_running is True
     assert refresh_cancelled is True
@@ -99,12 +116,18 @@ def test_run_service_async_runs_without_refresh_when_disabled(monkeypatch: pytes
         captured["transport"] = transport
         captured["mount_path"] = mount_path
 
-    monkeypatch.setattr(runtime, "create_mcp_server", lambda host, port: {"host": host, "port": port})
-    monkeypatch.setattr(runtime, "start_auto_refresh_task", lambda: None)
-    monkeypatch.setattr(runtime, "start_backend_readiness_task", lambda: None)
-    monkeypatch.setattr(runtime, "run_mcp_server_async", fake_run_mcp_server_async)
+    monkeypatch.setattr(runtime, "start_backend_readiness_task", lambda *, observer: None)
 
-    asyncio.run(runtime.run_service_async(transport="sse", host="127.0.0.1", port=9000, mount_path="/events"))
+    asyncio.run(
+        runtime.run_service_async(
+            transport="sse",
+            host="127.0.0.1",
+            port=9000,
+            mount_path="/events",
+            mcp_server_factory=lambda host, port: {"host": host, "port": port},
+            mcp_server_runner=fake_run_mcp_server_async,
+        )
+    )
 
     assert captured == {
         "server": {"host": "127.0.0.1", "port": 9000},
@@ -119,12 +142,12 @@ def test_backend_readiness_loop_records_probe_crash_without_propagating(
 ) -> None:
     slept = False
 
-    async def fake_run_backend_readiness_probe(
-        *,
-        settings: ReadinessSettings,
-        previous: runtime.BackendReadinessState,
-    ) -> runtime.BackendReadinessState:
-        raise ValueError("broken probe")
+    class BrokenObserver:
+        def start_auto_refresh_task(self) -> asyncio.Task[None] | None:
+            return None
+
+        async def observe_backend_readiness(self) -> BackendReadinessObservation:
+            raise ValueError("broken probe")
 
     async def fake_sleep(seconds: float) -> None:
         nonlocal slept
@@ -145,13 +168,14 @@ def test_backend_readiness_loop_records_probe_crash_without_propagating(
         return None
 
     monkeypatch.setattr(runtime, "log_event", fake_log_event)
-    monkeypatch.setattr(runtime, "_run_backend_readiness_probe", fake_run_backend_readiness_probe)
     monkeypatch.setattr(runtime.asyncio, "sleep", fake_sleep)
 
     initial_state = backend_readiness_starting_state(checked_at=runtime.datetime.now(runtime.UTC))
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(runtime._backend_readiness_loop(settings=settings, initial_state=initial_state))
+        asyncio.run(
+            runtime._backend_readiness_loop(settings=settings, initial_state=initial_state, observer=BrokenObserver())
+        )
 
     state = read_backend_readiness_state(settings.state_file)
     assert slept is True
@@ -179,15 +203,24 @@ def test_start_backend_readiness_task_writes_starting_state(
         *,
         settings: ReadinessSettings,
         initial_state: runtime.BackendReadinessState,
+        observer: object,
     ) -> None:
+        assert observer is not None
         captured_initial_state.append(initial_state)
         await asyncio.Future[None]()
 
     monkeypatch.setattr(runtime, "default_settings", lambda: type("Settings", (), {"readiness": settings})())
     monkeypatch.setattr(runtime, "_backend_readiness_loop", fake_backend_readiness_loop)
 
+    class RuntimeAuth:
+        def start_auto_refresh_task(self) -> asyncio.Task[None] | None:
+            return None
+
+        async def observe_backend_readiness(self) -> BackendReadinessObservation:
+            return BackendReadinessObservation(ready=True)
+
     async def run_start() -> None:
-        task = runtime.start_backend_readiness_task()
+        task = runtime.start_backend_readiness_task(observer=RuntimeAuth())
         assert task is not None
         await asyncio.sleep(0)
         task.cancel()

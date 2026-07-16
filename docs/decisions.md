@@ -77,3 +77,12 @@ agents can orient quickly before making changes.
   second contract.
 - **Import-linter as architecture policy**: import-linter expresses enforced
   module boundaries, not style preferences.
+- **Auth Session and Runtime/Observability ownership**: Auth Session is
+  credential-focused and cannot depend on Audit, Portfolio, application,
+  delivery, or raw gateway translators. Runtime/Observability owns supervisor,
+  readiness, telemetry, and journey coordination; it may use the narrow MCP
+  factory boundary required by the current runtime, but not domain
+  implementations or raw gateway HTTP/wire modules.
+- **Source ownership policy**: current product layers are checked for imports
+  of raw gateway implementations; the anti-corruption boundary remains the
+  explicit owner of transport and wire translation.

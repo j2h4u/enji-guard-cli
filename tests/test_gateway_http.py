@@ -3,6 +3,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
 from enji_guard_cli.auth_session.api import (
     AUTH_REFRESH_USER_AGENT,
     import_bearer_token,
@@ -48,6 +49,7 @@ from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpRes
 
 AUTH_REFRESH_ORIGIN = DEFAULT_GUARD_ORIGIN
 AUTH_REFRESH_REFERER = DEFAULT_GUARD_REFERER
+AUTH_PORT = AuthSessionAdapter()
 
 
 @dataclass
@@ -96,7 +98,7 @@ def test_access_returns_normalized_payload_and_uses_stored_auth_headers(tmp_path
         ]
     )
 
-    payload = access(auth_file, client)
+    payload = access(auth_file, client, auth_port=AUTH_PORT)
 
     assert payload == {
         "group": "starter",
@@ -140,9 +142,9 @@ def test_report_language_endpoints_use_observed_paths_and_payloads(tmp_path: Pat
         ]
     )
 
-    assert user_preferences(auth_file, client) == {"preferences": {"language": "ru"}}
-    assert project_run_language("project_1", auth_file, client) == {"language": "ru"}
-    assert put_user_language("en", auth_file, client) == {"preferences": {"language": "en"}}
+    assert user_preferences(auth_file, client, auth_port=AUTH_PORT) == {"preferences": {"language": "ru"}}
+    assert project_run_language("project_1", auth_file, client, auth_port=AUTH_PORT) == {"language": "ru"}
+    assert put_user_language("en", auth_file, client, auth_port=AUTH_PORT) == {"preferences": {"language": "en"}}
 
     assert [(request.method, request.url, request.json_body) for request in client.requests] == [
         ("GET", "https://fleet.enji.ai/api/ux/user-preferences", None),
@@ -183,7 +185,7 @@ def test_reports_list_returns_compact_project_overview(tmp_path: Path) -> None:
         ]
     )
 
-    payload = reports_list(auth_file, client)
+    payload = reports_list(auth_file, client, auth_port=AUTH_PORT)
 
     assert payload == {
         "projects": [
@@ -225,7 +227,7 @@ def test_reports_list_filters_project_selector(tmp_path: Path) -> None:
         ]
     )
 
-    payload = reports_list(auth_file, client, selector="pets/*")
+    payload = reports_list(auth_file, client, selector="pets/*", auth_port=AUTH_PORT)
 
     assert payload["projects"] == [
         {
@@ -254,12 +256,12 @@ def test_project_admin_and_repo_transfer_operations_use_expected_requests(tmp_pa
         ]
     )
 
-    created = create_project("Pets", auth_file, client)
-    renamed = rename_project("project_1", "Friends", auth_file, client)
-    delete_project("project_1", auth_file, client)
-    preflight = preflight_repo_move("project_1", "repo_1", "project_2", auth_file, client)
-    moved = move_repo(RepoTransfer("project_1", "repo_1", "project_2"), auth_file, client)
-    connected = connect_project_repo("project_1", "repo_1", auth_file, client)
+    created = create_project("Pets", auth_file, client, auth_port=AUTH_PORT)
+    renamed = rename_project("project_1", "Friends", auth_file, client, auth_port=AUTH_PORT)
+    delete_project("project_1", auth_file, client, auth_port=AUTH_PORT)
+    preflight = preflight_repo_move("project_1", "repo_1", "project_2", auth_file, client, auth_port=AUTH_PORT)
+    moved = move_repo(RepoTransfer("project_1", "repo_1", "project_2"), auth_file, client, auth_port=AUTH_PORT)
+    connected = connect_project_repo("project_1", "repo_1", auth_file, client, auth_port=AUTH_PORT)
 
     assert created == {"project": {"id": "project_1", "name": "Pets"}}
     assert renamed == {"project": {"id": "project_1", "name": "Friends"}}
@@ -305,7 +307,7 @@ def test_create_project_surfaces_partial_state_when_ux_create_fails(tmp_path: Pa
     )
 
     try:
-        create_project("Pets", auth_file, client)
+        create_project("Pets", auth_file, client, auth_port=AUTH_PORT)
     except EnjiPartialStateError as exc:
         assert exc.code == "PARTIAL_STATE"
         assert exc.operation == "create_project"
@@ -343,7 +345,7 @@ def test_delete_project_surfaces_partial_state_when_fleet_delete_fails(tmp_path:
     )
 
     try:
-        delete_project("project_1", auth_file, client)
+        delete_project("project_1", auth_file, client, auth_port=AUTH_PORT)
     except EnjiPartialStateError as exc:
         assert exc.code == "PARTIAL_STATE"
         assert exc.operation == "delete_project"
@@ -416,15 +418,15 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
         ]
     )
 
-    project_detail("project_1", auth_file, client)
-    catalog(auth_file, client)
-    runbook("runbook_1", auth_file, client)
-    add_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client)
-    delete_project_repo("project_1", "repo_1", auth_file, client)
-    repo_active_runs("repo_1", auth_file, client)
-    repo_audit_rerun_state("repo_1", auth_file, client)
-    repo_task_links("repo_1", auth_file, client)
-    task_detail("task_1", auth_file, client)
+    project_detail("project_1", auth_file, client, auth_port=AUTH_PORT)
+    catalog(auth_file, client, auth_port=AUTH_PORT)
+    runbook("runbook_1", auth_file, client, auth_port=AUTH_PORT)
+    add_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client, auth_port=AUTH_PORT)
+    delete_project_repo("project_1", "repo_1", auth_file, client, auth_port=AUTH_PORT)
+    repo_active_runs("repo_1", auth_file, client, auth_port=AUTH_PORT)
+    repo_audit_rerun_state("repo_1", auth_file, client, auth_port=AUTH_PORT)
+    repo_task_links("repo_1", auth_file, client, auth_port=AUTH_PORT)
+    task_detail("task_1", auth_file, client, auth_port=AUTH_PORT)
     start_audit_run(
         AuditRunCreate(
             repo_id="repo_1",
@@ -434,9 +436,10 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
         ),
         auth_file,
         client,
+        auth_port=AUTH_PORT,
     )
-    audit_summary_snapshot("repo_1", "vulns", auth_file, client)
-    audit_auto_runs("repo_1", auth_file, client)
+    audit_summary_snapshot("repo_1", "vulns", auth_file, client, auth_port=AUTH_PORT)
+    audit_auto_runs("repo_1", auth_file, client, auth_port=AUTH_PORT)
     put_audit_auto_run(
         "repo_1",
         "audit.security",
@@ -456,6 +459,7 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
         },
         auth_file,
         client,
+        auth_port=AUTH_PORT,
     )
 
     assert [(request.method, request.url) for request in client.requests] == [
@@ -505,13 +509,14 @@ def test_audit_email_preferences_use_expected_requests(tmp_path: Path) -> None:
         ]
     )
 
-    read_payload = audit_email_preferences("repo_1", "audit.security", auth_file, client)
+    read_payload = audit_email_preferences("repo_1", "audit.security", auth_file, client, auth_port=AUTH_PORT)
     write_payload = put_audit_email_preferences(
         "repo_1",
         "audit.security",
         {"manualRunCompletion": False, "scheduledRunCompletion": False},
         auth_file,
         client,
+        auth_port=AUTH_PORT,
     )
 
     assert read_payload == {"resolved": {"manualRunCompletion": True, "scheduledRunCompletion": False}}
@@ -528,7 +533,7 @@ def test_reports_list_rejects_unsupported_filters(tmp_path: Path) -> None:
     import_cookie("session=abc", auth_file)
 
     try:
-        reports_list(auth_file, FakeEnjiHttpClient([]), stale=True)
+        reports_list(auth_file, FakeEnjiHttpClient([]), stale=True, auth_port=AUTH_PORT)
     except EnjiApiError as exc:
         assert exc.code == "VALIDATION"
         assert exc.message == "stale filtering is not available in the compact project overview yet"
@@ -538,7 +543,7 @@ def test_reports_list_rejects_unsupported_filters(tmp_path: Path) -> None:
 
 def test_access_raises_auth_required_when_auth_file_is_missing(tmp_path: Path) -> None:
     try:
-        access(tmp_path / "missing.json", FakeEnjiHttpClient([]))
+        access(tmp_path / "missing.json", FakeEnjiHttpClient([]), auth_port=AUTH_PORT)
     except EnjiApiError as exc:
         assert exc.code == "AUTH_REQUIRED"
         assert exc.message == "auth file does not exist"
@@ -552,7 +557,7 @@ def test_reports_list_raises_upstream_error_for_non_object_response(tmp_path: Pa
     client = FakeEnjiHttpClient([json_response(["unexpected"])])
 
     try:
-        reports_list(auth_file, client)
+        reports_list(auth_file, client, auth_port=AUTH_PORT)
     except EnjiApiError as exc:
         assert exc.code == "UPSTREAM"
         assert exc.message == "reports list returned unexpected JSON"
@@ -573,7 +578,7 @@ def test_api_error_payload_is_preserved_for_unexpected_status(tmp_path: Path) ->
     )
 
     try:
-        repo_active_runs("repo_1", auth_file, client)
+        repo_active_runs("repo_1", auth_file, client, auth_port=AUTH_PORT)
     except EnjiApiError as exc:
         assert exc.code == "CLIENT_NOT_ALLOWED"
         assert exc.message == "client is not allowed"
@@ -594,7 +599,7 @@ def test_cookie_permission_forbidden_does_not_refresh(tmp_path: Path) -> None:
     )
 
     try:
-        repo_active_runs("repo_1", auth_file, client)
+        repo_active_runs("repo_1", auth_file, client, auth_port=AUTH_PORT)
     except EnjiApiError as exc:
         assert exc.code == "CLIENT_NOT_ALLOWED"
         assert exc.message == "client is not allowed"
@@ -623,7 +628,7 @@ def test_cookie_auth_invalid_forbidden_refreshes(tmp_path: Path) -> None:
         ]
     )
 
-    payload = repo_active_runs("repo_1", auth_file, client)
+    payload = repo_active_runs("repo_1", auth_file, client, auth_port=AUTH_PORT)
 
     assert payload == {"activeRuns": []}
     assert [(request.method, request.url) for request in client.requests] == [
@@ -654,7 +659,7 @@ def test_access_refreshes_cookie_on_auth_invalid_and_retries_once(tmp_path: Path
         ]
     )
 
-    payload = access(auth_file, client)
+    payload = access(auth_file, client, auth_port=AUTH_PORT)
 
     assert payload["group"] == "pro"
     assert payload["limits"]["can_use_schedules"] is True
@@ -702,7 +707,7 @@ def test_access_refreshes_cookie_on_plain_unauthorized_and_retries_once(tmp_path
         ]
     )
 
-    payload = access(auth_file, client)
+    payload = access(auth_file, client, auth_port=AUTH_PORT)
 
     assert payload["group"] == "pro"
     assert [(request.method, request.url) for request in client.requests] == [
@@ -727,7 +732,7 @@ def test_access_surfaces_auth_required_when_refresh_cookie_is_invalid(tmp_path: 
     )
 
     try:
-        access(auth_file, client)
+        access(auth_file, client, auth_port=AUTH_PORT)
     except EnjiApiError as exc:
         assert exc.code == "AUTH_REQUIRED"
         assert exc.message == "stored refresh cookie is not authenticated"
@@ -746,7 +751,7 @@ def test_bearer_token_auth_invalid_does_not_use_cookie_refresh(tmp_path: Path) -
     client = FakeEnjiHttpClient([json_response({"error": {"code": "AUTH_INVALID"}}, status_code=401)])
 
     try:
-        access(auth_file, client)
+        access(auth_file, client, auth_port=AUTH_PORT)
     except EnjiApiError as exc:
         assert exc.code == "AUTH_INVALID"
         assert exc.message == "invalid access token"
@@ -776,7 +781,7 @@ def test_access_retries_only_once_after_cookie_refresh(tmp_path: Path) -> None:
     )
 
     try:
-        access(auth_file, client)
+        access(auth_file, client, auth_port=AUTH_PORT)
     except EnjiApiError as exc:
         assert exc.code == "AUTH_INVALID"
         assert exc.message == "invalid access token after refresh"
@@ -793,7 +798,7 @@ def test_access_retries_only_once_after_cookie_refresh(tmp_path: Path) -> None:
 def test_concurrent_auth_invalid_responses_dedupe_cookie_refresh(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=long", auth_file)
-    session = load_api_session(auth_file)
+    session = load_api_session(auth_file, auth_port=AUTH_PORT)
     client = ConcurrentRefreshFakeClient()
 
     async def run() -> tuple[dict[str, object], dict[str, object]]:

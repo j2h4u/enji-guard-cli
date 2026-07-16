@@ -7,12 +7,14 @@ import pytest
 import enji_guard_cli.enji_gateway.portfolio_gateway as portfolio_gateway_module
 from enji_guard_cli.audit.catalog import published_autofix_keys
 from enji_guard_cli.audit.ledger import FileAuditLedger, new_entry
-from enji_guard_cli.audit.ports import AuditItemStatus
+from enji_guard_cli.audit.ports import AuditFreshness, AuditStatus, AuditStatusItem
+from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
 from enji_guard_cli.delivery.mcp.server import _json
 from enji_guard_cli.enji_gateway.audit_gateway import _schedule
 from enji_guard_cli.enji_gateway.portfolio_gateway import PortfolioGateway
 from enji_guard_cli.enji_gateway.wire import audit_rerun_state_from_legacy_payload
 from enji_guard_cli.portfolio.models import RepositoryRef
+from enji_guard_cli.portfolio.ports import PortfolioAuditStatus
 from enji_guard_cli.portfolio.status import RepositoryStatus
 
 
@@ -35,17 +37,18 @@ def test_schedule_maps_fields_and_rejects_missing_action() -> None:
 def test_repository_freshness_all_states() -> None:
     repo = RepositoryRef("r", "p", None, "o/r")
 
-    def status(items: tuple[AuditItemStatus, ...]) -> RepositoryStatus:
-        return RepositoryStatus(repo, None, {}, items, (), None)
+    def status(items: tuple[AuditStatusItem, ...]) -> RepositoryStatus:
+        return RepositoryStatus(repo, PortfolioAuditStatus(AuditStatus("r", "x", items)))
 
-    def item(current: str | None, audited: str | None) -> AuditItemStatus:
-        return AuditItemStatus("a", current, audited, True, None, None, None, False)
+    def item(current: str | None, audited: str | None) -> AuditStatusItem:
+        state = "unknown" if current is None or audited is None else "fresh" if current == audited else "stale"
+        return AuditStatusItem("a", "Audit", AuditFreshness(current, audited, state), True, "completed", None, None)
 
-    assert status(()).freshness == "unknown"
-    assert status((item(None, "x"),)).freshness == "unknown"
-    assert status((item("x", "x"),)).freshness == "fresh"
-    assert status((item("x", "y"),)).freshness == "stale"
-    assert status((item("x", "x"), item("x", "y"))).freshness == "mixed"
+    assert status(()).audit.summary.items == ()
+    assert status((item(None, "x"),)).audit.summary.items[0].freshness.state == "unknown"
+    assert status((item("x", "x"),)).audit.summary.fresh is True
+    assert status((item("x", "y"),)).audit.summary.stale == ("a",)
+    assert status((item("x", "x"), item("x", "y"))).audit.summary.mixed is True
 
 
 def test_published_autofix_keys_filters_status_and_duplicates() -> None:
@@ -109,12 +112,15 @@ def test_move_preflight_accepts_current_and_legacy_shapes(monkeypatch: pytest.Mo
     monkeypatch.setattr(
         portfolio_gateway_module,
         "_preflight_repo_move",
-        lambda *args: {"canTransfer": False, "schedule_replacements": ["audit.a", 4], "reason": "blocked"},
+        lambda *args, **kwargs: {"canTransfer": False, "schedule_replacements": ["audit.a", 4], "reason": "blocked"},
     )
-    result = PortfolioGateway().preflight_repository_move("source", "repo", "target")
+    result = PortfolioGateway(auth_port=AuthSessionAdapter()).preflight_repository_move("source", "repo", "target")
     assert result.allowed is False
     assert result.schedule_replacements == ("audit.a",)
     assert result.message == "blocked"
 
-    monkeypatch.setattr(portfolio_gateway_module, "_preflight_repo_move", lambda *args: {"allowed": True})
-    assert PortfolioGateway().preflight_repository_move("s", "r", "t").schedule_replacements == ()
+    monkeypatch.setattr(portfolio_gateway_module, "_preflight_repo_move", lambda *args, **kwargs: {"allowed": True})
+    assert (
+        PortfolioGateway(auth_port=AuthSessionAdapter()).preflight_repository_move("s", "r", "t").schedule_replacements
+        == ()
+    )

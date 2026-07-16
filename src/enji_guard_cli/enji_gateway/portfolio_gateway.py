@@ -51,7 +51,7 @@ from enji_guard_cli.enji_gateway.http import (
 from enji_guard_cli.enji_gateway.http import (
     user_preferences as _user_preferences,
 )
-from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayClient
+from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayAuthPort, GatewayClient
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.portfolio.models import (
     AccessInfo,
@@ -66,19 +66,26 @@ from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
 
 
 class PortfolioGateway(PortfolioGatewayPort):
-    def __init__(self, auth_file: GatewayAuthFile = None, client: GatewayClient = None) -> None:
+    def __init__(
+        self,
+        auth_file: GatewayAuthFile = None,
+        client: GatewayClient = None,
+        *,
+        auth_port: GatewayAuthPort,
+    ) -> None:
         self._auth_file = auth_file
         self._client = client
+        self._auth_port = auth_port
 
     def list_projects(self) -> tuple[ProjectRef, ...]:
-        payload = _projects(self._auth_file, self._client)
+        payload = _projects(self._auth_file, self._client, auth_port=self._auth_port)
         raw = payload.get("projects")
         if not isinstance(raw, list):
             raw = payload.get("items") if isinstance(payload.get("items"), list) else []
         return tuple(project for item in _object_list(raw) if (project := _project_ref(item)) is not None)
 
     def project_detail(self, project_id: str) -> ProjectDetail:
-        payload = _project_detail(project_id, self._auth_file, self._client)
+        payload = _project_detail(project_id, self._auth_file, self._client, auth_port=self._auth_port)
         project_payload = _object(payload.get("project")) or payload
         project = _project_ref(project_payload) or ProjectRef(project_id=project_id, name=None)
         # The live endpoint returns collections alongside the nested project;
@@ -109,35 +116,37 @@ class PortfolioGateway(PortfolioGatewayPort):
         )
 
     def create_project(self, name: str) -> ProjectRef:
-        payload = _create_project(name, self._auth_file, self._client)
+        payload = _create_project(name, self._auth_file, self._client, auth_port=self._auth_port)
         project = _project_ref(_object(payload.get("project")) or payload)
         return project or ProjectRef(project_id=_optional_str(payload.get("id")) or "", name=name)
 
     def rename_project(self, project_id: str, name: str) -> ProjectRef:
-        payload = _rename_project(project_id, name, self._auth_file, self._client)
+        payload = _rename_project(project_id, name, self._auth_file, self._client, auth_port=self._auth_port)
         project = _project_ref(_object(payload.get("project")) or payload)
         return project or ProjectRef(project_id=project_id, name=name)
 
     def delete_project(self, project_id: str) -> None:
-        _delete_project(project_id, self._auth_file, self._client)
+        _delete_project(project_id, self._auth_file, self._client, auth_port=self._auth_port)
 
     def add_repository(self, project_id: str, owner: str, name: str) -> RepositoryRef:
-        payload = _add_project_repo(project_id, owner, name, self._auth_file, self._client)
+        payload = _add_project_repo(project_id, owner, name, self._auth_file, self._client, auth_port=self._auth_port)
         return _repository_ref(
             _object(payload.get("repo")) or _object(payload.get("repository")) or payload, ProjectRef(project_id, None)
         ) or RepositoryRef("", project_id, None, f"{owner}/{name}")
 
     def remove_repository(self, project_id: str, repo_id: str) -> None:
-        _delete_project_repo(project_id, repo_id, self._auth_file, self._client)
+        _delete_project_repo(project_id, repo_id, self._auth_file, self._client, auth_port=self._auth_port)
 
     def connect_repository(self, project_id: str, repo_id: str) -> RepositoryRef:
-        payload = _connect_project_repo(project_id, repo_id, self._auth_file, self._client)
+        payload = _connect_project_repo(project_id, repo_id, self._auth_file, self._client, auth_port=self._auth_port)
         return _repository_ref(
             _object(payload.get("repo")) or _object(payload.get("repository")) or payload, ProjectRef(project_id, None)
         ) or RepositoryRef(repo_id, project_id, None, None, connected=True)
 
     def preflight_repository_move(self, source_project_id: str, repo_id: str, target_project_id: str) -> MovePreflight:
-        payload = _preflight_repo_move(source_project_id, repo_id, target_project_id, self._auth_file, self._client)
+        payload = _preflight_repo_move(
+            source_project_id, repo_id, target_project_id, self._auth_file, self._client, auth_port=self._auth_port
+        )
         if not isinstance(payload, dict):
             return MovePreflight()
         allowed_raw = payload.get("allowed")
@@ -156,14 +165,19 @@ class PortfolioGateway(PortfolioGatewayPort):
         )
 
     def move_repository(self, source_project_id: str, repo_id: str, target_project_id: str) -> RepositoryRef:
-        payload = _move_repo(RepoTransfer(source_project_id, repo_id, target_project_id), self._auth_file, self._client)
+        payload = _move_repo(
+            RepoTransfer(source_project_id, repo_id, target_project_id),
+            self._auth_file,
+            self._client,
+            auth_port=self._auth_port,
+        )
         return _repository_ref(
             _object(payload.get("repo")) or _object(payload.get("repository")) or payload,
             ProjectRef(target_project_id, None),
         ) or RepositoryRef(repo_id, target_project_id, None, None)
 
     def get_preferences(self) -> AccountPreferences:
-        payload = _user_preferences(self._auth_file, self._client)
+        payload = _user_preferences(self._auth_file, self._client, auth_port=self._auth_port)
         preferences = _object(payload.get("preferences"))
         language = _optional_str(preferences.get("language")) or _optional_str(payload.get("language"))
         return AccountPreferences(language)
@@ -171,14 +185,16 @@ class PortfolioGateway(PortfolioGatewayPort):
     def set_preferences(self, preferences: AccountPreferences) -> AccountPreferences:
         if not isinstance(preferences.language, str) or not preferences.language.strip():
             raise ValueError("preferences must contain a language")
-        payload = _put_user_language(cast(LanguageCode, preferences.language), self._auth_file, self._client)
+        payload = _put_user_language(
+            cast(LanguageCode, preferences.language), self._auth_file, self._client, auth_port=self._auth_port
+        )
         nested = _object(payload.get("preferences"))
         return AccountPreferences(
             _optional_str(nested.get("language")) or _optional_str(payload.get("language")) or preferences.language
         )
 
     def access(self) -> AccessInfo:
-        payload = _access(self._auth_file, self._client)
+        payload = _access(self._auth_file, self._client, auth_port=self._auth_port)
         limits = payload.get("limits")
         return AccessInfo(
             group=_optional_str(payload.get("group")),

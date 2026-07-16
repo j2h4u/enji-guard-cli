@@ -361,6 +361,58 @@ class AuditAutofixUpdate:
 
 
 @dataclass(frozen=True, slots=True)
+class AuditAutofixJob:
+    """Typed improvement job crossing the Audit gateway boundary.
+
+    ``extensions`` preserves provider fields without exposing a JSON object to
+    Audit workflows.  Known fields remain product-language values.
+    """
+
+    action_key: str
+    variant_key: str
+    kind: str | None = None
+    enabled: bool | None = None
+    auto_fix: bool | None = None
+    autofix_variant_key: str | None = None
+    frequency: str | None = None
+    days_of_week: tuple[str, ...] = ()
+    schedule_time: str | None = None
+    schedule_time_source: Literal["auto", "user"] | None = None
+    timezone: str | None = None
+    pentest_mode: str | None = None
+    extensions: tuple[tuple[str, JsonValue], ...] = ()
+
+    def value(self, name: str) -> object:
+        values = {
+            "actionKey": self.action_key,
+            "variantKey": self.variant_key,
+            "kind": self.kind,
+            "enabled": self.enabled,
+            "autoFix": self.auto_fix,
+            "autofixVariantKey": self.autofix_variant_key,
+            "frequency": self.frequency,
+            "daysOfWeek": list(self.days_of_week),
+            "scheduleTime": self.schedule_time,
+            "scheduleTimeSource": self.schedule_time_source,
+            "timezone": self.timezone,
+            "pentestMode": self.pentest_mode,
+        }
+        return values[name]
+
+    def __getitem__(self, name: str) -> object:
+        """Compatibility view for renderers while keeping the DTO typed."""
+        if name in {key for key, _value in self.extensions}:
+            return dict(self.extensions)[name]
+        return self.value(name)
+
+    def get(self, name: str, default: object = None) -> object:
+        try:
+            return self[name]
+        except KeyError, ValueError:
+            return default
+
+
+@dataclass(frozen=True, slots=True)
 class AuditEmailPreference:
     """Completion-email choices for one repository audit."""
 
@@ -490,6 +542,6 @@ class AuditGatewayPort(Protocol):
         self, repo_id: str, audit_key: str, update: AuditEmailPreferenceUpdate
     ) -> AuditEmailPreference: ...
 
-    def list_autofix_jobs(self, repo_id: str) -> tuple[dict[str, JsonValue], ...]: ...
+    def list_autofix_jobs(self, repo_id: str) -> tuple[AuditAutofixJob, ...]: ...
 
-    def set_autofix_job(self, repo_id: str, kind: str, job: dict[str, JsonValue]) -> dict[str, JsonValue]: ...
+    def set_autofix_job(self, repo_id: str, kind: str, job: AuditAutofixJob) -> AuditAutofixJob: ...

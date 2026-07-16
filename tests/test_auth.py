@@ -1,7 +1,8 @@
 import asyncio
 import base64
 import json
-from collections.abc import Awaitable, Callable
+import logging
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import NotRequired, TypedDict, TypeGuard, cast
@@ -12,6 +13,7 @@ from typer.testing import CliRunner
 
 import enji_guard_cli.auth_session.api as auth_module
 import enji_guard_cli.auth_session.auto_refresh as auto_refresh_module
+from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
 from enji_guard_cli.auth_session.api import (
     AUTH_REFRESH_USER_AGENT,
     AuthError,
@@ -31,8 +33,8 @@ from enji_guard_cli.auth_session.api import (
     start_auto_refresh_task,
 )
 from enji_guard_cli.auth_session.api import StoredAuth as RuntimeStoredAuth
+from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
 from enji_guard_cli.delivery.cli.app import app
-from enji_guard_cli.runtime_observability.readiness import BackendReadinessProbe
 from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER, AutoRefreshSettings
 from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient
 
@@ -309,7 +311,7 @@ def test_backend_readiness_probe_does_not_refresh_on_auth_invalid(tmp_path: Path
         captured.append((request.method, request.url.path))
         return httpx.Response(401, json={"error": {"code": "AUTH_INVALID"}}, request=request)
 
-    async def run_probe() -> BackendReadinessProbe:
+    async def run_probe() -> AuthBackendReadinessResult:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             return await backend_readiness_probe_async(auth_file, HttpxEnjiHttpClient(client))
 
@@ -807,6 +809,99 @@ def test_start_auto_refresh_task_runs_without_bootstrapped_auth_file(
     asyncio.run(run_task())
 
     assert captured == {"auth_file": auth_file, "refresh_settings": auto_refresh_settings()}
+
+
+def test_start_auto_refresh_task_uses_explicit_auth_file_without_default_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    custom_auth_file = tmp_path / "custom" / "auth.json"
+    default_auth_file = tmp_path / "default" / "auth.json"
+    captured: dict[str, object] = {}
+    loaded_paths: list[Path] = []
+
+    async def fake_auto_refresh_loop(
+        *, auth_file: Path, refresh_settings: AutoRefreshSettings, **_kwargs: object
+    ) -> None:
+        captured["auth_file"] = auth_file
+        captured["refresh_settings"] = refresh_settings
+
+    monkeypatch.setattr("enji_guard_cli.auth_session.auto_refresh._auto_refresh_loop", fake_auto_refresh_loop)
+    monkeypatch.setattr(auth_module, "load_stored_auth", lambda path: loaded_paths.append(path) or None)
+    monkeypatch.setattr(
+        "enji_guard_cli.auth_session.api.default_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "auto_refresh": auto_refresh_settings(),
+                "auth": type("Auth", (), {"auth_file": default_auth_file})(),
+            },
+        )(),
+    )
+
+    async def run_task() -> None:
+        task = start_auto_refresh_task(custom_auth_file)
+        assert task is not None
+        await task
+
+    asyncio.run(run_task())
+
+    assert captured["auth_file"] == custom_auth_file
+    assert captured["auth_file"] != default_auth_file
+    assert loaded_paths == [custom_auth_file]
+
+
+def test_auth_adapter_passes_isolated_event_sink_to_auto_refresh(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured_dependencies: list[auto_refresh_module.AutoRefreshTaskDependencies] = []
+    events: list[tuple[str, dict[str, object]]] = []
+
+    def event_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> None:
+        _ = logger, level
+        events.append((event, dict(fields)))
+
+    def fake_start_auto_refresh_task(
+        *,
+        auth_file: Path,
+        refresh_settings: AutoRefreshSettings,
+        credential_cookie_type: str,
+        dependencies: auto_refresh_module.AutoRefreshTaskDependencies,
+    ) -> None:
+        assert refresh_settings.enabled is True
+        assert credential_cookie_type == "cookie"
+        captured_dependencies.append(dependencies)
+        assert auth_file == tmp_path / ("custom-auth.json" if len(captured_dependencies) == 1 else "isolated-auth.json")
+
+    monkeypatch.setattr(auto_refresh_module, "start_auto_refresh_task", fake_start_auto_refresh_task)
+
+    adapter = AuthSessionAdapter(tmp_path / "custom-auth.json", event_sink=event_sink)
+    assert adapter.start_auto_refresh_task() is None
+
+    dependencies = captured_dependencies[0].loop_dependencies
+    for event in (
+        "enji_auth_auto_refresh_scheduled",
+        "enji_auth_auto_refresh_succeeded",
+        "enji_auth_auto_refresh_schedule_failed",
+    ):
+        dependencies.log_event_fn(logging.getLogger("test"), logging.INFO, event, {"safe": True})
+
+    assert [event for event, _fields in events] == [
+        "enji_auth_auto_refresh_scheduled",
+        "enji_auth_auto_refresh_succeeded",
+        "enji_auth_auto_refresh_schedule_failed",
+    ]
+    assert all(fields == {"safe": True} for _event, fields in events)
+
+    isolated_adapter = AuthSessionAdapter(tmp_path / "isolated-auth.json")
+    assert isolated_adapter.start_auto_refresh_task() is None
+    isolated_dependencies = captured_dependencies[1].loop_dependencies
+    isolated_dependencies.log_event_fn(logging.getLogger("test"), logging.INFO, "leak-check", {})
+    assert [event for event, _fields in events] == [
+        "enji_auth_auto_refresh_scheduled",
+        "enji_auth_auto_refresh_succeeded",
+        "enji_auth_auto_refresh_schedule_failed",
+    ]
 
 
 def test_cli_import_bearer_reads_from_stdin(tmp_path: Path) -> None:

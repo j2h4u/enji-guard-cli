@@ -117,23 +117,24 @@ def create_mcp_server(
 
 
 async def run_mcp_server_async(
-    server: FastMCP,
+    server: object,
     *,
     transport: McpTransport = "stdio",
     mount_path: str | None = None,
 ) -> None:
+    typed_server = cast(FastMCP, server)
     if transport == "stdio":
-        await server.run_stdio_async()
+        await typed_server.run_stdio_async()
     elif transport == "sse":
-        await server.run_sse_async(mount_path)
+        await typed_server.run_sse_async(mount_path)
     elif transport == "streamable-http":
-        await server.run_streamable_http_async()
+        await typed_server.run_streamable_http_async()
     else:
         raise ValueError(f"Unknown transport: {transport}")
 
 
 def run_mcp_server(
-    server: FastMCP,
+    server: object,
     *,
     transport: McpTransport = "stdio",
     mount_path: str | None = None,

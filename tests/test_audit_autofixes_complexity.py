@@ -57,6 +57,7 @@ def test_desired_job_requires_timezone_for_new_enable_and_preserves_defaults() -
             AuditAutofixUpdate(True),
         )
     result = desired_job(None, _definition(), AuditAutofixUpdate(True, timezone="UTC"))
+    assert result is not None
     assert result["enabled"] is True
     assert result["daysOfWeek"] == ["mon", "tue", "wed", "thu", "fri"]
 
@@ -68,5 +69,7 @@ def test_set_one_is_idempotent_and_skips_new_disable() -> None:
         == "unchanged"
     )
     existing = desired_job(None, definition, AuditAutofixUpdate(True, timezone="UTC"))
+    assert existing is not None
+    assert existing is not None
     result = set_one(definition, existing, AuditAutofixUpdate(True), lambda *_: pytest.fail("must not write"))
     assert result.status == "unchanged"

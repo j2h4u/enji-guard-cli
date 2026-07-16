@@ -11,7 +11,6 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -19,15 +18,18 @@ from enji_guard_cli.audit import parse_catalog_result
 from enji_guard_cli.audit.autofixes import definitions as autofix_definitions
 from enji_guard_cli.audit.autofixes import select as select_autofixes
 from enji_guard_cli.audit.autofixes import set_one
-from enji_guard_cli.audit.ledger import FileAuditLedger, new_entry
+from enji_guard_cli.audit.catalog_observation import AuditCatalogObserver
+from enji_guard_cli.audit.email import EmailPreferencesUpdate
+from enji_guard_cli.audit.email import list_for_targets as list_email_for_targets
+from enji_guard_cli.audit.email import set_for_targets as set_email_for_targets
+from enji_guard_cli.audit.ledger import FileAuditLedger
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.ports import (
+    AuditAutofixJob,
     AuditAutofixUpdate,
     AuditCatalogResult,
-    AuditEmailPreferenceUpdate,
     AuditGatewayPort,
     AuditLedgerPort,
-    AuditRunRequest,
     AuditRunResult,
     AuditSchedule,
     AuditScheduleUpdate,
@@ -36,19 +38,20 @@ from enji_guard_cli.audit.ports import (
     AuditWaitResult,
 )
 from enji_guard_cli.audit.preflight import AuditPreflight, build_preflight
-from enji_guard_cli.audit.runs import (
-    RecordStartedRunContext,
-    StartAuditDependencies,
-    StartAuditsContext,
-    start_audits_for_target,
-)
-from enji_guard_cli.audit.schedules import auto_time, plan_schedule_update
-from enji_guard_cli.audit.status import audit_status_items, build_status
+from enji_guard_cli.audit.schedules import auto_time_for_targets, list_for_targets, set_for_targets
+from enji_guard_cli.audit.start import AuditStartService
+from enji_guard_cli.audit.status import build_status
 from enji_guard_cli.audit.wait import AuditWaitDependencies, wait_for_completion
 from enji_guard_cli.audit.workflows import AuditWorkflowDependencies, choose_audits, read_for_repo
+from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
+from enji_guard_cli.auth_session.api import AuthError
+from enji_guard_cli.auth_session.models import (
+    AuthSessionRefreshResult,
+    AuthSessionStatus,
+    ImportCredentialPayload,
+)
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.enji_gateway import AuditGateway, PortfolioGateway
-from enji_guard_cli.json_types import JsonValue
 from enji_guard_cli.portfolio.models import (
     AccessInfo,
     AccountPreferences,
@@ -57,23 +60,33 @@ from enji_guard_cli.portfolio.models import (
     ProjectSettings,
     RepositoryRef,
 )
-from enji_guard_cli.portfolio.ports import AuditStartPort, AuditStatusReader, PortfolioAuditStatus, PortfolioGatewayPort
+from enji_guard_cli.portfolio.ports import (
+    AuditStartPort,
+    AuditStatusReader,
+    PortfolioAuditStatus,
+    PortfolioGatewayPort,
+    PortfolioTargetService,
+)
 from enji_guard_cli.portfolio.projects import create_project as create_project_use_case
 from enji_guard_cli.portfolio.projects import delete_project as delete_project_use_case
 from enji_guard_cli.portfolio.projects import rename_project as rename_project_use_case
 from enji_guard_cli.portfolio.recon import recon_after_add
 from enji_guard_cli.portfolio.recon import start_recon as start_recon_use_case
 from enji_guard_cli.portfolio.repositories import add_repository, move_repository, remove_repository
-from enji_guard_cli.portfolio.scopes import MutationScope
-from enji_guard_cli.portfolio.selectors import GatewaySelectorResolver
+from enji_guard_cli.portfolio.selectors import GatewayPortfolioTargetService, GatewaySelectorResolver
 from enji_guard_cli.portfolio.status import PortfolioStatus, assemble_status, status_for_repo
+from enji_guard_cli.runtime_observability.ports import RuntimeAuthPort
+from enji_guard_cli.runtime_observability.telemetry import log_event
 from enji_guard_cli.settings import RepositorySortName, default_settings
 
 
-@dataclass(frozen=True, slots=True)
-class EmailPreferencesUpdate:
-    manual: bool | None = None
-    scheduled: bool | None = None
+class ApplicationAuthError(Exception):
+    """Typed authentication failure exposed by the application facade."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +103,9 @@ class Application:
     portfolio_gateway: PortfolioGatewayPort
     auth: AuthSessionService
     ledger: AuditLedgerPort | None = None
+    catalog_observer: AuditCatalogObserver | None = None
+    target_service: PortfolioTargetService | None = None
+    runtime_auth: RuntimeAuthPort | None = None
     _last_catalog_result: AuditCatalogResult | None = None
 
     @classmethod
@@ -100,12 +116,54 @@ class Application:
             ttl_seconds=settings.active_run_ledger.ttl_seconds,
             lookup_grace_seconds=settings.active_run_ledger.lookup_grace_seconds,
         )
-        return cls(AuditGateway(auth_file), PortfolioGateway(auth_file), AuthSessionService(auth_file), ledger)
+        auth_adapter = AuthSessionAdapter(auth_file, settings=settings, event_sink=log_event)
+        auth_service = AuthSessionService(auth_file, settings=settings, event_sink=log_event)
+        portfolio_gateway = PortfolioGateway(auth_file, auth_port=auth_adapter)
+        return cls(
+            AuditGateway(auth_file, auth_port=auth_adapter),
+            portfolio_gateway,
+            auth_service,
+            ledger,
+            AuditCatalogObserver(settings.audit_catalog.state_file),
+            GatewayPortfolioTargetService(portfolio_gateway),
+            auth_adapter,
+        )
+
+    def import_cookie(self, raw_cookie: str) -> ImportCredentialPayload:
+        try:
+            return self.auth.import_cookie(raw_cookie)
+        except AuthError as exc:
+            raise ApplicationAuthError(exc.code, exc.message) from exc
+
+    def import_bearer(self, raw_token: str) -> ImportCredentialPayload:
+        try:
+            return self.auth.import_bearer_token(raw_token)
+        except AuthError as exc:
+            raise ApplicationAuthError(exc.code, exc.message) from exc
+
+    def auth_status(self) -> AuthSessionStatus:
+        try:
+            return self.auth.status()
+        except AuthError as exc:
+            raise ApplicationAuthError(exc.code, exc.message) from exc
+
+    def auth_refresh(self) -> AuthSessionRefreshResult:
+        try:
+            return self.auth.refresh()
+        except AuthError as exc:
+            raise ApplicationAuthError(exc.code, exc.message) from exc
+
+    def runtime_auth_port(self) -> RuntimeAuthPort:
+        if self.runtime_auth is None:
+            raise RuntimeError("runtime auth is not configured")
+        return self.runtime_auth
 
     # Catalog and Audit -------------------------------------------------
     def catalog(self) -> AuditCatalogResult:
         """Fetch the live catalog once; ``changes`` is the typed observation hook."""
         result = self.audit_gateway.catalog()
+        if self.catalog_observer is not None:
+            result = self.catalog_observer.observe(result)
         self._last_catalog_result = result
         return result
 
@@ -136,14 +194,12 @@ class Application:
         target = self._resolve_repository(repo, project)
         catalog = self.audit_catalog()
         selected = self._select_audits(catalog, selectors or [], all_audits=all_audits)
-        self._preserve_snapshots(target.repo_id, catalog)
-        batch = self._start_batch(target.repo_id, target.project_id, selected, catalog)
+        batch = self._audit_start_service().start(target.repo_id, target.project_id, selected, catalog)
         return {"repo_id": target.repo_id, "project_id": target.project_id, **batch}
 
     def audit_start_one(self, repo_id: str, project_id: str, audit: AuditDefinition) -> object:
         catalog = self.audit_catalog()
-        self._preserve_snapshots(repo_id, catalog)
-        batch = self._start_batch(repo_id, project_id, (audit,), catalog)
+        batch = self._audit_start_service().start(repo_id, project_id, (audit,), catalog)
         return cast(list[dict[str, object]], batch["results"])[0]
 
     def audit_read(
@@ -251,12 +307,12 @@ class Application:
     # Schedules, autofixes, preferences --------------------------------
     def list_schedules(self, repo: str | None = None, project: str | None = None) -> tuple[object, ...]:
         catalog = self.audit_catalog()
-        return tuple(
-            schedule_for_audit(audit, schedules)
-            for target in self._targets(repo, project)
-            for schedules in (self.audit_gateway.list_schedules(target.repo_id),)
-            for audit in catalog.published_audits
+        results = list_for_targets(
+            self._targets(repo, project),
+            tuple(audit.action_key for audit in catalog.published_audits),
+            self.audit_gateway,
         )
+        return tuple(schedule for result in results for schedule in result.schedules)
 
     def set_schedules(
         self,
@@ -266,48 +322,23 @@ class Application:
         *,
         scope: AutofixWriteScope | None = None,
     ) -> tuple[object, ...]:
-        targets = self._write_targets(repo, project, scope)
         catalog = self.audit_catalog()
-        result: list[object] = []
-        for target in targets:
-            result.extend(self._set_schedules_for_target(target, catalog, update))
-        return tuple(result)
-
-    def _set_schedules_for_target(
-        self, target: RepositoryRef, catalog: AuditCatalog, update: AuditScheduleUpdate
-    ) -> tuple[object, ...]:
-        existing = {item.audit_key: item for item in self.audit_gateway.list_schedules(target.repo_id)}
-        values: list[object] = []
-        for audit in catalog.published_audits:
-            desired = plan_schedule_update(existing.get(audit.action_key), audit.action_key, update)
-            if desired is None:
-                continue
-            current = existing.get(audit.action_key)
-            values.append(
-                desired
-                if current == desired
-                else self.audit_gateway.set_schedule(target.repo_id, audit.action_key, desired)
-            )
-        return tuple(values)
+        return set_for_targets(
+            self._write_targets(repo, project, scope),
+            tuple(audit.action_key for audit in catalog.published_audits),
+            update,
+            self.audit_gateway,
+        )
 
     def schedule_auto_time(
         self, repo: str | None, project: str | None = None, *, scope: AutofixWriteScope | None = None
     ) -> tuple[object, ...]:
-        targets = self._write_targets(repo, project, scope)
         catalog = self.audit_catalog()
-        published = {audit.action_key for audit in catalog.published_audits}
-        result: list[object] = []
-        for target in targets:
-            for current in self.audit_gateway.list_schedules(target.repo_id):
-                if current.audit_key not in published:
-                    continue
-                desired = auto_time(current)
-                result.append(
-                    current
-                    if desired == current
-                    else self.audit_gateway.set_schedule(target.repo_id, current.audit_key, desired)
-                )
-        return tuple(result)
+        return auto_time_for_targets(
+            self._write_targets(repo, project, scope),
+            tuple(audit.action_key for audit in catalog.published_audits),
+            self.audit_gateway,
+        )
 
     def list_autofixes(self, repo: str | None = None, project: str | None = None) -> tuple[object, ...]:
         catalog = self.catalog()
@@ -332,17 +363,12 @@ class Application:
         for target in self._write_targets(repo, project, scope):
             jobs = _index_autofix_jobs(self.audit_gateway.list_autofix_jobs(target.repo_id))
             for definition in selected:
-                existing = cast(
-                    dict[str, object] | None,
-                    jobs.get(definition.action_key) or jobs.get(definition.kind or definition.selector),
-                )
+                existing = jobs.get(definition.action_key) or jobs.get(definition.kind or definition.selector)
                 outcome = set_one(
                     definition,
                     existing,
                     update,
-                    lambda kind, job, repo_id=target.repo_id: self.audit_gateway.set_autofix_job(
-                        repo_id, kind, cast(dict[str, JsonValue], job)
-                    ),
+                    lambda kind, job, repo_id=target.repo_id: self.audit_gateway.set_autofix_job(repo_id, kind, job),
                 )
                 result.append(outcome)
         return tuple(result)
@@ -350,10 +376,7 @@ class Application:
     def list_email_preferences(self, repo: str | None = None, project: str | None = None) -> tuple[object, ...]:
         catalog = self.audit_catalog()
         keys = tuple(audit.action_key for audit in catalog.published_audits)
-        return tuple(
-            (target, self.audit_gateway.list_email_preferences(target.repo_id, keys))
-            for target in self._targets(repo, project)
-        )
+        return list_email_for_targets(self._targets(repo, project), keys, self.audit_gateway)
 
     def set_email_preferences(
         self,
@@ -363,13 +386,8 @@ class Application:
         *,
         scope: AutofixWriteScope | None = None,
     ) -> tuple[object, ...]:
-        typed = _email_preference_update(update)
         keys = tuple(a.action_key for a in self.audit_catalog().published_audits)
-        return tuple(
-            self.audit_gateway.set_email_preference(target.repo_id, key, typed)
-            for target in self._write_targets(repo, project, scope)
-            for key in keys
-        )
+        return set_email_for_targets(self._write_targets(repo, project, scope), keys, update, self.audit_gateway)
 
     def language(self) -> AccountPreferences:
         return self.portfolio_gateway.get_preferences()
@@ -397,38 +415,27 @@ class Application:
 
     # Internal composition helpers ------------------------------------
     def _resolve_repository(self, selector: str, project: str | None) -> RepositoryRef:
-        return GatewaySelectorResolver(self.portfolio_gateway).resolve_repository(selector, project=project)
+        resolver = self.target_service or GatewaySelectorResolver(self.portfolio_gateway)
+        return resolver.resolve_repository(selector, project=project)
 
     def _targets(self, repo: str | None, project: str | None) -> tuple[RepositoryRef, ...]:
-        projects = self.portfolio_gateway.list_projects()
-        selected = (
-            projects if project is None else (GatewaySelectorResolver(self.portfolio_gateway).resolve_project(project),)
-        )
-        repos = tuple(
-            repo_ref
-            for item in selected
-            for repo_ref in self.portfolio_gateway.project_detail(item.project_id).repositories
-        )
-        if repo is None:
-            return repos
-        return (GatewaySelectorResolver(self.portfolio_gateway).resolve_repository(repo, project=project),)
+        resolver = self.target_service
+        if resolver is not None:
+            return resolver.targets(repo, project)
+        return GatewayPortfolioTargetService(self.portfolio_gateway).targets(repo, project)
 
     def _write_targets(
         self, repo: str | None, project: str | None, scope: AutofixWriteScope | None
     ) -> tuple[RepositoryRef, ...]:
         resolved = scope or AutofixWriteScope()
-        mutation = MutationScope.from_args(
+        resolver = self.target_service or GatewayPortfolioTargetService(self.portfolio_gateway)
+        return resolver.write_targets(
             repo,
             project,
             all_repos=resolved.all_repos,
             all_projects=resolved.all_projects,
             operation="mutation",
         )
-        if mutation.kind == "all_projects":
-            return self._targets(None, None)
-        if mutation.kind == "all_repos":
-            return self._targets(None, mutation.project)
-        return self._targets(mutation.repo, mutation.project)
 
     def _audit_project(self, project_id: str):
         from enji_guard_cli.audit.ports import AuditProject, AuditRepository, AuditWebsite
@@ -451,56 +458,10 @@ class Application:
         return choose_audits(catalog, selectors, all_audits=all_audits)
 
     def _active_runs(self, repo_id: str):
-        upstream = self.audit_gateway.active_runs(repo_id).runs
-        if self.ledger is None:
-            return upstream
-        return self.ledger.reconcile(repo_id, upstream, self.audit_gateway.task_detail)
+        return self._audit_start_service().active_runs(repo_id)
 
-    def _preserve_snapshots(self, repo_id: str, catalog: AuditCatalog) -> None:
-        status = self.audit_status(repo_id, catalog=catalog)
-        groups = {audit.action_key: audit.metric_group for audit in catalog.published_audits}
-        for action_key in status.readable:
-            self.audit_gateway.read_audit_snapshot(repo_id, action_key, groups.get(action_key))
-
-    def _start_batch(
-        self, repo_id: str, project_id: str, audits: tuple[AuditDefinition, ...], catalog: AuditCatalog
-    ) -> dict[str, object]:
-        dependencies = StartAuditDependencies(
-            make_audit_run_create=lambda target_repo, target_project, action_key, body: AuditRunRequest(
-                target_repo, target_project, action_key, body
-            ),
-            start_audit_run=self.audit_gateway.start_audit_run,
-            project_detail=lambda target_project: self._audit_project(target_project),
-            runbook=lambda runbook_id: self.audit_gateway.runbook_metadata(runbook_id),
-            current_repo_active_runs=self._active_runs,
-            record_started_run=self._record_started,
-            task_identity=lambda response: (
-                cast(AuditRunResult, response).task_id,
-                cast(AuditRunResult, response).status,
-            ),
-        )
-        return start_audits_for_target(
-            StartAuditsContext(repo_id, project_id, list(audits), catalog),
-            dependencies=dependencies,
-            get_repo_rerun_state=self.audit_gateway.rerun_state,
-        )
-
-    def _record_started(self, context: RecordStartedRunContext) -> None:
-        if self.ledger is None:
-            return
-        self.ledger.record_started(
-            new_entry(
-                repo_id=context.repo_id,
-                project_id=context.project_id,
-                audit_key=context.action_key,
-                task_id=context.task_id,
-                task_status=context.task_status,
-                current_head_sha=context.current_head_sha,
-                audited_head_sha=context.last_audited_head_sha,
-                observed_at=datetime.now(UTC),
-                ttl_seconds=getattr(self.ledger, "ttl_seconds", 21_600),
-            )
-        )
+    def _audit_start_service(self) -> AuditStartService:
+        return AuditStartService(self.audit_gateway, self.ledger, self._audit_project)
 
 
 class _AuditStatusReader(AuditStatusReader):
@@ -510,12 +471,7 @@ class _AuditStatusReader(AuditStatusReader):
 
     def status(self, repo_id: str) -> PortfolioAuditStatus:
         status = self.application.audit_status(repo_id, catalog=self.catalog)
-        return PortfolioAuditStatus(
-            current_head_sha=status.current_head_sha,
-            audited_head_shas={item.audit_key: item.freshness.audited_head_sha for item in status.items},
-            audits=audit_status_items(status),
-            active_runs=self.application._active_runs(repo_id),
-        )
+        return PortfolioAuditStatus.from_audit_status(status, active_runs=self.application._active_runs(repo_id))
 
 
 class _AuditStarter(AuditStartPort):
@@ -527,7 +483,8 @@ class _AuditStarter(AuditStartPort):
         catalog = self.catalog or self.application.audit_catalog()
         audit = _audit_for_action(catalog, action_key)
         result = cast(
-            list[dict[str, object]], self.application._start_batch(repo_id, project_id, (audit,), catalog)["results"]
+            list[dict[str, object]],
+            self.application._audit_start_service().start(repo_id, project_id, (audit,), catalog)["results"],
         )[0]
         return _run_result(result)
 
@@ -539,7 +496,6 @@ def _audit_for_action(catalog: AuditCatalog, action_key: str) -> AuditDefinition
 
 
 def _run_result(result: dict[str, object]):
-    from enji_guard_cli.audit.ports import AuditRunResult
 
     return AuditRunResult(cast(str | None, result.get("task_id")), cast(str | None, result.get("status")))
 
@@ -548,58 +504,30 @@ __all__ = ["Application", "AutofixWriteScope", "EmailPreferencesUpdate"]
 
 
 def schedule_for_audit(audit: AuditDefinition, schedules: tuple[AuditSchedule, ...]) -> AuditSchedule:
-    """Project one configured or unconfigured row for each published audit."""
+    """Compatibility helper delegating projection to Audit scheduling rules."""
 
     current = next((item for item in schedules if item.audit_key == audit.action_key), None)
-    return current or AuditSchedule(
-        audit_key=audit.action_key,
-        enabled=False,
-        cadence=None,
-        schedule_day=None,
-        schedule_day_of_month=None,
-        schedule_time=None,
-        schedule_time_source=None,
-        timezone=None,
-    )
+    return current or AuditSchedule(audit.action_key, False, None, None, None, None, None, None)
 
 
-def _normalize_autofix_jobs(jobs: tuple[dict[str, JsonValue], ...]) -> tuple[dict[str, JsonValue], ...]:
-    """Keep only canonical improvement-job identities and preserve wire extensions."""
+def _normalize_autofix_jobs(jobs: tuple[AuditAutofixJob, ...]) -> tuple[AuditAutofixJob, ...]:
+    """Keep one canonical job for each action/variant identity."""
 
-    result: list[dict[str, JsonValue]] = []
+    result: list[AuditAutofixJob] = []
     seen: set[tuple[str, str]] = set()
     for job in jobs:
-        normalized = _normalized_autofix_job(job)
-        if normalized is None or normalized[:2] in seen:
+        identity = (job.action_key, job.variant_key)
+        if identity in seen:
             continue
-        seen.add(normalized[:2])
-        result.append(normalized[2])
+        seen.add(identity)
+        result.append(job)
     return tuple(result)
 
 
-def _normalized_autofix_job(job: dict[str, JsonValue]) -> tuple[str, str, dict[str, JsonValue]] | None:
-    action = job.get("actionKey") or job.get("kind")
-    variant = job.get("variantKey") or job.get("autofixVariantKey")
-    if not isinstance(action, str) or not isinstance(variant, str):
-        return None
-    return action, variant, {**job, "actionKey": action, "variantKey": variant}
-
-
-def _email_preference_update(update: EmailPreferencesUpdate) -> AuditEmailPreferenceUpdate:
-    if update.manual is None and update.scheduled is None:
-        raise ValueError("pass --manual or --scheduled")
-    return AuditEmailPreferenceUpdate(update.manual, update.scheduled)
-
-
-def _index_autofix_jobs(jobs: tuple[dict[str, JsonValue], ...]) -> dict[str, dict[str, object]]:
-    normalized = _normalize_autofix_jobs(jobs)
-    indexed: dict[str, dict[str, object]] = {}
-    for job in normalized:
-        typed = cast(dict[str, object], job)
-        action = job.get("actionKey")
-        kind = job.get("kind")
-        if isinstance(action, str):
-            indexed[action] = typed
-        if isinstance(kind, str):
-            indexed[kind] = typed
+def _index_autofix_jobs(jobs: tuple[AuditAutofixJob, ...]) -> dict[str, AuditAutofixJob]:
+    indexed: dict[str, AuditAutofixJob] = {}
+    for job in _normalize_autofix_jobs(jobs):
+        indexed[job.action_key] = job
+        if job.kind is not None:
+            indexed[job.kind] = job
     return indexed

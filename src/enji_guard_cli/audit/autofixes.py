@@ -2,9 +2,11 @@
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Literal, cast
 
 from enji_guard_cli.audit.ports import (
     AuditAutofixDefinition,
+    AuditAutofixJob,
     AuditAutofixUpdate,
     AuditCatalogAutofix,
     AuditCatalogResult,
@@ -23,7 +25,7 @@ SEPARATE_ACTIONS = frozenset({"audit.pentest", "improvement.pentest"})
 class AutofixWriteResult:
     definition: AuditAutofixDefinition
     status: str
-    job: object | None
+    job: AuditAutofixJob | None
 
 
 def definitions(catalog: AuditCatalogResult) -> tuple[AuditAutofixDefinition, ...]:
@@ -63,36 +65,47 @@ def _selected_definition(by_selector: dict[str, AuditAutofixDefinition], selecto
 
 
 def desired_job(
-    existing: dict[str, object] | None,
+    existing: AuditAutofixJob | None,
     definition: AuditAutofixDefinition,
     update: AuditAutofixUpdate,
-) -> dict[str, object]:
+) -> AuditAutofixJob | None:
     if update.enabled is None:
         raise ValueError("pass --enabled on or off")
     if existing is None and update.enabled is False:
-        return {}
+        return None
     timezone = update.timezone or _str(existing, "timezone")
     if timezone is None:
         raise ValueError("pass --timezone when enabling an absent autofix")
-    return {
-        **(existing or {}),
-        "actionKey": definition.action_key,
-        "variantKey": definition.variant_key,
-        **_autofix_fields(existing, definition, update, timezone),
-    }
+    return AuditAutofixJob(
+        action_key=definition.action_key,
+        variant_key=definition.variant_key,
+        kind=existing.kind if existing else definition.kind,
+        enabled=update.enabled,
+        auto_fix=True,
+        autofix_variant_key=_str(existing, "autofixVariantKey") or definition.variant_key,
+        frequency=update.frequency or _str(existing, "frequency") or "workdays",
+        days_of_week=_days(existing) or ("mon", "tue", "wed", "thu", "fri"),
+        schedule_time=_str(existing, "scheduleTime") or "09:00",
+        schedule_time_source=cast(Literal["auto", "user"], _source(existing) or "auto"),
+        timezone=timezone,
+        pentest_mode=_str(existing, "pentestMode") or "off",
+        extensions=existing.extensions if existing else (),
+    )
 
 
 def set_one(
     definition: AuditAutofixDefinition,
-    existing: dict[str, object] | None,
+    existing: AuditAutofixJob | None,
     update: AuditAutofixUpdate,
-    write: Callable[[str, dict[str, object]], object],
+    write: Callable[[str, AuditAutofixJob], AuditAutofixJob],
 ) -> AutofixWriteResult:
     if not definition.supported:
         raise ValueError(f"autofix selector is unsupported until a relationship is defined: {definition.selector}")
     if existing is None and update.enabled is False:
         return AutofixWriteResult(definition, "unchanged", None)
     desired = desired_job(existing, definition, update)
+    if desired is None:
+        return AutofixWriteResult(definition, "unchanged", None)
     if existing is not None and _effective(existing) == _effective(desired):
         return AutofixWriteResult(definition, "unchanged", existing)
     return AutofixWriteResult(definition, "changed", write(definition.kind or definition.selector, desired))
@@ -100,25 +113,6 @@ def set_one(
 
 def _is_visible(item: AuditCatalogAutofix) -> bool:
     return item.status == PUBLISHED and item.action_key not in SEPARATE_ACTIONS
-
-
-def _autofix_fields(
-    existing: dict[str, object] | None,
-    definition: AuditAutofixDefinition,
-    update: AuditAutofixUpdate,
-    timezone: str,
-) -> dict[str, object]:
-    return {
-        "enabled": update.enabled,
-        "autoFix": True,
-        "autofixVariantKey": _str(existing, "autofixVariantKey") or definition.variant_key,
-        "frequency": update.frequency or _str(existing, "frequency") or "workdays",
-        "daysOfWeek": _list(existing, "daysOfWeek") or ["mon", "tue", "wed", "thu", "fri"],
-        "scheduleTime": _str(existing, "scheduleTime") or "09:00",
-        "scheduleTimeSource": _str(existing, "scheduleTimeSource") or "auto",
-        "timezone": timezone,
-        "pentestMode": _str(existing, "pentestMode") or "off",
-    }
 
 
 def _definition(item: AuditCatalogAutofix, published_audits: set[str]) -> AuditAutofixDefinition:
@@ -136,30 +130,31 @@ def _definition(item: AuditCatalogAutofix, published_audits: set[str]) -> AuditA
     )
 
 
-def _effective(job: dict[str, object]) -> dict[str, object]:
-    return {
-        key: job.get(key)
-        for key in (
-            "enabled",
-            "autoFix",
-            "autofixVariantKey",
-            "actionKey",
-            "variantKey",
-            "frequency",
-            "daysOfWeek",
-            "scheduleTime",
-            "scheduleTimeSource",
-            "timezone",
-            "pentestMode",
-        )
-    }
+def _effective(job: AuditAutofixJob) -> tuple[object, ...]:
+    return (
+        job.enabled,
+        job.auto_fix,
+        job.autofix_variant_key,
+        job.action_key,
+        job.variant_key,
+        job.frequency,
+        job.days_of_week,
+        job.schedule_time,
+        job.schedule_time_source,
+        job.timezone,
+        job.pentest_mode,
+    )
 
 
-def _str(job: dict[str, object] | None, key: str) -> str | None:
+def _str(job: AuditAutofixJob | None, key: str) -> str | None:
     value = job.get(key) if job else None
     return value if isinstance(value, str) else None
 
 
-def _list(job: dict[str, object] | None, key: str) -> list[str] | None:
-    value = job.get(key) if job else None
-    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else None
+def _days(job: AuditAutofixJob | None) -> tuple[str, ...] | None:
+    return job.days_of_week if job and job.days_of_week else None
+
+
+def _source(job: AuditAutofixJob | None) -> str | None:
+    value = job.schedule_time_source if job else None
+    return value if value in {"auto", "user"} else None

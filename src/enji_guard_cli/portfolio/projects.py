@@ -20,7 +20,7 @@ def create_project(name: str, *, gateway: PortfolioGatewayPort) -> OperationResu
 def rename_project(project: str, name: str, *, gateway: PortfolioGatewayPort) -> OperationResult:
     selected = resolve_project(gateway.list_projects(), project)
     new_name = validated_project_name(name)
-    if selected.name == new_name:
+    if selected.name is not None and selected.name.casefold() == new_name.casefold():
         return OperationResult("unchanged", project=selected)
     return OperationResult("renamed", project=gateway.rename_project(selected.project_id, new_name))
 

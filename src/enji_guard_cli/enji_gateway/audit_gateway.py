@@ -4,9 +4,9 @@ from typing import Literal, cast
 
 from enji_guard_cli.audit.ports import (
     AuditArtifact,
+    AuditAutofixJob,
     AuditCatalogAction,
     AuditCatalogAutofix,
-    AuditCatalogChange,
     AuditCatalogResult,
     AuditEmailPreference,
     AuditEmailPreferenceUpdate,
@@ -23,7 +23,6 @@ from enji_guard_cli.audit.ports import (
     AuditTaskLink,
     AuditTaskLinksResult,
 )
-from enji_guard_cli.enji_gateway.catalog_snapshot import active_audit_catalog_changes as _active_audit_catalog_changes
 from enji_guard_cli.enji_gateway.http import (
     AuditRunCreate,
 )
@@ -69,7 +68,7 @@ from enji_guard_cli.enji_gateway.http import (
 from enji_guard_cli.enji_gateway.http import (
     task_detail as _task_detail,
 )
-from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayClient
+from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayAuthPort, GatewayClient
 from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot, audit_run_from_legacy_payload
 from enji_guard_cli.json_types import JsonValue
 
@@ -77,12 +76,19 @@ from enji_guard_cli.json_types import JsonValue
 class AuditGateway(AuditGatewayPort):
     """Delegate Audit endpoint access to the existing Enji API adapter."""
 
-    def __init__(self, auth_file: GatewayAuthFile = None, client: GatewayClient = None) -> None:
+    def __init__(
+        self,
+        auth_file: GatewayAuthFile = None,
+        client: GatewayClient = None,
+        *,
+        auth_port: GatewayAuthPort,
+    ) -> None:
         self._auth_file = auth_file
         self._client = client
+        self._auth_port = auth_port
 
     def catalog(self) -> AuditCatalogResult:
-        payload = _catalog(self._auth_file, self._client)
+        payload = _catalog(self._auth_file, self._client, auth_port=self._auth_port)
         return AuditCatalogResult(
             actions=tuple(
                 catalog_action
@@ -94,18 +100,16 @@ class AuditGateway(AuditGatewayPort):
                 for action in _object_list(payload.get("auditAutofixes"))
                 if (autofix := _catalog_autofix(action)) is not None
             ),
-            changes=tuple(
-                AuditCatalogChange(change.kind, change.action_key, change.changed_fields)
-                for change in _active_audit_catalog_changes()
-            ),
         )
 
     def active_runs(self, repo_id: str) -> AuditRunsResult:
-        payload = _repo_active_runs(repo_id, self._auth_file, self._client)
+        payload = _repo_active_runs(repo_id, self._auth_file, self._client, auth_port=self._auth_port)
         return AuditRunsResult(runs=tuple(_audit_run(run) for run in _object_list(payload.get("activeRuns"))))
 
     def rerun_state(self, repo_id: str) -> AuditRerunState:
-        state = _object(_repo_audit_rerun_state(repo_id, self._auth_file, self._client).get("state"))
+        state = _object(
+            _repo_audit_rerun_state(repo_id, self._auth_file, self._client, auth_port=self._auth_port).get("state")
+        )
         return AuditRerunState(
             current_head_sha=_optional_str(state.get("currentHeadSha")),
             audited_head_sha=_optional_str(state.get("lastAuditedSha")),
@@ -119,7 +123,7 @@ class AuditGateway(AuditGatewayPort):
         )
 
     def task_links(self, repo_id: str) -> AuditTaskLinksResult:
-        payload = _repo_task_links(repo_id, self._auth_file, self._client)
+        payload = _repo_task_links(repo_id, self._auth_file, self._client, auth_port=self._auth_port)
         return AuditTaskLinksResult(
             links=tuple(
                 AuditTaskLink(
@@ -136,7 +140,7 @@ class AuditGateway(AuditGatewayPort):
         )
 
     def task_detail(self, task_id: str) -> AuditTaskDetail:
-        payload = _task_detail(task_id, self._auth_file, self._client)
+        payload = _task_detail(task_id, self._auth_file, self._client, auth_port=self._auth_port)
         task = _task_payload(payload)
         return AuditTaskDetail(
             task_id=_optional_str(task.get("id")) or task_id,
@@ -147,7 +151,7 @@ class AuditGateway(AuditGatewayPort):
         )
 
     def runbook_metadata(self, runbook_id: str) -> AuditRunbookMetadata:
-        payload = _runbook(runbook_id, self._auth_file, self._client)
+        payload = _runbook(runbook_id, self._auth_file, self._client, auth_port=self._auth_port)
         return AuditRunbookMetadata(
             runbook_id=runbook_id,
             title=_optional_str(payload.get("title")),
@@ -166,6 +170,7 @@ class AuditGateway(AuditGatewayPort):
             ),
             self._auth_file,
             self._client,
+            auth_port=self._auth_port,
         )
         task = _task_payload(payload)
         return AuditRunResult(
@@ -188,17 +193,19 @@ class AuditGateway(AuditGatewayPort):
     def read_audit_snapshot(self, repo_id: str, audit_key: str, metric_group: str | None = None) -> AuditArtifact:
         route_group = metric_group if isinstance(metric_group, str) and metric_group.strip() else audit_key
         return audit_artifact_from_snapshot(
-            _audit_summary_snapshot(repo_id, route_group, self._auth_file, self._client),
+            _audit_summary_snapshot(repo_id, route_group, self._auth_file, self._client, auth_port=self._auth_port),
             audit_key,
         )
 
     def list_schedules(self, repo_id: str) -> tuple[AuditSchedule, ...]:
-        payload = _audit_auto_runs(repo_id, self._auth_file, self._client)
+        payload = _audit_auto_runs(repo_id, self._auth_file, self._client, auth_port=self._auth_port)
         raw = payload.get("subscriptions")
         return tuple(schedule for item in _object_list(raw) if (schedule := _schedule(item)) is not None)
 
     def set_schedule(self, repo_id: str, audit_key: str, schedule: AuditSchedule) -> AuditSchedule:
-        payload = _put_audit_auto_run(repo_id, audit_key, _schedule_payload(schedule), self._auth_file, self._client)
+        payload = _put_audit_auto_run(
+            repo_id, audit_key, _schedule_payload(schedule), self._auth_file, self._client, auth_port=self._auth_port
+        )
         raw = _object(payload.get("subscription")) or payload
         return _schedule(raw) or schedule
 
@@ -206,7 +213,7 @@ class AuditGateway(AuditGatewayPort):
         return tuple(self.get_email_preferences(repo_id, key) for key in audit_keys)
 
     def get_email_preferences(self, repo_id: str, audit_key: str) -> AuditEmailPreference:
-        payload = _audit_email_preferences(repo_id, audit_key, self._auth_file, self._client)
+        payload = _audit_email_preferences(repo_id, audit_key, self._auth_file, self._client, auth_port=self._auth_port)
         resolved = _object(payload.get("resolved"))
         return AuditEmailPreference(
             audit_key=audit_key,
@@ -224,7 +231,9 @@ class AuditGateway(AuditGatewayPort):
             patch["scheduledRunCompletion"] = update.scheduled
         if not patch:
             raise ValueError("pass --manual or --scheduled")
-        payload = _put_audit_email_preferences(repo_id, audit_key, patch, self._auth_file, self._client)
+        payload = _put_audit_email_preferences(
+            repo_id, audit_key, patch, self._auth_file, self._client, auth_port=self._auth_port
+        )
         resolved = _object(payload.get("resolved"))
         return AuditEmailPreference(
             audit_key=audit_key,
@@ -232,16 +241,18 @@ class AuditGateway(AuditGatewayPort):
             scheduled=_optional_bool(resolved.get("scheduledRunCompletion")),
         )
 
-    def list_autofix_jobs(self, repo_id: str) -> tuple[dict[str, JsonValue], ...]:
-        payload = _improvement_jobs(repo_id, self._auth_file, self._client)
+    def list_autofix_jobs(self, repo_id: str) -> tuple[AuditAutofixJob, ...]:
+        payload = _improvement_jobs(repo_id, self._auth_file, self._client, auth_port=self._auth_port)
         raw = payload.get("jobs")
         if not isinstance(raw, list):
             raw = payload.get("improvementJobs")
-        return tuple(item for item in _object_list(raw))
+        return tuple(job for item in _object_list(raw) if (job := _autofix_job(item)) is not None)
 
-    def set_autofix_job(self, repo_id: str, kind: str, job: dict[str, JsonValue]) -> dict[str, JsonValue]:
-        payload = _put_improvement_job(repo_id, kind, job, self._auth_file, self._client)
-        return _object(payload.get("job")) or payload
+    def set_autofix_job(self, repo_id: str, kind: str, job: AuditAutofixJob) -> AuditAutofixJob:
+        payload = _put_improvement_job(
+            repo_id, kind, _autofix_job_payload(job), self._auth_file, self._client, auth_port=self._auth_port
+        )
+        return _autofix_job(_object(payload.get("job")) or payload) or job
 
 
 def _audit_run(payload: dict[str, JsonValue]) -> AuditRun:
@@ -303,6 +314,64 @@ def _optional_str(value: JsonValue | None) -> str | None:
 
 def _optional_bool(value: JsonValue | None) -> bool | None:
     return value if isinstance(value, bool) else None
+
+
+def _autofix_job(payload: dict[str, JsonValue]) -> AuditAutofixJob | None:
+    action_key = _optional_str(payload.get("actionKey")) or _optional_str(payload.get("kind"))
+    variant_key = _optional_str(payload.get("variantKey")) or _optional_str(payload.get("autofixVariantKey"))
+    if action_key is None or variant_key is None:
+        return None
+    days = payload.get("daysOfWeek")
+    source = _optional_str(payload.get("scheduleTimeSource"))
+    known = {
+        "actionKey",
+        "variantKey",
+        "kind",
+        "enabled",
+        "autoFix",
+        "autofixVariantKey",
+        "frequency",
+        "daysOfWeek",
+        "scheduleTime",
+        "scheduleTimeSource",
+        "timezone",
+        "pentestMode",
+    }
+    return AuditAutofixJob(
+        action_key=action_key,
+        variant_key=variant_key,
+        kind=_optional_str(payload.get("kind")),
+        enabled=_optional_bool(payload.get("enabled")),
+        auto_fix=_optional_bool(payload.get("autoFix")),
+        autofix_variant_key=_optional_str(payload.get("autofixVariantKey")),
+        frequency=_optional_str(payload.get("frequency")),
+        days_of_week=tuple(item for item in days if isinstance(item, str)) if isinstance(days, list) else (),
+        schedule_time=_optional_str(payload.get("scheduleTime")),
+        schedule_time_source=cast(Literal["auto", "user"] | None, source if source in {"auto", "user"} else None),
+        timezone=_optional_str(payload.get("timezone")),
+        pentest_mode=_optional_str(payload.get("pentestMode")),
+        extensions=tuple((key, value) for key, value in payload.items() if key not in known),
+    )
+
+
+def _autofix_job_payload(job: AuditAutofixJob) -> dict[str, JsonValue]:
+    payload: dict[str, JsonValue] = {
+        "actionKey": job.action_key,
+        "variantKey": job.variant_key,
+        "enabled": job.enabled,
+        "autoFix": job.auto_fix,
+        "autofixVariantKey": job.autofix_variant_key,
+        "frequency": job.frequency,
+        "daysOfWeek": list(job.days_of_week),
+        "scheduleTime": job.schedule_time,
+        "scheduleTimeSource": job.schedule_time_source,
+        "timezone": job.timezone,
+        "pentestMode": job.pentest_mode,
+    }
+    if job.kind is not None:
+        payload["kind"] = job.kind
+    payload.update(dict(job.extensions))
+    return payload
 
 
 def _schedule(payload: dict[str, JsonValue]) -> AuditSchedule | None:

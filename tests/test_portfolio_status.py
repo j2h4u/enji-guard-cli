@@ -2,6 +2,7 @@
 
 from typing import Any, cast
 
+from enji_guard_cli.audit.ports import AuditFreshness, AuditStatus, AuditStatusItem
 from enji_guard_cli.portfolio.models import ProjectDetail, ProjectRef, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioAuditStatus
 from enji_guard_cli.portfolio.status import assemble_status
@@ -17,13 +18,29 @@ class Gateway:
 
 class Audits:
     def status(self, repo_id):
-        return PortfolioAuditStatus("new", {"audit.security": "old"})
+        return PortfolioAuditStatus(
+            AuditStatus(
+                repo_id,
+                "new",
+                (
+                    AuditStatusItem(
+                        "audit.security",
+                        "Security",
+                        AuditFreshness("new", "old", "stale"),
+                        True,
+                        "completed",
+                        "task",
+                        "completed",
+                    ),
+                ),
+            )
+        )
 
 
 def test_status_preserves_sha_and_staleness_inputs() -> None:
     status = assemble_status(gateway=cast(Any, Gateway()), audits=Audits())
-    assert status.repositories[0].current_head_sha == "new"
-    assert status.repositories[0].audited_head_shas["audit.security"] == "old"
+    assert status.repositories[0].audit.summary.current_head_sha == "new"
+    assert status.repositories[0].audit.summary.items[0].freshness.audited_head_sha == "old"
 
 
 class SortGateway:

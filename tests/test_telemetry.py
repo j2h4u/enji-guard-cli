@@ -185,7 +185,7 @@ def test_rotation_durability_telemetry_is_safe_and_keeps_storage_error_details(
 
     async def run_refresh() -> object:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await refresh_auth_async(auth_file, HttpxEnjiHttpClient(client))
+            return await refresh_auth_async(auth_file, HttpxEnjiHttpClient(client), event_sink=log_event)
 
     with pytest.raises(AuthError):
         asyncio.run(run_refresh())

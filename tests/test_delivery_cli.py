@@ -92,6 +92,9 @@ class _FakeApplication:
         self.calls.append(("project_settings", project))
         return {"project": project, "repositories": []}
 
+    def import_bearer(self, value: str) -> dict[str, object]:
+        return self.auth.import_bearer_token(value)
+
     def access(self) -> object:
         self.calls.append(("access", None))
         return {"full_access": True}

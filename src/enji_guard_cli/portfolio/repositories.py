@@ -5,23 +5,27 @@ from __future__ import annotations
 from enji_guard_cli.portfolio.errors import PortfolioNotFoundError
 from enji_guard_cli.portfolio.models import OperationResult, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
-from enji_guard_cli.portfolio.selectors import parse_github_repo, resolve_project, resolve_repository
+from enji_guard_cli.portfolio.selectors import (
+    GatewayPortfolioTargetService,
+    parse_github_repo,
+    resolve_project,
+    resolve_repository,
+)
 
 
 def all_targets(*, gateway: PortfolioGatewayPort) -> tuple[RepositoryRef, ...]:
-    return tuple(
-        repo for project in gateway.list_projects() for repo in gateway.project_detail(project.project_id).repositories
-    )
+    return GatewayPortfolioTargetService(gateway).targets()
 
 
 def add_repository(github_repo: str, project: str | None, *, gateway: PortfolioGatewayPort) -> OperationResult:
     selected = resolve_project(gateway.list_projects(), project)
     owner, name = parse_github_repo(github_repo)
+    canonical_name = f"{owner}/{name}"
     existing = next(
         (
             repo
             for repo in gateway.project_detail(selected.project_id).repositories
-            if repo.full_name is not None and repo.full_name.casefold() == github_repo.casefold()
+            if repo.full_name is not None and repo.full_name.casefold() == canonical_name.casefold()
         ),
         None,
     )

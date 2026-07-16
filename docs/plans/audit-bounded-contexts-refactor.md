@@ -1,7 +1,20 @@
 # Audit Bounded Contexts Refactor — Design
 
-Status: implementation in progress; Phase 1 is completed and its acceptance
-criteria are met.
+Status: implemented and verified at the controlled reconstruction snapshot
+`530a126`; no deployment was performed as part of this refactor.
+
+## Implementation outcome
+
+Phases 1–6 are implemented in the one-shot controlled reconstruction model:
+Audit and Portfolio bounded contexts, the typed application composition seam,
+Auth Session, Runtime/Observability, delivery adapters, and final cleanup /
+contract hardening are present in the committed tree. The final historical
+acceptance snapshot recorded 286 tests, CRAP-gate coverage, Docker build and
+runtime checks, and import/source-policy checks. Those numbers describe the
+`530a126` verification run; they are not a claim about a later live runtime or
+deployment. Optional future work remains explicitly non-blocking: additional
+catalog relationships, further gateway endpoint coverage, and follow-up
+operator-DX improvements are future items rather than unfinished phases.
 
 ## Goals
 
@@ -169,9 +182,9 @@ are unchanged at the boundary; all product types used by catalog code live in
 Phase 1 status: completed. The acceptance criteria are met: catalog-driven
 selectors and autofix catalog behavior are unchanged at the boundary, all
 product types used by catalog code live in `audit`, no old `audits` import
-remains, and `just verify` passes.
+remains, and the historical `530a126` verification passed `just verify`.
 
-### Phase 2 — Gateway facade and Audit run lifecycle — pending
+### Phase 2 — Gateway facade and Audit run lifecycle — completed
 
 Expected modules to create or rename:
 
@@ -191,7 +204,10 @@ Expected modules to create or rename:
 The phase keeps the existing public CLI until the breaking surface phase, so
 the implementation can prove behavior before changing command names.
 
-### Phase 3 — Portfolio/Repository context — pending
+Phase 2 status: completed at `530a126`; typed gateway ports, Audit lifecycle,
+task construction, and artifact translation are implemented.
+
+### Phase 3 — Portfolio/Repository context — completed
 
 Create `src/enji_guard_cli/portfolio/__init__.py`, `projects.py`,
 `repositories.py`, `selectors.py`, and `status.py`. Move project administration,
@@ -202,7 +218,10 @@ consumes Audit status summaries through an explicit port and does not import
 Audit implementation modules. Migrate `core.py` composition and the portfolio
 MCP operation first; then CLI project/repo commands.
 
-### Phase 4 — Auth Session and Runtime/Observability seams — pending
+Phase 3 status: completed at `530a126`; Portfolio owns selectors, explicit
+mutation scope, membership operations, and repository status assembly.
+
+### Phase 4 — Auth Session and Runtime/Observability seams — completed
 
 Create `src/enji_guard_cli/auth_session/__init__.py`, `service.py`, and
 `ports.py`; move the public auth behavior from `auth.py` and the auth
@@ -213,7 +232,10 @@ retain the files and enforce the package boundary in place. Runtime keeps
 supervisor ownership of refresh, readiness remains observational, and no
 secret-bearing types cross into delivery.
 
-### Phase 5 — Delivery adapters and public vocabulary break — pending
+Phase 4 status: completed at `530a126`; Auth Session and Runtime/Observability
+boundaries are implemented with supervisor-owned refresh and readiness.
+
+### Phase 5 — Delivery adapters and public vocabulary break — completed
 
 Create `src/enji_guard_cli/delivery/cli/` and `src/enji_guard_cli/delivery/mcp/`
 as thin adapter packages. Move `cli_impl/` and `mcp_server.py` incrementally,
@@ -222,13 +244,21 @@ commands and payloads described below, update README, field guide, CLI help,
 surface-contract tests, and MCP descriptions together. Remove all temporary
 report-named domain modules and aliases.
 
-### Phase 6 — Cleanup and contract hardening — pending
+Phase 5 status: completed at `530a126`; delivery adapters use the application
+surface and the product vocabulary break has no compatibility aliases.
+
+### Phase 6 — Cleanup and contract hardening — completed
 
 Delete empty compatibility seams, consolidate only genuinely duplicated
 context code, and make the final import-linter contracts reflect the context
-graph. Re-run source-policy checks for forbidden product use of `report`, then
+graph. Re-run current-tree source-policy checks for forbidden product imports
+of raw gateway implementations, then
 perform full CLI/MCP and Docker runtime verification in the implementation
 workstream. This design artifact itself does not perform those checks.
+
+Phase 6 status: completed at `530a126`; import contracts and current-tree
+source ownership checks are hard gates. The recorded full verification is historical, with no deploy
+or live-runtime claim from this document.
 
 ## Expected public breaking changes
 
@@ -289,10 +319,8 @@ The existing contracts remain hard gates throughout. In successive phases:
    Auth Session, runtime-control, and CLI imports.
 5. Keep CLI forbidden from gateway internals and keep all framework imports in
    delivery adapters.
-6. Add a source-policy test that rejects product identifiers containing
-   `report` outside explicitly allowlisted gateway wire/translator files and
-   integration-vocabulary documentation. The allowlist must be narrow and
-   reviewed whenever a new external field is introduced.
+6. Add a source-policy test that rejects product-layer imports of raw gateway
+   implementations, including imports routed through the gateway package root.
 
 ## Test and documentation plan
 
@@ -320,7 +348,7 @@ used as evidence for this refactor, or bundled into Phase 1.
 
 | Risk | Mitigation | Phase rollback |
 | --- | --- | --- |
-| Product/wire vocabulary leaks or accidental JSON drift | Boundary translators, source-policy allowlist, golden JSON tests | Revert the phase commit; do not add aliases |
+| Product/wire vocabulary leaks or accidental JSON drift | Boundary translators, current-tree ownership checks, golden JSON tests | Revert the phase commit; do not add aliases |
 | Duplicate business rules during migration | One owner per moved function; delete old implementation immediately after imports move | Restore the previous facade and remove the new seam |
 | Import cycles | Add contracts before moves; keep composition in facades | Revert only the phase’s move and contract change |
 | Audit freshness/task behavior changes | Compare old/new payload fixtures and slow-job lifecycle tests before CLI rename | Keep old command surface for the prior completed phase |
@@ -335,8 +363,8 @@ the last complete pre-break release and its documentation.
 ## Full acceptance criteria
 
 - All product-facing domain and delivery language uses `audit`, not `report`.
-- Every remaining `report` occurrence is in an allowlisted Enji/OpenAPI wire
-  contract, raw translator, or explicitly external-vocabulary documentation.
+- Product layers do not import raw gateway HTTP, transport, contract, client,
+  or wire implementations; external field translation remains gateway-owned.
 - Audit, Portfolio/Repository, Auth Session, Enji Gateway, CLI/MCP delivery,
   and Runtime/Observability responsibilities and dependency direction are
   represented by code boundaries, not only comments.

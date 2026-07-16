@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
+from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
 from enji_guard_cli.auth_session.api import import_bearer_token
 from enji_guard_cli.enji_gateway.contract import (
     IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC,
@@ -39,6 +40,7 @@ from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse
 
 CONTRACT_PATH = Path("contracts/enji-openapi.json")
 HTTP_METHODS = frozenset({"get", "put", "post", "patch", "delete", "head", "options", "trace"})
+AUTH_PORT = AuthSessionAdapter()
 
 
 @dataclass
@@ -82,23 +84,23 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
         ]
     )
 
-    access(auth_file, client)
-    reports_list(auth_file, client)
-    project_detail("project_1", auth_file, client)
-    create_project("Pets", auth_file, client)
-    rename_project("project_1", "Friends", auth_file, client)
-    delete_project("project_1", auth_file, client)
-    preflight_repo_move("project_1", "repo_1", "project_2", auth_file, client)
-    move_repo(RepoTransfer("project_1", "repo_1", "project_2"), auth_file, client)
-    catalog(auth_file, client)
-    runbook("runbook_1", auth_file, client)
-    add_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client)
-    delete_project_repo("project_1", "repo_1", auth_file, client)
-    connect_project_repo("project_1", "repo_1", auth_file, client)
-    repo_active_runs("repo_1", auth_file, client)
-    repo_audit_rerun_state("repo_1", auth_file, client)
-    repo_task_links("repo_1", auth_file, client)
-    task_detail("task_1", auth_file, client)
+    access(auth_file, client, auth_port=AUTH_PORT)
+    reports_list(auth_file, client, auth_port=AUTH_PORT)
+    project_detail("project_1", auth_file, client, auth_port=AUTH_PORT)
+    create_project("Pets", auth_file, client, auth_port=AUTH_PORT)
+    rename_project("project_1", "Friends", auth_file, client, auth_port=AUTH_PORT)
+    delete_project("project_1", auth_file, client, auth_port=AUTH_PORT)
+    preflight_repo_move("project_1", "repo_1", "project_2", auth_file, client, auth_port=AUTH_PORT)
+    move_repo(RepoTransfer("project_1", "repo_1", "project_2"), auth_file, client, auth_port=AUTH_PORT)
+    catalog(auth_file, client, auth_port=AUTH_PORT)
+    runbook("runbook_1", auth_file, client, auth_port=AUTH_PORT)
+    add_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client, auth_port=AUTH_PORT)
+    delete_project_repo("project_1", "repo_1", auth_file, client, auth_port=AUTH_PORT)
+    connect_project_repo("project_1", "repo_1", auth_file, client, auth_port=AUTH_PORT)
+    repo_active_runs("repo_1", auth_file, client, auth_port=AUTH_PORT)
+    repo_audit_rerun_state("repo_1", auth_file, client, auth_port=AUTH_PORT)
+    repo_task_links("repo_1", auth_file, client, auth_port=AUTH_PORT)
+    task_detail("task_1", auth_file, client, auth_port=AUTH_PORT)
     start_audit_run(
         AuditRunCreate(
             repo_id="repo_1",
@@ -108,10 +110,11 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
         ),
         auth_file,
         client,
+        auth_port=AUTH_PORT,
     )
-    audit_summary_snapshot("repo_1", "vulns", auth_file, client)
-    improvement_jobs("repo_1", auth_file, client)
-    put_improvement_job("repo_1", "vuln-audit", {"enabled": True}, auth_file, client)
+    audit_summary_snapshot("repo_1", "vulns", auth_file, client, auth_port=AUTH_PORT)
+    improvement_jobs("repo_1", auth_file, client, auth_port=AUTH_PORT)
+    put_improvement_job("repo_1", "vuln-audit", {"enabled": True}, auth_file, client, auth_port=AUTH_PORT)
 
     contract = cast(object, json.loads(CONTRACT_PATH.read_text(encoding="utf-8")))
     assert isinstance(contract, dict)

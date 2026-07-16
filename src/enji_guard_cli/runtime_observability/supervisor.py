@@ -6,9 +6,12 @@ import signal
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal, Protocol
 
-from enji_guard_cli.auth_session.service import AuthSessionService
-from enji_guard_cli.delivery.mcp.server import McpTransport, create_mcp_server, run_mcp_server_async
+from enji_guard_cli.runtime_observability.ports import (
+    BackendReadinessObservation,
+    RuntimeAuthPort,
+)
 from enji_guard_cli.runtime_observability.readiness import (
     BackendReadinessProbe,
     BackendReadinessState,
@@ -21,47 +24,65 @@ from enji_guard_cli.settings import ReadinessSettings, default_settings
 
 _LOGGER = logging.getLogger(__name__)
 MCP_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+McpTransport = Literal["stdio", "sse", "streamable-http"]
+
+
+class McpServerFactory(Protocol):
+    def __call__(self, host: str, port: int) -> object: ...
+
+
+class McpServerRunner(Protocol):
+    async def __call__(
+        self, server: object, *, transport: McpTransport = "stdio", mount_path: str | None = None
+    ) -> None: ...
 
 
 @dataclass(slots=True)
 class RuntimeSupervisor:
     """Injectable supervisor facade used by service composition and tests."""
 
-    auth_service: AuthSessionService | None = None
+    runtime_auth: RuntimeAuthPort | None = None
 
-    async def run_async(
+    async def run_async(  # noqa: PLR0913
         self,
         *,
         transport: McpTransport,
         host: str,
         port: int,
         mount_path: str | None = None,
+        mcp_server_factory: McpServerFactory,
+        mcp_server_runner: McpServerRunner,
     ) -> None:
         await run_service_async(
             transport=transport,
             host=host,
             port=port,
             mount_path=mount_path,
-            auth_service=self.auth_service,
+            runtime_auth=self.runtime_auth,
+            mcp_server_factory=mcp_server_factory,
+            mcp_server_runner=mcp_server_runner,
         )
 
 
-async def run_service_async(
+async def run_service_async(  # noqa: PLR0913
     *,
     transport: McpTransport,
     host: str,
     port: int,
     mount_path: str | None = None,
-    auth_service: AuthSessionService | None = None,
+    runtime_auth: RuntimeAuthPort | None = None,
+    mcp_server_factory: McpServerFactory | None = None,
+    mcp_server_runner: McpServerRunner | None = None,
 ) -> None:
     """Start all sibling tasks and cancel them together on service exit."""
+    if mcp_server_factory is None or mcp_server_runner is None:
+        raise ValueError("MCP server factory and runner must be provided by delivery composition")
     mcp_task = asyncio.create_task(
-        run_mcp_server_async(create_mcp_server(host=host, port=port), transport=transport, mount_path=mount_path),
+        mcp_server_runner(mcp_server_factory(host, port), transport=transport, mount_path=mount_path),
         name="enji-guard-mcp-server",
     )
-    service = auth_service or AuthSessionService()
-    refresh_task = service.start_auto_refresh_task()
-    readiness_task = start_backend_readiness_task(auth_service=service)
+    refresh_task = runtime_auth.start_auto_refresh_task() if runtime_auth is not None else None
+    readiness_task = start_backend_readiness_task(observer=runtime_auth)
     shutdown_event = asyncio.Event()
     installed_signals = _install_signal_handlers(shutdown_event)
     try:
@@ -70,9 +91,28 @@ async def run_service_async(
         _remove_signal_handlers(installed_signals)
 
 
-def run_service(*, transport: McpTransport, host: str, port: int, mount_path: str | None = None) -> None:
+def run_service(  # noqa: PLR0913
+    *,
+    transport: McpTransport,
+    host: str,
+    port: int,
+    mount_path: str | None = None,
+    runtime_auth: RuntimeAuthPort | None = None,
+    mcp_server_factory: McpServerFactory | None = None,
+    mcp_server_runner: McpServerRunner | None = None,
+) -> None:
     configure_logging(default_settings().telemetry, provenance="supervisor")
-    asyncio.run(run_service_async(transport=transport, host=host, port=port, mount_path=mount_path))
+    asyncio.run(
+        run_service_async(
+            transport=transport,
+            host=host,
+            port=port,
+            mount_path=mount_path,
+            runtime_auth=runtime_auth,
+            mcp_server_factory=mcp_server_factory,
+            mcp_server_runner=mcp_server_runner,
+        )
+    )
 
 
 async def supervise_tasks(
@@ -162,15 +202,16 @@ def _remove_signal_handlers(signals: tuple[signal.Signals, ...]) -> None:
             loop.remove_signal_handler(signum)
 
 
-def start_backend_readiness_task(*, auth_service: AuthSessionService | None = None) -> asyncio.Task[None] | None:
+def start_backend_readiness_task(*, observer: RuntimeAuthPort | None = None) -> asyncio.Task[None] | None:
     settings = default_settings().readiness
     if not settings.enabled:
         return None
     initial_state = backend_readiness_starting_state(checked_at=datetime.now(UTC))
     _write_state(settings, initial_state)
-    service = auth_service or AuthSessionService()
+    if observer is None:
+        return None
     return asyncio.create_task(
-        _backend_readiness_loop(settings=settings, initial_state=initial_state, auth_service=service),
+        _backend_readiness_loop(settings=settings, initial_state=initial_state, observer=observer),
         name="enji-guard-backend-readiness",
     )
 
@@ -179,20 +220,32 @@ async def _backend_readiness_loop(
     *,
     settings: ReadinessSettings,
     initial_state: BackendReadinessState,
-    auth_service: AuthSessionService | None = None,
+    observer: RuntimeAuthPort,
 ) -> None:
     state = initial_state
-    service = auth_service or AuthSessionService()
     while True:
         try:
             checked_at = datetime.now(UTC)
-            probe = await service.backend_readiness_probe_async()
-            state = backend_readiness_state_after_probe(state, probe, checked_at=checked_at)
+            probe = await observer.observe_backend_readiness()
+            readiness_probe = _readiness_probe(probe)
+            state = backend_readiness_state_after_probe(state, readiness_probe, checked_at=checked_at)
             _write_state(settings, state)
-            _log_probe(state, probe)
+            _log_probe(state, readiness_probe)
         except (OSError, RuntimeError, ValueError) as exc:
             state = _state_after_crash(settings, state, exc)
         await asyncio.sleep(settings.heartbeat_interval_seconds)
+
+
+def _readiness_probe(observation: BackendReadinessObservation) -> BackendReadinessProbe:
+    return BackendReadinessProbe(
+        ready=observation.ready,
+        failure_kind=observation.failure_kind,
+        failure_code=observation.failure_code,
+        failure_message=observation.failure_message,
+        failure_status_code=observation.failure_status_code,
+        credential_type=observation.credential_type,
+        elapsed_ms=observation.elapsed_ms,
+    )
 
 
 def _write_state(settings: ReadinessSettings, state: BackendReadinessState) -> None:

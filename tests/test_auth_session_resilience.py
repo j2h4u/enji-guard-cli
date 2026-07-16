@@ -9,6 +9,7 @@ import pytest
 import enji_guard_cli.auth_session.api as auth_module
 import enji_guard_cli.auth_session.auto_refresh as auto_refresh_module
 import enji_guard_cli.enji_gateway.client as api_client_module
+from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
 from enji_guard_cli.auth_session.api import (
     backend_readiness_probe_async,
     import_cookie,
@@ -140,7 +141,7 @@ def test_non_replayable_profiles_do_not_auto_retry_status_responses(profile: Ret
 def test_unsafe_request_is_not_replayed_after_cookie_refresh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access=old; refresh=long", auth_file)
-    session = api_client_module.load_api_session(auth_file)
+    session = api_client_module.load_api_session(auth_file, auth_port=AuthSessionAdapter())
     calls: list[EnjiHttpRequest] = []
 
     class Client:

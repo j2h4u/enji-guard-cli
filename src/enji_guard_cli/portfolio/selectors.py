@@ -8,6 +8,7 @@ from typing import Protocol
 from enji_guard_cli.portfolio.errors import PortfolioNotFoundError
 from enji_guard_cli.portfolio.models import ProjectRef, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort, SelectorResolver
+from enji_guard_cli.portfolio.scopes import MutationScope
 
 
 def project_matches(project: ProjectRef, selector: str) -> bool:
@@ -96,8 +97,58 @@ class GatewaySelectorResolver(SelectorResolver):
         return resolve_repository(targets, selector, project=project)
 
 
+class GatewayPortfolioTargetService(GatewaySelectorResolver):
+    """Gateway-backed Portfolio target selection and explicit scope expansion."""
+
+    def targets(self, repo: str | None = None, project: str | None = None) -> tuple[RepositoryRef, ...]:
+        projects = self.gateway.list_projects()
+        selected = projects if project is None else (resolve_project(projects, project),)
+        repositories = tuple(
+            repository
+            for project_ref in selected
+            for repository in self.gateway.project_detail(project_ref.project_id).repositories
+        )
+        if repo is None:
+            return repositories
+        return (resolve_repository(repositories, repo, project=project),)
+
+    def write_targets(
+        self,
+        repo: str | None,
+        project: str | None,
+        *,
+        all_repos: bool = False,
+        all_projects: bool = False,
+        operation: str = "mutation",
+    ) -> tuple[RepositoryRef, ...]:
+        scope = MutationScope.from_args(
+            repo,
+            project,
+            all_repos=all_repos,
+            all_projects=all_projects,
+            operation=operation,
+        )
+        if scope.kind == "all_projects":
+            return self.targets()
+        if scope.kind == "all_repos":
+            return self.targets(project=scope.project)
+        return self.targets(scope.repo, scope.project)
+
+    def linked_website_mapping(self, project_id: str) -> dict[str, tuple[str, ...]]:
+        """Return website-to-repository links as an immutable-value mapping."""
+
+        detail = self.gateway.project_detail(project_id)
+        return {
+            url: tuple(repo_ids)
+            for url, repo_ids in detail.linked_website_repo_ids.items()
+            if url in detail.linked_websites
+        }
+
+
 def parse_github_repo(value: str) -> tuple[str, str]:
     owner, separator, name = value.strip().partition("/")
+    owner = owner.strip()
+    name = name.strip()
     if not separator or not owner or not name or "/" in name:
         raise ValueError("repo must be an owner/name GitHub slug")
     return owner, name

@@ -4,6 +4,7 @@ import pytest
 
 from enji_guard_cli.application import Application
 from enji_guard_cli.audit.ports import AuditGatewayPort
+from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.enji_gateway import PortfolioGateway
 from enji_guard_cli.enji_gateway.ports import GatewayClient
@@ -30,8 +31,8 @@ def test_project_detail_composes_live_collections_into_audit_project(
     }
     import enji_guard_cli.enji_gateway.portfolio_gateway as module
 
-    monkeypatch.setattr(module, "_project_detail", lambda *_args: payload)
-    gateway = PortfolioGateway(client=cast(GatewayClient, object()))
+    monkeypatch.setattr(module, "_project_detail", lambda *_args, **_kwargs: payload)
+    gateway = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=AuthSessionAdapter())
     application = Application(
         audit_gateway=cast(AuditGatewayPort, _AuditGateway()),
         portfolio_gateway=gateway,
@@ -60,8 +61,10 @@ def test_project_detail_uses_nested_collections_as_compatibility_fallback(
     }
     import enji_guard_cli.enji_gateway.portfolio_gateway as module
 
-    monkeypatch.setattr(module, "_project_detail", lambda *_args: payload)
-    detail = PortfolioGateway(client=cast(GatewayClient, object())).project_detail("project-1")
+    monkeypatch.setattr(module, "_project_detail", lambda *_args, **_kwargs: payload)
+    detail = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=AuthSessionAdapter()).project_detail(
+        "project-1"
+    )
 
     assert detail.repositories[0].repo_id == "repo-1"
     assert detail.linked_website_repo_ids == {"https://pets.example": ("repo-1",)}

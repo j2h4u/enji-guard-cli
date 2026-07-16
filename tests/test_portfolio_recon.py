@@ -1,5 +1,6 @@
 # pyright: basic
 
+from enji_guard_cli.audit.ports import AuditStatus
 from enji_guard_cli.portfolio.models import RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioAuditStatus
 from enji_guard_cli.portfolio.recon import RECON_ACTION_KEY, start_recon
@@ -7,7 +8,7 @@ from enji_guard_cli.portfolio.recon import RECON_ACTION_KEY, start_recon
 
 class Audits:
     def status(self, repo_id):
-        return PortfolioAuditStatus("sha", {})
+        return PortfolioAuditStatus(AuditStatus(repo_id, "sha", ()))
 
 
 class Starter:

@@ -20,7 +20,7 @@ from typing import Annotated, Literal, cast
 
 import typer
 
-from enji_guard_cli.application import Application, AutofixWriteScope, EmailPreferencesUpdate
+from enji_guard_cli.application import Application, ApplicationAuthError, AutofixWriteScope, EmailPreferencesUpdate
 from enji_guard_cli.audit.artifacts import AuditArtifactUnavailableError
 from enji_guard_cli.audit.errors import AuditMalformedError, AuditNotFoundError, AuditUpstreamError
 from enji_guard_cli.audit.ports import (
@@ -30,11 +30,7 @@ from enji_guard_cli.audit.ports import (
     AuditWaitOptions,
     MalformedAuditSnapshotError,
 )
-from enji_guard_cli.auth_session.api import AuthError
-from enji_guard_cli.enji_gateway.catalog_snapshot import (
-    begin_audit_catalog_observation,
-    end_audit_catalog_observation,
-)
+from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.portfolio.errors import PortfolioMalformedError, PortfolioNotFoundError, PortfolioUpstreamError
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
@@ -185,14 +181,11 @@ def _run(action: Callable[[], object], as_json: bool) -> None:  # noqa: C901
     """Execute a command action and keep expected operator errors on stderr."""
     changes: list[AuditCatalogChange] = []
     operation = str(_state.get("operation") or "cli")
-    audit_aware = _is_audit_aware_operation(operation)
 
     def _catalog_changed(items: tuple[object, ...]) -> None:
         changes.extend(cast(AuditCatalogChange, item) for item in items)
 
     def _catalog_changes() -> tuple[object, ...]:
-        if not audit_aware:
-            return ()
         application = _state.get("application")
         reader = getattr(application, "catalog_observation", None)
         if not callable(reader):
@@ -208,25 +201,18 @@ def _run(action: Callable[[], object], as_json: bool) -> None:  # noqa: C901
         provenance="cli",
         json_output=as_json,
     )
-    observation_token = (
-        begin_audit_catalog_observation(state_file=default_settings().audit_catalog.state_file) if audit_aware else None
-    )
     try:
-        try:
-            payload = run_agent_journey(
-                action,
-                journey,
-                exit_code_for_exception=lambda _exc: 1,
-                audit_catalog_change_renderer=_catalog_changed,
-                audit_catalog_change_reader=_catalog_changes,
-            )
-        finally:
-            if observation_token is not None:
-                end_audit_catalog_observation(observation_token)
+        payload = run_agent_journey(
+            action,
+            journey,
+            exit_code_for_exception=lambda _exc: 1,
+            audit_catalog_change_renderer=_catalog_changed,
+            audit_catalog_change_reader=_catalog_changes,
+        )
     except EnjiApiError as exc:
         typer.echo(f"{exc.code}: {exc.message}", err=True)
         raise typer.Exit(_exit_code_for_error(exc.code)) from None
-    except AuthError as exc:
+    except ApplicationAuthError as exc:
         typer.echo(f"{exc.code}: {exc.message}", err=True)
         raise typer.Exit(3 if exc.code.startswith("AUTH_") else 1) from None
     except (AuditArtifactUnavailableError, AuditNotFoundError, PortfolioNotFoundError) as exc:
@@ -245,7 +231,7 @@ def _run(action: Callable[[], object], as_json: bool) -> None:  # noqa: C901
         typer.echo(f"VALIDATION: {exc}", err=True)
         raise typer.Exit(1) from None
     if as_json:
-        _emit(_with_catalog_changes(payload, changes) if audit_aware else payload, True)
+        _emit(_with_catalog_changes(payload, changes) if changes else payload, True)
     else:
         _emit(payload, False)
         if changes:
@@ -260,44 +246,12 @@ def _exit_code_for_error(code: str) -> int:
     return 1
 
 
-def _is_audit_aware_operation(operation: str) -> bool:
-    # Keep this list aligned with command handlers whose Application method
-    # actually reads the audit catalog.  Portfolio mutations and selectors do
-    # not need an observation lifecycle merely because they live under repo.
-    return operation in {
-        "cli audit start",
-        "cli audit read",
-        "cli audit summary",
-        "cli audit status",
-        "cli audit wait",
-        "cli repo add",
-        "cli repo list",
-        "cli repo status",
-        "cli recon start",
-        "cli recon status",
-        "cli portfolio status",
-        "cli status",
-        "cli wait",
-        "cli schedule list",
-        "cli schedule set",
-        "cli schedule auto-time",
-        "cli schedule timezone",
-        "cli improvement-jobs list",
-        "cli improvement-jobs set",
-        "cli email list",
-        "cli email set",
-    }
-
-
 def _with_catalog_changes(payload: object, changes: list[AuditCatalogChange]) -> object:
     rendered = [
         {
             "action_key": change.action_key,
             "changed_fields": list(change.changed_fields),
-            "current": None,
             "kind": change.kind,
-            "previous": None,
-            "selector": change.action_key.removeprefix("audit."),
         }
         for change in changes
     ]
@@ -375,7 +329,7 @@ def auth_import_cookie(
         typer.echo("VALIDATION: use --stdin to avoid storing cookies in shell history", err=True)
         raise typer.Exit(1)
     raw_cookie = sys.stdin.read()
-    _run(lambda: _application(auth_file).auth.import_cookie(raw_cookie), _json_output(json_output))
+    _run(lambda: _application(auth_file).import_cookie(raw_cookie), _json_output(json_output))
 
 
 @auth_app.command("import-bearer")
@@ -388,7 +342,7 @@ def auth_import_bearer(
         typer.echo("VALIDATION: use --stdin to avoid storing tokens in shell history", err=True)
         raise typer.Exit(1)
     raw_token = sys.stdin.read()
-    _run(lambda: _application(auth_file).auth.import_bearer_token(raw_token), _json_output(json_output))
+    _run(lambda: _application(auth_file).import_bearer(raw_token), _json_output(json_output))
 
 
 @auth_app.command("status")
@@ -396,7 +350,7 @@ def auth_status(
     auth_file: Annotated[Path | None, typer.Option("--auth-file", hidden=True)] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    _run(lambda: _application(auth_file).auth.status(), _json_output(json_output))
+    _run(lambda: _application(auth_file).auth_status(), _json_output(json_output))
 
 
 @auth_app.command("refresh")
@@ -404,7 +358,7 @@ def auth_refresh(
     auth_file: Annotated[Path | None, typer.Option("--auth-file", hidden=True)] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    _run(lambda: _application(auth_file).auth.refresh(), _json_output(json_output))
+    _run(lambda: _application(auth_file).auth_refresh(), _json_output(json_output))
 
 
 @project_app.command("list")
@@ -645,7 +599,16 @@ def run(
     allow_external_host: Annotated[bool, typer.Option("--allow-external-host")] = False,
 ) -> None:
     _validate_http_bind(host, transport, allow_external_host=allow_external_host)
-    run_service(transport=transport, host=host, port=port, mount_path=mount_path)
+    application = _application()
+    run_service(
+        transport=transport,
+        host=host,
+        port=port,
+        mount_path=mount_path,
+        runtime_auth=application.runtime_auth_port(),
+        mcp_server_factory=lambda host, port: create_mcp_server(host, port, application=application),
+        mcp_server_runner=run_mcp_server_async,
+    )
 
 
 @app.command("status")
