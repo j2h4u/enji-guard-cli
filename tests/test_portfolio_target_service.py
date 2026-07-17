@@ -8,10 +8,14 @@ from enji_guard_cli.portfolio.selectors import GatewayPortfolioTargetService
 
 
 class Gateway:
+    def __init__(self) -> None:
+        self.detail_calls: list[str] = []
+
     def list_projects(self) -> tuple[ProjectRef, ...]:
         return (ProjectRef("p1", "Pets"), ProjectRef("p2", "Work"))
 
     def project_detail(self, project_id: str) -> ProjectDetail:
+        self.detail_calls.append(project_id)
         if project_id == "p1":
             return ProjectDetail(
                 ProjectRef("p1", "Pets"),
@@ -29,6 +33,14 @@ def test_target_service_resolves_and_expands_explicit_scopes() -> None:
     assert service.resolve_repository("acme/cat", project="pets").repo_id == "r1"
     assert [repo.repo_id for repo in service.write_targets(None, "p1", all_repos=True)] == ["r1"]
     assert [repo.repo_id for repo in service.write_targets(None, None, all_projects=True)] == ["r1", "r2"]
+
+
+def test_repository_resolution_only_loads_selected_project_detail() -> None:
+    gateway = Gateway()
+    service = GatewayPortfolioTargetService(cast(PortfolioGatewayPort, gateway))
+
+    assert service.resolve_repository("acme/cat", project="pets").repo_id == "r1"
+    assert gateway.detail_calls == ["p1"]
 
 
 def test_target_service_rejects_conflicting_batch_scope() -> None:

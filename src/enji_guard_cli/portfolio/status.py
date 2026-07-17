@@ -1,9 +1,10 @@
 """Portfolio status assembly over a typed Audit status projection."""
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from enji_guard_cli.portfolio.models import ProjectDetail, ProjectRef, RepositoryRef
+from enji_guard_cli.portfolio.models import PortfolioActiveRun, ProjectDetail, ProjectRef, RepositoryRef
 from enji_guard_cli.portfolio.ports import (
     AuditStatusReader,
     PortfolioAuditStatus,
@@ -39,6 +40,24 @@ class PortfolioStatus:
         return tuple(repo for project in self.projects for repo in project.repositories)
 
 
+@dataclass(frozen=True, slots=True)
+class RepositoryOverview:
+    repository: RepositoryRef
+    active_runs: tuple[PortfolioActiveRun, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectOverview:
+    project: ProjectRef
+    repositories: tuple[RepositoryOverview, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PortfolioOverview:
+    observed_at: str
+    projects: tuple[ProjectOverview, ...]
+
+
 def repository_status(repository: RepositoryRef, *, audits: AuditStatusReader) -> RepositoryStatus:
     status = audits.status(repository.repo_id)
     return RepositoryStatus(repository=repository, audit=status)
@@ -59,6 +78,71 @@ def assemble_status(
         for project in gateway.list_projects()
     )
     return PortfolioStatus(datetime.now(UTC).isoformat(), projects)
+
+
+def assemble_overview(
+    *,
+    gateway: PortfolioGatewayPort,
+    project: str | None = None,
+    sort: RepositorySortName = "default",
+) -> PortfolioOverview:
+    """Build the fast aggregate view without per-repository audit requests."""
+
+    projects = gateway.list_projects()
+    if project is not None:
+        projects = tuple(item for item in projects if project in {item.project_id, item.name})
+    if not projects:
+        return PortfolioOverview(datetime.now(UTC).isoformat(), ())
+    with ThreadPoolExecutor(max_workers=len(projects)) as executor:
+        overviews = tuple(executor.map(lambda item: _project_overview(gateway, item, sort), projects))
+    return PortfolioOverview(datetime.now(UTC).isoformat(), overviews)
+
+
+def _project_overview(gateway: PortfolioGatewayPort, project: ProjectRef, sort: RepositorySortName) -> ProjectOverview:
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        detail_future = executor.submit(gateway.project_detail, project.project_id)
+        runs_future = executor.submit(gateway.project_active_runs, project.project_id)
+        detail = detail_future.result()
+        active_runs = runs_future.result()
+    runs_by_repo: dict[str, list[PortfolioActiveRun]] = {}
+    for run in active_runs:
+        runs_by_repo.setdefault(run.repo_id, []).append(run)
+    repositories = tuple(
+        RepositoryOverview(repository, tuple(runs_by_repo.get(repository.repo_id, ())))
+        for repository in detail.repositories
+    )
+    return ProjectOverview(detail.project, _sort_overview_repositories(repositories, sort))
+
+
+def _sort_overview_repositories(
+    repositories: tuple[RepositoryOverview, ...], sort: RepositorySortName
+) -> tuple[RepositoryOverview, ...]:
+    if sort == "default":
+        return repositories
+    sorters = {
+        "name": lambda: sorted(repositories, key=_overview_name),
+        "weakest": lambda: sorted(repositories, key=lambda item: _overview_score(item, weakest=True)),
+        "overall": lambda: sorted(repositories, key=lambda item: _overview_score(item, weakest=False)),
+        "latest-audit": lambda: sorted(repositories, key=_overview_latest_audit_at, reverse=True),
+    }
+    try:
+        return tuple(sorters[sort]())
+    except KeyError as exc:
+        raise ValueError(f"unknown repository sort: {sort}") from exc
+
+
+def _overview_name(item: RepositoryOverview) -> str:
+    return (item.repository.full_name or "").casefold()
+
+
+def _overview_score(item: RepositoryOverview, *, weakest: bool) -> tuple[float, str]:
+    values = [float(value) for value in item.repository.scores.values() if value is not None]
+    score = (min(values) if weakest else sum(values) / len(values)) if values else float("inf")
+    return score, item.repository.full_name or ""
+
+
+def _overview_latest_audit_at(item: RepositoryOverview) -> str:
+    return max((run.completed_at or "" for run in item.active_runs), default="")
 
 
 def _sort_repositories(

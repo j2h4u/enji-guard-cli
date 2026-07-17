@@ -37,6 +37,9 @@ from enji_guard_cli.enji_gateway.http import (
     preflight_repo_move as _preflight_repo_move,
 )
 from enji_guard_cli.enji_gateway.http import (
+    project_active_runs as _project_active_runs,
+)
+from enji_guard_cli.enji_gateway.http import (
     project_detail as _project_detail,
 )
 from enji_guard_cli.enji_gateway.http import (
@@ -58,6 +61,7 @@ from enji_guard_cli.portfolio.models import (
     AccessLimits,
     AccountPreferences,
     MovePreflight,
+    PortfolioActiveRun,
     ProjectDetail,
     ProjectRef,
     RepositoryRef,
@@ -114,6 +118,13 @@ class PortfolioGateway(PortfolioGatewayPort):
             linked_websites=tuple(url for url, _ in website_pairs),
             linked_website_repo_ids=dict(website_pairs),
         )
+
+    def project_active_runs(self, project_id: str) -> tuple[PortfolioActiveRun, ...]:
+        payload = _project_active_runs(project_id, self._auth_file, self._client, auth_port=self._auth_port)
+        raw_runs = payload.get("activeRuns")
+        if not isinstance(raw_runs, list):
+            raw_runs = payload.get("runs") if isinstance(payload.get("runs"), list) else []
+        return tuple(run for item in _object_list(raw_runs) if (run := _portfolio_active_run(item)) is not None)
 
     def create_project(self, name: str) -> ProjectRef:
         payload = _create_project(name, self._auth_file, self._client, auth_port=self._auth_port)
@@ -245,6 +256,29 @@ def _repository_ref(payload: JsonObjectPayload, project: ProjectRef) -> Reposito
             if isinstance(key, str)
             and ((isinstance(value, (int, float)) and not isinstance(value, bool)) or value is None)
         },
+    )
+
+
+def _portfolio_active_run(payload: JsonObjectPayload) -> PortfolioActiveRun | None:
+    repo_id = _optional_str(payload.get("repoId"))
+    if repo_id is None:
+        return None
+    return PortfolioActiveRun(
+        repo_id=repo_id,
+        task_id=(
+            _optional_str(payload.get("fleetTaskId"))
+            or _optional_str(payload.get("taskId"))
+            or _optional_str(payload.get("id"))
+        ),
+        action_key=_optional_str(payload.get("actionKey")),
+        status=(
+            _optional_str(payload.get("status"))
+            or _optional_str(payload.get("state"))
+            or _optional_str(payload.get("lifecycle_state"))
+        ),
+        created_at=_optional_str(payload.get("createdAt")),
+        started_at=_optional_str(payload.get("startedAt")),
+        completed_at=_optional_str(payload.get("completedAt")),
     )
 
 

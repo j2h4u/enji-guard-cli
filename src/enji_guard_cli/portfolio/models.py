@@ -37,6 +37,19 @@ class ProjectDetail:
 
 
 @dataclass(frozen=True, slots=True)
+class PortfolioActiveRun:
+    """Project-level active work projected into Portfolio language."""
+
+    repo_id: str
+    task_id: str | None = None
+    action_key: str | None = None
+    status: str | None = None
+    created_at: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AccountPreferences:
     """Account-wide preferences; language is not a project setting."""
 

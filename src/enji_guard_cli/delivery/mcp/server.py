@@ -11,7 +11,7 @@ from typing import Literal, cast
 from mcp.server.fastmcp import FastMCP
 
 from enji_guard_cli.application import Application
-from enji_guard_cli.portfolio.status import PortfolioStatus
+from enji_guard_cli.portfolio.status import PortfolioOverview
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.telemetry import configure_logging
 from enji_guard_cli.settings import (
@@ -61,7 +61,7 @@ def create_mcp_server(
 
     @server.tool(
         name=MCP_TOOL_NAMES[0],
-        description="Read projects, repositories, scores, audit freshness, and active audit work.",
+        description="Read projects, repositories, scores, and project-level audit activity.",
         structured_output=True,
     )
     async def portfolio_overview(
@@ -69,10 +69,10 @@ def create_mcp_server(
         sort: RepositorySortName = DEFAULT_REPO_SORT,
     ) -> dict[str, object]:
         portfolio = cast(
-            PortfolioStatus,
+            PortfolioOverview,
             await asyncio.to_thread(
                 run_agent_journey,
-                lambda: app.portfolio_status(sort),
+                lambda: app.portfolio_overview(_project_arg(project), sort),
                 AgentJourney(
                     event_prefix="mcp_tool",
                     operation=MCP_TOOL_NAMES[0],
@@ -82,13 +82,7 @@ def create_mcp_server(
                 ),
             ),
         )
-        selected = _project_arg(project)
-        projects = [
-            item
-            for item in portfolio.projects
-            if selected is None or selected in {item.project.project_id, item.project.name}
-        ]
-        return cast(dict[str, object], _json({"observed_at": portfolio.observed_at, "projects": projects}))
+        return cast(dict[str, object], _json(portfolio))
 
     @server.tool(
         name=MCP_TOOL_NAMES[1],

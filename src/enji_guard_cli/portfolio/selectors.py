@@ -89,9 +89,11 @@ class GatewaySelectorResolver(SelectorResolver):
         return resolve_project(self.gateway.list_projects(), selector)
 
     def resolve_repository(self, selector: str, *, project: str | None = None) -> RepositoryRef:
+        projects = self.gateway.list_projects()
+        selected = projects if project is None else (resolve_project(projects, project),)
         targets = tuple(
             repo
-            for project_ref in self.gateway.list_projects()
+            for project_ref in selected
             for repo in self.gateway.project_detail(project_ref.project_id).repositories
         )
         return resolve_repository(targets, selector, project=project)

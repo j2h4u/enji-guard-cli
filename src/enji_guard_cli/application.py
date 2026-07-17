@@ -30,6 +30,7 @@ from enji_guard_cli.audit.ports import (
     AuditCatalogResult,
     AuditGatewayPort,
     AuditLedgerPort,
+    AuditRun,
     AuditRunResult,
     AuditSchedule,
     AuditScheduleUpdate,
@@ -74,7 +75,13 @@ from enji_guard_cli.portfolio.recon import recon_after_add
 from enji_guard_cli.portfolio.recon import start_recon as start_recon_use_case
 from enji_guard_cli.portfolio.repositories import add_repository, move_repository, remove_repository
 from enji_guard_cli.portfolio.selectors import GatewayPortfolioTargetService, GatewaySelectorResolver
-from enji_guard_cli.portfolio.status import PortfolioStatus, assemble_status, status_for_repo
+from enji_guard_cli.portfolio.status import (
+    PortfolioOverview,
+    PortfolioStatus,
+    assemble_overview,
+    assemble_status,
+    status_for_repo,
+)
 from enji_guard_cli.runtime_observability.ports import RuntimeAuthPort
 from enji_guard_cli.runtime_observability.telemetry import log_event
 from enji_guard_cli.settings import RepositorySortName, default_settings
@@ -179,14 +186,20 @@ class Application:
         return parse_catalog_result(self.catalog())
 
     def audit_status(self, repo_id: str, *, catalog: AuditCatalog | None = None) -> AuditStatus:
+        return self._audit_status_with_runs(repo_id, catalog=catalog)[0]
+
+    def _audit_status_with_runs(
+        self, repo_id: str, *, catalog: AuditCatalog | None = None
+    ) -> tuple[AuditStatus, tuple[AuditRun, ...]]:
         definitions = catalog if catalog is not None else self.audit_catalog()
+        active_runs = self._active_runs(repo_id)
         return build_status(
             repo_id,
             definitions,
             self.audit_gateway.task_links(repo_id).links,
-            self._active_runs(repo_id),
+            active_runs,
             self.audit_gateway.rerun_state(repo_id),
-        )
+        ), active_runs
 
     def audit_start(
         self, repo: str, project: str | None = None, selectors: list[str] | None = None, *, all_audits: bool = False
@@ -299,6 +312,9 @@ class Application:
     def portfolio_status(self, sort: RepositorySortName = "default") -> PortfolioStatus:
         catalog = self.audit_catalog()
         return assemble_status(gateway=self.portfolio_gateway, audits=_AuditStatusReader(self, catalog), sort=sort)
+
+    def portfolio_overview(self, project: str | None = None, sort: RepositorySortName = "default") -> PortfolioOverview:
+        return assemble_overview(gateway=self.portfolio_gateway, project=project, sort=sort)
 
     def repository_status(self, repo: str, project: str | None = None) -> object:
         catalog = self.audit_catalog()
@@ -470,8 +486,8 @@ class _AuditStatusReader(AuditStatusReader):
         self.catalog = catalog
 
     def status(self, repo_id: str) -> PortfolioAuditStatus:
-        status = self.application.audit_status(repo_id, catalog=self.catalog)
-        return PortfolioAuditStatus.from_audit_status(status, active_runs=self.application._active_runs(repo_id))
+        status, active_runs = self.application._audit_status_with_runs(repo_id, catalog=self.catalog)
+        return PortfolioAuditStatus.from_audit_status(status, active_runs=cast(tuple, active_runs))
 
 
 class _AuditStarter(AuditStartPort):

@@ -31,15 +31,16 @@ def list_for_targets(
 ) -> tuple[ScheduleTargetResult, ...]:
     """Project configured and unconfigured rows for every selected target."""
 
-    return tuple(
-        ScheduleTargetResult(
-            target.repo_id,
-            tuple(
-                schedule_for_audit(audit_key, gateway.list_schedules(target.repo_id)) for audit_key in published_audits
-            ),
+    result: list[ScheduleTargetResult] = []
+    for target in targets:
+        schedules = gateway.list_schedules(target.repo_id)
+        result.append(
+            ScheduleTargetResult(
+                target.repo_id,
+                tuple(schedule_for_audit(audit_key, schedules) for audit_key in published_audits),
+            )
         )
-        for target in targets
-    )
+    return tuple(result)
 
 
 def set_for_targets(

@@ -26,6 +26,7 @@ from enji_guard_cli.enji_gateway.contract import (
     FLEET_PROJECT_DELETE_ENDPOINT_SPEC,
     IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC,
     IMPROVEMENT_JOBS_ENDPOINT_SPEC,
+    PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC,
     PROJECT_DETAIL_ENDPOINT_SPEC,
     PROJECT_RENAME_ENDPOINT_SPEC,
     PROJECT_REPO_CONNECTION_ENDPOINT_SPEC,
@@ -535,6 +536,21 @@ def repo_active_runs(
     )
 
 
+def project_active_runs(
+    project_id: str,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+    *,
+    auth_port: GatewayAuthPort,
+) -> JsonObjectPayload:
+    return run_api_request(
+        auth_file,
+        client,
+        PROJECT_ACTIVE_RUNS_ENDPOINT.request(path_params={"projectId": project_id}),
+        auth_port=auth_port,
+    )
+
+
 def repo_audit_rerun_state(
     repo_id: str,
     auth_file: Path | None = None,
@@ -824,6 +840,10 @@ PROJECTS_ENDPOINT = ApiEndpoint(
 )
 PROJECT_DETAIL_ENDPOINT = ApiEndpoint(
     spec=PROJECT_DETAIL_ENDPOINT_SPEC,
+    parser=_parse_json_object_payload,
+)
+PROJECT_ACTIVE_RUNS_ENDPOINT = ApiEndpoint(
+    spec=PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 PROJECT_RUN_LANGUAGE_ENDPOINT = ApiEndpoint(

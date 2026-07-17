@@ -78,6 +78,13 @@ PROJECT_DETAIL_ENDPOINT_SPEC = EnjiEndpointSpec(
     operation="project detail",
     retry_profile=RetryProfile.READ,
 )
+PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC = EnjiEndpointSpec(
+    method="GET",
+    path_template="/api/ux/projects/{projectId}/active-runs",
+    operation_id="listProjectActiveRuns",
+    operation="project active runs",
+    retry_profile=RetryProfile.READ,
+)
 PROJECT_RUN_LANGUAGE_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="GET",
     path_template="/api/ux/projects/{projectId}/run-language",
@@ -270,6 +277,7 @@ IMPLEMENTED_ENJI_ENDPOINTS = (
     REPORTS_LIST_ENDPOINT_SPEC,
     PROJECTS_ENDPOINT_SPEC,
     PROJECT_DETAIL_ENDPOINT_SPEC,
+    PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC,
     FLEET_PROJECT_CREATE_ENDPOINT_SPEC,
     UX_PROJECT_CREATE_ENDPOINT_SPEC,
     PROJECT_RENAME_ENDPOINT_SPEC,
