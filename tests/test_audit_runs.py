@@ -26,7 +26,7 @@ def _context() -> AuditTaskContext:
         runbook_id="runbook_1",
         artifact_schema_name="upfront.audit.summary",
         artifact_schema_version="v1",
-        description_template="Repo {{repoFullName}}\n{{linkedSites}}",
+        description_template="Repo {{repository_full_name}}\n{{linked_websites}}",
     )
 
 
@@ -179,7 +179,7 @@ def test_task_for_repo_uses_only_sites_linked_to_requested_repository() -> None:
         runbook_id=context.runbook_id,
         artifact_schema_name=context.artifact_schema_name,
         artifact_schema_version=context.artifact_schema_version,
-        description_template="{{linkedSites}}",
+        description_template="{{linked_websites}}",
     )
 
     assert task_for_repo(context, "repo_1").description == "- https://first.example"

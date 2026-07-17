@@ -92,21 +92,9 @@ class PortfolioGateway(PortfolioGatewayPort):
         payload = _project_detail(project_id, self._auth_file, self._client, auth_port=self._auth_port)
         project_payload = _object(payload.get("project")) or payload
         project = _project_ref(project_payload) or ProjectRef(project_id=project_id, name=None)
-        # The live endpoint returns collections alongside the nested project;
-        # retain the nested form as a compatibility fallback for older shapes.
         raw_repos = payload.get("repos")
-        if not isinstance(raw_repos, list):
-            raw_repos = project_payload.get("repos")
-        if not isinstance(raw_repos, list):
-            raw_repos = (
-                payload.get("repositories")
-                if isinstance(payload.get("repositories"), list)
-                else project_payload.get("repositories")
-            )
         repos = tuple(repo for item in _object_list(raw_repos) if (repo := _repository_ref(item, project)) is not None)
         raw_web_resources = payload.get("webResources")
-        if not isinstance(raw_web_resources, list):
-            raw_web_resources = project_payload.get("webResources")
         website_pairs = tuple(
             (url, _string_tuple(resource.get("repoIds")))
             for resource in _object_list(raw_web_resources)
@@ -122,8 +110,6 @@ class PortfolioGateway(PortfolioGatewayPort):
     def project_active_runs(self, project_id: str) -> tuple[PortfolioActiveRun, ...]:
         payload = _project_active_runs(project_id, self._auth_file, self._client, auth_port=self._auth_port)
         raw_runs = payload.get("activeRuns")
-        if not isinstance(raw_runs, list):
-            raw_runs = payload.get("runs") if isinstance(payload.get("runs"), list) else []
         return tuple(run for item in _object_list(raw_runs) if (run := _portfolio_active_run(item)) is not None)
 
     def create_project(self, name: str) -> ProjectRef:
@@ -155,25 +141,10 @@ class PortfolioGateway(PortfolioGatewayPort):
         ) or RepositoryRef(repo_id, project_id, None, None, connected=True)
 
     def preflight_repository_move(self, source_project_id: str, repo_id: str, target_project_id: str) -> MovePreflight:
-        payload = _preflight_repo_move(
+        _preflight_repo_move(
             source_project_id, repo_id, target_project_id, self._auth_file, self._client, auth_port=self._auth_port
         )
-        if not isinstance(payload, dict):
-            return MovePreflight()
-        allowed_raw = payload.get("allowed")
-        if not isinstance(allowed_raw, bool):
-            allowed_raw = payload.get("canTransfer")
-        allowed = allowed_raw if isinstance(allowed_raw, bool) else True
-        replacements = payload.get("scheduleReplacements")
-        if not isinstance(replacements, list):
-            replacements = (
-                payload.get("schedule_replacements") if isinstance(payload.get("schedule_replacements"), list) else []
-            )
-        return MovePreflight(
-            allowed=allowed,
-            schedule_replacements=_string_tuple(replacements),
-            message=_optional_str(payload.get("message")) or _optional_str(payload.get("reason")),
-        )
+        return MovePreflight()
 
     def move_repository(self, source_project_id: str, repo_id: str, target_project_id: str) -> RepositoryRef:
         payload = _move_repo(
@@ -265,17 +236,9 @@ def _portfolio_active_run(payload: JsonObjectPayload) -> PortfolioActiveRun | No
         return None
     return PortfolioActiveRun(
         repo_id=repo_id,
-        task_id=(
-            _optional_str(payload.get("fleetTaskId"))
-            or _optional_str(payload.get("taskId"))
-            or _optional_str(payload.get("id"))
-        ),
+        task_id=_optional_str(payload.get("fleetTaskId")),
         action_key=_optional_str(payload.get("actionKey")),
-        status=(
-            _optional_str(payload.get("status"))
-            or _optional_str(payload.get("state"))
-            or _optional_str(payload.get("lifecycle_state"))
-        ),
+        status=_optional_str(payload.get("state")),
         created_at=_optional_str(payload.get("createdAt")),
         started_at=_optional_str(payload.get("startedAt")),
         completed_at=_optional_str(payload.get("completedAt")),

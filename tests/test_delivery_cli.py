@@ -2,10 +2,12 @@ import importlib
 from typing import cast
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
-from enji_guard_cli.application import AutofixWriteScope
-from enji_guard_cli.delivery.cli.app import app
+from enji_guard_cli.application import ApplicationAuthError, AutofixWriteScope
+from enji_guard_cli.delivery.cli.app import _run, app
+from enji_guard_cli.errors import EnjiApiError
 
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
 
@@ -15,28 +17,12 @@ def test_operator_command_tree_uses_audit_vocabulary() -> None:
     assert result.exit_code == 0
     for command in ("auth", "project", "repo", "recon", "audit", "schedule", "improvement-jobs", "email", "language"):
         assert command in result.stdout
-    assert "│ report " not in result.stdout
 
 
 def test_audit_read_and_summary_are_public_commands() -> None:
     runner = CliRunner()
     assert runner.invoke(app, ["audit", "read", "--help"]).exit_code == 0
     assert runner.invoke(app, ["audit", "summary", "--help"]).exit_code == 0
-
-
-def test_operator_surface_removes_report_and_legacy_auth_aliases() -> None:
-    runner = CliRunner()
-    for args in (("report", "read"), ("report", "summary"), ("auth", "import-token"), ("language", "get")):
-        result = runner.invoke(app, list(args))
-        assert result.exit_code != 0
-    assert runner.invoke(app, ["auth", "import-bearer", "--help"]).exit_code == 0
-
-
-def test_repository_sort_rejects_legacy_value() -> None:
-    result = CliRunner().invoke(app, ["repo", "list", "--sort", "latest-report"])
-
-    assert result.exit_code != 0
-    assert "latest-audit" in result.stderr
 
 
 def test_run_defaults_to_long_lived_http_transport(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -171,3 +157,27 @@ def test_auth_import_bearer_requires_stdin_and_never_prints_credential(monkeypat
     result = CliRunner().invoke(app, ["auth", "import-bearer", "--stdin", "--json"], input="Bearer secret-token\n")
     assert result.exit_code == 0
     assert "secret-token" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("error", "exit_code", "rendered"),
+    [
+        (EnjiApiError("BAD_SELECTOR", "unknown audit"), 4, "BAD_SELECTOR: unknown audit"),
+        (ApplicationAuthError("AUTH_EXPIRED", "authentication expired"), 3, "AUTH_EXPIRED: authentication expired"),
+        (ValueError("invalid audit scope"), 1, "VALIDATION: invalid audit scope"),
+    ],
+)
+def test_run_maps_current_application_errors_to_cli_contract(
+    error: Exception,
+    exit_code: int,
+    rendered: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail() -> object:
+        raise error
+
+    with pytest.raises(typer.Exit) as caught:
+        _run(fail, False)
+
+    assert caught.value.exit_code == exit_code
+    assert rendered in capsys.readouterr().err

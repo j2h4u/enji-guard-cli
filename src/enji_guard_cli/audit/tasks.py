@@ -58,14 +58,14 @@ def _description(context: AuditTaskContext, full_name: str, repo_id: str | None 
     template = context.description_template or _default_template()
     linked = [site.url for site in context.project.linked_websites if repo_id in site.repo_ids]
     values = {
-        "recurringPrefix": f"Task created from {context.audit.action_key} for {full_name}.",
-        "repoFullName": full_name,
-        "repoUrl": f"https://github.com/{full_name}",
-        "linkedSites": "\n".join(f"- {url}" for url in linked) if linked else "- none linked yet",
-        "artifactSchemaName": context.artifact_schema_name,
-        "artifactSchemaVersion": context.artifact_schema_version,
-        "artifactContract": "structured artifact metadata is machine-readable and deterministic",
-        "constraintsSection": "- use task title and description only",
+        "recurring_prefix": f"Task created from {context.audit.action_key} for {full_name}.",
+        "repository_full_name": full_name,
+        "repository_url": f"https://github.com/{full_name}",
+        "linked_websites": "\n".join(f"- {url}" for url in linked) if linked else "- none linked yet",
+        "artifact_schema_name": context.artifact_schema_name,
+        "artifact_schema_version": context.artifact_schema_version,
+        "artifact_contract": "structured artifact metadata is machine-readable and deterministic",
+        "constraints": "- use task title and description only",
     }
     for name, value in values.items():
         template = template.replace(f"{{{{{name}}}}}", value)
@@ -74,9 +74,9 @@ def _description(context: AuditTaskContext, full_name: str, repo_id: str | None 
 
 def _default_template() -> str:
     return (
-        "{{recurringPrefix}}\n\nRepository:\n- full_name: {{repoFullName}}\n"
-        "- url: {{repoUrl}}\n\nLinked websites:\n{{linkedSites}}\n\n"
-        "Artifact contract for this run:\n- structured artifact metadata.schema_name={{artifactSchemaName}}\n"
-        "- structured artifact metadata.schema_version={{artifactSchemaVersion}}\n"
-        "- {{artifactContract}}\n\nConstraints:\n{{constraintsSection}}"
+        "{{recurring_prefix}}\n\nRepository:\n- full_name: {{repository_full_name}}\n"
+        "- url: {{repository_url}}\n\nLinked websites:\n{{linked_websites}}\n\n"
+        "Artifact contract for this run:\n- structured artifact metadata.schema_name={{artifact_schema_name}}\n"
+        "- structured artifact metadata.schema_version={{artifact_schema_version}}\n"
+        "- {{artifact_contract}}\n\nConstraints:\n{{constraints}}"
     )

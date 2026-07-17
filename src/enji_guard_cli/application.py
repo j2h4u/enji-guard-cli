@@ -32,7 +32,6 @@ from enji_guard_cli.audit.ports import (
     AuditLedgerPort,
     AuditRun,
     AuditRunResult,
-    AuditSchedule,
     AuditScheduleUpdate,
     AuditStatus,
     AuditWaitOptions,
@@ -517,13 +516,6 @@ def _run_result(result: dict[str, object]):
 
 
 __all__ = ["Application", "AutofixWriteScope", "EmailPreferencesUpdate"]
-
-
-def schedule_for_audit(audit: AuditDefinition, schedules: tuple[AuditSchedule, ...]) -> AuditSchedule:
-    """Compatibility helper delegating projection to Audit scheduling rules."""
-
-    current = next((item for item in schedules if item.audit_key == audit.action_key), None)
-    return current or AuditSchedule(audit.action_key, False, None, None, None, None, None, None)
 
 
 def _normalize_autofix_jobs(jobs: tuple[AuditAutofixJob, ...]) -> tuple[AuditAutofixJob, ...]:

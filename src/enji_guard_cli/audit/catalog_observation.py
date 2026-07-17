@@ -15,7 +15,7 @@ from typing import Literal, Protocol, cast
 
 from enji_guard_cli.audit.ports import AuditCatalogAction, AuditCatalogChange, AuditCatalogResult
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 type _ChangeKind = Literal["added", "removed", "changed"]
 
 
@@ -86,7 +86,7 @@ def _read_snapshot(state_file: Path) -> dict[str, dict[str, object]] | None:
         return None
     if not isinstance(payload, dict) or payload.get("schema_version") != _SCHEMA_VERSION:
         return None
-    actions = payload.get("actions") or payload.get("audits")
+    actions = payload.get("audits")
     if not isinstance(actions, dict):
         return None
     return {
@@ -134,27 +134,26 @@ def _action_fields(old: AuditCatalogAction, new: AuditCatalogAction) -> tuple[tu
         ("title", old.title, new.title),
         ("category", old.category, new.category),
         ("status", old.status, new.status),
-        ("metricGroup", old.metric_group, new.metric_group),
-        ("runbookKind", old.runbook_kind, new.runbook_kind),
-        ("fleetRunbookId", old.runbook_id, new.runbook_id),
-        ("artifactSchemaName", old.artifact_schema_name, new.artifact_schema_name),
-        ("artifactSchemaVersion", old.artifact_schema_version, new.artifact_schema_version),
-        ("taskDescriptionTemplate", old.task_description_template, new.task_description_template),
+        ("metric_group", old.metric_group, new.metric_group),
+        ("runbook_kind", old.runbook_kind, new.runbook_kind),
+        ("runbook_id", old.runbook_id, new.runbook_id),
+        ("artifact_schema_name", old.artifact_schema_name, new.artifact_schema_name),
+        ("artifact_schema_version", old.artifact_schema_version, new.artifact_schema_version),
+        ("task_description_template", old.task_description_template, new.task_description_template),
     )
 
 
 def _action_payload(action: AuditCatalogAction) -> dict[str, object]:
     return {
-        "actionKey": action.action_key,
         "title": action.title,
         "category": action.category,
         "status": action.status,
-        "metricGroup": action.metric_group,
-        "runbookKind": action.runbook_kind,
-        "fleetRunbookId": action.runbook_id,
-        "artifactSchemaName": action.artifact_schema_name,
-        "artifactSchemaVersion": action.artifact_schema_version,
-        "taskDescriptionTemplate": action.task_description_template,
+        "metric_group": action.metric_group,
+        "runbook_kind": action.runbook_kind,
+        "runbook_id": action.runbook_id,
+        "artifact_schema_name": action.artifact_schema_name,
+        "artifact_schema_version": action.artifact_schema_version,
+        "task_description_template": action.task_description_template,
     }
 
 
@@ -168,12 +167,12 @@ def _action_from_snapshot(action_key: str, payload: dict[str, object]) -> AuditC
         title=string_value("title") or "",
         category=string_value("category"),
         status=string_value("status"),
-        metric_group=string_value("metricGroup"),
-        runbook_kind=string_value("runbookKind"),
-        runbook_id=string_value("fleetRunbookId"),
-        artifact_schema_name=string_value("artifactSchemaName"),
-        artifact_schema_version=string_value("artifactSchemaVersion"),
-        task_description_template=string_value("taskDescriptionTemplate"),
+        metric_group=string_value("metric_group"),
+        runbook_kind=string_value("runbook_kind"),
+        runbook_id=string_value("runbook_id"),
+        artifact_schema_name=string_value("artifact_schema_name"),
+        artifact_schema_version=string_value("artifact_schema_version"),
+        task_description_template=string_value("task_description_template"),
     )
 
 

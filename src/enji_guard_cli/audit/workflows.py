@@ -4,9 +4,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from enji_guard_cli.audit.artifacts import ArtifactReadItem, read_artifacts, select_artifacts
+from enji_guard_cli.audit.catalog import parse_catalog_result
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.ports import (
-    AuditCatalogAction,
     AuditCatalogPort,
     AuditGatewayPort,
     AuditProject,
@@ -107,24 +107,4 @@ def _catalog(dependencies: AuditWorkflowDependencies) -> AuditCatalog:
     if dependencies.frozen_catalog is not None:
         return dependencies.frozen_catalog
 
-    result = dependencies.catalog.catalog()
-    recon = next((action for action in result.actions if action.action_key == "audit.recon"), None)
-    if recon is None:
-        raise ValueError("catalog must contain exactly one audit.recon action")
-    # Gateway implementations may supply richer definitions directly; this
-    # fallback keeps the workflow usable with the deliberately narrow port.
-    from enji_guard_cli.audit.models import AuditDefinition
-
-    published = tuple(_audit_definition(action) for action in result.actions if _is_published_audit(action))
-    return AuditCatalog(
-        published_audits=published,
-        recon=AuditDefinition(recon.action_key, recon.title, None, recon.runbook_kind or "recon"),
-    )
-
-
-def _is_published_audit(action: AuditCatalogAction) -> bool:
-    return action.action_key != "audit.recon" and action.category == "audit" and action.status == "published"
-
-
-def _audit_definition(action: AuditCatalogAction) -> AuditDefinition:
-    return AuditDefinition(action.action_key, action.title, action.metric_group, action.runbook_kind or "")
+    return parse_catalog_result(dependencies.catalog.catalog())

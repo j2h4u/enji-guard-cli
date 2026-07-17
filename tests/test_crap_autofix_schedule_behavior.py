@@ -49,11 +49,6 @@ def test_list_autofix_jobs_maps_variants_and_preserves_extensions(monkeypatch: p
     assert second.enabled is None
 
 
-def test_list_autofix_jobs_accepts_legacy_improvement_jobs_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gateway_module, "_improvement_jobs", lambda *args, **kwargs: {"improvementJobs": []})
-    assert AuditGateway(auth_port=AuthSessionAdapter()).list_autofix_jobs("repo-1") == ()
-
-
 @dataclass(frozen=True)
 class _Target:
     repo_id: str

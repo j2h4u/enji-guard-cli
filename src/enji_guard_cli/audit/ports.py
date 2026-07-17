@@ -79,7 +79,7 @@ class AuditCatalogAutofix:
     variant_key: str
     title: str | None = None
     description: str | None = None
-    fleet_runbook_id: str | None = None
+    runbook_id: str | None = None
     status: str | None = None
     sort_order: int | None = None
 
@@ -345,7 +345,7 @@ class AuditAutofixDefinition:
     source_audit: str | None
     kind: str | None
     supported: bool
-    fleet_runbook_id: str | None = None
+    runbook_id: str | None = None
     sort_order: int | None = None
 
     @property
@@ -381,35 +381,6 @@ class AuditAutofixJob:
     timezone: str | None = None
     pentest_mode: str | None = None
     extensions: tuple[tuple[str, JsonValue], ...] = ()
-
-    def value(self, name: str) -> object:
-        values = {
-            "actionKey": self.action_key,
-            "variantKey": self.variant_key,
-            "kind": self.kind,
-            "enabled": self.enabled,
-            "autoFix": self.auto_fix,
-            "autofixVariantKey": self.autofix_variant_key,
-            "frequency": self.frequency,
-            "daysOfWeek": list(self.days_of_week),
-            "scheduleTime": self.schedule_time,
-            "scheduleTimeSource": self.schedule_time_source,
-            "timezone": self.timezone,
-            "pentestMode": self.pentest_mode,
-        }
-        return values[name]
-
-    def __getitem__(self, name: str) -> object:
-        """Compatibility view for renderers while keeping the DTO typed."""
-        if name in {key for key, _value in self.extensions}:
-            return dict(self.extensions)[name]
-        return self.value(name)
-
-    def get(self, name: str, default: object = None) -> object:
-        try:
-            return self[name]
-        except KeyError, ValueError:
-            return default
 
 
 @dataclass(frozen=True, slots=True)

@@ -23,7 +23,7 @@ def freshness_for_status(item: AuditItemStatus) -> AuditFreshness:
 
 
 def stale(current_head_sha: str | None, audited_head_sha: str | None) -> bool | None:
-    """Return the legacy-friendly tri-state result without hiding unknown."""
+    """Return the tri-state result without hiding unknown freshness."""
 
     return compare_heads(current_head_sha, audited_head_sha).stale
 

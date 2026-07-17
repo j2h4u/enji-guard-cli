@@ -44,7 +44,7 @@ def test_catalog_converts_live_actions_and_rejects_missing_recon() -> None:
     port = _CatalogPort(
         AuditCatalogResult(
             actions=(
-                AuditCatalogAction("audit.recon", "Recon", "audit", "published", None, None),
+                AuditCatalogAction("audit.recon", "Recon", "audit", "published", None, "recon"),
                 AuditCatalogAction("audit.security", "Security", "audit", "published", "vulns", "security"),
                 AuditCatalogAction("audit.hidden", "Hidden", "audit", "draft", None, None),
             )

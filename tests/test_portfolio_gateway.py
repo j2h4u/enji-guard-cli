@@ -48,28 +48,6 @@ def test_project_detail_composes_live_collections_into_audit_project(
     assert project.linked_websites[0].repo_ids == ("repo-1",)
 
 
-def test_project_detail_uses_nested_collections_as_compatibility_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    payload: JsonObjectPayload = {
-        "project": {
-            "id": "project-1",
-            "name": "Pets",
-            "repos": [{"id": "repo-1", "fullName": "acme/cat"}],
-            "webResources": [{"url": "https://pets.example", "repoIds": ["repo-1"]}],
-        }
-    }
-    import enji_guard_cli.enji_gateway.portfolio_gateway as module
-
-    monkeypatch.setattr(module, "_project_detail", lambda *_args, **_kwargs: payload)
-    detail = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=AuthSessionAdapter()).project_detail(
-        "project-1"
-    )
-
-    assert detail.repositories[0].repo_id == "repo-1"
-    assert detail.linked_website_repo_ids == {"https://pets.example": ("repo-1",)}
-
-
 def test_project_active_runs_are_project_owned_neutral_models(monkeypatch: pytest.MonkeyPatch) -> None:
     payload: JsonObjectPayload = {
         "activeRuns": [

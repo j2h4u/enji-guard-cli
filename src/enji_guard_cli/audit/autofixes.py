@@ -73,7 +73,7 @@ def desired_job(
         raise ValueError("pass --enabled on or off")
     if existing is None and update.enabled is False:
         return None
-    timezone = update.timezone or _str(existing, "timezone")
+    timezone = update.timezone or (existing.timezone if existing else None)
     if timezone is None:
         raise ValueError("pass --timezone when enabling an absent autofix")
     return AuditAutofixJob(
@@ -82,13 +82,13 @@ def desired_job(
         kind=existing.kind if existing else definition.kind,
         enabled=update.enabled,
         auto_fix=True,
-        autofix_variant_key=_str(existing, "autofixVariantKey") or definition.variant_key,
-        frequency=update.frequency or _str(existing, "frequency") or "workdays",
+        autofix_variant_key=(existing.autofix_variant_key if existing else None) or definition.variant_key,
+        frequency=update.frequency or (existing.frequency if existing else None) or "workdays",
         days_of_week=_days(existing) or ("mon", "tue", "wed", "thu", "fri"),
-        schedule_time=_str(existing, "scheduleTime") or "09:00",
+        schedule_time=(existing.schedule_time if existing else None) or "09:00",
         schedule_time_source=cast(Literal["auto", "user"], _source(existing) or "auto"),
         timezone=timezone,
-        pentest_mode=_str(existing, "pentestMode") or "off",
+        pentest_mode=(existing.pentest_mode if existing else None) or "off",
         extensions=existing.extensions if existing else (),
     )
 
@@ -125,7 +125,7 @@ def _definition(item: AuditCatalogAutofix, published_audits: set[str]) -> AuditA
         source_audit=source,
         kind=kind,
         supported=source in published_audits if source else False,
-        fleet_runbook_id=item.fleet_runbook_id,
+        runbook_id=item.runbook_id,
         sort_order=item.sort_order,
     )
 
@@ -144,11 +144,6 @@ def _effective(job: AuditAutofixJob) -> tuple[object, ...]:
         job.timezone,
         job.pentest_mode,
     )
-
-
-def _str(job: AuditAutofixJob | None, key: str) -> str | None:
-    value = job.get(key) if job else None
-    return value if isinstance(value, str) else None
 
 
 def _days(job: AuditAutofixJob | None) -> tuple[str, ...] | None:

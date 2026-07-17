@@ -108,7 +108,7 @@ def _link_readable(
     if link is None:
         return False
     # A task projection can lag the active-runs projection and omit its own
-    # status.  An active queued/running task still makes the report unreadable.
+    # status.  An active queued/running task still makes the artifact unreadable.
     if active_run is not None and lifecycle in {"queued", "running"}:
         return False
     status = (link.status or "").strip().lower()

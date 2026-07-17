@@ -19,7 +19,7 @@ from enji_guard_cli.audit.ports import (
 from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
 from enji_guard_cli.enji_gateway import AuditGateway
 from enji_guard_cli.enji_gateway.http import AuditRunCreate
-from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot, audit_project_from_legacy_payload
+from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot
 from enji_guard_cli.json_types import JsonObjectPayload
 from enji_guard_cli.transport import EnjiHttpClient
 
@@ -210,59 +210,13 @@ def test_audit_gateway_reads_active_runs(gateway_harness: _GatewayHarness) -> No
     assert gateway_harness.calls == [("active_runs", ("repo-1", gateway_harness.auth_file, gateway_harness.client))]
 
 
-def test_wire_preserves_linked_site_repository_associations() -> None:
-    project = audit_project_from_legacy_payload(
-        {
-            "repos": [],
-            "webResources": [
-                {"url": "https://one.example", "repoIds": ["repo-1"]},
-                {"url": "https://two.example", "repoIds": ["repo-2"]},
-            ],
-        },
-        "project-1",
-    )
-
-    assert [site.url for site in project.linked_websites if "repo-1" in site.repo_ids] == ["https://one.example"]
-
-
-@pytest.mark.parametrize(
-    ("payload", "task_id", "status"),
-    [
-        ({"taskId": "task-root", "actionKey": "audit.security", "state": "queued"}, "task-root", "queued"),
-        ({"taskId": "task-root", "actionKey": "audit.security", "lifecycle_state": "running"}, "task-root", "running"),
-        (
-            {"task": {"taskId": "task-nested", "lifecycle_state": "running"}, "actionKey": "audit.security"},
-            "task-nested",
-            "running",
-        ),
-        (
-            {"task": {"fleetTaskId": "task-nested", "state": "queued"}, "actionKey": "audit.security"},
-            "task-nested",
-            "queued",
-        ),
-    ],
-)
-def test_audit_gateway_normalizes_legacy_active_run_identity_and_state(
-    gateway_harness: _GatewayHarness,
-    payload: JsonObjectPayload,
-    task_id: str,
-    status: str,
-) -> None:
-    gateway_harness.active_runs_payload = {"activeRuns": [payload]}
-
-    run = gateway_harness.gateway.active_runs("repo-1").runs[0]
-
-    assert run.task_id == task_id
-    assert run.status == status
-
-
 def test_audit_gateway_drops_wire_extensions_from_active_run_projection(
     gateway_harness: _GatewayHarness,
 ) -> None:
     gateway_harness.active_runs_payload = {
         "activeRuns": [
             {
-                "id": "task-root",
+                "fleetTaskId": "task-root",
                 "actionKey": "audit.security",
                 "status": "running",
                 "customField": {"source": "fleet"},
@@ -277,64 +231,6 @@ def test_audit_gateway_drops_wire_extensions_from_active_run_projection(
     assert run.status == "running"
     assert run.created_at is None
     assert not hasattr(run, "upstream_payload")
-
-
-@pytest.mark.parametrize(
-    ("task_payload", "expected_id", "expected_status", "expected_completed_at"),
-    [
-        (
-            {"task": {"id": "task-nested", "status": "completed", "completedAt": "2026-07-15T08:02:00Z"}},
-            "task-nested",
-            "completed",
-            "2026-07-15T08:02:00Z",
-        ),
-        (
-            {"id": "task-root", "status": "completed", "completedAt": "2026-07-15T08:03:00Z"},
-            "task-root",
-            "completed",
-            "2026-07-15T08:03:00Z",
-        ),
-    ],
-)
-def test_audit_gateway_normalizes_nested_and_root_task_detail_payloads(
-    gateway_harness: _GatewayHarness,
-    task_payload: JsonObjectPayload,
-    expected_id: str,
-    expected_status: str,
-    expected_completed_at: str,
-) -> None:
-    gateway_harness.task_payload = task_payload
-
-    detail = gateway_harness.gateway.task_detail("fallback-task")
-
-    assert detail.task_id == expected_id
-    assert detail.status == expected_status
-    assert detail.completed_at == expected_completed_at
-
-
-@pytest.mark.parametrize(
-    ("start_payload", "expected_id", "expected_status"),
-    [
-        ({"task": {"id": "task-nested", "status": "queued"}}, "task-nested", "queued"),
-        ({"id": "task-root", "status": "queued"}, "task-root", "queued"),
-        ({"task": {"taskId": "task-nested", "state": "queued"}}, "task-nested", "queued"),
-        ({"task": {"fleetTaskId": "task-nested", "lifecycle_state": "running"}}, "task-nested", "running"),
-        ({"fleetTaskId": "task-root", "status": "queued"}, "task-root", "queued"),
-        ({"taskId": "task-wire", "state": "queued"}, "task-wire", "queued"),
-        ({"taskId": "task-wire", "lifecycle_state": "running"}, "task-wire", "running"),
-    ],
-)
-def test_audit_gateway_normalizes_nested_and_root_start_payloads(
-    gateway_harness: _GatewayHarness,
-    start_payload: JsonObjectPayload,
-    expected_id: str,
-    expected_status: str,
-) -> None:
-    gateway_harness.start_payload = start_payload
-
-    result = gateway_harness.gateway.start_audit_run(gateway_harness.request)
-
-    assert result == AuditRunResult(task_id=expected_id, status=expected_status)
 
 
 def test_audit_gateway_reads_rerun_state(gateway_harness: _GatewayHarness) -> None:
