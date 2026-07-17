@@ -147,6 +147,25 @@ forbidden_modules = [
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
+id = "audit-stays-independent-from-portfolio"
+name = "Audit stays independent from Portfolio"
+type = "forbidden"
+source_modules = ["enji_guard_cli.audit"]
+forbidden_modules = ["enji_guard_cli.portfolio"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "portfolio-enters-audit-through-ports"
+name = "Portfolio enters Audit only through its typed ports"
+type = "forbidden"
+source_modules = ["enji_guard_cli.portfolio"]
+forbidden_modules = ["enji_guard_cli.audit"]
+ignore_imports = [
+    "enji_guard_cli.portfolio.ports -> enji_guard_cli.audit.ports",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
 id = "application-avoids-wire-and-frameworks"
 name = "Application composes typed adapters without wire or delivery dependencies"
 type = "forbidden"

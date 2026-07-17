@@ -76,7 +76,11 @@ agents can orient quickly before making changes.
   is the source of truth for the service API. Markdown docs do not define a
   second contract.
 - **Import-linter as architecture policy**: import-linter expresses enforced
-  module boundaries, not style preferences.
+  module boundaries, not style preferences. Audit cannot depend on Portfolio.
+  Portfolio cannot depend on Audit except for the explicit typed
+  `portfolio.ports -> audit.ports` seam used by recon and status composition;
+  new cross-context imports must be moved to application orchestration or an
+  intentionally designed shared kernel.
 - **Auth Session and Runtime/Observability ownership**: Auth Session is
   credential-focused and cannot depend on Audit, Portfolio, application,
   delivery, or raw gateway translators. Runtime/Observability owns supervisor,
