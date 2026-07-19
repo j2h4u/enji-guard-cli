@@ -1,6 +1,8 @@
 # pyright: basic
 
 import importlib
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, cast
 
 import pytest
@@ -46,6 +48,36 @@ def test_run_emits_catalog_changes_from_the_command_application(
 
     assert constructions == 1
     assert '"action_key": "audit.security"' in capsys.readouterr().out
+
+
+def test_application_keeps_catalog_observation_isolated_per_execution() -> None:
+    barrier = threading.Barrier(2)
+
+    class CatalogGateway:
+        def catalog(self) -> AuditCatalogResult:
+            action_key = f"audit.{threading.current_thread().name}"
+            change = AuditCatalogChange(kind="changed", action_key=action_key, changed_fields=("title",))
+            return AuditCatalogResult(actions=(), changes=(change,))
+
+    application = Application(
+        audit_gateway=cast(Any, CatalogGateway()),
+        portfolio_gateway=cast(Any, None),
+        auth=cast(Any, None),
+    )
+
+    def execute() -> tuple[str, str]:
+        def read_catalog() -> str:
+            action_key = application.catalog().changes[0].action_key
+            barrier.wait()
+            return action_key
+
+        result = application.execute(read_catalog)
+        return cast(str, result.payload), result.catalog_changes[0].action_key
+
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="catalog") as pool:
+        results = tuple(pool.map(lambda _index: execute(), range(2)))
+
+    assert all(expected == observed for expected, observed in results)
 
 
 @pytest.mark.parametrize(

@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
@@ -129,6 +130,10 @@ class AutofixWriteScope:
     all_projects: bool = False
 
 
+def _catalog_result_context() -> ContextVar[AuditCatalogResult | None]:
+    return ContextVar("application_catalog_result", default=None)
+
+
 @dataclass(slots=True)
 class Application:
     """Composition root shared by CLI, MCP, and runtime supervisor."""
@@ -140,17 +145,17 @@ class Application:
     catalog_observer: AuditCatalogObserver | None = None
     target_service: PortfolioTargetService | None = None
     runtime_auth: RuntimeAuthPort | None = None
-    _last_catalog_result: AuditCatalogResult | None = None
+    _catalog_result: ContextVar[AuditCatalogResult | None] = field(default_factory=_catalog_result_context, repr=False)
 
     def execute(self, action: Callable[[], object]) -> ApplicationResult:
         """Execute one delivery action and translate context failures."""
-        self._last_catalog_result = None
+        self._catalog_result.set(None)
         try:
             payload = action()
         except EnjiApiError as exc:
             raise ApplicationCommandError(exc.code, exc.message, _exit_code_for_error(exc.code)) from exc
         except ApplicationAuthError as exc:
-            raise ApplicationCommandError(exc.code, exc.message, 3 if exc.code.startswith("AUTH_") else 1) from exc
+            raise ApplicationCommandError(exc.code, exc.message, _exit_code_for_error(exc.code)) from exc
         except (AuditArtifactUnavailableError, AuditNotFoundError, PortfolioNotFoundError) as exc:
             raise ApplicationCommandError("NOT_FOUND", str(exc), 4) from exc
         except (
@@ -163,7 +168,8 @@ class Application:
             raise ApplicationCommandError("UPSTREAM", str(exc)) from exc
         except (ValueError, OSError) as exc:
             raise ApplicationCommandError("VALIDATION", str(exc)) from exc
-        changes = () if self._last_catalog_result is None else self._last_catalog_result.changes
+        catalog_result = self._catalog_result.get()
+        changes = () if catalog_result is None else catalog_result.changes
         return ApplicationResult(
             payload,
             tuple(
@@ -227,7 +233,7 @@ class Application:
         result = self.audit_gateway.catalog()
         if self.catalog_observer is not None:
             result = self.catalog_observer.observe(result)
-        self._last_catalog_result = result
+        self._catalog_result.set(result)
         return result
 
     def audit_catalog(self) -> AuditCatalog:
@@ -562,18 +568,15 @@ class _AuditStarter(AuditStartPort):
 def _audit_for_action(catalog: AuditCatalog, action_key: str) -> AuditDefinition:
     if action_key == catalog.recon.action_key:
         return catalog.recon
-    return next(item for item in catalog.published_audits if item.action_key == action_key)
+    audit = next((item for item in catalog.published_audits if item.action_key == action_key), None)
+    if audit is None:
+        raise AuditNotFoundError(f"audit action is no longer published: {action_key}")
+    return audit
 
 
 def _run_result(result: dict[str, object]):
 
     return AuditRunResult(cast(str | None, result.get("task_id")), cast(str | None, result.get("status")))
-
-
-def execute_application(application: Application, action: Callable[[], object]) -> ApplicationResult:
-    """Run an action through the application boundary."""
-
-    return application.execute(action)
 
 
 def _exit_code_for_error(code: str) -> int:
@@ -593,7 +596,6 @@ __all__ = [
     "AutofixWriteScope",
     "EmailPreferencesUpdate",
     "PortfolioOverview",
-    "execute_application",
 ]
 
 

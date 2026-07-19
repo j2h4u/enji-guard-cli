@@ -27,7 +27,6 @@ from enji_guard_cli.application import (
     ApplicationResult,
     AutofixWriteScope,
     EmailPreferencesUpdate,
-    execute_application,
 )
 from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
@@ -194,7 +193,7 @@ def _run(action: Callable[[], object], as_json: bool) -> None:
 
     def _execute() -> ApplicationResult:
         nonlocal result
-        result = execute_application(_application(), action)
+        result = _application().execute(action)
         return result
 
     journey = AgentJourney(

@@ -13,8 +13,11 @@ from enji_guard_cli.application import (
     ApplicationResult,
     AutofixWriteScope,
 )
+from enji_guard_cli.audit.ports import AuditGatewayPort
+from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.delivery.cli.app import _command_exit_code, _run, app
 from enji_guard_cli.errors import EnjiApiError
+from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
 
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
 
@@ -217,7 +220,11 @@ def test_run_maps_current_application_errors_to_cli_contract(
     rendered: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    application = object.__new__(Application)
+    application = Application(
+        audit_gateway=cast(AuditGatewayPort, object()),
+        portfolio_gateway=cast(PortfolioGatewayPort, object()),
+        auth=cast(AuthSessionService, object()),
+    )
     monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: application)
 
     def fail() -> object:

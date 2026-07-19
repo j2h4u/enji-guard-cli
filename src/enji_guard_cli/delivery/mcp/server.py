@@ -12,7 +12,7 @@ from typing import Literal, cast
 
 from mcp.server.fastmcp import FastMCP
 
-from enji_guard_cli.application import Application, PortfolioOverview
+from enji_guard_cli.application import Application, ApplicationResult, PortfolioOverview
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.telemetry import configure_logging
 from enji_guard_cli.settings import (
@@ -33,10 +33,10 @@ def _project_arg(project: str) -> str | None:
 
 
 def _json(value: object) -> object:
-    if isinstance(value, date):
-        return value.isoformat()
-    if isinstance(value, Path):
-        return str(value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (date, Path)):
+        return value.isoformat() if isinstance(value, date) else str(value)
     if isinstance(value, dict):
         return {str(key): _json(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -44,7 +44,7 @@ def _json(value: object) -> object:
     fields = getattr(value, "__dataclass_fields__", None)
     if isinstance(fields, dict):
         return {name: _json(cast(object, getattr(value, name))) for name in fields}
-    return value
+    return str(value)
 
 
 def create_mcp_server(
@@ -73,11 +73,11 @@ def create_mcp_server(
         project: str = "",
         sort: RepositorySortName = DEFAULT_REPO_SORT,
     ) -> dict[str, object]:
-        portfolio = cast(
-            PortfolioOverview,
+        result = cast(
+            ApplicationResult,
             await asyncio.to_thread(
                 run_agent_journey,
-                lambda: app.portfolio_overview(_project_arg(project), sort),
+                lambda: app.execute(lambda: app.portfolio_overview(_project_arg(project), sort)),
                 AgentJourney(
                     event_prefix="mcp_tool",
                     operation=MCP_TOOL_NAMES[0],
@@ -87,6 +87,7 @@ def create_mcp_server(
                 ),
             ),
         )
+        portfolio = cast(PortfolioOverview, result.payload)
         return cast(dict[str, object], _json(portfolio))
 
     @server.tool(
@@ -95,22 +96,27 @@ def create_mcp_server(
         structured_output=True,
     )
     async def repository_audits(repo: str, project: str = "") -> dict[str, object]:
-        payload = await asyncio.to_thread(
-            run_agent_journey,
-            lambda: app.audit_read(
-                repo.strip(),
-                project=_project_arg(project),
-                all_audits=True,
-            ),
-            AgentJourney(
-                event_prefix="mcp_tool",
-                operation=MCP_TOOL_NAMES[1],
-                surface="mcp",
-                provenance="mcp",
-                selector_kind="owner_name" if "/" in repo else "repo_id",
+        result = cast(
+            ApplicationResult,
+            await asyncio.to_thread(
+                run_agent_journey,
+                lambda: app.execute(
+                    lambda: app.audit_read(
+                        repo.strip(),
+                        project=_project_arg(project),
+                        all_audits=True,
+                    )
+                ),
+                AgentJourney(
+                    event_prefix="mcp_tool",
+                    operation=MCP_TOOL_NAMES[1],
+                    surface="mcp",
+                    provenance="mcp",
+                    selector_kind="owner_name" if "/" in repo else "repo_id",
+                ),
             ),
         )
-        return cast(dict[str, object], _json(payload))
+        return cast(dict[str, object], _json(result.payload))
 
     return server
 
