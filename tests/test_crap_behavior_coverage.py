@@ -78,3 +78,5 @@ class _Thing:
 def test_mcp_json_recurses_dataclass_mapping_and_sequences() -> None:
     assert _json(_Thing(3)) == {"value": 3}
     assert _json({1: (_Thing(2), "x")}) == {"1": [{"value": 2}, "x"]}
+    assert _json(datetime(2026, 7, 20, 12, 30, tzinfo=UTC)) == "2026-07-20T12:30:00+00:00"
+    assert _json(Path("audit.json")) == "audit.json"

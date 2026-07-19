@@ -6,12 +6,13 @@ CLI/runtime surfaces.
 """
 
 import asyncio
+from datetime import date
+from pathlib import Path
 from typing import Literal, cast
 
 from mcp.server.fastmcp import FastMCP
 
-from enji_guard_cli.application import Application
-from enji_guard_cli.portfolio.status import PortfolioOverview
+from enji_guard_cli.application import Application, PortfolioOverview
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.telemetry import configure_logging
 from enji_guard_cli.settings import (
@@ -32,6 +33,10 @@ def _project_arg(project: str) -> str | None:
 
 
 def _json(value: object) -> object:
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
     if isinstance(value, dict):
         return {str(key): _json(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):

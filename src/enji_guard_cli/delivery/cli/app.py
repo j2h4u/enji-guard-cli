@@ -210,7 +210,7 @@ def _run(action: Callable[[], object], as_json: bool) -> None:
             run_agent_journey(
                 _execute,
                 journey,
-                exit_code_for_exception=lambda _exc: 1,
+                exit_code_for_exception=_command_exit_code,
                 audit_catalog_change_renderer=_catalog_changed,
                 audit_catalog_change_reader=_catalog_changes,
             ),
@@ -218,8 +218,6 @@ def _run(action: Callable[[], object], as_json: bool) -> None:
     except ApplicationCommandError as exc:
         typer.echo(f"{exc.code}: {exc.message}", err=True)
         raise typer.Exit(exc.exit_code) from None
-    if result is None:
-        raise RuntimeError("application command returned no result")
     payload = result.payload
     if as_json:
         _emit(_with_catalog_changes(payload, changes) if changes else payload, True)
@@ -244,6 +242,10 @@ def _with_catalog_changes(payload: object, changes: list[ApplicationCatalogChang
     if isinstance(payload, (list, tuple)):
         return {"items": payload, "audit_catalog": audit_catalog}
     return {"value": payload, "audit_catalog": audit_catalog}
+
+
+def _command_exit_code(exc: Exception) -> int:
+    return exc.exit_code if isinstance(exc, ApplicationCommandError) else 1
 
 
 def _catalog_change_text(change: ApplicationCatalogChange) -> str:

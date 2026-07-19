@@ -592,6 +592,7 @@ __all__ = [
     "ApplicationResult",
     "AutofixWriteScope",
     "EmailPreferencesUpdate",
+    "PortfolioOverview",
     "execute_application",
 ]
 

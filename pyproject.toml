@@ -215,6 +215,14 @@ forbidden_modules = ["enji_guard_cli.audit", "enji_guard_cli.portfolio"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
+id = "mcp-uses-application-context-boundary"
+name = "MCP uses Application instead of Audit and Portfolio internals"
+type = "forbidden"
+source_modules = ["enji_guard_cli.delivery.mcp.server"]
+forbidden_modules = ["enji_guard_cli.audit", "enji_guard_cli.portfolio"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
 id = "auth-session-stays-credential-focused"
 name = "Auth Session does not depend on product contexts or delivery"
 type = "forbidden"

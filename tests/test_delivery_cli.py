@@ -6,8 +6,14 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from enji_guard_cli.application import ApplicationAuthError, ApplicationResult, AutofixWriteScope
-from enji_guard_cli.delivery.cli.app import _run, app
+from enji_guard_cli.application import (
+    Application,
+    ApplicationAuthError,
+    ApplicationCommandError,
+    ApplicationResult,
+    AutofixWriteScope,
+)
+from enji_guard_cli.delivery.cli.app import _command_exit_code, _run, app
 from enji_guard_cli.errors import EnjiApiError
 
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
@@ -205,11 +211,15 @@ def test_auth_import_bearer_requires_stdin_and_never_prints_credential(monkeypat
     ],
 )
 def test_run_maps_current_application_errors_to_cli_contract(
+    monkeypatch: pytest.MonkeyPatch,
     error: Exception,
     exit_code: int,
     rendered: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    application = object.__new__(Application)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: application)
+
     def fail() -> object:
         raise error
 
@@ -218,3 +228,8 @@ def test_run_maps_current_application_errors_to_cli_contract(
 
     assert caught.value.exit_code == exit_code
     assert rendered in capsys.readouterr().err
+
+
+def test_journey_telemetry_uses_application_command_exit_code() -> None:
+    assert _command_exit_code(ApplicationCommandError("AUTH_EXPIRED", "expired", 3)) == 3
+    assert _command_exit_code(ValueError("invalid")) == 1
