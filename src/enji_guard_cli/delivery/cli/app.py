@@ -74,6 +74,7 @@ _state: dict[str, object] = {
     "auth_file": None,
     "operation": "cli",
     "application": None,
+    "application_auth_file": None,
 }
 
 
@@ -88,6 +89,7 @@ def main(
     _state["json"] = json_output
     _state["auth_file"] = auth_file
     _state["application"] = None
+    _state["application_auth_file"] = None
     _state["operation"] = f"cli {ctx.invoked_subcommand or 'root'}"
     # The callback is the single CLI process entrypoint.  Explicit settings
     # ensure the default persistent telemetry path is honored even in tests.
@@ -137,8 +139,12 @@ def _repository_sort(value: str) -> RepositorySortName:
 
 def _application(auth_file: Path | None = None) -> Application:
     selected = auth_file if auth_file is not None else cast(Path | None, _state["auth_file"])
+    cached = _state["application"]
+    if isinstance(cached, Application) and _state["application_auth_file"] == selected:
+        return cached
     application = Application.from_auth_file(selected)
     _state["application"] = application
+    _state["application_auth_file"] = selected
     return application
 
 

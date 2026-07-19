@@ -1,54 +1,51 @@
 # pyright: basic
 
 import importlib
+from typing import Any, cast
 
 import pytest
 from typer.testing import CliRunner
 
+from enji_guard_cli.application import Application
+from enji_guard_cli.audit.ports import AuditCatalogChange, AuditCatalogResult
+
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
 
 
-def test_run_uses_application_result_without_reading_internal_observation(
+def test_run_emits_catalog_changes_from_the_command_application(
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    events: list[tuple[str, object]] = []
-    fetches = 0
+    change = AuditCatalogChange(
+        kind="changed",
+        action_key="audit.security",
+        changed_fields=("title",),
+    )
 
-    class FakeApplication:
-        def catalog_observation(self) -> object:
-            events.append(("read", None))
-            raise AssertionError("CLI must not inspect Application internals")
+    class CatalogGateway:
+        def catalog(self) -> AuditCatalogResult:
+            return AuditCatalogResult(actions=(), changes=(change,))
 
-        def fetch_catalog_once(self) -> dict[str, object]:
-            nonlocal fetches
-            fetches += 1
-            return {"ok": True}
+    application = Application(
+        audit_gateway=cast(Any, CatalogGateway()),
+        portfolio_gateway=cast(Any, None),
+        auth=cast(Any, None),
+    )
+    constructions = 0
 
-    application = FakeApplication()
-    monkeypatch.setitem(cli_module._state, "application", application)
-    monkeypatch.setitem(cli_module._state, "operation", "cli repo status")
-    cli_module._run(application.fetch_catalog_once, True)
+    def application_factory(_auth_file: object = None) -> Application:
+        nonlocal constructions
+        constructions += 1
+        return application
 
-    assert fetches == 1
-    assert events == []
+    monkeypatch.setattr(cli_module.Application, "from_auth_file", application_factory)
+    monkeypatch.setitem(cli_module._state, "application", None)
+    monkeypatch.setitem(cli_module._state, "application_auth_file", None)
 
+    cli_module._run(lambda: cli_module._application().catalog(), True)
 
-def test_run_does_not_read_application_observation_for_successful_operations(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events: list[str] = []
-
-    class FakeApplication:
-        def catalog_observation(self) -> object:
-            events.append("read")
-            raise AssertionError("CLI must not inspect Application internals")
-
-    monkeypatch.setitem(cli_module._state, "application", FakeApplication())
-    monkeypatch.setitem(cli_module._state, "operation", "cli repo remove")
-
-    cli_module._run(lambda: {"ok": True}, True)
-
-    assert events == []
+    assert constructions == 1
+    assert '"action_key": "audit.security"' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(

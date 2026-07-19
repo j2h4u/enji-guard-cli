@@ -92,11 +92,3 @@ class AuditStatusReader(Protocol):
 
 class AuditStartPort(Protocol):
     def start(self, repo_id: str, project_id: str, action_key: str) -> AuditRunResult: ...
-
-
-@dataclass(frozen=True, slots=True)
-class PortfolioStatusPort:
-    """Composition port used by CLI/MCP facades for status assembly."""
-
-    gateway: PortfolioGatewayPort
-    audits: AuditStatusReader

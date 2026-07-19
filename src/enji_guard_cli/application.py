@@ -230,14 +230,6 @@ class Application:
         self._last_catalog_result = result
         return result
 
-    def catalog_observation(self) -> AuditCatalogResult | None:
-        """Return the live result already fetched during this operation.
-
-        Observation is read-only: a journey renderer must never turn its
-        post-action hook into an extra catalog request.
-        """
-        return self._last_catalog_result
-
     def audit_catalog(self) -> AuditCatalog:
         return parse_catalog_result(self.catalog())
 
@@ -579,9 +571,9 @@ def _run_result(result: dict[str, object]):
 
 
 def execute_application(application: Application, action: Callable[[], object]) -> ApplicationResult:
-    """Run an action through the application boundary, including test doubles."""
+    """Run an action through the application boundary."""
 
-    return Application.execute(application, action)
+    return application.execute(action)
 
 
 def _exit_code_for_error(code: str) -> int:
@@ -594,6 +586,7 @@ def _exit_code_for_error(code: str) -> int:
 
 __all__ = [
     "Application",
+    "ApplicationAuthError",
     "ApplicationCatalogChange",
     "ApplicationCommandError",
     "ApplicationResult",

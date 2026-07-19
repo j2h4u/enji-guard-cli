@@ -1,11 +1,12 @@
 import importlib
+from collections.abc import Callable
 from typing import cast
 
 import pytest
 import typer
 from typer.testing import CliRunner
 
-from enji_guard_cli.application import ApplicationAuthError, AutofixWriteScope
+from enji_guard_cli.application import ApplicationAuthError, ApplicationResult, AutofixWriteScope
 from enji_guard_cli.delivery.cli.app import _run, app
 from enji_guard_cli.errors import EnjiApiError
 
@@ -74,6 +75,9 @@ class _FakeApplication:
         self.auth = _FakeAuth()
         self.calls: list[tuple[str, object]] = []
 
+    def execute(self, action: Callable[[], object]) -> ApplicationResult:
+        return ApplicationResult(action())
+
     def project_settings(self, project: str | None) -> object:
         self.calls.append(("project_settings", project))
         return {"project": project, "repositories": []}
@@ -97,8 +101,8 @@ class _FakeApplication:
         self.calls.append(("set_email_preferences", (repo, project, update, scope)))
         return [{"state": "changed"}]
 
-    def set_autofixes(self, repo: str | None, project: str | None, selectors: list[str], **options: object) -> object:
-        self.calls.append(("set_autofixes", (repo, project, selectors, options)))
+    def set_autofixes(self, *args: object, **options: object) -> object:
+        self.calls.append(("set_autofixes", (*args, options)))
         return [{"state": "unchanged"}]
 
 
@@ -135,6 +139,41 @@ def test_batch_write_options_are_forwarded_with_explicit_scope(monkeypatch: pyte
     values = cast(tuple[object, object, dict[str, object]], args)
     assert values[0:2] == (None, "Pets")
     assert cast(AutofixWriteScope, values[2]["scope"]).all_repos is True
+
+
+def test_autofix_write_options_are_forwarded_with_canonical_keyword_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeApplication()
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "--project",
+            "Pets",
+            "improvement-jobs",
+            "set",
+            "tests/test-writing",
+            "--all-repos",
+            "--enabled",
+            "on",
+            "--frequency",
+            "weekly",
+            "--timezone",
+            "Asia/Almaty",
+        ],
+    )
+
+    assert result.exit_code == 0
+    name, args = fake.calls[-1]
+    assert name == "set_autofixes"
+    values = cast(tuple[object, object, object, dict[str, object]], args)
+    assert values[:3] == (None, "Pets", ["tests/test-writing"])
+    assert values[3]["enabled"] is True
+    assert values[3]["cadence"] == "weekly"
+    assert values[3]["timezone"] == "Asia/Almaty"
+    assert cast(AutofixWriteScope, values[3]["scope"]).all_repos is True
 
 
 def test_batch_write_rejects_ambiguous_scope_before_application(monkeypatch: pytest.MonkeyPatch) -> None:
