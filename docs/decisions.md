@@ -40,7 +40,7 @@ agents can orient quickly before making changes.
   not a project mutation. CLI reads and writes user preferences idempotently;
   it does not expose redundant per-project resolved values.
 - **Narrow read-only MCP facade**: MCP stays curated and read-only. It exposes
-  portfolio overview and repository report reading, not auth bootstrap,
+  portfolio overview and repository audit reading, not auth bootstrap,
   project/repo writes, scheduling, or other operator controls.
 - **Docker-first runtime with a supervisor**: the service runs in Docker and
   `enji-guard run` owns MCP, background cookie refresh, and backend readiness

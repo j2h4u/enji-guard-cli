@@ -66,8 +66,3 @@ def move_repository(
     return OperationResult(
         "moved", repository=moved, source_project_id=target.project_id, target_project_id=destination.project_id
     )
-
-
-add_repo = add_repository
-remove_repo = remove_repository
-move_repo = move_repository

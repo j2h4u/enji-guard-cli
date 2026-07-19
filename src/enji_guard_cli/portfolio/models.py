@@ -25,9 +25,6 @@ class RepositoryRef:
     scores: Mapping[str, float | int | None] = field(default_factory=dict)
 
 
-Target = RepositoryRef
-
-
 @dataclass(frozen=True, slots=True)
 class ProjectDetail:
     project: ProjectRef

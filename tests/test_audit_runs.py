@@ -61,7 +61,7 @@ def test_audit_task_body_is_neutral_until_gateway_translation() -> None:
     }
 
 
-def test_skipped_audit_result_keeps_typed_runs_until_core_projection() -> None:
+def test_skipped_audit_result_keeps_typed_runs_until_delivery_projection() -> None:
     run = AuditRun("task-1", "audit.security", "running", None, None, None)
 
     result = skipped_audit_payload("audit.security", "audit.security", (run,))

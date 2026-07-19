@@ -20,19 +20,16 @@ from typing import Annotated, Literal, cast
 
 import typer
 
-from enji_guard_cli.application import Application, ApplicationAuthError, AutofixWriteScope, EmailPreferencesUpdate
-from enji_guard_cli.audit.artifacts import AuditArtifactUnavailableError
-from enji_guard_cli.audit.errors import AuditMalformedError, AuditNotFoundError, AuditUpstreamError
-from enji_guard_cli.audit.ports import (
-    AuditAutofixUpdate,
-    AuditCatalogChange,
-    AuditScheduleUpdate,
-    AuditWaitOptions,
-    MalformedAuditSnapshotError,
+from enji_guard_cli.application import (
+    Application,
+    ApplicationCatalogChange,
+    ApplicationCommandError,
+    ApplicationResult,
+    AutofixWriteScope,
+    EmailPreferencesUpdate,
+    execute_application,
 )
 from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
-from enji_guard_cli.errors import EnjiApiError
-from enji_guard_cli.portfolio.errors import PortfolioMalformedError, PortfolioNotFoundError, PortfolioUpstreamError
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.readiness import readiness_verdict
 from enji_guard_cli.runtime_observability.supervisor import run_service
@@ -177,22 +174,22 @@ def _emit(payload: object, as_json: bool) -> None:
     typer.echo(json.dumps(rendered, indent=2, sort_keys=True))
 
 
-def _run(action: Callable[[], object], as_json: bool) -> None:  # noqa: C901
+def _run(action: Callable[[], object], as_json: bool) -> None:
     """Execute a command action and keep expected operator errors on stderr."""
-    changes: list[AuditCatalogChange] = []
+    changes: list[ApplicationCatalogChange] = []
     operation = str(_state.get("operation") or "cli")
+    result: ApplicationResult | None = None
 
     def _catalog_changed(items: tuple[object, ...]) -> None:
-        changes.extend(cast(AuditCatalogChange, item) for item in items)
+        changes.extend(item for item in items if isinstance(item, ApplicationCatalogChange))
 
     def _catalog_changes() -> tuple[object, ...]:
-        application = _state.get("application")
-        reader = getattr(application, "catalog_observation", None)
-        if not callable(reader):
-            return ()
-        observed = reader()
-        typed_changes = getattr(observed, "changes", ())
-        return tuple(typed_changes) if isinstance(typed_changes, tuple) else ()
+        return () if result is None else result.catalog_changes
+
+    def _execute() -> ApplicationResult:
+        nonlocal result
+        result = execute_application(_application(), action)
+        return result
 
     journey = AgentJourney(
         event_prefix="cli_command",
@@ -202,34 +199,22 @@ def _run(action: Callable[[], object], as_json: bool) -> None:  # noqa: C901
         json_output=as_json,
     )
     try:
-        payload = run_agent_journey(
-            action,
-            journey,
-            exit_code_for_exception=lambda _exc: 1,
-            audit_catalog_change_renderer=_catalog_changed,
-            audit_catalog_change_reader=_catalog_changes,
+        result = cast(
+            ApplicationResult,
+            run_agent_journey(
+                _execute,
+                journey,
+                exit_code_for_exception=lambda _exc: 1,
+                audit_catalog_change_renderer=_catalog_changed,
+                audit_catalog_change_reader=_catalog_changes,
+            ),
         )
-    except EnjiApiError as exc:
+    except ApplicationCommandError as exc:
         typer.echo(f"{exc.code}: {exc.message}", err=True)
-        raise typer.Exit(_exit_code_for_error(exc.code)) from None
-    except ApplicationAuthError as exc:
-        typer.echo(f"{exc.code}: {exc.message}", err=True)
-        raise typer.Exit(3 if exc.code.startswith("AUTH_") else 1) from None
-    except (AuditArtifactUnavailableError, AuditNotFoundError, PortfolioNotFoundError) as exc:
-        typer.echo(f"NOT_FOUND: {exc}", err=True)
-        raise typer.Exit(4) from None
-    except (
-        MalformedAuditSnapshotError,
-        AuditMalformedError,
-        AuditUpstreamError,
-        PortfolioMalformedError,
-        PortfolioUpstreamError,
-    ) as exc:
-        typer.echo(f"UPSTREAM: {exc}", err=True)
-        raise typer.Exit(1) from None
-    except (ValueError, OSError) as exc:
-        typer.echo(f"VALIDATION: {exc}", err=True)
-        raise typer.Exit(1) from None
+        raise typer.Exit(exc.exit_code) from None
+    if result is None:
+        raise RuntimeError("application command returned no result")
+    payload = result.payload
     if as_json:
         _emit(_with_catalog_changes(payload, changes) if changes else payload, True)
     else:
@@ -238,15 +223,7 @@ def _run(action: Callable[[], object], as_json: bool) -> None:  # noqa: C901
             typer.echo(f"audit catalog changed: {'; '.join(_catalog_change_text(change) for change in changes)}")
 
 
-def _exit_code_for_error(code: str) -> int:
-    if code.startswith("AUTH_"):
-        return 3
-    if code in {"NOT_FOUND", "BAD_SELECTOR"}:
-        return 4
-    return 1
-
-
-def _with_catalog_changes(payload: object, changes: list[AuditCatalogChange]) -> object:
+def _with_catalog_changes(payload: object, changes: list[ApplicationCatalogChange]) -> object:
     rendered = [
         {
             "action_key": change.action_key,
@@ -263,7 +240,7 @@ def _with_catalog_changes(payload: object, changes: list[AuditCatalogChange]) ->
     return {"value": payload, "audit_catalog": audit_catalog}
 
 
-def _catalog_change_text(change: AuditCatalogChange) -> str:
+def _catalog_change_text(change: ApplicationCatalogChange) -> str:
     if change.kind == "added":
         selector = change.action_key.removeprefix("audit.")
         return f"added audit {selector}"
@@ -544,10 +521,10 @@ def audit_wait(
     timeout: Annotated[str, typer.Option("--timeout")] = default_settings().audit_wait.timeout_text,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    settings = default_settings().audit_wait
-    options = AuditWaitOptions(settings.poll_seconds, _parse_duration(timeout), settings.heartbeat_seconds)
     _run(
-        lambda: _application().audit_wait(repo, project=_selected_project(project), options=options),
+        lambda: _application().audit_wait(
+            repo, project=_selected_project(project), timeout_seconds=_parse_duration(timeout)
+        ),
         _json_output(json_output),
     )
 
@@ -658,9 +635,15 @@ def schedule_set(  # noqa: PLR0913
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     scope = _scope(all_repos, all_projects)
-    update = AuditScheduleUpdate(enabled=_switch(enabled), cadence=frequency, timezone=timezone)
     _run(
-        lambda: _application().set_schedules(repo, _selected_project(project), update, scope=scope),
+        lambda: _application().set_schedules(
+            repo,
+            _selected_project(project),
+            enabled=_switch(enabled),
+            cadence=frequency,
+            timezone=timezone,
+            scope=scope,
+        ),
         _json_output(json_output),
     )
 
@@ -691,9 +674,8 @@ def schedule_timezone(  # noqa: PLR0913
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     scope = _scope(all_repos, all_projects)
-    update = AuditScheduleUpdate(timezone=timezone)
     _run(
-        lambda: _application().set_schedules(repo, _selected_project(project), update, scope=scope),
+        lambda: _application().set_schedules(repo, _selected_project(project), timezone=timezone, scope=scope),
         _json_output(json_output),
     )
 
@@ -723,9 +705,16 @@ def autofix_set(  # noqa: PLR0913
 ) -> None:
     selectors = ["__all__"] if all_autofixes else (autofixes or [])
     scope = _scope(all_repos, all_projects)
-    update = AuditAutofixUpdate(_switch(enabled), frequency, timezone)
     _run(
-        lambda: _application().set_autofixes(repo, _selected_project(project), selectors, update, scope=scope),
+        lambda: _application().set_autofixes(
+            repo,
+            _selected_project(project),
+            selectors,
+            enabled=_switch(enabled),
+            cadence=frequency,
+            timezone=timezone,
+            scope=scope,
+        ),
         _json_output(json_output),
     )
 

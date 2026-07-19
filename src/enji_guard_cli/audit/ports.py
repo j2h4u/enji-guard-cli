@@ -423,38 +423,6 @@ class AuditCatalogPort(Protocol):
     def catalog(self) -> AuditCatalogResult: ...
 
 
-class AuditReadPort(Protocol):
-    def read_artifact(self, repo_id: str, audit_key: str) -> AuditArtifact: ...
-
-
-class AuditStatusPort(Protocol):
-    def status(self, repo_id: str) -> AuditStatus: ...
-
-
-class AuditFreshnessPort(Protocol):
-    def freshness(self, repo_id: str) -> tuple[AuditFreshness, ...]: ...
-
-
-class AuditSchedulePort(Protocol):
-    def list_schedules(self, repo_id: str) -> tuple[AuditSchedule, ...]: ...
-
-    def set_schedule(self, repo_id: str, audit_key: str, update: AuditScheduleUpdate) -> AuditSchedule: ...
-
-
-class AuditAutofixPort(Protocol):
-    def list_autofixes(self, repo_id: str) -> tuple[AuditAutofixDefinition, ...]: ...
-
-    def set_autofix(self, repo_id: str, definition: AuditAutofixDefinition, update: AuditAutofixUpdate) -> object: ...
-
-
-class AuditEmailPort(Protocol):
-    def get_email_preferences(self, repo_id: str, audit_key: str) -> AuditEmailPreference: ...
-
-    def set_email_preferences(
-        self, repo_id: str, audit_key: str, update: AuditEmailPreferenceUpdate
-    ) -> AuditEmailPreference: ...
-
-
 class AuditLedgerPort(Protocol):
     def record_started(self, entry: AuditLedgerEntry) -> None: ...
 

@@ -165,9 +165,3 @@ def validated_project_name(name: str) -> str:
 
 def _project_candidates(projects: Sequence[ProjectRef]) -> str:
     return ", ".join(f"{p.name} ({p.project_id})" if p.name else p.project_id for p in projects)
-
-
-resolve_single_project = resolve_project
-resolve_single_project_id = resolve_project_id
-resolve_single_repository = resolve_repository
-resolve_single_repo_target = resolve_repository

@@ -8,7 +8,6 @@ from enji_guard_cli.portfolio.models import (
     ProjectRef,
     ProjectSettings,
     RepositoryRef,
-    Target,
 )
 
 __all__ = [
@@ -19,5 +18,4 @@ __all__ = [
     "ProjectRef",
     "ProjectSettings",
     "RepositoryRef",
-    "Target",
 ]

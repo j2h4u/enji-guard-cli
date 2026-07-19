@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import cast
 
 from enji_guard_cli.audit import parse_catalog_result
+from enji_guard_cli.audit.artifacts import AuditArtifactUnavailableError
 from enji_guard_cli.audit.autofixes import definitions as autofix_definitions
 from enji_guard_cli.audit.autofixes import select as select_autofixes
 from enji_guard_cli.audit.autofixes import set_one
@@ -22,6 +23,7 @@ from enji_guard_cli.audit.catalog_observation import AuditCatalogObserver
 from enji_guard_cli.audit.email import EmailPreferencesUpdate
 from enji_guard_cli.audit.email import list_for_targets as list_email_for_targets
 from enji_guard_cli.audit.email import set_for_targets as set_email_for_targets
+from enji_guard_cli.audit.errors import AuditMalformedError, AuditNotFoundError, AuditUpstreamError
 from enji_guard_cli.audit.ledger import FileAuditLedger
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.ports import (
@@ -36,6 +38,7 @@ from enji_guard_cli.audit.ports import (
     AuditStatus,
     AuditWaitOptions,
     AuditWaitResult,
+    MalformedAuditSnapshotError,
 )
 from enji_guard_cli.audit.preflight import AuditPreflight, build_preflight
 from enji_guard_cli.audit.schedules import auto_time_for_targets, list_for_targets, set_for_targets
@@ -52,6 +55,8 @@ from enji_guard_cli.auth_session.models import (
 )
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.enji_gateway import AuditGateway, PortfolioGateway
+from enji_guard_cli.errors import EnjiApiError
+from enji_guard_cli.portfolio.errors import PortfolioMalformedError, PortfolioNotFoundError, PortfolioUpstreamError
 from enji_guard_cli.portfolio.models import (
     AccessInfo,
     AccountPreferences,
@@ -95,6 +100,29 @@ class ApplicationAuthError(Exception):
         self.message = message
 
 
+class ApplicationCommandError(Exception):
+    """Operator-facing failure translated at the application boundary."""
+
+    def __init__(self, code: str, message: str, exit_code: int = 1) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.exit_code = exit_code
+
+
+@dataclass(frozen=True, slots=True)
+class ApplicationCatalogChange:
+    action_key: str
+    changed_fields: tuple[str, ...]
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class ApplicationResult:
+    payload: object
+    catalog_changes: tuple[ApplicationCatalogChange, ...] = ()
+
+
 @dataclass(frozen=True, slots=True)
 class AutofixWriteScope:
     all_repos: bool = False
@@ -113,6 +141,35 @@ class Application:
     target_service: PortfolioTargetService | None = None
     runtime_auth: RuntimeAuthPort | None = None
     _last_catalog_result: AuditCatalogResult | None = None
+
+    def execute(self, action: Callable[[], object]) -> ApplicationResult:
+        """Execute one delivery action and translate context failures."""
+        self._last_catalog_result = None
+        try:
+            payload = action()
+        except EnjiApiError as exc:
+            raise ApplicationCommandError(exc.code, exc.message, _exit_code_for_error(exc.code)) from exc
+        except ApplicationAuthError as exc:
+            raise ApplicationCommandError(exc.code, exc.message, 3 if exc.code.startswith("AUTH_") else 1) from exc
+        except (AuditArtifactUnavailableError, AuditNotFoundError, PortfolioNotFoundError) as exc:
+            raise ApplicationCommandError("NOT_FOUND", str(exc), 4) from exc
+        except (
+            MalformedAuditSnapshotError,
+            AuditMalformedError,
+            AuditUpstreamError,
+            PortfolioMalformedError,
+            PortfolioUpstreamError,
+        ) as exc:
+            raise ApplicationCommandError("UPSTREAM", str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise ApplicationCommandError("VALIDATION", str(exc)) from exc
+        changes = () if self._last_catalog_result is None else self._last_catalog_result.changes
+        return ApplicationResult(
+            payload,
+            tuple(
+                ApplicationCatalogChange(change.action_key, change.changed_fields, change.kind) for change in changes
+            ),
+        )
 
     @classmethod
     def from_auth_file(cls, auth_file: Path | None = None) -> Application:
@@ -244,13 +301,15 @@ class Application:
         repo: str,
         *,
         project: str | None = None,
-        options: AuditWaitOptions | None = None,
+        timeout_seconds: float | None = None,
         heartbeat: object | None = None,
     ) -> AuditWaitResult:
         target = self._resolve_repository(repo, project)
         settings = default_settings().audit_wait
-        selected = options or AuditWaitOptions(
-            settings.poll_seconds, settings.timeout_seconds, settings.heartbeat_seconds
+        selected = AuditWaitOptions(
+            settings.poll_seconds,
+            settings.timeout_seconds if timeout_seconds is None else timeout_seconds,
+            settings.heartbeat_seconds,
         )
         callback = cast(Callable[[AuditWaitResult], None] | None, heartbeat if callable(heartbeat) else None)
         catalog = self.audit_catalog()
@@ -329,19 +388,21 @@ class Application:
         )
         return tuple(schedule for result in results for schedule in result.schedules)
 
-    def set_schedules(
+    def set_schedules(  # noqa: PLR0913
         self,
         repo: str | None,
         project: str | None,
-        update: AuditScheduleUpdate,
         *,
+        enabled: bool | None = None,
+        cadence: str | None = None,
+        timezone: str | None = None,
         scope: AutofixWriteScope | None = None,
     ) -> tuple[object, ...]:
         catalog = self.audit_catalog()
         return set_for_targets(
             self._write_targets(repo, project, scope),
             tuple(audit.action_key for audit in catalog.published_audits),
-            update,
+            AuditScheduleUpdate(enabled=enabled, cadence=cadence, timezone=timezone),
             self.audit_gateway,
         )
 
@@ -363,13 +424,15 @@ class Application:
             for target in self._targets(repo, project)
         )
 
-    def set_autofixes(
+    def set_autofixes(  # noqa: PLR0913
         self,
         repo: str | None,
         project: str | None,
         selectors: list[str],
-        update: AuditAutofixUpdate,
         *,
+        enabled: bool | None = None,
+        cadence: str | None = None,
+        timezone: str | None = None,
         scope: AutofixWriteScope | None = None,
     ) -> tuple[object, ...]:
         catalog = self.catalog()
@@ -382,7 +445,7 @@ class Application:
                 outcome = set_one(
                     definition,
                     existing,
-                    update,
+                    AuditAutofixUpdate(enabled, cadence, timezone),
                     lambda kind, job, repo_id=target.repo_id: self.audit_gateway.set_autofix_job(repo_id, kind, job),
                 )
                 result.append(outcome)
@@ -515,7 +578,29 @@ def _run_result(result: dict[str, object]):
     return AuditRunResult(cast(str | None, result.get("task_id")), cast(str | None, result.get("status")))
 
 
-__all__ = ["Application", "AutofixWriteScope", "EmailPreferencesUpdate"]
+def execute_application(application: Application, action: Callable[[], object]) -> ApplicationResult:
+    """Run an action through the application boundary, including test doubles."""
+
+    return Application.execute(application, action)
+
+
+def _exit_code_for_error(code: str) -> int:
+    if code.startswith("AUTH_"):
+        return 3
+    if code in {"NOT_FOUND", "BAD_SELECTOR"}:
+        return 4
+    return 1
+
+
+__all__ = [
+    "Application",
+    "ApplicationCatalogChange",
+    "ApplicationCommandError",
+    "ApplicationResult",
+    "AutofixWriteScope",
+    "EmailPreferencesUpdate",
+    "execute_application",
+]
 
 
 def _normalize_autofix_jobs(jobs: tuple[AuditAutofixJob, ...]) -> tuple[AuditAutofixJob, ...]:

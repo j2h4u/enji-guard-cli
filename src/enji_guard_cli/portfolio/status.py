@@ -9,7 +9,6 @@ from enji_guard_cli.portfolio.ports import (
     AuditStatusReader,
     PortfolioAuditStatus,
     PortfolioGatewayPort,
-    PortfolioStatusPort,
 )
 from enji_guard_cli.settings import RepositorySortName
 
@@ -181,13 +180,3 @@ def status_for_repo(
         for repo_ref in gateway.project_detail(project_ref.project_id).repositories
     )
     return (repository_status(resolve_repository(targets, repo, project=project), audits=audits),)
-
-
-repo_status = status_for_repo
-portfolio_status = assemble_status
-
-
-def portfolio_status_port(port: PortfolioStatusPort) -> PortfolioStatus:
-    """Assemble status from a ``PortfolioStatusPort`` without exposing gateway details."""
-
-    return assemble_status(gateway=port.gateway, audits=port.audits)

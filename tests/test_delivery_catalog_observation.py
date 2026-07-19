@@ -1,7 +1,6 @@
 # pyright: basic
 
 import importlib
-from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
@@ -9,7 +8,7 @@ from typer.testing import CliRunner
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
 
 
-def test_run_renders_application_catalog_changes_without_refetch(
+def test_run_uses_application_result_without_reading_internal_observation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[tuple[str, object]] = []
@@ -18,7 +17,7 @@ def test_run_renders_application_catalog_changes_without_refetch(
     class FakeApplication:
         def catalog_observation(self) -> object:
             events.append(("read", None))
-            return SimpleNamespace(changes=())
+            raise AssertionError("CLI must not inspect Application internals")
 
         def fetch_catalog_once(self) -> dict[str, object]:
             nonlocal fetches
@@ -31,23 +30,25 @@ def test_run_renders_application_catalog_changes_without_refetch(
     cli_module._run(application.fetch_catalog_once, True)
 
     assert fetches == 1
-    assert [kind for kind, _value in events] == ["read"]
+    assert events == []
 
 
-def test_run_reads_application_observation_for_every_successful_operation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_does_not_read_application_observation_for_successful_operations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     events: list[str] = []
 
     class FakeApplication:
         def catalog_observation(self) -> object:
             events.append("read")
-            return SimpleNamespace(changes=())
+            raise AssertionError("CLI must not inspect Application internals")
 
     monkeypatch.setitem(cli_module._state, "application", FakeApplication())
     monkeypatch.setitem(cli_module._state, "operation", "cli repo remove")
 
     cli_module._run(lambda: {"ok": True}, True)
 
-    assert events == ["read"]
+    assert events == []
 
 
 @pytest.mark.parametrize(

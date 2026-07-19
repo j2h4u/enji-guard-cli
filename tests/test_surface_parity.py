@@ -1,6 +1,4 @@
-import ast
 import asyncio
-from pathlib import Path
 from typing import cast
 
 from mcp.types import Tool
@@ -26,19 +24,3 @@ def test_registered_mcp_tools_include_portfolio_and_audits() -> None:
     registered_tool_names = {tool.name for tool in tools}
 
     assert registered_tool_names == REQUIRED_MCP_TOOLS
-
-
-def test_mcp_server_does_not_import_broad_core_module() -> None:
-    module_path = Path(__file__).resolve().parents[1] / "src" / "enji_guard_cli" / "delivery" / "mcp" / "server.py"
-    tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
-
-    forbidden_imports: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == "enji_guard_cli.core":
-                    forbidden_imports.append(alias.name)
-        elif isinstance(node, ast.ImportFrom) and node.module == "enji_guard_cli.core":
-            forbidden_imports.extend(alias.name for alias in node.names if alias.name == "*")
-
-    assert forbidden_imports == []

@@ -37,6 +37,3 @@ def recon_after_add(repository: RepositoryRef, *, audits: AuditStatusReader, sta
     """The ``repo add`` continuation: existing membership still enters recon."""
 
     return start_recon(repository, audits=audits, starter=starter)
-
-
-run_recon = start_recon

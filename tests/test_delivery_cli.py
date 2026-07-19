@@ -89,18 +89,16 @@ class _FakeApplication:
         self.calls.append(("audit_start", (repo, project, selectors, all_audits)))
         return {"repo_id": repo, "project_id": project, "results": [{"state": "started"}]}
 
-    def set_schedules(self, repo: str | None, project: str | None, update: object, *, scope: object) -> object:
-        self.calls.append(("set_schedules", (repo, project, update, scope)))
+    def set_schedules(self, repo: str | None, project: str | None, **options: object) -> object:
+        self.calls.append(("set_schedules", (repo, project, options)))
         return [{"state": "unchanged"}]
 
     def set_email_preferences(self, repo: str | None, project: str | None, update: object, *, scope: object) -> object:
         self.calls.append(("set_email_preferences", (repo, project, update, scope)))
         return [{"state": "changed"}]
 
-    def set_autofixes(
-        self, repo: str | None, project: str | None, selectors: list[str], update: object, *, scope: object
-    ) -> object:
-        self.calls.append(("set_autofixes", (repo, project, selectors, update, scope)))
+    def set_autofixes(self, repo: str | None, project: str | None, selectors: list[str], **options: object) -> object:
+        self.calls.append(("set_autofixes", (repo, project, selectors, options)))
         return [{"state": "unchanged"}]
 
 
@@ -134,9 +132,9 @@ def test_batch_write_options_are_forwarded_with_explicit_scope(monkeypatch: pyte
     assert result.exit_code == 0
     name, args = fake.calls[-1]
     assert name == "set_schedules"
-    values = cast(tuple[object, object, object, object], args)
+    values = cast(tuple[object, object, dict[str, object]], args)
     assert values[0:2] == (None, "Pets")
-    assert cast(AutofixWriteScope, values[3]).all_repos is True
+    assert cast(AutofixWriteScope, values[2]["scope"]).all_repos is True
 
 
 def test_batch_write_rejects_ambiguous_scope_before_application(monkeypatch: pytest.MonkeyPatch) -> None:
