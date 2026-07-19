@@ -116,11 +116,12 @@ def _exit_code(exc: Exception, resolver: ExitCodeResolver | None) -> int:
 
 
 def _result_count(result: object | None) -> int | None:
-    if isinstance(result, dict):
+    payload = getattr(result, "payload", result)
+    if isinstance(payload, dict):
         for key in ("projects", "results", "items", "schedules", "preferences", "audits"):
-            value = result.get(key)
+            value = payload.get(key)
             if isinstance(value, list):
                 return len(value)
-    if isinstance(result, list):
-        return len(result)
+    if isinstance(payload, list):
+        return len(payload)
     return None

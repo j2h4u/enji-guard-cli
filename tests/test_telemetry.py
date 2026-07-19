@@ -11,7 +11,9 @@ import pytest
 from pytest import MonkeyPatch
 
 import enji_guard_cli.auth_session.api as auth_module
+from enji_guard_cli.application import ApplicationResult
 from enji_guard_cli.auth_session.api import AuthError, import_cookie, refresh_auth_async
+from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.telemetry import configure_logging, log_event
 from enji_guard_cli.settings import LogFormat, LogLevelName, TelemetrySettings
 from enji_guard_cli.transport import HttpxEnjiHttpClient
@@ -132,6 +134,19 @@ def test_configure_logging_allows_explicit_provenance(capsys: pytest.CaptureFixt
     payload = cast(object, json.loads(capsys.readouterr().err))
     assert isinstance(payload, dict)
     assert payload["provenance"] == "mcp"
+
+
+def test_agent_journey_counts_results_inside_application_envelope(capsys: pytest.CaptureFixture[str]) -> None:
+    configure_logging(_telemetry_settings(log_file=None, log_format="json"))
+
+    run_agent_journey(
+        lambda: ApplicationResult({"results": [{"id": "one"}, {"id": "two"}]}),
+        AgentJourney(event_prefix="cli_command", operation="audit start", surface="cli"),
+    )
+
+    payloads = [cast(dict[str, object], json.loads(line)) for line in capsys.readouterr().err.splitlines()]
+    finished = next(payload for payload in payloads if payload["message"] == "cli_command_finished")
+    assert finished["result_count"] == 2
 
 
 def test_configure_logging_preserves_jsonl_rotation(tmp_path: Path) -> None:
