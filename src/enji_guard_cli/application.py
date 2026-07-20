@@ -300,7 +300,7 @@ class Application:
         *,
         project: str | None = None,
         timeout_seconds: float | None = None,
-        heartbeat: object | None = None,
+        heartbeat: Callable[[AuditWaitResult], None] | None = None,
     ) -> AuditWaitResult:
         target = self._resolve_repository(repo, project)
         settings = default_settings().audit_wait
@@ -309,12 +309,11 @@ class Application:
             settings.timeout_seconds if timeout_seconds is None else timeout_seconds,
             settings.heartbeat_seconds,
         )
-        callback = cast(Callable[[AuditWaitResult], None] | None, heartbeat if callable(heartbeat) else None)
         catalog = self.audit_catalog()
         return wait_for_completion(
             target.repo_id,
             options=selected,
-            heartbeat=callback,
+            heartbeat=heartbeat,
             dependencies=AuditWaitDependencies(
                 lambda repo_id: self.audit_status(repo_id, catalog=catalog), time.monotonic, time.sleep
             ),

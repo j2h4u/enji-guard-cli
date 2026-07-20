@@ -4,9 +4,9 @@ import json
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import cast
 
+from enji_guard_cli.atomic_json import write_atomic_json
 from enji_guard_cli.audit.ports import AuditLedgerEntry, AuditLedgerPort, AuditRun, AuditTaskDetail
 
 TERMINAL_STATUSES = frozenset({"completed", "failed", "canceled", "cancelled", "skipped"})
@@ -115,13 +115,7 @@ class FileAuditLedger(AuditLedgerPort):
         return tuple(result)
 
     def _write(self, entries: Sequence[AuditLedgerEntry]) -> None:
-        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        with NamedTemporaryFile("w", encoding="utf-8", dir=self.path.parent, delete=False) as handle:
-            temporary = Path(handle.name)
-            json.dump({"entries": [_encode(entry) for entry in entries]}, handle, sort_keys=True)
-            handle.write("\n")
-        temporary.chmod(0o600)
-        temporary.replace(self.path)
+        write_atomic_json(self.path, {"entries": [_encode(entry) for entry in entries]})
 
 
 def new_entry(  # noqa: PLR0913

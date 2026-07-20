@@ -10,9 +10,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Literal, Protocol, cast
 
+from enji_guard_cli.atomic_json import write_atomic_json
 from enji_guard_cli.audit.ports import AuditCatalogAction, AuditCatalogChange, AuditCatalogResult
 
 _SCHEMA_VERSION = 2
@@ -97,16 +97,7 @@ def _read_snapshot(state_file: Path) -> dict[str, dict[str, object]] | None:
 
 
 def _write_snapshot(state_file: Path, actions: dict[str, dict[str, object]]) -> None:
-    try:
-        state_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        with NamedTemporaryFile("w", encoding="utf-8", dir=state_file.parent, delete=False) as temporary:
-            temporary_path = Path(temporary.name)
-            json.dump({"schema_version": _SCHEMA_VERSION, "audits": actions}, temporary, sort_keys=True)
-            temporary.write("\n")
-        temporary_path.chmod(0o600)
-        temporary_path.replace(state_file)
-    except OSError:
-        return
+    write_atomic_json(state_file, {"schema_version": _SCHEMA_VERSION, "audits": actions})
 
 
 def _diff(

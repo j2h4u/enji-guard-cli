@@ -2,6 +2,9 @@ import json
 from pathlib import Path
 from typing import cast
 
+import pytest
+
+from enji_guard_cli.audit import catalog_observation
 from enji_guard_cli.audit.catalog_observation import AuditCatalogObserver
 from enji_guard_cli.audit.ports import AuditCatalogAction, AuditCatalogResult
 
@@ -53,6 +56,18 @@ def test_observer_tracks_typed_catalog_results(tmp_path: Path) -> None:
         ("added", "audit.open-source"),
         ("added", "audit.security"),
     ]
+
+
+def test_observer_surfaces_snapshot_persistence_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_write(_path: Path, _payload: object) -> None:
+        raise OSError("snapshot persistence failed")
+
+    monkeypatch.setattr(catalog_observation, "write_atomic_json", fail_write)
+
+    with pytest.raises(OSError, match="snapshot persistence failed"):
+        AuditCatalogObserver(tmp_path / "audit-catalog.json").observe(
+            _catalog(_action("audit.security", title="Security", metric_group="vulns"))
+        )
 
 
 def _action(action_key: str, *, title: str, metric_group: str) -> AuditCatalogAction:

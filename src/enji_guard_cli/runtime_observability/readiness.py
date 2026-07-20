@@ -2,9 +2,9 @@ import json
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import cast
 
+from enji_guard_cli.atomic_json import write_atomic_json
 from enji_guard_cli.settings import ReadinessSettings, default_settings
 
 
@@ -99,13 +99,7 @@ def backend_readiness_starting_state(*, checked_at: datetime) -> BackendReadines
 
 
 def write_backend_readiness_state(path: Path, state: BackendReadinessState) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as temp_file:
-        temp_path = Path(temp_file.name)
-        json.dump(asdict(state), temp_file, sort_keys=True)
-        temp_file.write("\n")
-    temp_path.chmod(0o600)
-    temp_path.replace(path)
+    write_atomic_json(path, asdict(state))
 
 
 def read_backend_readiness_state(path: Path) -> BackendReadinessState | None:

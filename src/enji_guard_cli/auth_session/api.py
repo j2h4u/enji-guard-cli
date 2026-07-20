@@ -533,8 +533,6 @@ async def _refresh_cookie_auth_unlocked(
     _validate_successful_refresh_cookie_rotation(response)
     refreshed_auth = _persist_refresh_response_cookies(path, stored_auth, response, event_sink)
     raise_for_response_status(response, operation="auth refresh", expected_statuses={HTTP_OK})
-    if not response.set_cookie_headers:
-        raise EnjiHttpError("UPSTREAM", "auth refresh did not return Set-Cookie")
     return refreshed_auth
 
 
