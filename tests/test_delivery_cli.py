@@ -210,6 +210,7 @@ def test_auth_import_bearer_requires_stdin_and_never_prints_credential(monkeypat
     [
         (EnjiApiError("BAD_SELECTOR", "unknown audit"), 4, "BAD_SELECTOR: unknown audit"),
         (ApplicationAuthError("AUTH_EXPIRED", "authentication expired"), 3, "AUTH_EXPIRED: authentication expired"),
+        (OSError("disk full"), 1, "STORAGE: disk full"),
         (ValueError("invalid audit scope"), 1, "VALIDATION: invalid audit scope"),
     ],
 )

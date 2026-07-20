@@ -197,6 +197,7 @@ def _load_credential(raw_credential: dict[object, object]) -> Credential | None:
 
 
 def _fsync_directory(path: Path) -> None:
+    """Best-effort sync for cleanup after the journal may already be absent."""
     try:
         directory_fd = os_open(path, O_RDONLY)
     except OSError:

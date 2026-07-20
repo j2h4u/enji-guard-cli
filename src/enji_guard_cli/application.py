@@ -166,7 +166,9 @@ class Application:
             PortfolioUpstreamError,
         ) as exc:
             raise ApplicationCommandError("UPSTREAM", str(exc)) from exc
-        except (ValueError, OSError) as exc:
+        except OSError as exc:
+            raise ApplicationCommandError("STORAGE", str(exc)) from exc
+        except ValueError as exc:
             raise ApplicationCommandError("VALIDATION", str(exc)) from exc
         catalog_result = self._catalog_result.get()
         changes = () if catalog_result is None else catalog_result.changes
