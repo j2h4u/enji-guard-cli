@@ -197,9 +197,6 @@ class AuditGateway(AuditGatewayPort):
         raw = _object(payload.get("subscription")) or payload
         return _schedule(raw) or schedule
 
-    def list_email_preferences(self, repo_id: str, audit_keys: tuple[str, ...]) -> tuple[AuditEmailPreference, ...]:
-        return tuple(self.get_email_preferences(repo_id, key) for key in audit_keys)
-
     def get_email_preferences(self, repo_id: str, audit_key: str) -> AuditEmailPreference:
         payload = _audit_email_preferences(repo_id, audit_key, self._auth_file, self._client, auth_port=self._auth_port)
         resolved = _object(payload.get("resolved"))

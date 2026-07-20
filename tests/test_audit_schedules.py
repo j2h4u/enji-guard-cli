@@ -8,7 +8,9 @@ from enji_guard_cli.audit.schedules import (
     validate_schedule_time,
     validate_schedule_update,
 )
+from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.models import RepositoryRef
+from enji_guard_cli.settings import FanoutSettings
 
 
 class _ScheduleGateway:
@@ -29,7 +31,12 @@ def test_schedule_listing_fetches_each_repository_once() -> None:
     gateway = _ScheduleGateway((current,))
     target = RepositoryRef("repo-1", "project-1", "Pets", "acme/cat")
 
-    result = list_for_targets((target,), ("audit.security", "audit.tests"), gateway)
+    result = list_for_targets(
+        (target,),
+        ("audit.security", "audit.tests"),
+        gateway,
+        BoundedFanout(FanoutSettings(max_concurrency=2)),
+    )
 
     assert gateway.list_calls == ["repo-1"]
     assert result[0].schedules[0] == current

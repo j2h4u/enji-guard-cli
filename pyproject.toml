@@ -283,6 +283,18 @@ forbidden_modules = [
     "mcp",
 ]
 
+[[tool.importlinter.contracts]]
+id = "fanout-owns-concurrency"
+name = "Only orchestration layers may use the shared fanout policy"
+type = "protected"
+protected_modules = ["enji_guard_cli.fanout"]
+allowed_importers = [
+    "enji_guard_cli.application",
+    "enji_guard_cli.audit",
+    "enji_guard_cli.composition",
+    "enji_guard_cli.portfolio",
+]
+
 [dependency-groups]
 dev = [
     "actionlint-py>=1.7.12.24",

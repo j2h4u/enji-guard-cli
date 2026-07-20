@@ -54,6 +54,7 @@ from enji_guard_cli.auth_session.models import (
 )
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.errors import EnjiApiError
+from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.errors import PortfolioMalformedError, PortfolioNotFoundError, PortfolioUpstreamError
 from enji_guard_cli.portfolio.models import (
     AccessInfo,
@@ -160,6 +161,7 @@ class Application:
     catalog_observer: AuditCatalogObserver | None = None
     target_service: PortfolioTargetService | None = None
     runtime_auth: RuntimeAuthPort | None = None
+    fanout: BoundedFanout = field(default_factory=lambda: BoundedFanout(default_settings().fanout))
     _catalog_result: ContextVar[AuditCatalogResult | None] = field(default_factory=_catalog_result_context, repr=False)
 
     def execute(self, action: Callable[[], object]) -> ApplicationResult:
@@ -371,14 +373,25 @@ class Application:
 
     def portfolio_status(self, sort: RepositorySortName = "default") -> PortfolioStatus:
         catalog = self.audit_catalog()
-        return assemble_status(gateway=self.portfolio_gateway, audits=_AuditStatusReader(self, catalog), sort=sort)
+        return assemble_status(
+            gateway=self.portfolio_gateway,
+            audits=_AuditStatusReader(self, catalog),
+            fanout=self.fanout,
+            sort=sort,
+        )
 
     def portfolio_overview(self, project: str | None = None, sort: RepositorySortName = "default") -> PortfolioOverview:
-        return assemble_overview(gateway=self.portfolio_gateway, project=project, sort=sort)
+        return assemble_overview(gateway=self.portfolio_gateway, fanout=self.fanout, project=project, sort=sort)
 
     def repository_status(self, repo: str, project: str | None = None) -> tuple[RepositoryStatus, ...]:
         catalog = self.audit_catalog()
-        return status_for_repo(repo, project, gateway=self.portfolio_gateway, audits=_AuditStatusReader(self, catalog))
+        return status_for_repo(
+            repo,
+            project,
+            gateway=self.portfolio_gateway,
+            audits=_AuditStatusReader(self, catalog),
+            fanout=self.fanout,
+        )
 
     # Schedules, autofixes, preferences --------------------------------
     def list_schedules(self, repo: str | None = None, project: str | None = None) -> tuple[ScheduleListing, ...]:
@@ -388,6 +401,7 @@ class Application:
             targets,
             tuple(audit.action_key for audit in catalog.published_audits),
             self.audit_gateway,
+            self.fanout,
         )
         by_repo_id = {result.repo_id: result.schedules for result in results}
         return tuple(ScheduleListing(target, by_repo_id[target.repo_id]) for target in targets)
@@ -423,8 +437,9 @@ class Application:
     def list_autofixes(self, repo: str | None = None, project: str | None = None) -> tuple[AutofixListing, ...]:
         catalog = self.catalog()
         definitions = autofix_definitions(catalog)
-        result: list[AutofixListing] = []
-        for target in self._targets(repo, project):
+        targets = self._targets(repo, project)
+
+        def read_target(target: RepositoryRef) -> AutofixListing:
             jobs = _index_autofix_jobs(self.audit_gateway.list_autofix_jobs(target.repo_id))
             items = tuple(
                 AutofixListingItem(
@@ -433,8 +448,9 @@ class Application:
                 )
                 for definition in definitions
             )
-            result.append(AutofixListing(target, items))
-        return tuple(result)
+            return AutofixListing(target, items)
+
+        return self.fanout.map(targets, read_target)
 
     def set_autofixes(  # noqa: PLR0913
         self,
@@ -466,7 +482,7 @@ class Application:
     def list_email_preferences(self, repo: str | None = None, project: str | None = None) -> tuple[object, ...]:
         catalog = self.audit_catalog()
         keys = tuple(audit.action_key for audit in catalog.published_audits)
-        return list_email_for_targets(self._targets(repo, project), keys, self.audit_gateway)
+        return list_email_for_targets(self._targets(repo, project), keys, self.audit_gateway, self.fanout)
 
     def set_email_preferences(
         self,
@@ -512,13 +528,13 @@ class Application:
         resolver = self.target_service
         if resolver is not None:
             return resolver.targets(repo, project)
-        return GatewayPortfolioTargetService(self.portfolio_gateway).targets(repo, project)
+        return GatewayPortfolioTargetService(self.portfolio_gateway, self.fanout).targets(repo, project)
 
     def _write_targets(
         self, repo: str | None, project: str | None, scope: AutofixWriteScope | None
     ) -> tuple[RepositoryRef, ...]:
         resolved = scope or AutofixWriteScope()
-        resolver = self.target_service or GatewayPortfolioTargetService(self.portfolio_gateway)
+        resolver = self.target_service or GatewayPortfolioTargetService(self.portfolio_gateway, self.fanout)
         return resolver.write_targets(
             repo,
             project,

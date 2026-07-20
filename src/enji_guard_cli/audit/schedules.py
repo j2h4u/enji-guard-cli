@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from typing import Literal, Protocol, cast
 
 from enji_guard_cli.audit.ports import AuditSchedule, AuditScheduleUpdate
+from enji_guard_cli.fanout import BoundedFanout
 
 
 class AuditScheduleTarget(Protocol):
@@ -28,19 +29,18 @@ def list_for_targets(
     targets: Sequence[AuditScheduleTarget],
     published_audits: Sequence[str],
     gateway: AuditScheduleGateway,
+    fanout: BoundedFanout,
 ) -> tuple[ScheduleTargetResult, ...]:
     """Project configured and unconfigured rows for every selected target."""
 
-    result: list[ScheduleTargetResult] = []
-    for target in targets:
+    def read_target(target: AuditScheduleTarget) -> ScheduleTargetResult:
         schedules = gateway.list_schedules(target.repo_id)
-        result.append(
-            ScheduleTargetResult(
-                target.repo_id,
-                tuple(schedule_for_audit(audit_key, schedules) for audit_key in published_audits),
-            )
+        return ScheduleTargetResult(
+            target.repo_id,
+            tuple(schedule_for_audit(audit_key, schedules) for audit_key in published_audits),
         )
-    return tuple(result)
+
+    return fanout.map(targets, read_target)
 
 
 def set_for_targets(

@@ -5,10 +5,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
+from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.errors import PortfolioNotFoundError
 from enji_guard_cli.portfolio.models import ProjectRef, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort, SelectorResolver
 from enji_guard_cli.portfolio.scopes import MutationScope
+from enji_guard_cli.settings import default_settings
 
 
 def project_matches(project: ProjectRef, selector: str) -> bool:
@@ -76,14 +78,16 @@ def repository_targets(details: Sequence[ProjectDetailLike]) -> tuple[Repository
 class ProjectDetailLike(Protocol):
     """Structural helper for callers that only need ``repositories``."""
 
-    repositories: tuple[RepositoryRef, ...]
+    @property
+    def repositories(self) -> tuple[RepositoryRef, ...]: ...
 
 
 class GatewaySelectorResolver(SelectorResolver):
     """Selector resolver backed by the typed Portfolio gateway."""
 
-    def __init__(self, gateway: PortfolioGatewayPort) -> None:
+    def __init__(self, gateway: PortfolioGatewayPort, fanout: BoundedFanout | None = None) -> None:
         self.gateway = gateway
+        self.fanout = fanout or BoundedFanout(default_settings().fanout)
 
     def resolve_project(self, selector: str | None = None) -> ProjectRef:
         return resolve_project(self.gateway.list_projects(), selector)
@@ -91,11 +95,8 @@ class GatewaySelectorResolver(SelectorResolver):
     def resolve_repository(self, selector: str, *, project: str | None = None) -> RepositoryRef:
         projects = self.gateway.list_projects()
         selected = projects if project is None else (resolve_project(projects, project),)
-        targets = tuple(
-            repo
-            for project_ref in selected
-            for repo in self.gateway.project_detail(project_ref.project_id).repositories
-        )
+        details = self.fanout.map(selected, lambda item: self.gateway.project_detail(item.project_id))
+        targets = repository_targets(details)
         return resolve_repository(targets, selector, project=project)
 
 
@@ -105,11 +106,8 @@ class GatewayPortfolioTargetService(GatewaySelectorResolver):
     def targets(self, repo: str | None = None, project: str | None = None) -> tuple[RepositoryRef, ...]:
         projects = self.gateway.list_projects()
         selected = projects if project is None else (resolve_project(projects, project),)
-        repositories = tuple(
-            repository
-            for project_ref in selected
-            for repository in self.gateway.project_detail(project_ref.project_id).repositories
-        )
+        details = self.fanout.map(selected, lambda item: self.gateway.project_detail(item.project_id))
+        repositories = repository_targets(details)
         if repo is None:
             return repositories
         return (resolve_repository(repositories, repo, project=project),)

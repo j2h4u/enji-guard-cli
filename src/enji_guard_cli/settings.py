@@ -58,6 +58,7 @@ DEFAULT_AUDIT_WAIT_HEARTBEAT_SECONDS = 120
 DEFAULT_REPO_SORT: RepositorySortName = "default"
 DEFAULT_ACTIVE_RUN_LEDGER_TTL_SECONDS = 6 * 60 * 60
 DEFAULT_ACTIVE_RUN_LOOKUP_GRACE_SECONDS = 300
+DEFAULT_FANOUT_MAX_CONCURRENCY = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +151,11 @@ class AuditCatalogSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class FanoutSettings:
+    max_concurrency: int
+
+
+@dataclass(frozen=True, slots=True)
 class EnjiGuardSettings:
     auth: AuthSettings
     auto_refresh: AutoRefreshSettings
@@ -161,6 +167,7 @@ class EnjiGuardSettings:
     repo: RepoSettings
     active_run_ledger: ActiveRunLedgerSettings
     audit_catalog: AuditCatalogSettings
+    fanout: FanoutSettings
 
 
 def default_settings() -> EnjiGuardSettings:
@@ -224,6 +231,7 @@ def default_settings() -> EnjiGuardSettings:
         audit_catalog=AuditCatalogSettings(
             state_file=config_root / STATE_DIR_NAME / AUDIT_CATALOG_STATE_FILE_NAME,
         ),
+        fanout=FanoutSettings(max_concurrency=DEFAULT_FANOUT_MAX_CONCURRENCY),
     )
 
 

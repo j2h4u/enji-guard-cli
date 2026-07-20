@@ -30,6 +30,15 @@ agents can orient quickly before making changes.
   subscription stores its cadence, IANA timezone, and auto or user-selected
   time. `improvement-jobs` is autofix-only and is never a scheduling fallback;
   project-wide operations are explicit client-side batches.
+- **Bounded read fan-out**: upstream Enji currently exposes several resources
+  only at project, repository, or repository-plus-audit granularity. Independent
+  batch reads use the shared order-preserving `BoundedFanout` application
+  policy, with concurrency fixed in frozen settings. Selector expansion,
+  portfolio status/overview, schedule listing, autofix listing, and email
+  preference listing must not create private executors. Mutating batches remain
+  explicit sequential loops so idempotency and partial-failure behavior stay
+  understandable. A future upstream batch endpoint replaces client fan-out at
+  its gateway seam rather than changing domain workflows.
 - **Curated autofix management**: the mental model is audit -> findings ->
   optional improvement. `auditAutofixes` is the typed catalog of available
   variants, while `improvement-jobs` is the canonical CLI operator resource
@@ -93,7 +102,9 @@ agents can orient quickly before making changes.
   new cross-context imports must be moved to application orchestration or an
   intentionally designed shared kernel. Protected ownership contracts reserve
   raw Enji HTTP/wire modules for the gateway and transport for Auth Session and
-  the gateway. Contract names state when a rule governs direct imports only.
+  the gateway. A protected concurrency contract reserves thread-pool ownership
+  for the shared fan-out policy. Contract names state when a rule governs
+  direct imports only.
 - **Explicit composition root**: dependency construction lives in
   `composition.py`; the application module contains orchestration and typed
   facades, not concrete adapter construction.

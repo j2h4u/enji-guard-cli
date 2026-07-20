@@ -5,9 +5,13 @@ from typing import Any, cast
 import pytest
 
 from enji_guard_cli.audit.ports import AuditFreshness, AuditStatus, AuditStatusItem
+from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.models import PortfolioActiveRun, ProjectDetail, ProjectRef, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioAuditStatus
 from enji_guard_cli.portfolio.status import assemble_overview, assemble_status
+from enji_guard_cli.settings import FanoutSettings
+
+FANOUT = BoundedFanout(FanoutSettings(max_concurrency=4))
 
 
 class Gateway:
@@ -40,7 +44,7 @@ class Audits:
 
 
 def test_status_preserves_sha_and_staleness_inputs() -> None:
-    status = assemble_status(gateway=cast(Any, Gateway()), audits=Audits())
+    status = assemble_status(gateway=cast(Any, Gateway()), audits=Audits(), fanout=FANOUT)
     assert status.repositories[0].audit.summary.current_head_sha == "new"
     assert status.repositories[0].audit.summary.items[0].freshness.audited_head_sha == "old"
 
@@ -60,7 +64,7 @@ class SortGateway:
 
 
 def test_status_sorts_repository_inventory_by_weakest_score() -> None:
-    status = assemble_status(gateway=cast(Any, SortGateway()), audits=Audits(), sort="weakest")
+    status = assemble_status(gateway=cast(Any, SortGateway()), audits=Audits(), fanout=FANOUT, sort="weakest")
 
     assert [item.repository.repo_id for item in status.repositories] == ["r2", "r1"]
 
@@ -97,7 +101,7 @@ class OverviewGateway:
 def test_overview_uses_project_aggregates_and_filters_before_detail_reads() -> None:
     gateway = OverviewGateway()
 
-    overview = assemble_overview(gateway=cast(Any, gateway), project="Pets")
+    overview = assemble_overview(gateway=cast(Any, gateway), fanout=FANOUT, project="Pets")
 
     assert [item.project.project_id for item in overview.projects] == ["p1"]
     assert overview.projects[0].repositories[0].active_runs[0].task_id == "task-p1"
@@ -115,6 +119,8 @@ def test_overview_uses_project_aggregates_and_filters_before_detail_reads() -> N
     ],
 )
 def test_overview_sorts_aggregate_repository_data(sort: str, expected: list[str]) -> None:
-    overview = assemble_overview(gateway=cast(Any, OverviewGateway()), project="Pets", sort=cast(Any, sort))
+    overview = assemble_overview(
+        gateway=cast(Any, OverviewGateway()), fanout=FANOUT, project="Pets", sort=cast(Any, sort)
+    )
 
     assert [item.repository.repo_id for item in overview.projects[0].repositories] == expected

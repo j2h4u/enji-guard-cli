@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from enji_guard_cli.audit.ports import AuditEmailPreference, AuditEmailPreferenceUpdate
+from enji_guard_cli.fanout import BoundedFanout
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,7 +21,7 @@ def validate_update(update: EmailPreferencesUpdate) -> AuditEmailPreferenceUpdat
 
 
 class EmailPreferenceGateway(Protocol):
-    def list_email_preferences(self, repo_id: str, audit_keys: tuple[str, ...]) -> tuple[AuditEmailPreference, ...]: ...
+    def get_email_preferences(self, repo_id: str, audit_key: str) -> AuditEmailPreference: ...
 
     def set_email_preference(
         self, repo_id: str, audit_key: str, update: AuditEmailPreferenceUpdate
@@ -28,9 +29,20 @@ class EmailPreferenceGateway(Protocol):
 
 
 def list_for_targets(
-    targets: Sequence[object], audit_keys: tuple[str, ...], gateway: EmailPreferenceGateway
+    targets: Sequence[object],
+    audit_keys: tuple[str, ...],
+    gateway: EmailPreferenceGateway,
+    fanout: BoundedFanout,
 ) -> tuple[tuple[object, tuple[AuditEmailPreference, ...]], ...]:
-    return tuple((target, gateway.list_email_preferences(_repo_id(target), audit_keys)) for target in targets)
+    resolved_targets = tuple(targets)
+    jobs = tuple((_repo_id(target), key) for target in resolved_targets for key in audit_keys)
+    if not jobs:
+        return tuple((target, ()) for target in resolved_targets)
+    preferences = fanout.map(jobs, lambda job: gateway.get_email_preferences(*job))
+    width = len(audit_keys)
+    return tuple(
+        (target, preferences[index * width : (index + 1) * width]) for index, target in enumerate(resolved_targets)
+    )
 
 
 def set_for_targets(

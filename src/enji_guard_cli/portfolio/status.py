@@ -1,9 +1,9 @@
 """Portfolio status assembly over a typed Audit status projection."""
 
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.models import PortfolioActiveRun, ProjectDetail, ProjectRef, RepositoryRef
 from enji_guard_cli.portfolio.ports import (
     AuditStatusReader,
@@ -62,19 +62,23 @@ def repository_status(repository: RepositoryRef, *, audits: AuditStatusReader) -
     return RepositoryStatus(repository=repository, audit=status)
 
 
-def project_status(
-    detail: ProjectDetail, *, audits: AuditStatusReader, sort: RepositorySortName = "default"
-) -> ProjectStatus:
-    repositories = tuple(repository_status(repo, audits=audits) for repo in detail.repositories)
-    return ProjectStatus(detail.project, _sort_repositories(repositories, sort))
-
-
 def assemble_status(
-    *, gateway: PortfolioGatewayPort, audits: AuditStatusReader, sort: RepositorySortName = "default"
+    *,
+    gateway: PortfolioGatewayPort,
+    audits: AuditStatusReader,
+    fanout: BoundedFanout,
+    sort: RepositorySortName = "default",
 ) -> PortfolioStatus:
+    details = fanout.map(gateway.list_projects(), lambda project: gateway.project_detail(project.project_id))
+    repositories = tuple(repository for detail in details for repository in detail.repositories)
+    statuses = fanout.map(repositories, lambda repository: repository_status(repository, audits=audits))
+    status_by_id = {status.repository.repo_id: status for status in statuses}
     projects = tuple(
-        project_status(gateway.project_detail(project.project_id), audits=audits, sort=sort)
-        for project in gateway.list_projects()
+        ProjectStatus(
+            detail.project,
+            _sort_repositories(tuple(status_by_id[repo.repo_id] for repo in detail.repositories), sort),
+        )
+        for detail in details
     )
     return PortfolioStatus(datetime.now(UTC).isoformat(), projects)
 
@@ -82,6 +86,7 @@ def assemble_status(
 def assemble_overview(
     *,
     gateway: PortfolioGatewayPort,
+    fanout: BoundedFanout,
     project: str | None = None,
     sort: RepositorySortName = "default",
 ) -> PortfolioOverview:
@@ -92,17 +97,15 @@ def assemble_overview(
         projects = tuple(item for item in projects if project in {item.project_id, item.name})
     if not projects:
         return PortfolioOverview(datetime.now(UTC).isoformat(), ())
-    with ThreadPoolExecutor(max_workers=len(projects)) as executor:
-        overviews = tuple(executor.map(lambda item: _project_overview(gateway, item, sort), projects))
+    details = fanout.map(projects, lambda item: gateway.project_detail(item.project_id))
+    active_runs = fanout.map(projects, lambda item: gateway.project_active_runs(item.project_id))
+    overviews = tuple(_project_overview(detail, runs, sort) for detail, runs in zip(details, active_runs, strict=True))
     return PortfolioOverview(datetime.now(UTC).isoformat(), overviews)
 
 
-def _project_overview(gateway: PortfolioGatewayPort, project: ProjectRef, sort: RepositorySortName) -> ProjectOverview:
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        detail_future = executor.submit(gateway.project_detail, project.project_id)
-        runs_future = executor.submit(gateway.project_active_runs, project.project_id)
-        detail = detail_future.result()
-        active_runs = runs_future.result()
+def _project_overview(
+    detail: ProjectDetail, active_runs: tuple[PortfolioActiveRun, ...], sort: RepositorySortName
+) -> ProjectOverview:
     runs_by_repo: dict[str, list[PortfolioActiveRun]] = {}
     for run in active_runs:
         runs_by_repo.setdefault(run.repo_id, []).append(run)
@@ -170,13 +173,15 @@ def _latest_audit_at(item: RepositoryStatus) -> str:
 
 
 def status_for_repo(
-    repo: str, project: str | None = None, *, gateway: PortfolioGatewayPort, audits: AuditStatusReader
+    repo: str,
+    project: str | None = None,
+    *,
+    gateway: PortfolioGatewayPort,
+    audits: AuditStatusReader,
+    fanout: BoundedFanout,
 ) -> tuple[RepositoryStatus, ...]:
     from enji_guard_cli.portfolio.selectors import resolve_repository
 
-    targets = tuple(
-        repo_ref
-        for project_ref in gateway.list_projects()
-        for repo_ref in gateway.project_detail(project_ref.project_id).repositories
-    )
+    details = fanout.map(gateway.list_projects(), lambda project_ref: gateway.project_detail(project_ref.project_id))
+    targets = tuple(repo_ref for detail in details for repo_ref in detail.repositories)
     return (repository_status(resolve_repository(targets, repo, project=project), audits=audits),)
