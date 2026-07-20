@@ -23,6 +23,9 @@ A change is ready when:
 - CLI and MCP stay thin and continue to rely on the shared Application/core layer;
 - `just verify` passes;
 - runtime-sensitive work is checked in Docker, not only in source;
+- candidate images pass `just release-contract IMAGE` before publication;
+- runtime or release changes pass the read-only authenticated `release-smoke`
+  journey, including recreate when auth persistence is in scope;
 - auth/runtime changes are validated with the running service (`auth status`, `health --ready`, telemetry when relevant), not with ad hoc refresh commands.
 
 ## Handoff

@@ -210,6 +210,27 @@ required for this command, not for normal runtime use.
 It reports git state, open PRs, the latest GitHub Release, GHCR image
 publication, and recent GitHub Actions.
 
+Every candidate image must pass the credentialless runtime contract before it
+is published:
+
+```bash
+just release-contract enji-guard-cli:local
+```
+
+Before merging runtime-sensitive work, exercise the already running authenticated
+service through its public CLI and MCP surfaces:
+
+```bash
+just release-smoke j2h4u/enji-guard-cli
+just release-smoke-recreate j2h4u/enji-guard-cli
+just release-smoke-soak j2h4u/enji-guard-cli 300 30 0
+```
+
+The first command is read-only. The recreate check proves that authentication
+survives container replacement; the bounded soak repeats the same read-only
+journey. `release-smoke-mutations` is opt-in and accepts only a unique project
+fixture created by that run; do not use it against an existing project.
+
 ## Runtime
 
 ```bash
@@ -395,6 +416,9 @@ The completion gate includes Ruff, basedpyright, import-linter, Vulture,
 deptry, OpenAPI contract validation, CRAP <= 30 per function, tests, and Docker
 build. Keep CLI and MCP thin, keep product logic behind Application, and treat
 import-linter failures as architectural regressions rather than style nits.
+`just verify` also builds the image; release workflows additionally execute the
+credentialless runtime contract, while authenticated live smoke remains an
+operator gate because CI receives no Enji credentials.
 
 Use `CONTRIBUTING.md` for change intake, acceptance criteria, and handoff rules.
 

@@ -56,6 +56,12 @@ agents can orient quickly before making changes.
 - **Docker-first runtime with a supervisor**: the service runs in Docker and
   `enji-guard run` owns MCP, background cookie refresh, and backend readiness
   as sibling tasks.
+- **Two-tier release QA through public surfaces**: credentialless CI starts the
+  exact candidate image and validates its hardened Docker, CLI, health, and MCP
+  contracts before publication. Authenticated pre-merge smoke and bounded soak
+  exercise the running service read-only; optional mutation smoke owns and
+  removes only its unique disposable fixture. QA scripts do not import product
+  internals, so they validate the same process and protocol boundaries users do.
 - **Started-task reconciliation before duplicate audit starts**: `audit start`
   and status reads do not trust upstream active-run projections alone. They
   reconcile those projections with a durable local started-task ledger and
