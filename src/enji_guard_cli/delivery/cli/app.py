@@ -27,6 +27,7 @@ from enji_guard_cli.application import (
     ApplicationResult,
     AuditSummary,
     AutofixListing,
+    AutofixListingItem,
     AutofixWriteScope,
     EmailPreferencesUpdate,
     PortfolioOverview,
@@ -169,7 +170,10 @@ def _application(auth_file: Path | None = None) -> Application:
     return application
 
 
-def _json(value: object) -> object:  # noqa: PLR0911
+_JSON_NULL_FIELDS = frozenset({"job", "connected", "recon_done", "enabled", "auto_fix", "score"})
+
+
+def _json(value: object, *, preserve_mapping_nulls: bool = False) -> object:  # noqa: PLR0911
     """Convert application DTOs to JSON-safe values without dynamic dispatch."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -178,11 +182,18 @@ def _json(value: object) -> object:  # noqa: PLR0911
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, Mapping):
-        return {str(key): _json(item) for key, item in value.items()}
+        # Optional fields are absent rather than rendered as ``null`` inside
+        # objects.  Keep semantic tri-state fields (and the unconfigured job
+        # marker) as explicit nulls, plus top-level values and list items.
+        return {
+            str(key): _json(item, preserve_mapping_nulls=preserve_mapping_nulls or str(key) == "scores")
+            for key, item in value.items()
+            if item is not None or str(key) in _JSON_NULL_FIELDS or preserve_mapping_nulls
+        }
     if isinstance(value, (list, tuple, set, frozenset)):
-        return [_json(item) for item in value]
+        return [_json(item, preserve_mapping_nulls=preserve_mapping_nulls) for item in value]
     if is_dataclass(value) and not isinstance(value, type):
-        return _json(asdict(value))
+        return _json(asdict(value), preserve_mapping_nulls=preserve_mapping_nulls)
     return str(value)
 
 
@@ -320,9 +331,86 @@ def _emit_audit_summary(payload: object) -> None:
             typer.echo(f"  {selector}  unavailable={item.reason or 'unknown'} freshness={item.freshness.state}")
 
 
-def _common_value(values: list[str]) -> str:
+def _dimension(label: str, values: list[str], selectors: list[str]) -> str | None:
+    if not values:
+        return None
     unique = set(values)
-    return next(iter(unique)) if len(unique) == 1 else "mixed"
+    if unique == {"unset"}:
+        return None
+    if len(unique) == 1:
+        return f"{label}={values[0]}"
+    grouped = ",".join(f"{selector}={value}" for selector, value in zip(selectors, values, strict=True))
+    return f"{label}=mixed[{grouped}]"
+
+
+def _nullable_bool(value: bool | None) -> str:
+    return "unset" if value is None else str(value).lower()
+
+
+def _schedule_dimensions(listing: ScheduleListing, selectors: list[str]) -> str:
+    items = listing.schedules
+    dimensions = (
+        _dimension("frequency", [item.cadence or "unset" for item in items], selectors),
+        _dimension("timezone", [item.timezone or "unset" for item in items], selectors),
+        _dimension("enabled_state", [_nullable_bool(item.enabled) for item in items], selectors),
+        _dimension("day", [item.schedule_day or "unset" for item in items], selectors),
+        _dimension("day_of_month", [str(item.schedule_day_of_month or "unset") for item in items], selectors),
+        _dimension("schedule_time", [item.schedule_time or "unset" for item in items], selectors),
+        _dimension("schedule_time_source", [item.schedule_time_source or "unset" for item in items], selectors),
+        _dimension("window_start", [item.window_start_time or "unset" for item in items], selectors),
+        _dimension("window_end", [item.window_end_time or "unset" for item in items], selectors),
+        _dimension("window_mode", [item.window_mode or "unset" for item in items], selectors),
+    )
+    return " ".join(item for item in dimensions if item is not None)
+
+
+def _window_days_dimension(listing: ScheduleListing) -> str | None:
+    items = listing.schedules
+    restricted: dict[tuple[str, ...], list[str]] = {}
+    for item in items:
+        restricted.setdefault(tuple(item.window_days), []).append(item.audit_key.removeprefix("audit."))
+    if not any(days for days in restricted):
+        return None
+    groups = [
+        f"{','.join(days) if days else 'unrestricted'}:{','.join(selectors)}" for days, selectors in restricted.items()
+    ]
+    return f"window_days={'|'.join(groups)}"
+
+
+def _autofix_dimensions(configured: list[AutofixListingItem], selectors: list[str]) -> str:
+    dimensions = (
+        _dimension("enabled_state", [_nullable_bool(item.job.enabled) for item in configured if item.job], selectors),
+        _dimension("auto_fix_state", [_nullable_bool(item.job.auto_fix) for item in configured if item.job], selectors),
+        _dimension("frequency", [item.job.frequency or "unset" for item in configured if item.job], selectors),
+        _dimension("timezone", [item.job.timezone or "unset" for item in configured if item.job], selectors),
+        _dimension("days", [",".join(item.job.days_of_week) or "unset" for item in configured if item.job], selectors),
+        _dimension("schedule_time", [item.job.schedule_time or "unset" for item in configured if item.job], selectors),
+        _dimension(
+            "schedule_time_source",
+            [item.job.schedule_time_source or "unset" for item in configured if item.job],
+            selectors,
+        ),
+        _dimension("pentest_mode", [item.job.pentest_mode or "unset" for item in configured if item.job], selectors),
+    )
+    return " ".join(item for item in dimensions if item is not None)
+
+
+def _autofix_state(
+    supported: list[AutofixListingItem],
+) -> tuple[list[AutofixListingItem], list[str], list[str], list[str], int, int]:
+    configured = [item for item in supported if item.job is not None]
+    unconfigured = [item.definition.selector for item in supported if item.job is None]
+    disabled = [item.definition.selector for item in configured if item.job and item.job.enabled is False]
+    unknown = [item.definition.selector for item in configured if item.job and item.job.enabled is None]
+    enabled = sum(item.job is not None and item.job.enabled is True for item in supported)
+    return (
+        configured,
+        unconfigured,
+        disabled,
+        unknown,
+        enabled,
+        sum(item.job is not None and item.job.auto_fix is True for item in supported),
+    )
 
 
 def _emit_schedule_list(payload: object) -> None:
@@ -330,15 +418,16 @@ def _emit_schedule_list(payload: object) -> None:
     for listing in listings:
         schedules = listing.schedules
         enabled = [item for item in schedules if item.enabled is True]
-        disabled = [item.audit_key.removeprefix("audit.") for item in schedules if item.enabled is not True]
-        frequencies = [(item.cadence or "unset") for item in schedules]
-        timezones = [(item.timezone or "unset") for item in schedules]
-        time_sources = [(item.schedule_time_source or "unset") for item in schedules]
-        suffix = f" disabled={','.join(disabled)}" if disabled else ""
+        disabled = [item.audit_key.removeprefix("audit.") for item in schedules if item.enabled is False]
+        selectors = [item.audit_key.removeprefix("audit.") for item in schedules]
+        fields = [f"enabled={len(enabled)}/{len(schedules)}", _schedule_dimensions(listing, selectors)]
+        if disabled:
+            fields.append(f"disabled={','.join(disabled)}")
+        if window_days := _window_days_dimension(listing):
+            fields.append(window_days)
         typer.echo(
             f"{listing.repository.full_name or listing.repository.repo_id}  "
-            f"enabled={len(enabled)}/{len(schedules)} frequency={_common_value(frequencies)} "
-            f"timezone={_common_value(timezones)} time={_common_value(time_sources)}{suffix}"
+            + " ".join(field for field in fields if field)
         )
 
 
@@ -346,18 +435,25 @@ def _emit_autofix_list(payload: object) -> None:
     listings = cast(tuple[AutofixListing, ...], payload)
     for listing in listings:
         supported = [item for item in listing.items if item.definition.supported]
-        configured = [item for item in supported if item.job is not None]
-        enabled = [item for item in supported if item.job is not None and item.job.enabled is True]
-        disabled = [item.definition.selector for item in supported if item.job is None or item.job.enabled is not True]
-        frequencies = [(item.job.frequency or "unset") for item in configured if item.job is not None]
-        timezones = [(item.job.timezone or "unset") for item in configured if item.job is not None]
-        frequency = _common_value(frequencies) if frequencies else "unset"
-        timezone = _common_value(timezones) if timezones else "unset"
-        suffix = f" disabled={','.join(disabled)}" if disabled else ""
+        configured, unconfigured, disabled, unknown, enabled, auto_fix = _autofix_state(supported)
+        configured_selectors = [item.definition.selector for item in configured]
+        selectors = ",".join(item.definition.selector for item in supported) or "-"
+        fields = [
+            f"enabled={enabled}/{len(supported)}",
+            f"configured={len(configured)}/{len(supported)}",
+            f"auto_fix={auto_fix}/{len(supported)}",
+            f"supported={selectors}",
+            _autofix_dimensions(configured, configured_selectors),
+        ]
+        if unconfigured:
+            fields.append(f"unconfigured={','.join(unconfigured)}")
+        if disabled:
+            fields.append(f"disabled={','.join(disabled)}")
+        if unknown:
+            fields.append(f"enabled_unknown={','.join(unknown)}")
         typer.echo(
             f"{listing.repository.full_name or listing.repository.repo_id}  "
-            f"enabled={len(enabled)}/{len(supported)} configured={len(configured)}/{len(supported)} "
-            f"frequency={frequency} timezone={timezone}{suffix}"
+            + " ".join(field for field in fields if field)
         )
 
 

@@ -27,7 +27,7 @@ from enji_guard_cli.audit.ports import (
     AuditStatusItem,
 )
 from enji_guard_cli.auth_session.service import AuthSessionService
-from enji_guard_cli.delivery.cli.app import _command_exit_code, _run, app
+from enji_guard_cli.delivery.cli.app import _command_exit_code, _json, _run, app
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.portfolio.models import ProjectRef, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioAuditStatus, PortfolioGatewayPort
@@ -270,6 +270,41 @@ def test_audit_summary_is_compact_in_text_and_json(monkeypatch: pytest.MonkeyPat
     assert '"body"' not in json_result.stdout
 
 
+def test_json_omits_nested_optional_null_fields_but_keeps_top_level_and_list_nulls() -> None:
+    assert _json({"present": 1, "missing": None, "nested": {"missing": None, "present": 2}}) == {
+        "present": 1,
+        "nested": {"present": 2},
+    }
+    assert _json([None, {"missing": None}]) == [None, {}]
+    assert _json(None) is None
+
+
+def test_json_preserves_semantic_nulls_and_non_null_falsy_values() -> None:
+    assert _json(
+        {
+            "job": None,
+            "connected": None,
+            "recon_done": None,
+            "enabled": None,
+            "auto_fix": None,
+            "score": None,
+            "false": False,
+            "zero": 0,
+            "empty": [],
+        }
+    ) == {
+        "job": None,
+        "connected": None,
+        "recon_done": None,
+        "enabled": None,
+        "auto_fix": None,
+        "score": None,
+        "false": False,
+        "zero": 0,
+        "empty": [],
+    }
+
+
 def test_schedule_list_is_one_summary_line_per_repository(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeApplication()
     repository = RepositoryRef("r1", "p1", "Pets", "acme/cat")
@@ -290,11 +325,21 @@ def test_schedule_list_is_one_summary_line_per_repository(monkeypatch: pytest.Mo
 
     assert text_result.exit_code == 0
     assert text_result.stdout.strip() == (
-        "acme/cat  enabled=1/2 frequency=mixed timezone=mixed time=mixed disabled=tests"
+        "acme/cat  enabled=1/2 frequency=mixed[security=workdays,tests=weekly] "
+        "timezone=mixed[security=Asia/Almaty,tests=UTC] enabled_state=mixed[security=true,tests=false] "
+        "schedule_time=mixed[security=09:00,tests=10:00] "
+        "schedule_time_source=mixed[security=auto,tests=user] disabled=tests"
     )
     assert json_result.exit_code == 0
     assert '"repository"' in json_result.stdout
     assert '"schedules"' in json_result.stdout
+
+
+def test_json_preserves_null_scores_from_typed_repository_dto() -> None:
+    rendered = _json(RepositoryRef("r1", "p1", "Pets", "acme/cat", scores={"audit.security": None, "audit.tests": 0}))
+
+    assert isinstance(rendered, dict)
+    assert rendered["scores"] == {"audit.security": None, "audit.tests": 0}
 
 
 def test_improvement_jobs_list_is_one_summary_line_per_repository(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -313,7 +358,112 @@ def test_improvement_jobs_list_is_one_summary_line_per_repository(monkeypatch: p
     result = CliRunner().invoke(app, ["improvement-jobs", "list"])
 
     assert result.exit_code == 0
-    assert result.stdout.strip() == ("acme/cat  enabled=1/1 configured=1/1 frequency=workdays timezone=UTC")
+    assert result.stdout.strip() == (
+        "acme/cat  enabled=1/1 configured=1/1 auto_fix=1/1 supported=test-writing "
+        "enabled_state=true auto_fix_state=true frequency=workdays timezone=UTC"
+    )
+
+
+def test_improvement_jobs_text_preserves_mixed_dimensions_and_states(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeApplication()
+    repository = RepositoryRef("r1", "p1", "Pets", "acme/cat")
+    definitions = tuple(
+        AuditAutofixDefinition(f"improvement.{selector}", "default", selector, None, None, selector, True)
+        for selector in ("security-fix", "dependency-update", "test-writing")
+    )
+    jobs = (
+        AuditAutofixJob(
+            "improvement.security-fix",
+            "default",
+            "security-fix",
+            True,
+            False,
+            frequency="daily",
+            days_of_week=("mon",),
+            schedule_time="09:00",
+            schedule_time_source="auto",
+            pentest_mode="off",
+        ),
+        AuditAutofixJob(
+            "improvement.dependency-update",
+            "default",
+            "dependency-update",
+            False,
+            None,
+            frequency="weekly",
+            days_of_week=("fri",),
+            schedule_time="10:00",
+            schedule_time_source="user",
+            pentest_mode="on",
+        ),
+        None,
+    )
+    payload = (
+        AutofixListing(
+            repository,
+            tuple(AutofixListingItem(definition, job) for definition, job in zip(definitions, jobs, strict=True)),
+        ),
+    )
+    monkeypatch.setattr(fake, "list_autofixes", lambda repo, project: payload)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    result = CliRunner().invoke(app, ["improvement-jobs", "list"])
+
+    assert result.exit_code == 0
+    assert "enabled=1/3 configured=2/3 auto_fix=0/3" in result.stdout
+    assert "enabled_state=mixed[security-fix=true,dependency-update=false]" in result.stdout
+    assert "auto_fix_state=mixed[security-fix=false,dependency-update=unset]" in result.stdout
+    assert "frequency=mixed[security-fix=daily,dependency-update=weekly]" in result.stdout
+    assert "days=mixed[security-fix=mon,dependency-update=fri]" in result.stdout
+    assert "schedule_time=mixed[security-fix=09:00,dependency-update=10:00]" in result.stdout
+    assert "schedule_time_source=mixed[security-fix=auto,dependency-update=user]" in result.stdout
+    assert "pentest_mode=mixed[security-fix=off,dependency-update=on]" in result.stdout
+    assert "unconfigured=test-writing disabled=dependency-update" in result.stdout
+
+
+def test_improvement_jobs_text_does_not_report_unknown_enabled_state_as_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeApplication()
+    repository = RepositoryRef("r1", "p1", "Pets", "acme/cat")
+    definition = AuditAutofixDefinition(
+        "improvement.test-writing", "default", "Tests", None, "audit.tests", "test-writing", True
+    )
+    job = AuditAutofixJob("improvement.test-writing", "default", "test-writing", None, True)
+    payload = (AutofixListing(repository, (AutofixListingItem(definition, job),)),)
+    monkeypatch.setattr(fake, "list_autofixes", lambda repo, project: payload)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    result = CliRunner().invoke(app, ["improvement-jobs", "list"])
+
+    assert result.exit_code == 0
+    assert "enabled=0/1" in result.stdout
+    assert "disabled=" not in result.stdout
+    assert "enabled_unknown=test-writing" in result.stdout
+
+
+def test_schedule_list_groups_restricted_window_days_by_selector(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    repository = RepositoryRef("r1", "p1", "Pets", "acme/cat")
+    payload = (
+        ScheduleListing(
+            repository,
+            (
+                AuditSchedule("audit.security", True, "daily", None, None, None, "auto", "UTC", ("mon", "wed")),
+                AuditSchedule("audit.tests", True, "daily", None, None, None, "auto", "UTC", ("mon", "wed")),
+                AuditSchedule("audit.deps", True, "daily", None, None, None, "auto", "UTC", ("fri",)),
+            ),
+        ),
+    )
+    monkeypatch.setattr(fake, "list_schedules", lambda repo, project: payload)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    result = CliRunner().invoke(app, ["schedule", "list"])
+
+    assert result.exit_code == 0
+    assert "window_days=mon,wed:security,tests|fri:deps" in result.stdout
 
 
 def test_batch_write_options_are_forwarded_with_explicit_scope(monkeypatch: pytest.MonkeyPatch) -> None:
