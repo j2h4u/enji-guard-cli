@@ -39,7 +39,8 @@ docker exec -i enji-guard-cli enji-guard auth status
 Keep the auth directory writable by uid `1000`; Enji rotates refresh cookies.
 Docker health uses cached readiness from the supervisor heartbeat: local MCP
 must listen, backend readiness state must be fresh, and authenticated Enji
-checks must not fail repeatedly.
+checks must not fail repeatedly. Credential-file changes wake the heartbeat
+immediately, so importing renewed credentials needs no service restart.
 
 Bearer/API-token auth is preferred. For the temporary cookie-session path, the
 supervisor owns auto refresh. It keeps a durable, private pending-replacement
@@ -48,12 +49,11 @@ preserve that storage and its permissions across restarts. The journal is
 protected credential-storage state; do not inspect or copy its contents.
 
 After a real re-authentication, refresh the browser session, request
-`/api/v1/auth/me`, and import that request's current `Cookie` header. Validate
-the running container explicitly:
+`/api/v1/auth/me`, and import that request's current `Cookie` header. The
+supervisor detects the import, owns any required cookie refresh, and recomputes
+backend readiness immediately. Validate the running container explicitly:
 
 ```bash
-docker exec -i enji-guard-cli enji-guard auth refresh
-docker exec -i enji-guard-cli enji-guard auth status
 docker exec -i enji-guard-cli enji-guard health --ready
 ```
 

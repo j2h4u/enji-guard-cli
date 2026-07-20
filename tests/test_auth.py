@@ -2,7 +2,7 @@ import asyncio
 import base64
 import json
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import NotRequired, TypedDict, TypeGuard, cast
@@ -40,6 +40,11 @@ from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse, HttpxEnj
 
 AUTH_REFRESH_ORIGIN = DEFAULT_GUARD_ORIGIN
 AUTH_REFRESH_REFERER = DEFAULT_GUARD_REFERER
+
+
+async def _never_changes(_auth_file: Path) -> AsyncGenerator[None]:
+    await asyncio.Event().wait()
+    yield
 
 
 class ImportPayload(TypedDict):
@@ -141,6 +146,7 @@ def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch
                     logger=auto_refresh_module.logging.getLogger("test"),
                     sleep_fn=fake_sleep,
                     client_factory=FakeHttpxEnjiHttpClient,
+                    credential_changes_fn=_never_changes,
                 ),
             )
         )

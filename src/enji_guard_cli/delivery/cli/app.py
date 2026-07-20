@@ -337,14 +337,6 @@ def auth_status(
     _run(lambda: _application(auth_file).auth_status(), _json_output(json_output))
 
 
-@auth_app.command("refresh")
-def auth_refresh(
-    auth_file: Annotated[Path | None, typer.Option("--auth-file", hidden=True)] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(lambda: _application(auth_file).auth_refresh(), _json_output(json_output))
-
-
 @project_app.command("list")
 def project_list(json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
     _run(lambda: _application().list_projects(), _json_output(json_output))

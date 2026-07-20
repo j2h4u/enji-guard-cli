@@ -255,7 +255,6 @@ Cookie contains the old refresh token.
 
 ```bash
 pbpaste | docker exec -i enji-guard-cli enji-guard auth import-cookie --stdin
-docker exec -i enji-guard-cli enji-guard auth status
 docker exec -i enji-guard-cli enji-guard health --ready
 ```
 
@@ -292,11 +291,11 @@ and timing fields; credentials are not an operator-facing log output.
 
 After a real cookie re-authentication, refresh the session in the browser,
 request `/api/v1/auth/me`, and import the current `Cookie` request header using
-the procedure above. Then validate the running service with:
+the procedure above. The supervisor notices the new credentials immediately,
+takes over cookie refresh, and updates backend readiness without a restart.
+Validate the running service with:
 
 ```bash
-docker exec -i enji-guard-cli enji-guard auth refresh
-docker exec -i enji-guard-cli enji-guard auth status
 docker exec -i enji-guard-cli enji-guard health --ready
 ```
 
@@ -330,7 +329,6 @@ docker exec -i enji-guard-cli enji-guard --project Pets schedule list
 docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos --enabled on --frequency workdays --timezone Asia/Almaty
 docker exec -i enji-guard-cli enji-guard --project Pets schedule auto-time --all-repos
 docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --scheduled off
-docker exec -i enji-guard-cli enji-guard auth refresh
 ```
 
 Pass `--json` when a command output is consumed by automation.

@@ -5,7 +5,6 @@ to the application and gateway adapter seams.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import NotRequired, TypedDict
 
@@ -71,38 +70,9 @@ class AuthSessionStatus:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class AuthSessionRefreshResult:
-    """Safe projection returned after cookie rotation."""
-
-    ok: bool
-    credential_type: str
-    cookie_count: int = 0
-    access_expires_at: datetime | None = None
-    auth_file: Path | None = None
-
-    @classmethod
-    def from_payload(cls, payload: AuthRefreshPayload) -> AuthSessionRefreshResult:
-        expires = payload["access_expires_at"]
-        parsed: datetime | None = None
-        if expires is not None:
-            try:
-                parsed = datetime.fromisoformat(expires)
-            except ValueError:
-                parsed = None
-        return cls(
-            ok=payload["ok"],
-            credential_type=payload["credential_type"],
-            cookie_count=payload["cookie_count"],
-            access_expires_at=parsed,
-            auth_file=Path(payload["auth_file"]),
-        )
-
-
 __all__ = [
     "AuthBackendReadinessResult",
     "AuthRefreshPayload",
-    "AuthSessionRefreshResult",
     "AuthSessionStatus",
     "AuthStatusPayload",
     "BearerTokenCredential",

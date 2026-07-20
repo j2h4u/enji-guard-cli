@@ -81,6 +81,10 @@ def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypat
         async def observe_backend_readiness(self) -> BackendReadinessObservation:
             return BackendReadinessObservation(ready=True)
 
+        async def credential_changes(self):
+            await asyncio.Event().wait()
+            yield
+
     auth = FakeRuntimeAuth()
 
     asyncio.run(
@@ -140,7 +144,7 @@ def test_backend_readiness_loop_records_probe_crash_without_propagating(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    slept = False
+    waited = False
 
     class BrokenObserver:
         def start_auto_refresh_task(self) -> asyncio.Task[None] | None:
@@ -149,10 +153,16 @@ def test_backend_readiness_loop_records_probe_crash_without_propagating(
         async def observe_backend_readiness(self) -> BackendReadinessObservation:
             raise ValueError("broken probe")
 
-    async def fake_sleep(seconds: float) -> None:
-        nonlocal slept
+        async def credential_changes(self):
+            await asyncio.Future[None]()
+            yield None
 
-        slept = True
+    async def fake_wait_for_readiness_trigger(change_task: asyncio.Task[None], interval_seconds: int) -> bool:
+        nonlocal waited
+
+        assert interval_seconds == 30
+        assert not change_task.done()
+        waited = True
         raise asyncio.CancelledError
 
     settings = ReadinessSettings(
@@ -168,7 +178,7 @@ def test_backend_readiness_loop_records_probe_crash_without_propagating(
         return None
 
     monkeypatch.setattr(runtime, "log_event", fake_log_event)
-    monkeypatch.setattr(runtime.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(runtime, "_wait_for_readiness_trigger", fake_wait_for_readiness_trigger)
 
     initial_state = backend_readiness_starting_state(checked_at=runtime.datetime.now(runtime.UTC))
 
@@ -178,11 +188,49 @@ def test_backend_readiness_loop_records_probe_crash_without_propagating(
         )
 
     state = read_backend_readiness_state(settings.state_file)
-    assert slept is True
+    assert waited is True
     assert state is not None
     assert state.ready is False
     assert state.failure_kind == "internal"
     assert state.failure_code == "ValueError"
+
+
+def test_backend_readiness_loop_reprobes_immediately_after_credential_change(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    probes = 0
+
+    class Observer:
+        async def observe_backend_readiness(self) -> BackendReadinessObservation:
+            nonlocal probes
+
+            probes += 1
+            if probes == 2:
+                raise asyncio.CancelledError
+            return BackendReadinessObservation(ready=False, failure_code="AUTH_REQUIRED")
+
+        async def credential_changes(self):
+            yield None
+            await asyncio.Future[None]()
+
+    settings = ReadinessSettings(
+        enabled=True,
+        state_file=tmp_path / "readiness.json",
+        heartbeat_interval_seconds=300,
+        heartbeat_timeout_seconds=2.0,
+        failure_threshold=3,
+        state_stale_after_seconds=600,
+    )
+    monkeypatch.setattr(runtime, "log_event", lambda *_args, **_kwargs: None)
+    initial_state = backend_readiness_starting_state(checked_at=runtime.datetime.now(runtime.UTC))
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            runtime._backend_readiness_loop(settings=settings, initial_state=initial_state, observer=Observer())
+        )
+
+    assert probes == 2
 
 
 def test_start_backend_readiness_task_writes_starting_state(
@@ -218,6 +266,10 @@ def test_start_backend_readiness_task_writes_starting_state(
 
         async def observe_backend_readiness(self) -> BackendReadinessObservation:
             return BackendReadinessObservation(ready=True)
+
+        async def credential_changes(self):
+            await asyncio.Event().wait()
+            yield
 
     async def run_start() -> None:
         task = runtime.start_backend_readiness_task(observer=RuntimeAuth())

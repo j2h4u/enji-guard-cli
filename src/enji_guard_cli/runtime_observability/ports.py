@@ -1,6 +1,7 @@
 """Runtime-facing ports supplied by the composition root."""
 
 import asyncio
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -26,13 +27,23 @@ class BackgroundRefreshStarter(Protocol):
     def start_auto_refresh_task(self) -> asyncio.Task[None] | None: ...
 
 
-class RuntimeAuthPort(BackendReadinessObserver, BackgroundRefreshStarter, Protocol):
+class CredentialChangeObserver(Protocol):
+    def credential_changes(self) -> AsyncGenerator[None]: ...
+
+
+class BackendReadinessPort(BackendReadinessObserver, CredentialChangeObserver, Protocol):
+    """Probe plus the event that invalidates its cached projection."""
+
+
+class RuntimeAuthPort(BackendReadinessObserver, BackgroundRefreshStarter, CredentialChangeObserver, Protocol):
     """Combined capability used by the supervisor; no auth implementation import."""
 
 
 __all__ = [
     "BackendReadinessObservation",
     "BackendReadinessObserver",
+    "BackendReadinessPort",
     "BackgroundRefreshStarter",
+    "CredentialChangeObserver",
     "RuntimeAuthPort",
 ]

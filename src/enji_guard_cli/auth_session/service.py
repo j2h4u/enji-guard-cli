@@ -6,8 +6,6 @@ from pathlib import Path
 from enji_guard_cli.auth_session import api as _api
 from enji_guard_cli.auth_session.models import (
     AuthBackendReadinessResult,
-    AuthRefreshPayload,
-    AuthSessionRefreshResult,
     AuthSessionStatus,
     AuthStatusPayload,
     ImportCredentialPayload,
@@ -54,20 +52,11 @@ class AuthSessionService:
     async def status_async(self) -> AuthStatusPayload:
         return await _api.auth_status_async(self.auth_file, self.client, event_sink=self.event_sink)
 
-    async def refresh_async(self) -> AuthRefreshPayload:
-        return await _api.refresh_auth_async(self.auth_file, self.client, event_sink=self.event_sink)
-
     def status(self) -> AuthSessionStatus:
         return AuthSessionStatus.from_payload(asyncio.run(self.status_async()))
 
-    def refresh(self) -> AuthSessionRefreshResult:
-        return AuthSessionRefreshResult.from_payload(asyncio.run(self.refresh_async()))
-
     async def status_result_async(self) -> AuthSessionStatus:
         return AuthSessionStatus.from_payload(await self.status_async())
-
-    async def refresh_result_async(self) -> AuthSessionRefreshResult:
-        return AuthSessionRefreshResult.from_payload(await self.refresh_async())
 
     async def backend_readiness_probe_async(self) -> AuthBackendReadinessResult:
         """Observe backend auth state without triggering cookie refresh."""
@@ -98,15 +87,10 @@ def auth_status(auth_file: Path | None = None, client: EnjiHttpClient | None = N
     return _api.auth_status(auth_file, client)
 
 
-def refresh_auth(auth_file: Path | None = None, client: EnjiHttpClient | None = None) -> AuthRefreshPayload:
-    return _api.refresh_auth(auth_file, client)
-
-
 __all__ = [
     "AuthSessionService",
     "auth_status",
     "default_auth_file",
     "import_bearer_token",
     "import_cookie",
-    "refresh_auth",
 ]

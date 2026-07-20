@@ -7,7 +7,6 @@ from typing import Protocol
 
 from enji_guard_cli.auth_session.models import (
     AuthBackendReadinessResult,
-    AuthSessionRefreshResult,
     AuthSessionStatus,
     StoredAuth,
 )
@@ -37,8 +36,6 @@ class AuthSessionPort(Protocol):
     def auth_headers(self, stored_auth: StoredAuth) -> dict[str, str]: ...
 
     def status(self) -> AuthSessionStatus: ...
-
-    def refresh(self) -> AuthSessionRefreshResult: ...
 
 
 class AuthStorePort(Protocol):

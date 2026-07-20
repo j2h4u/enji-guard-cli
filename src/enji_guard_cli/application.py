@@ -50,7 +50,6 @@ from enji_guard_cli.audit.workflows import AuditWorkflowDependencies, choose_aud
 from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
 from enji_guard_cli.auth_session.api import AuthError
 from enji_guard_cli.auth_session.models import (
-    AuthSessionRefreshResult,
     AuthSessionStatus,
     ImportCredentialPayload,
 )
@@ -215,12 +214,6 @@ class Application:
     def auth_status(self) -> AuthSessionStatus:
         try:
             return self.auth.status()
-        except AuthError as exc:
-            raise ApplicationAuthError(exc.code, exc.message) from exc
-
-    def auth_refresh(self) -> AuthSessionRefreshResult:
-        try:
-            return self.auth.refresh()
         except AuthError as exc:
             raise ApplicationAuthError(exc.code, exc.message) from exc
 

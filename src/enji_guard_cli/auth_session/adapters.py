@@ -1,8 +1,10 @@
 """Composition adapters exposing Auth Session capabilities to other contexts."""
 
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from enji_guard_cli.auth_session import api as _api
+from enji_guard_cli.auth_session.credential_changes import credential_changes
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult, StoredAuth
 from enji_guard_cli.auth_session.ports import AuthEventSink
 from enji_guard_cli.enji_gateway.ports import GatewayAuthPort
@@ -51,6 +53,10 @@ class AuthSessionAdapter(GatewayAuthPort, RuntimeAuthPort):
             credential_type=result.credential_type,
             elapsed_ms=result.elapsed_ms,
         )
+
+    async def credential_changes(self) -> AsyncGenerator[None]:
+        async for _ in credential_changes(self.auth_file):
+            yield None
 
     def start_auto_refresh_task(self):
         return _api.start_auto_refresh_task(

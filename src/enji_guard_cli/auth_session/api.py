@@ -20,6 +20,7 @@ from enji_guard_cli.auth_session.cookies import (
     set_cookie_names,
     should_persist_transient_refresh_cookies,
 )
+from enji_guard_cli.auth_session.credential_changes import credential_changes
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
 from enji_guard_cli.auth_session.payloads import (
     AuthRefreshPayload,
@@ -194,15 +195,6 @@ def auth_status(
     return asyncio.run(auth_status_async(auth_file, client, event_sink=event_sink))
 
 
-def refresh_auth(
-    auth_file: Path | None = None,
-    client: EnjiHttpClient | None = None,
-    *,
-    event_sink: AuthEventSink | None = None,
-) -> AuthRefreshPayload:
-    return asyncio.run(refresh_auth_async(auth_file, client, event_sink=event_sink))
-
-
 async def auth_status_async(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
@@ -314,6 +306,7 @@ def start_auto_refresh_task(
                 logger=_LOGGER,
                 sleep_fn=asyncio.sleep,
                 client_factory=HttpxEnjiHttpClient,
+                credential_changes_fn=credential_changes,
             ),
         ),
     )

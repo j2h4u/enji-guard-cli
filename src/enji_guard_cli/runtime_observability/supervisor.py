@@ -10,6 +10,7 @@ from typing import Literal, Protocol
 
 from enji_guard_cli.runtime_observability.ports import (
     BackendReadinessObservation,
+    BackendReadinessPort,
     RuntimeAuthPort,
 )
 from enji_guard_cli.runtime_observability.readiness import (
@@ -202,7 +203,7 @@ def _remove_signal_handlers(signals: tuple[signal.Signals, ...]) -> None:
             loop.remove_signal_handler(signum)
 
 
-def start_backend_readiness_task(*, observer: RuntimeAuthPort | None = None) -> asyncio.Task[None] | None:
+def start_backend_readiness_task(*, observer: BackendReadinessPort | None = None) -> asyncio.Task[None] | None:
     settings = default_settings().readiness
     if not settings.enabled:
         return None
@@ -220,20 +221,37 @@ async def _backend_readiness_loop(
     *,
     settings: ReadinessSettings,
     initial_state: BackendReadinessState,
-    observer: RuntimeAuthPort,
+    observer: BackendReadinessPort,
 ) -> None:
     state = initial_state
-    while True:
-        try:
-            checked_at = datetime.now(UTC)
-            probe = await observer.observe_backend_readiness()
-            readiness_probe = _readiness_probe(probe)
-            state = backend_readiness_state_after_probe(state, readiness_probe, checked_at=checked_at)
-            _write_state(settings, state)
-            _log_probe(state, readiness_probe)
-        except (OSError, RuntimeError, ValueError) as exc:
-            state = _state_after_crash(settings, state, exc)
-        await asyncio.sleep(settings.heartbeat_interval_seconds)
+    credential_changes = observer.credential_changes()
+    change_task = asyncio.ensure_future(anext(credential_changes))
+    try:
+        while True:
+            try:
+                checked_at = datetime.now(UTC)
+                probe = await observer.observe_backend_readiness()
+                readiness_probe = _readiness_probe(probe)
+                state = backend_readiness_state_after_probe(state, readiness_probe, checked_at=checked_at)
+                _write_state(settings, state)
+                _log_probe(state, readiness_probe)
+            except (OSError, RuntimeError, ValueError) as exc:
+                state = _state_after_crash(settings, state, exc)
+            if await _wait_for_readiness_trigger(change_task, settings.heartbeat_interval_seconds):
+                change_task = asyncio.ensure_future(anext(credential_changes))
+    finally:
+        change_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await change_task
+        await credential_changes.aclose()
+
+
+async def _wait_for_readiness_trigger(change_task: asyncio.Future[None], interval_seconds: int) -> bool:
+    done, _ = await asyncio.wait({change_task}, timeout=interval_seconds)
+    if not done:
+        return False
+    change_task.result()
+    return True
 
 
 def _readiness_probe(observation: BackendReadinessObservation) -> BackendReadinessProbe:

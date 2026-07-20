@@ -2,7 +2,6 @@
 
 from enji_guard_cli.auth_session.models import (
     AuthRefreshPayload,
-    AuthSessionRefreshResult,
     AuthSessionStatus,
     AuthStatusPayload,
     CredentialType,
@@ -16,13 +15,11 @@ from enji_guard_cli.auth_session.service import (
     default_auth_file,
     import_bearer_token,
     import_cookie,
-    refresh_auth,
 )
 
 __all__ = [
     "AuthRefreshPayload",
     "AuthSessionPort",
-    "AuthSessionRefreshResult",
     "AuthSessionService",
     "AuthSessionStatus",
     "AuthStatusPayload",
@@ -33,5 +30,4 @@ __all__ = [
     "default_auth_file",
     "import_bearer_token",
     "import_cookie",
-    "refresh_auth",
 ]
