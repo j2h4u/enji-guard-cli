@@ -6,9 +6,10 @@ agents can orient quickly before making changes.
 
 ## Decisions
 
-- **Audit bounded-context vocabulary and migration**: the approved incremental
-  design is in [Audit Bounded Contexts Refactor](plans/audit-bounded-contexts-refactor.md).
-  Product language uses `audit`; `report` is reserved for Enji/OpenAPI wire
+- **Audit bounded-context vocabulary and migration**: the completed refactor
+  separates Audit, Portfolio, Application, Auth Session,
+  Runtime/Observability, gateway, and delivery ownership. Product language
+  uses `audit`; `report` is reserved for Enji/OpenAPI wire
   contracts, raw upstream translators, and documentation explicitly naming
   external integration vocabulary. No compatibility aliases are required.
 - **Audit Catalog authority and notification**: every command in the Audit
@@ -39,13 +40,18 @@ agents can orient quickly before making changes.
 - **Report language scope**: language is an account-wide `en`/`ru` preference,
   not a project mutation. CLI reads and writes user preferences idempotently;
   it does not expose redundant per-project resolved values.
-- **Narrow read-only MCP facade**: MCP stays curated and read-only. It exposes
-  portfolio overview and repository audit reading, not auth bootstrap,
-  project/repo writes, scheduling, or other operator controls. MCP delivery
-  depends on `McpQueryFacade`, never on the broad operator `Application`.
+- **Narrow read-only MCP facade**: MCP stays curated and read-only. MCP
+  delivery imports only `McpQueryFacade`, which exposes portfolio overview and
+  repository audit reading. It does not surface auth bootstrap, project/repo
+  writes, scheduling, improvement-job mutation, or other operator controls.
 - **Docker-first runtime with a supervisor**: the service runs in Docker and
   `enji-guard run` owns MCP, background cookie refresh, and backend readiness
   as sibling tasks.
+- **Started-task reconciliation before duplicate audit starts**: `audit start`
+  and status reads do not trust upstream active-run projections alone. They
+  reconcile those projections with a durable local started-task ledger and
+  `task-by-id` lookups so recently started audits are not duplicated while
+  upstream state is catching up.
 - **Temporary cookie auth with first-class API tokens**: cookie auth is a
   compatibility path. Bearer/API-token support is the preferred stable auth
   path and should remain first-class.
@@ -60,6 +66,10 @@ agents can orient quickly before making changes.
   Transport delay is exponential with jitter and a 30-second cap. Supervisor
   recovery retries indefinitely with exponential jitter, caps each delay at one
   hour, and uses the configured re-auth interval for `AUTH_REQUIRED` failures.
+  Credential-file changes wake the refresh scheduler and backend-readiness loop
+  immediately instead of waiting for the next heartbeat. There is no manual
+  operator-facing `auth refresh` command; `auth status`, readiness, and
+  telemetry are the validation surfaces.
 - **Auth resilience observability**: runtime diagnosis uses telemetry events
   `enji_http_retry`, `enji_auth_auto_refresh_scheduled`,
   `enji_auth_auto_refresh_retry`, `enji_auth_auto_refresh_succeeded`,

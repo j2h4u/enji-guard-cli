@@ -85,6 +85,7 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
   current cookie state. Prefer a `Cookie` header from any Fleet request made
   after refresh. If using the refresh request itself, merge its response
   `Set-Cookie` values; its request `Cookie` has the old refresh token.
-- After bootstrap, prove Docker refresh works: container `auth refresh`, CLI auth
-  smoke, and `enji_auth_auto_refresh_succeeded` in logs. MCP tools should either
-  work through the configured service auth or return clear auth errors.
+- After bootstrap, prove Docker auth recovery works with `auth status`,
+  `health --ready`, and `enji_auth_auto_refresh_succeeded` in logs. MCP tools
+  should either work through the configured service auth or return clear auth
+  errors.

@@ -8,8 +8,8 @@ Portfolio contexts behind one application facade, a
 validated Typer CLI operator surface, and a curated read-only FastMCP surface
 for portfolio and audit access.
 
-See [ROADMAP.md](ROADMAP.md) for the current product status and remaining MCP
-scope.
+See [ROADMAP.md](ROADMAP.md) for the current product status and remaining
+hardening work.
 
 ## Mental Model
 
@@ -77,7 +77,9 @@ tool needs structured output.
 
 Audit and Portfolio own product rules, Application composes their use cases,
 and gateway/auth/runtime packages own infrastructure. CLI and MCP stay thin
-and call Application instead of duplicating product or backend logic.
+and call Application instead of duplicating product or backend logic. The
+repository treats these DDD-style boundaries as architecture policy, and
+`import-linter` enforces them in the verification gate.
 
 The CLI is the broad operator surface for agents. It exposes reads, writes,
 project administration, repository moves, schedule changes, email preferences,
@@ -249,19 +251,21 @@ printf '%s' "$ENJI_API_TOKEN" | docker exec -i enji-guard-cli enji-guard auth im
 Until API tokens are available, cookie auth is supported as a temporary
 compatibility path:
 
-Run in the guard.enji.ai DevTools Console:
+Refresh the Enji session in the browser first, then trigger an authenticated
+Fleet request such as:
 
 ```javascript
-await fetch('https://fleet.enji.ai/api/v1/auth/refresh', { method: 'POST', credentials: 'include' });
 await fetch('https://fleet.enji.ai/api/v1/auth/me', { credentials: 'include' });
 ```
 
-In DevTools Network, open the second `GET /api/v1/auth/me` and copy
-Request Headers -> Cookie, not response headers. The refresh request's Request
-Cookie contains the old refresh token.
+In DevTools Network, open `GET /api/v1/auth/me` and copy Request Headers ->
+Cookie, not response headers. If you inspect the refresh request itself, merge
+its response `Set-Cookie` values because that request's `Cookie` header still
+contains the old refresh token.
 
 ```bash
 pbpaste | docker exec -i enji-guard-cli enji-guard auth import-cookie --stdin
+docker exec -i enji-guard-cli enji-guard auth status
 docker exec -i enji-guard-cli enji-guard health --ready
 ```
 
@@ -335,6 +339,8 @@ docker exec -i enji-guard-cli enji-guard audit read j2h4u/enji-guard-cli --json
 docker exec -i enji-guard-cli enji-guard --project Pets schedule list
 docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos --enabled on --frequency workdays --timezone Asia/Almaty
 docker exec -i enji-guard-cli enji-guard --project Pets schedule auto-time --all-repos
+docker exec -i enji-guard-cli enji-guard improvement-jobs list j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard improvement-jobs set j2h4u/enji-guard-cli security vuln-fix --enabled on
 docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --scheduled off
 ```
 
@@ -370,7 +376,7 @@ Local HTTP MCP service:
 docker compose up -d --force-recreate --remove-orphans --wait
 ```
 
-Endpoint:
+The current FastMCP streamable-HTTP default endpoint is:
 
 ```text
 http://127.0.0.1:8001/mcp
@@ -387,7 +393,8 @@ just verify
 
 The completion gate includes Ruff, basedpyright, import-linter, Vulture,
 deptry, OpenAPI contract validation, CRAP <= 30 per function, tests, and Docker
-build.
+build. Keep CLI and MCP thin, keep product logic behind Application, and treat
+import-linter failures as architectural regressions rather than style nits.
 
 Use `CONTRIBUTING.md` for change intake, acceptance criteria, and handoff rules.
 
@@ -402,7 +409,7 @@ dependency/Docker/CI references.
 
 ## Documentation
 
-- [ROADMAP.md](ROADMAP.md): product status, remaining MCP scope, and modular
+- [ROADMAP.md](ROADMAP.md): product status, remaining hardening work, and modular
   install notes.
 - [CONTRIBUTING.md](CONTRIBUTING.md): change intake, acceptance, and handoff
   rules.
