@@ -27,6 +27,7 @@ from enji_guard_cli.application import (
     ApplicationResult,
     AutofixWriteScope,
     EmailPreferencesUpdate,
+    PortfolioOverview,
 )
 from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
@@ -179,7 +180,11 @@ def _emit(payload: object, as_json: bool) -> None:
     typer.echo(json.dumps(rendered, indent=2, sort_keys=True))
 
 
-def _run(action: Callable[[], object], as_json: bool) -> None:
+def _run(
+    action: Callable[[], object],
+    as_json: bool,
+    text_renderer: Callable[[object], None] | None = None,
+) -> None:
     """Execute a command action and keep expected operator errors on stderr."""
     changes: list[ApplicationCatalogChange] = []
     operation = str(_state.get("operation") or "cli")
@@ -221,9 +226,41 @@ def _run(action: Callable[[], object], as_json: bool) -> None:
     if as_json:
         _emit(_with_catalog_changes(payload, changes) if changes else payload, True)
     else:
-        _emit(payload, False)
+        if text_renderer is None:
+            _emit(payload, False)
+        else:
+            text_renderer(payload)
         if changes:
             typer.echo(f"audit catalog changed: {'; '.join(_catalog_change_text(change) for change in changes)}")
+
+
+def _emit_portfolio_overview(payload: object) -> None:
+    overview = cast(PortfolioOverview, payload)
+    typer.echo(f"observed_at: {overview.observed_at}")
+    if not overview.projects:
+        typer.echo("No projects found.")
+        return
+    for project in overview.projects:
+        typer.echo(f"\n{project.project.name or project.project.project_id}")
+        for item in project.repositories:
+            repository = item.repository
+            scores = [float(score) for score in repository.scores.values() if score is not None]
+            weakest = f"{min(scores):g}" if scores else "-"
+            overall = f"{sum(scores) / len(scores):.1f}" if scores else "-"
+            active = sum(run.completed_at is None for run in item.active_runs)
+            typer.echo(
+                f"  {repository.full_name or repository.repo_id}  "
+                f"weakest={weakest} overall={overall} "
+                f"recon={_state_label(repository.recon_done)} active={active}"
+            )
+
+
+def _state_label(value: bool | None) -> str:
+    if value is True:
+        return "ready"
+    if value is False:
+        return "pending"
+    return "unknown"
 
 
 def _with_catalog_changes(payload: object, changes: list[ApplicationCatalogChange]) -> object:
@@ -373,7 +410,11 @@ def repo_list(
     sort: Annotated[str, typer.Option("--sort")] = "default",
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    _run(lambda: _application().portfolio_status(_repository_sort(sort)), _json_output(json_output))
+    _run(
+        lambda: _application().portfolio_overview(_selected_project(), _repository_sort(sort)),
+        _json_output(json_output),
+        _emit_portfolio_overview,
+    )
 
 
 @repo_app.command("resolve")
@@ -529,8 +570,15 @@ def audit_wait(
 
 
 @portfolio_app.command("status")
-def portfolio_status(json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
-    _run(lambda: _application().portfolio_status(), _json_output(json_output))
+def portfolio_status(
+    sort: Annotated[str, typer.Option("--sort")] = "default",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    _run(
+        lambda: _application().portfolio_overview(_selected_project(), _repository_sort(sort)),
+        _json_output(json_output),
+        _emit_portfolio_overview,
+    )
 
 
 @app.command("health")
@@ -589,7 +637,7 @@ def run(
 
 @app.command("status")
 def status(
-    repo: str | None = None,
+    repo: Annotated[str | None, typer.Argument()] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     sort: Annotated[str, typer.Option("--sort")] = "default",
     json_output: Annotated[bool, typer.Option("--json")] = False,
@@ -597,9 +645,9 @@ def status(
     action = (
         (lambda: _application().repository_status(repo, _selected_project(project)))
         if repo is not None
-        else (lambda: _application().portfolio_status(_repository_sort(sort)))
+        else (lambda: _application().portfolio_overview(_selected_project(project), _repository_sort(sort)))
     )
-    _run(action, _json_output(json_output))
+    _run(action, _json_output(json_output), None if repo is not None else _emit_portfolio_overview)
 
 
 @app.command("wait")

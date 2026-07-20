@@ -17,7 +17,9 @@ from enji_guard_cli.audit.ports import AuditGatewayPort
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.delivery.cli.app import _command_exit_code, _run, app
 from enji_guard_cli.errors import EnjiApiError
+from enji_guard_cli.portfolio.models import ProjectRef, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
+from enji_guard_cli.portfolio.status import PortfolioOverview, ProjectOverview, RepositoryOverview
 
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
 
@@ -98,6 +100,14 @@ class _FakeApplication:
         self.calls.append(("access", None))
         return {"full_access": True}
 
+    def portfolio_overview(self, project: str | None, sort: str) -> object:
+        self.calls.append(("portfolio_overview", (project, sort)))
+        return {"observed_at": "2026-07-20T00:00:00Z", "projects": []}
+
+    def repository_status(self, repo: str, project: str | None) -> object:
+        self.calls.append(("repository_status", (repo, project)))
+        return {"repository": {"full_name": repo}}
+
     def audit_start(self, repo: str, project: str | None, selectors: list[str], *, all_audits: bool) -> object:
         self.calls.append(("audit_start", (repo, project, selectors, all_audits)))
         return {"repo_id": repo, "project_id": project, "results": [{"state": "started"}]}
@@ -133,6 +143,62 @@ def test_project_settings_and_access_use_typed_application_methods(monkeypatch: 
     assert settings.exit_code == 0
     assert access.exit_code == 0
     assert fake.calls[:2] == [("project_settings", "Pets"), ("access", None)]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--project", "Pets", "status", "--sort", "weakest", "--json"],
+        ["--project", "Pets", "portfolio", "status", "--sort", "weakest", "--json"],
+        ["--project", "Pets", "repo", "list", "--sort", "weakest", "--json"],
+    ],
+)
+def test_portfolio_commands_use_compact_overview(monkeypatch: pytest.MonkeyPatch, arguments: list[str]) -> None:
+    fake = _FakeApplication()
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    result = CliRunner().invoke(app, arguments)
+
+    assert result.exit_code == 0
+    assert fake.calls == [("portfolio_overview", ("Pets", "weakest"))]
+
+
+def test_status_for_one_repository_keeps_detailed_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    result = CliRunner().invoke(app, ["--project", "Pets", "status", "acme/cat", "--json"])
+
+    assert result.exit_code == 0
+    assert fake.calls == [("repository_status", ("acme/cat", "Pets"))]
+
+
+def test_portfolio_text_is_compact_and_scenario_oriented(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    overview = PortfolioOverview(
+        "2026-07-20T00:00:00Z",
+        (
+            ProjectOverview(
+                ProjectRef("p1", "Pets"),
+                (
+                    RepositoryOverview(
+                        RepositoryRef(
+                            "r1", "p1", "Pets", "acme/cat", recon_done=True, scores={"tests": 80, "vulns": 40}
+                        )
+                    ),
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(fake, "portfolio_overview", lambda project, sort: overview)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    result = CliRunner().invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "Pets" in result.stdout
+    assert "acme/cat  weakest=40 overall=60.0 recon=ready active=0" in result.stdout
+    assert '"projects"' not in result.stdout
 
 
 def test_batch_write_options_are_forwarded_with_explicit_scope(monkeypatch: pytest.MonkeyPatch) -> None:

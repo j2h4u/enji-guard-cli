@@ -152,6 +152,13 @@ docker exec -i enji-guard-cli enji-guard status --sort weakest
 docker exec -i enji-guard-cli enji-guard repo list --sort latest-audit
 ```
 
+These portfolio-wide commands return the compact overview: project and
+repository identity, scores, recon/connection state, and active runs. They do
+not fetch every audit status for every repository. Use `status REPO` for the
+detailed status of one repository, `audit summary REPO` for compact audit
+triage, and `audit read REPO` for report contents. Add `--json` only when the
+result is being consumed programmatically.
+
 For audits:
 
 ```bash
