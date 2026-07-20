@@ -12,7 +12,8 @@ from typing import Literal, cast
 
 from mcp.server.fastmcp import FastMCP
 
-from enji_guard_cli.application import Application, ApplicationResult, PortfolioOverview
+from enji_guard_cli.composition import create_mcp_query_facade
+from enji_guard_cli.mcp_facade import McpQueryFacade, McpQueryResult
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.telemetry import configure_logging
 from enji_guard_cli.settings import (
@@ -51,9 +52,9 @@ def create_mcp_server(
     host: str = DEFAULT_HTTP_HOST,
     port: int = DEFAULT_HTTP_PORT,
     *,
-    application: Application | None = None,
+    queries: McpQueryFacade | None = None,
 ) -> FastMCP:
-    app = application or Application.from_auth_file()
+    query_facade = queries or create_mcp_query_facade()
     server = FastMCP(
         name="enji-guard-cli",
         instructions=(
@@ -74,10 +75,10 @@ def create_mcp_server(
         sort: RepositorySortName = DEFAULT_REPO_SORT,
     ) -> dict[str, object]:
         result = cast(
-            ApplicationResult,
+            McpQueryResult,
             await asyncio.to_thread(
                 run_agent_journey,
-                lambda: app.execute(lambda: app.portfolio_overview(_project_arg(project), sort)),
+                lambda: query_facade.portfolio_overview(_project_arg(project), sort),
                 AgentJourney(
                     event_prefix="mcp_tool",
                     operation=MCP_TOOL_NAMES[0],
@@ -87,8 +88,7 @@ def create_mcp_server(
                 ),
             ),
         )
-        portfolio = cast(PortfolioOverview, result.payload)
-        return cast(dict[str, object], _json(portfolio))
+        return cast(dict[str, object], _json(result.payload))
 
     @server.tool(
         name=MCP_TOOL_NAMES[1],
@@ -97,16 +97,10 @@ def create_mcp_server(
     )
     async def repository_audits(repo: str, project: str = "") -> dict[str, object]:
         result = cast(
-            ApplicationResult,
+            McpQueryResult,
             await asyncio.to_thread(
                 run_agent_journey,
-                lambda: app.execute(
-                    lambda: app.audit_read(
-                        repo.strip(),
-                        project=_project_arg(project),
-                        all_audits=True,
-                    )
-                ),
+                lambda: query_facade.repository_audits(repo.strip(), _project_arg(project)),
                 AgentJourney(
                     event_prefix="mcp_tool",
                     operation=MCP_TOOL_NAMES[1],

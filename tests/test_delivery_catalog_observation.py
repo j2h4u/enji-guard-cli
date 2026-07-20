@@ -40,7 +40,7 @@ def test_run_emits_catalog_changes_from_the_command_application(
         constructions += 1
         return application
 
-    monkeypatch.setattr(cli_module.Application, "from_auth_file", application_factory)
+    monkeypatch.setattr(cli_module, "create_application", application_factory)
     monkeypatch.setitem(cli_module._state, "application", None)
     monkeypatch.setitem(cli_module._state, "application_auth_file", None)
 
@@ -96,7 +96,11 @@ def test_cli_callbacks_set_the_operation_names_used_by_observation(
     operation: str,
 ) -> None:
     seen: list[str] = []
-    monkeypatch.setattr(cli_module, "_run", lambda _action, _as_json: seen.append(str(cli_module._state["operation"])))
+    monkeypatch.setattr(
+        cli_module,
+        "_run",
+        lambda _action, _as_json, _renderer=None: seen.append(str(cli_module._state["operation"])),
+    )
 
     result = CliRunner().invoke(cli_module.app, list(args))
 

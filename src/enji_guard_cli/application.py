@@ -12,7 +12,6 @@ import time
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import cast
 
 from enji_guard_cli.audit import parse_catalog_result
@@ -25,7 +24,6 @@ from enji_guard_cli.audit.email import EmailPreferencesUpdate
 from enji_guard_cli.audit.email import list_for_targets as list_email_for_targets
 from enji_guard_cli.audit.email import set_for_targets as set_email_for_targets
 from enji_guard_cli.audit.errors import AuditMalformedError, AuditNotFoundError, AuditUpstreamError
-from enji_guard_cli.audit.ledger import FileAuditLedger
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.ports import (
     AuditAutofixJob,
@@ -47,14 +45,12 @@ from enji_guard_cli.audit.start import AuditStartService
 from enji_guard_cli.audit.status import build_status
 from enji_guard_cli.audit.wait import AuditWaitDependencies, wait_for_completion
 from enji_guard_cli.audit.workflows import AuditWorkflowDependencies, choose_audits, read_for_repo
-from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
 from enji_guard_cli.auth_session.api import AuthError
 from enji_guard_cli.auth_session.models import (
     AuthSessionStatus,
     ImportCredentialPayload,
 )
 from enji_guard_cli.auth_session.service import AuthSessionService
-from enji_guard_cli.enji_gateway import AuditGateway, PortfolioGateway
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.portfolio.errors import PortfolioMalformedError, PortfolioNotFoundError, PortfolioUpstreamError
 from enji_guard_cli.portfolio.models import (
@@ -87,7 +83,6 @@ from enji_guard_cli.portfolio.status import (
     status_for_repo,
 )
 from enji_guard_cli.runtime_observability.ports import RuntimeAuthPort
-from enji_guard_cli.runtime_observability.telemetry import log_event
 from enji_guard_cli.settings import RepositorySortName, default_settings
 
 
@@ -135,7 +130,7 @@ def _catalog_result_context() -> ContextVar[AuditCatalogResult | None]:
 
 @dataclass(slots=True)
 class Application:
-    """Composition root shared by CLI, MCP, and runtime supervisor."""
+    """Operator application facade shared by CLI and runtime supervisor."""
 
     audit_gateway: AuditGatewayPort
     portfolio_gateway: PortfolioGatewayPort
@@ -176,27 +171,6 @@ class Application:
             tuple(
                 ApplicationCatalogChange(change.action_key, change.changed_fields, change.kind) for change in changes
             ),
-        )
-
-    @classmethod
-    def from_auth_file(cls, auth_file: Path | None = None) -> Application:
-        settings = default_settings()
-        ledger = FileAuditLedger(
-            settings.active_run_ledger.state_file,
-            ttl_seconds=settings.active_run_ledger.ttl_seconds,
-            lookup_grace_seconds=settings.active_run_ledger.lookup_grace_seconds,
-        )
-        auth_adapter = AuthSessionAdapter(auth_file, settings=settings, event_sink=log_event)
-        auth_service = AuthSessionService(auth_file, settings=settings, event_sink=log_event)
-        portfolio_gateway = PortfolioGateway(auth_file, auth_port=auth_adapter)
-        return cls(
-            AuditGateway(auth_file, auth_port=auth_adapter),
-            portfolio_gateway,
-            auth_service,
-            ledger,
-            AuditCatalogObserver(settings.audit_catalog.state_file),
-            GatewayPortfolioTargetService(portfolio_gateway),
-            auth_adapter,
         )
 
     def import_cookie(self, raw_cookie: str) -> ImportCredentialPayload:

@@ -29,7 +29,9 @@ from enji_guard_cli.application import (
     EmailPreferencesUpdate,
     PortfolioOverview,
 )
+from enji_guard_cli.composition import create_application
 from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
+from enji_guard_cli.mcp_facade import McpQueryFacade
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.readiness import readiness_verdict
 from enji_guard_cli.runtime_observability.supervisor import run_service
@@ -142,7 +144,7 @@ def _application(auth_file: Path | None = None) -> Application:
     cached = _state["application"]
     if isinstance(cached, Application) and _state["application_auth_file"] == selected:
         return cached
-    application = Application.from_auth_file(selected)
+    application = create_application(selected)
     _state["application"] = application
     _state["application_auth_file"] = selected
     return application
@@ -630,7 +632,7 @@ def run(
         port=port,
         mount_path=mount_path,
         runtime_auth=application.runtime_auth_port(),
-        mcp_server_factory=lambda host, port: create_mcp_server(host, port, application=application),
+        mcp_server_factory=lambda host, port: create_mcp_server(host, port, queries=McpQueryFacade(application)),
         mcp_server_runner=run_mcp_server_async,
     )
 

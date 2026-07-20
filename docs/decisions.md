@@ -41,7 +41,8 @@ agents can orient quickly before making changes.
   it does not expose redundant per-project resolved values.
 - **Narrow read-only MCP facade**: MCP stays curated and read-only. It exposes
   portfolio overview and repository audit reading, not auth bootstrap,
-  project/repo writes, scheduling, or other operator controls.
+  project/repo writes, scheduling, or other operator controls. MCP delivery
+  depends on `McpQueryFacade`, never on the broad operator `Application`.
 - **Docker-first runtime with a supervisor**: the service runs in Docker and
   `enji-guard run` owns MCP, background cookie refresh, and backend readiness
   as sibling tasks.
@@ -80,7 +81,12 @@ agents can orient quickly before making changes.
   Portfolio cannot depend on Audit except for the explicit typed
   `portfolio.ports -> audit.ports` seam used by recon and status composition;
   new cross-context imports must be moved to application orchestration or an
-  intentionally designed shared kernel.
+  intentionally designed shared kernel. Protected ownership contracts reserve
+  raw Enji HTTP/wire modules for the gateway and transport for Auth Session and
+  the gateway. Contract names state when a rule governs direct imports only.
+- **Explicit composition root**: dependency construction lives in
+  `composition.py`; the application module contains orchestration and typed
+  facades, not concrete adapter construction.
 - **Auth Session and Runtime/Observability ownership**: Auth Session is
   credential-focused and cannot depend on Audit, Portfolio, application,
   delivery, or raw gateway translators. Runtime/Observability owns supervisor,

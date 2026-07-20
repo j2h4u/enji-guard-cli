@@ -133,7 +133,7 @@ include_external_packages = true
 
 [[tool.importlinter.contracts]]
 id = "bounded-contexts-stay-domain-pure"
-name = "Audit and Portfolio contexts stay independent from delivery and infrastructure"
+name = "Audit and Portfolio do not directly import delivery or infrastructure"
 type = "forbidden"
 source_modules = ["enji_guard_cli.audit", "enji_guard_cli.portfolio"]
 forbidden_modules = [
@@ -168,7 +168,7 @@ allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 id = "application-avoids-wire-and-frameworks"
-name = "Application composes typed adapters without wire or delivery dependencies"
+name = "Application does not directly import wire or delivery dependencies"
 type = "forbidden"
 source_modules = ["enji_guard_cli.application"]
 forbidden_modules = [
@@ -186,7 +186,7 @@ allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 id = "delivery-avoids-gateway-internals"
-name = "Delivery enters through Application rather than gateway internals"
+name = "Delivery does not directly import gateway internals"
 type = "forbidden"
 source_modules = ["enji_guard_cli.delivery"]
 forbidden_modules = [
@@ -209,19 +209,49 @@ allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 id = "cli-uses-application-context-boundary"
-name = "CLI uses Application instead of Audit and Portfolio internals"
+name = "CLI directly uses Application instead of context internals"
 type = "forbidden"
 source_modules = ["enji_guard_cli.delivery.cli.app"]
 forbidden_modules = ["enji_guard_cli.audit", "enji_guard_cli.portfolio"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
-id = "mcp-uses-application-context-boundary"
-name = "MCP uses Application instead of Audit and Portfolio internals"
+id = "mcp-uses-narrow-query-facade"
+name = "MCP directly uses only its narrow query facade"
 type = "forbidden"
 source_modules = ["enji_guard_cli.delivery.mcp.server"]
-forbidden_modules = ["enji_guard_cli.audit", "enji_guard_cli.portfolio"]
+forbidden_modules = [
+    "enji_guard_cli.application",
+    "enji_guard_cli.audit",
+    "enji_guard_cli.portfolio",
+    "enji_guard_cli.auth_session",
+    "enji_guard_cli.enji_gateway",
+    "enji_guard_cli.transport",
+]
 allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "gateway-owns-wire-implementation"
+name = "Enji gateway exclusively owns its HTTP contract and wire implementation"
+type = "protected"
+protected_modules = [
+    "enji_guard_cli.enji_gateway.client",
+    "enji_guard_cli.enji_gateway.contract",
+    "enji_guard_cli.enji_gateway.http",
+    "enji_guard_cli.enji_gateway.wire",
+]
+allowed_importers = ["enji_guard_cli.enji_gateway"]
+
+[[tool.importlinter.contracts]]
+id = "auth-and-gateway-own-transport"
+name = "Only Auth Session and Enji gateway may directly use transport"
+type = "protected"
+protected_modules = ["enji_guard_cli.transport", "httpx"]
+allowed_importers = [
+    "enji_guard_cli.auth_session",
+    "enji_guard_cli.enji_gateway",
+    "enji_guard_cli.transport",
+]
 
 [[tool.importlinter.contracts]]
 id = "auth-session-stays-credential-focused"
