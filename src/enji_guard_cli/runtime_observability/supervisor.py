@@ -21,10 +21,9 @@ from enji_guard_cli.runtime_observability.readiness import (
     write_backend_readiness_state,
 )
 from enji_guard_cli.runtime_observability.telemetry import configure_logging, log_event
-from enji_guard_cli.settings import ReadinessSettings, default_settings
+from enji_guard_cli.settings import EnjiGuardSettings, ReadinessSettings, default_settings
 
 _LOGGER = logging.getLogger(__name__)
-MCP_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 McpTransport = Literal["stdio", "sse", "streamable-http"]
 
 
@@ -43,6 +42,7 @@ class RuntimeSupervisor:
     """Injectable supervisor facade used by service composition and tests."""
 
     runtime_auth: RuntimeAuthPort | None = None
+    settings: EnjiGuardSettings | None = None
 
     async def run_async(  # noqa: PLR0913
         self,
@@ -60,6 +60,7 @@ class RuntimeSupervisor:
             port=port,
             mount_path=mount_path,
             runtime_auth=self.runtime_auth,
+            settings=self.settings,
             mcp_server_factory=mcp_server_factory,
             mcp_server_runner=mcp_server_runner,
         )
@@ -72,6 +73,7 @@ async def run_service_async(  # noqa: PLR0913
     port: int,
     mount_path: str | None = None,
     runtime_auth: RuntimeAuthPort | None = None,
+    settings: EnjiGuardSettings | None = None,
     mcp_server_factory: McpServerFactory | None = None,
     mcp_server_runner: McpServerRunner | None = None,
 ) -> None:
@@ -83,11 +85,23 @@ async def run_service_async(  # noqa: PLR0913
         name="enji-guard-mcp-server",
     )
     refresh_task = runtime_auth.start_auto_refresh_task() if runtime_auth is not None else None
-    readiness_task = start_backend_readiness_task(observer=runtime_auth)
+    resolved_settings = settings if settings is not None else default_settings()
+    if settings is None:
+        # Keep the small test/delivery seam compatible with injected factories
+        # that predate the explicit settings port.
+        readiness_task = start_backend_readiness_task(observer=runtime_auth)
+    else:
+        readiness_task = start_backend_readiness_task(observer=runtime_auth, settings=resolved_settings)
     shutdown_event = asyncio.Event()
     installed_signals = _install_signal_handlers(shutdown_event)
     try:
-        await supervise_tasks(mcp_task, refresh_task, readiness_task, shutdown_event=shutdown_event)
+        await supervise_tasks(
+            mcp_task,
+            refresh_task,
+            readiness_task,
+            shutdown_event=shutdown_event,
+            shutdown_timeout_seconds=resolved_settings.service.mcp_graceful_shutdown_timeout_seconds,
+        )
     finally:
         _remove_signal_handlers(installed_signals)
 
@@ -99,10 +113,12 @@ def run_service(  # noqa: PLR0913
     port: int,
     mount_path: str | None = None,
     runtime_auth: RuntimeAuthPort | None = None,
+    settings: EnjiGuardSettings | None = None,
     mcp_server_factory: McpServerFactory | None = None,
     mcp_server_runner: McpServerRunner | None = None,
 ) -> None:
-    configure_logging(default_settings().telemetry, provenance="supervisor")
+    resolved_settings = settings if settings is not None else default_settings()
+    configure_logging(resolved_settings.telemetry, provenance="supervisor")
     asyncio.run(
         run_service_async(
             transport=transport,
@@ -110,6 +126,7 @@ def run_service(  # noqa: PLR0913
             port=port,
             mount_path=mount_path,
             runtime_auth=runtime_auth,
+            settings=resolved_settings,
             mcp_server_factory=mcp_server_factory,
             mcp_server_runner=mcp_server_runner,
         )
@@ -122,7 +139,13 @@ async def supervise_tasks(
     readiness_task: asyncio.Task[None] | None,
     *,
     shutdown_event: asyncio.Event | None = None,
+    shutdown_timeout_seconds: float | None = None,
 ) -> None:
+    resolved_shutdown_timeout = (
+        default_settings().service.mcp_graceful_shutdown_timeout_seconds
+        if shutdown_timeout_seconds is None
+        else shutdown_timeout_seconds
+    )
     tasks = {mcp_task}
     if refresh_task is not None:
         tasks.add(refresh_task)
@@ -149,7 +172,10 @@ async def supervise_tasks(
             task.result()
         if graceful_shutdown_requested:
             await _stop_sibling_tasks(tasks, shutdown_task=shutdown_task, mcp_task=mcp_task)
-            await _await_mcp_shutdown(mcp_task)
+            await _await_mcp_shutdown(
+                mcp_task,
+                timeout_seconds=resolved_shutdown_timeout,
+            )
     finally:
         await _cancel_tasks(tasks)
 
@@ -164,18 +190,18 @@ async def _stop_sibling_tasks(
     await _cancel_tasks(siblings)
 
 
-async def _await_mcp_shutdown(mcp_task: asyncio.Task[None]) -> None:
+async def _await_mcp_shutdown(mcp_task: asyncio.Task[None], *, timeout_seconds: float) -> None:
     if mcp_task.done():
         mcp_task.result()
         return
     try:
-        await asyncio.wait_for(asyncio.shield(mcp_task), timeout=MCP_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS)
+        await asyncio.wait_for(asyncio.shield(mcp_task), timeout=timeout_seconds)
     except TimeoutError:
         log_event(
             _LOGGER,
             logging.WARNING,
             "enji_guard_mcp_graceful_shutdown_timed_out",
-            {"timeout_seconds": MCP_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS},
+            {"timeout_seconds": timeout_seconds},
         )
         await _cancel_tasks({mcp_task})
 
@@ -203,16 +229,19 @@ def _remove_signal_handlers(signals: tuple[signal.Signals, ...]) -> None:
             loop.remove_signal_handler(signum)
 
 
-def start_backend_readiness_task(*, observer: BackendReadinessPort | None = None) -> asyncio.Task[None] | None:
-    settings = default_settings().readiness
-    if not settings.enabled:
+def start_backend_readiness_task(
+    *, observer: BackendReadinessPort | None = None, settings: EnjiGuardSettings | None = None
+) -> asyncio.Task[None] | None:
+    resolved_settings = settings if settings is not None else default_settings()
+    readiness_settings = resolved_settings.readiness
+    if not readiness_settings.enabled:
         return None
     initial_state = backend_readiness_starting_state(checked_at=datetime.now(UTC))
-    _write_state(settings, initial_state)
+    _write_state(readiness_settings, initial_state)
     if observer is None:
         return None
     return asyncio.create_task(
-        _backend_readiness_loop(settings=settings, initial_state=initial_state, observer=observer),
+        _backend_readiness_loop(settings=readiness_settings, initial_state=initial_state, observer=observer),
         name="enji-guard-backend-readiness",
     )
 

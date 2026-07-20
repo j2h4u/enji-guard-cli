@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -33,6 +33,9 @@ DEFAULT_TRANSPORT_RETRY_BACKOFF_FACTOR = 0.5
 DEFAULT_TRANSPORT_RETRY_MAX_DELAY_SECONDS = 30.0
 DEFAULT_TRANSPORT_RETRY_JITTER_SECONDS = 0.5
 DEFAULT_TRANSPORT_RETRYABLE_STATUS_CODES = (429, 500, 502, 503, 504)
+DEFAULT_TRANSPORT_MAX_CONNECTIONS = 20
+DEFAULT_TRANSPORT_MAX_KEEPALIVE_CONNECTIONS = 20
+DEFAULT_TRANSPORT_KEEPALIVE_EXPIRY_SECONDS = 5.0
 DEFAULT_LOG_LEVEL_NAME: LogLevelName = "INFO"
 DEFAULT_LOG_FORMAT: LogFormat = "json"
 DEFAULT_LOG_MAX_BYTES = 10_000_000
@@ -46,6 +49,7 @@ DEFAULT_MCP_TRANSPORT: McpTransportName = "streamable-http"
 DEFAULT_HTTP_HOST = "127.0.0.1"
 DEFAULT_HTTP_PORT = 8000
 DEFAULT_LOCAL_READINESS_TIMEOUT_SECONDS = 2.0
+DEFAULT_MCP_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 DEFAULT_BACKEND_READINESS_ENABLED = True
 DEFAULT_BACKEND_READINESS_INTERVAL_SECONDS = 300
 DEFAULT_BACKEND_READINESS_TIMEOUT_SECONDS = 5.0
@@ -92,9 +96,17 @@ class TransportRetrySettings:
 
 
 @dataclass(frozen=True, slots=True)
+class TransportPoolSettings:
+    max_connections: int = DEFAULT_TRANSPORT_MAX_CONNECTIONS
+    max_keepalive_connections: int = DEFAULT_TRANSPORT_MAX_KEEPALIVE_CONNECTIONS
+    keepalive_expiry_seconds: float = DEFAULT_TRANSPORT_KEEPALIVE_EXPIRY_SECONDS
+
+
+@dataclass(frozen=True, slots=True)
 class TransportSettings:
     timeout_seconds: float
     retry: TransportRetrySettings
+    pool: TransportPoolSettings = field(default_factory=TransportPoolSettings)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +121,7 @@ class TelemetrySettings:
 @dataclass(frozen=True, slots=True)
 class ServiceSettings:
     local_readiness_timeout_seconds: float
+    mcp_graceful_shutdown_timeout_seconds: float = DEFAULT_MCP_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +208,7 @@ def default_settings() -> EnjiGuardSettings:
                 retryable_status_codes=DEFAULT_TRANSPORT_RETRYABLE_STATUS_CODES,
                 respect_retry_after_header=True,
             ),
+            pool=TransportPoolSettings(),
         ),
         telemetry=TelemetrySettings(
             level_name=DEFAULT_LOG_LEVEL_NAME,
@@ -205,6 +219,7 @@ def default_settings() -> EnjiGuardSettings:
         ),
         service=ServiceSettings(
             local_readiness_timeout_seconds=DEFAULT_LOCAL_READINESS_TIMEOUT_SECONDS,
+            mcp_graceful_shutdown_timeout_seconds=DEFAULT_MCP_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
         ),
         readiness=ReadinessSettings(
             enabled=DEFAULT_BACKEND_READINESS_ENABLED,

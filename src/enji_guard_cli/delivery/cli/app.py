@@ -84,6 +84,16 @@ _state: dict[str, object] = {
 }
 
 
+def _close_cached_application() -> None:
+    cached = _state.get("application")
+    try:
+        if isinstance(cached, Application):
+            cached.close()
+    finally:
+        _state["application"] = None
+        _state["application_auth_file"] = None
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -91,12 +101,17 @@ def main(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
     auth_file: Annotated[Path | None, typer.Option("--auth-file", hidden=True)] = None,
 ) -> None:
+    _close_cached_application()
     _state["project"] = project
     _state["json"] = json_output
     _state["auth_file"] = auth_file
     _state["application"] = None
     _state["application_auth_file"] = None
     _state["operation"] = f"cli {ctx.invoked_subcommand or 'root'}"
+    # Click invokes registered close callbacks after command success or
+    # failure, including the long-running ``run`` command after its supervisor
+    # exits.  This keeps the pooled transport scoped to one CLI invocation.
+    ctx.call_on_close(_close_cached_application)
     # The callback is the single CLI process entrypoint.  Explicit settings
     # ensure the default persistent telemetry path is honored even in tests.
     if ctx.invoked_subcommand != "run":
@@ -728,6 +743,7 @@ def run(
         runtime_auth=application.runtime_auth_port(),
         mcp_server_factory=lambda host, port: create_mcp_server(host, port, queries=McpQueryFacade(application)),
         mcp_server_runner=run_mcp_server_async,
+        settings=default_settings(),
     )
 
 

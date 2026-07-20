@@ -13,8 +13,6 @@ from tenacity.wait import wait_base
 
 from enji_guard_cli.auth_session.store import StoredAuth
 
-AUTO_REFRESH_MAX_RETRY_SECONDS = 3600.0
-
 
 class AutoRefreshSettingsLike(Protocol):
     @property
@@ -81,10 +79,10 @@ class _AuthRefreshWait(wait_base):
         else:
             exponent = max(attempt_number - 1, 0)
             growth = float(self._settings.retry_initial_seconds) * (2.0**exponent)
-            cap = min(float(self._settings.retry_max_seconds), AUTO_REFRESH_MAX_RETRY_SECONDS)
+            cap = float(self._settings.retry_max_seconds)
             base = min(cap, growth)
         jitter = random.uniform(0.0, self._settings.retry_jitter_seconds)  # noqa: S311 - non-secret delay jitter
-        return min(base + jitter, AUTO_REFRESH_MAX_RETRY_SECONDS)
+        return min(base + jitter, float(self._settings.retry_max_seconds))
 
 
 class AuthSessionResilience:

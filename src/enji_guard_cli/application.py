@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import cast
+from typing import Protocol, cast
 
 from enji_guard_cli.audit import parse_catalog_result
 from enji_guard_cli.audit.artifacts import AuditArtifactUnavailableError, AuditSummary, summarize_artifacts
@@ -146,6 +146,12 @@ class AutofixWriteScope:
     all_projects: bool = False
 
 
+class ApplicationLifecyclePort(Protocol):
+    """Narrow lifecycle seam owned by application composition."""
+
+    def close(self) -> None: ...
+
+
 def _catalog_result_context() -> ContextVar[AuditCatalogResult | None]:
     return ContextVar("application_catalog_result", default=None)
 
@@ -162,10 +168,22 @@ class Application:
     target_service: PortfolioTargetService | None = None
     runtime_auth: RuntimeAuthPort | None = None
     fanout: BoundedFanout = field(default_factory=lambda: BoundedFanout(default_settings().fanout))
+    lifecycle: ApplicationLifecyclePort | None = None
     _catalog_result: ContextVar[AuditCatalogResult | None] = field(default_factory=_catalog_result_context, repr=False)
+    _closed: bool = field(default=False, init=False, repr=False)
+
+    def close(self) -> None:
+        """Release composition-owned resources; safe to call more than once."""
+        if self._closed:
+            return
+        self._closed = True
+        if self.lifecycle is not None:
+            self.lifecycle.close()
 
     def execute(self, action: Callable[[], object]) -> ApplicationResult:
         """Execute one delivery action and translate context failures."""
+        if self._closed:
+            raise RuntimeError("application is closed")
         self._catalog_result.set(None)
         try:
             payload = action()

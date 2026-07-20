@@ -255,5 +255,5 @@ def test_auto_refresh_backoff_grows_caps_and_auth_required_is_calmer(
         return wait(cast(auto_refresh_module.RetryCallState, state))
 
     assert [delay(attempt, RuntimeError()) for attempt in range(1, 5)] == [30, 60, 120, 240]
-    assert delay(20, RuntimeError()) == 3600
+    assert delay(20, RuntimeError()) == 10_000
     assert [delay(attempt, SimpleNamespace(code="AUTH_REQUIRED")) for attempt in range(1, 4)] == [900, 900, 900]

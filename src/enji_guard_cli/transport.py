@@ -117,12 +117,24 @@ class _RetryableResponseError(Exception):
         self.response = response
 
 
+def _new_async_client(limits: httpx.Limits | None) -> httpx.AsyncClient:
+    if limits is None:
+        return httpx.AsyncClient(follow_redirects=False)
+    return httpx.AsyncClient(follow_redirects=False, limits=limits)
+
+
 class HttpxEnjiHttpClient:
     """The sole real HTTP executor, including profile-aware Tenacity retries."""
 
-    def __init__(self, client: httpx.AsyncClient | None = None, *, retry_config: RetryConfig | None = None) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient | None = None,
+        *,
+        retry_config: RetryConfig | None = None,
+        limits: httpx.Limits | None = None,
+    ) -> None:
         self._owned_client = client is None
-        self._client = client if client is not None else httpx.AsyncClient(follow_redirects=False)
+        self._client = client if client is not None else _new_async_client(limits)
         self._retry_config = retry_config or RetryConfig()
 
     async def __aenter__(self) -> Self:

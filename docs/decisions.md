@@ -73,8 +73,9 @@ agents can orient quickly before making changes.
   HTTP retry profiles allow retries only for reads, safe probes, and idempotent
   mutations; unsafe mutations and auth refresh are not retried by transport.
   Transport delay is exponential with jitter and a 30-second cap. Supervisor
-  recovery retries indefinitely with exponential jitter, caps each delay at one
-  hour, and uses the configured re-auth interval for `AUTH_REQUIRED` failures.
+  recovery retries indefinitely with exponential jitter capped by the frozen
+  `auto_refresh.retry_max_seconds` setting, and uses the configured re-auth
+  interval for `AUTH_REQUIRED` failures.
   Credential-file changes wake the refresh scheduler and backend-readiness loop
   immediately instead of waiting for the next heartbeat. There is no manual
   operator-facing `auth refresh` command; `auth status`, readiness, and
@@ -117,3 +118,9 @@ agents can orient quickly before making changes.
 - **Source ownership policy**: current product layers are checked for imports
   of raw gateway implementations; the anti-corruption boundary remains the
   explicit owner of transport and wire translation.
+- **Shared transport lifecycle**: operator gateways share one pooled
+  `httpx.AsyncClient` owned by a dedicated event-loop thread. Synchronous
+  delivery calls bridge to that loop, and the application lifecycle closes the
+  pool idempotently after each CLI invocation. Pool limits and graceful MCP
+  shutdown timeout are frozen hierarchical settings rather than module-level
+  tuning constants.
