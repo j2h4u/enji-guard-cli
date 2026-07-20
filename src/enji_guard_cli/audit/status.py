@@ -1,6 +1,7 @@
 """Build typed Audit status from gateway projections."""
 
 from enji_guard_cli.audit.freshness import compare_heads
+from enji_guard_cli.audit.lifecycle import is_terminal_status
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.ports import (
     AuditItemStatus,
@@ -11,8 +12,6 @@ from enji_guard_cli.audit.ports import (
     AuditTaskLifecycle,
     AuditTaskLink,
 )
-
-TERMINAL_STATUSES = frozenset({"completed", "failed", "canceled", "cancelled", "skipped"})
 
 
 def build_status(
@@ -91,7 +90,7 @@ def _lifecycle(active_run: AuditRun | None, status: str | None) -> AuditTaskLife
     normalized = (status or "").strip().lower()
     if normalized == "failed" or (active_run is not None and normalized in {"error", "failure"}):
         return "failed"
-    if normalized in TERMINAL_STATUSES:
+    if is_terminal_status(normalized):
         return "completed"
     if active_run is None:
         return "none"

@@ -9,7 +9,12 @@ from enji_guard_cli.audit.ports import (
     AuditTaskBody,
     AuditWebsite,
 )
-from enji_guard_cli.audit.runs import AuditRunTaskContext, audit_run_task_body, skipped_audit_payload
+from enji_guard_cli.audit.runs import (
+    AuditRunTaskContext,
+    active_runs_for_action,
+    audit_run_task_body,
+    skipped_audit_payload,
+)
 from enji_guard_cli.audit.tasks import AuditTaskContext, task_for_repo
 from enji_guard_cli.enji_gateway.audit_gateway import _fleet_task_body
 
@@ -67,6 +72,24 @@ def test_skipped_audit_result_keeps_typed_runs_until_delivery_projection() -> No
     result = skipped_audit_payload("audit.security", "audit.security", (run,))
 
     assert result["active_runs"] == [run]
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        AuditRun("task-1", "audit.security", "completed", None, "started", None),
+        AuditRun("task-2", "audit.security", "running", None, "started", "completed"),
+    ],
+)
+def test_active_runs_for_action_ignores_terminal_upstream_history(run: AuditRun) -> None:
+    assert active_runs_for_action((run,), "audit.security") == ()
+
+
+def test_active_runs_for_action_keeps_current_matching_run() -> None:
+    current = AuditRun("task-1", "audit.security", "running", None, "started", None)
+    other = AuditRun("task-2", "audit.tests", "running", None, "started", None)
+
+    assert active_runs_for_action((current, other), "audit.security") == (current,)
 
 
 @pytest.mark.parametrize(

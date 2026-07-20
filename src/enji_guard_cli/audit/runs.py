@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit.lifecycle import is_active_run
 from enji_guard_cli.audit.ports import (
     AuditItemStatus,
     AuditProject,
@@ -229,7 +230,7 @@ def ordered_audit_results(
 
 
 def active_runs_for_action(active_runs: tuple[AuditRun, ...], action_key: str) -> tuple[AuditRun, ...]:
-    return tuple(run for run in active_runs if run.action_key == action_key)
+    return tuple(run for run in active_runs if run.action_key == action_key and is_active_run(run))
 
 
 def out_of_date(current: str | None, audited: str | None) -> bool | None:

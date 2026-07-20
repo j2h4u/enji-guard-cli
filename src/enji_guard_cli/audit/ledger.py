@@ -7,9 +7,8 @@ from pathlib import Path
 from typing import cast
 
 from enji_guard_cli.atomic_json import write_atomic_json
+from enji_guard_cli.audit.lifecycle import is_terminal_status
 from enji_guard_cli.audit.ports import AuditLedgerEntry, AuditLedgerPort, AuditRun, AuditTaskDetail
-
-TERMINAL_STATUSES = frozenset({"completed", "failed", "canceled", "cancelled", "skipped"})
 
 
 class FileAuditLedger(AuditLedgerPort):
@@ -40,7 +39,7 @@ class FileAuditLedger(AuditLedgerPort):
             if entry.repo_id == repo_id
             and (audit_key is None or entry.audit_key == audit_key)
             and not _expired(entry, point)
-            and not _terminal(entry.task_status)
+            and not is_terminal_status(entry.task_status)
         )
         self.prune(now=point)
         return entries
@@ -63,7 +62,7 @@ class FileAuditLedger(AuditLedgerPort):
             if entry.repo_id != repo_id:
                 retained.append(entry)
                 continue
-            if _expired(entry, point) or _terminal(entry.task_status):
+            if _expired(entry, point) or is_terminal_status(entry.task_status):
                 changed = True
                 continue
             if entry.audit_key in upstream_by_key:
@@ -92,7 +91,7 @@ class FileAuditLedger(AuditLedgerPort):
             entry
             for entry in entries
             if not _expired(entry, point)
-            and not _terminal(entry.task_status)
+            and not is_terminal_status(entry.task_status)
             and not _fresh_for(entry, current_head_sha, audited_head_shas)
         )
         removed = len(entries) - len(retained)
@@ -160,7 +159,7 @@ def _lookup(
         age = (now - entry.observed_at).total_seconds()
         return _project(entry, None) if age <= grace_seconds else None
     run = _project(entry, detail)
-    return run if run is not None and not _terminal(run.status) and run.completed_at is None else None
+    return run if run is not None and not is_terminal_status(run.status) and run.completed_at is None else None
 
 
 def _project(entry: AuditLedgerEntry, detail: AuditTaskDetail | None) -> AuditRun:
@@ -190,10 +189,6 @@ def _fresh_for(
 ) -> bool:
     audited = audited_head_shas.get(entry.audit_key) if audited_head_shas else entry.audited_head_sha
     return current_head_sha is not None and audited is not None and current_head_sha == audited
-
-
-def _terminal(status: str | None) -> bool:
-    return (status or "").strip().lower() in TERMINAL_STATUSES
 
 
 def _utc(value: datetime | None) -> datetime:
