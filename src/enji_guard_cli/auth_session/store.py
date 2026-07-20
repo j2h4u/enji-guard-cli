@@ -1,12 +1,12 @@
-import contextlib
 import json
-import tempfile
 from datetime import UTC, datetime
 from enum import StrEnum
 from os import O_RDONLY, close, fsync
 from os import open as os_open
 from pathlib import Path
 from typing import Literal, TypedDict, cast
+
+from enji_guard_cli.atomic_json import write_atomic_json
 
 
 class CredentialType(StrEnum):
@@ -53,32 +53,7 @@ def stored_auth(base_url: str, credential: Credential) -> StoredAuth:
 
 
 def write_auth_file(path: Path, payload: StoredAuth) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path.parent.chmod(0o700)
-    serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temp_file:
-            temp_path = Path(temp_file.name)
-            temp_file.write(serialized)
-            temp_file.flush()
-            fsync(temp_file.fileno())
-        temp_path.chmod(0o600)
-        temp_path.replace(path)
-        _fsync_directory(path.parent)
-    except OSError:
-        if temp_path is not None:
-            with contextlib.suppress(OSError):
-                temp_path.unlink()
-        raise
-    path.chmod(0o600)
+    write_atomic_json(path, payload, indent=2)
 
 
 def load_auth_file(path: Path) -> StoredAuth | None:
@@ -233,29 +208,4 @@ def _fsync_directory(path: Path) -> None:
 
 
 def _write_json_file(path: Path, payload: object) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path.parent.chmod(0o700)
-    serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temp_file:
-            temp_path = Path(temp_file.name)
-            temp_file.write(serialized)
-            temp_file.flush()
-            fsync(temp_file.fileno())
-        temp_path.chmod(0o600)
-        temp_path.replace(path)
-        _fsync_directory(path.parent)
-    except OSError:
-        if temp_path is not None:
-            with contextlib.suppress(OSError):
-                temp_path.unlink()
-        raise
-    path.chmod(0o600)
+    write_atomic_json(path, payload, indent=2)

@@ -32,3 +32,12 @@ def test_atomic_json_propagates_write_failure_and_removes_temporary_file(
 
     assert not destination.exists()
     assert list(destination.parent.iterdir()) == []
+
+
+def test_atomic_json_rejects_unserializable_payload_before_creating_files(tmp_path: Path) -> None:
+    destination = tmp_path / "state" / "value.json"
+
+    with pytest.raises(TypeError, match="not JSON serializable"):
+        atomic_json.write_atomic_json(destination, {"value": object()})
+
+    assert not destination.parent.exists()
