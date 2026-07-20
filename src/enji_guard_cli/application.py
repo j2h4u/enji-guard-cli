@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import cast
 
 from enji_guard_cli.audit import parse_catalog_result
-from enji_guard_cli.audit.artifacts import AuditArtifactUnavailableError
+from enji_guard_cli.audit.artifacts import AuditArtifactUnavailableError, AuditSummary, summarize_artifacts
 from enji_guard_cli.audit.autofixes import definitions as autofix_definitions
 from enji_guard_cli.audit.autofixes import select as select_autofixes
 from enji_guard_cli.audit.autofixes import set_one
@@ -78,6 +78,7 @@ from enji_guard_cli.portfolio.selectors import GatewayPortfolioTargetService, Ga
 from enji_guard_cli.portfolio.status import (
     PortfolioOverview,
     PortfolioStatus,
+    RepositoryStatus,
     assemble_overview,
     assemble_status,
     status_for_repo,
@@ -260,8 +261,23 @@ class Application:
         target = self._resolve_repository(repo, project)
         return build_preflight(self.audit_status(target.repo_id))
 
-    def audit_summary(self, repo: str, selectors: list[str] | None = None, *, project: str | None = None) -> object:
-        return self.audit_read(repo, selectors, project=project, all_audits=not bool(selectors))
+    def audit_summary(
+        self, repo: str, selectors: list[str] | None = None, *, project: str | None = None
+    ) -> AuditSummary:
+        target = self._resolve_repository(repo, project)
+        catalog = self.audit_catalog()
+        items = read_for_repo(
+            target.repo_id,
+            selectors or [],
+            all_audits=not bool(selectors),
+            dependencies=AuditWorkflowDependencies(
+                catalog=self.audit_gateway,
+                gateway=self.audit_gateway,
+                project=self._audit_project,
+                frozen_catalog=catalog,
+            ),
+        )
+        return summarize_artifacts(target.repo_id, items)
 
     def audit_wait(
         self,
@@ -340,7 +356,7 @@ class Application:
     def portfolio_overview(self, project: str | None = None, sort: RepositorySortName = "default") -> PortfolioOverview:
         return assemble_overview(gateway=self.portfolio_gateway, project=project, sort=sort)
 
-    def repository_status(self, repo: str, project: str | None = None) -> object:
+    def repository_status(self, repo: str, project: str | None = None) -> tuple[RepositoryStatus, ...]:
         catalog = self.audit_catalog()
         return status_for_repo(repo, project, gateway=self.portfolio_gateway, audits=_AuditStatusReader(self, catalog))
 

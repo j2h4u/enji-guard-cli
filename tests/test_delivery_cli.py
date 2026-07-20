@@ -13,13 +13,14 @@ from enji_guard_cli.application import (
     ApplicationResult,
     AutofixWriteScope,
 )
-from enji_guard_cli.audit.ports import AuditGatewayPort
+from enji_guard_cli.audit.artifacts import AuditSummary, AuditSummaryItem
+from enji_guard_cli.audit.ports import AuditFreshness, AuditGatewayPort, AuditStatus, AuditStatusItem
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.delivery.cli.app import _command_exit_code, _run, app
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.portfolio.models import ProjectRef, RepositoryRef
-from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
-from enji_guard_cli.portfolio.status import PortfolioOverview, ProjectOverview, RepositoryOverview
+from enji_guard_cli.portfolio.ports import PortfolioAuditStatus, PortfolioGatewayPort
+from enji_guard_cli.portfolio.status import PortfolioOverview, ProjectOverview, RepositoryOverview, RepositoryStatus
 
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
 
@@ -107,6 +108,10 @@ class _FakeApplication:
     def repository_status(self, repo: str, project: str | None) -> object:
         self.calls.append(("repository_status", (repo, project)))
         return {"repository": {"full_name": repo}}
+
+    def audit_summary(self, repo: str, selectors: list[str], *, project: str | None) -> object:
+        self.calls.append(("audit_summary", (repo, selectors, project)))
+        return AuditSummary(repo, ())
 
     def audit_start(self, repo: str, project: str | None, selectors: list[str], *, all_audits: bool) -> object:
         self.calls.append(("audit_start", (repo, project, selectors, all_audits)))
@@ -199,6 +204,51 @@ def test_portfolio_text_is_compact_and_scenario_oriented(monkeypatch: pytest.Mon
     assert "Pets" in result.stdout
     assert "acme/cat  weakest=40 overall=60.0 recon=ready active=0" in result.stdout
     assert '"projects"' not in result.stdout
+
+
+def test_repository_status_text_is_compact_and_does_not_dump_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    freshness = AuditFreshness("head", "head", "fresh")
+    item = AuditStatusItem("audit.security", "Security", freshness, True, "completed", "t1", "completed")
+    payload = (
+        RepositoryStatus(
+            RepositoryRef("r1", "p1", "Pets", "acme/cat"),
+            PortfolioAuditStatus(AuditStatus("r1", "head", (item,))),
+        ),
+    )
+    monkeypatch.setattr(fake, "repository_status", lambda repo, project: payload)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    result = CliRunner().invoke(app, ["status", "acme/cat"])
+
+    assert result.exit_code == 0
+    assert "audits: total=1 ready=1 active=0 stale=0 failed=0" in result.stdout
+    assert "security  state=ready freshness=fresh" in result.stdout
+    assert '"audit_key"' not in result.stdout
+
+
+def test_audit_summary_is_compact_in_text_and_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    payload = AuditSummary(
+        "r1",
+        (
+            AuditSummaryItem(
+                "audit.security", True, 73, "2026-07-20T00:00:00Z", None, AuditFreshness("h", "h", "fresh")
+            ),
+        ),
+    )
+    monkeypatch.setattr(fake, "audit_summary", lambda repo, selectors, project=None: payload)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    text_result = CliRunner().invoke(app, ["audit", "summary", "acme/cat"])
+    json_result = CliRunner().invoke(app, ["audit", "summary", "acme/cat", "--json"])
+
+    assert text_result.exit_code == 0
+    assert "security  score=73 freshness=fresh" in text_result.stdout
+    assert "body" not in text_result.stdout
+    assert json_result.exit_code == 0
+    assert '"score": 73' in json_result.stdout
+    assert '"body"' not in json_result.stdout
 
 
 def test_batch_write_options_are_forwarded_with_explicit_scope(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -3,6 +3,7 @@ from enji_guard_cli.audit.artifacts import (
     AuditArtifactUnavailableError,
     read_artifacts,
     select_artifacts,
+    summarize_artifacts,
 )
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.ports import AuditArtifact, AuditFreshness, AuditStatusItem
@@ -38,6 +39,24 @@ def test_read_artifacts_returns_ready_artifact_and_tolerated_missing() -> None:
     assert result == (
         ArtifactReadItem("audit.security", True, AuditArtifact("audit.security", "body"), None, _item().freshness),
     )
+
+
+def test_summary_discards_report_body_at_audit_boundary() -> None:
+    items = (
+        ArtifactReadItem(
+            "audit.security",
+            True,
+            AuditArtifact("audit.security", "very large report", 73, "2026-07-20T00:00:00Z"),
+            None,
+            _item().freshness,
+        ),
+    )
+
+    summary = summarize_artifacts("repo", items)
+
+    assert summary.repo_id == "repo"
+    assert summary.audits[0].score == 73
+    assert not hasattr(summary.audits[0], "body")
 
 
 def test_explicit_unreadable_selection_is_rejected() -> None:

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from enji_guard_cli.audit.errors import AuditNotFoundError
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
-from enji_guard_cli.audit.ports import AuditArtifact, AuditStatusItem
+from enji_guard_cli.audit.ports import AuditArtifact, AuditFreshness, AuditStatusItem
 
 
 class AuditArtifactUnavailableError(AuditNotFoundError, ValueError):
@@ -23,7 +23,44 @@ class ArtifactReadItem:
     available: bool
     artifact: AuditArtifact | None
     reason: str | None
-    freshness: object
+    freshness: AuditFreshness
+
+
+@dataclass(frozen=True, slots=True)
+class AuditSummaryItem:
+    """Compact audit metadata projection; report content intentionally excluded."""
+
+    audit_key: str
+    available: bool
+    score: int | float | None
+    generated_at: str | None
+    reason: str | None
+    freshness: AuditFreshness
+
+
+@dataclass(frozen=True, slots=True)
+class AuditSummary:
+    repo_id: str
+    audits: tuple[AuditSummaryItem, ...]
+
+
+def summarize_artifacts(repo_id: str, items: tuple[ArtifactReadItem, ...]) -> AuditSummary:
+    """Discard report bodies at the Audit boundary before delivery sees them."""
+
+    return AuditSummary(
+        repo_id,
+        tuple(
+            AuditSummaryItem(
+                audit_key=item.audit_key,
+                available=item.available,
+                score=item.artifact.score if item.artifact is not None else None,
+                generated_at=item.artifact.generated_at if item.artifact is not None else None,
+                reason=item.reason,
+                freshness=item.freshness,
+            )
+            for item in items
+        ),
+    )
 
 
 def select_artifacts(

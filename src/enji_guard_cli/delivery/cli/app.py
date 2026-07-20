@@ -25,9 +25,11 @@ from enji_guard_cli.application import (
     ApplicationCatalogChange,
     ApplicationCommandError,
     ApplicationResult,
+    AuditSummary,
     AutofixWriteScope,
     EmailPreferencesUpdate,
     PortfolioOverview,
+    RepositoryStatus,
 )
 from enji_guard_cli.composition import create_application
 from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
@@ -265,6 +267,42 @@ def _state_label(value: bool | None) -> str:
     return "unknown"
 
 
+def _emit_repository_status(payload: object) -> None:
+    statuses = cast(tuple[RepositoryStatus, ...], payload)
+    for index, status in enumerate(statuses):
+        if index:
+            typer.echo()
+        repository = status.repository
+        audits = status.audit.summary
+        typer.echo(f"repository: {repository.full_name or repository.repo_id}")
+        typer.echo(f"current_head: {audits.current_head_sha or '-'}")
+        typer.echo(
+            f"audits: total={len(audits.items)} ready={len(audits.readable)} "
+            f"active={len(audits.active)} stale={len(audits.stale)} failed={len(audits.failed)}"
+        )
+        for item in audits.items:
+            selector = item.audit_key.removeprefix("audit.")
+            state = (
+                item.task_lifecycle
+                if item.active or item.task_lifecycle == "failed"
+                else ("ready" if item.can_read else "missing")
+            )
+            typer.echo(f"  {selector}  state={state} freshness={item.freshness.state}")
+
+
+def _emit_audit_summary(payload: object) -> None:
+    summary = cast(AuditSummary, payload)
+    typer.echo(f"repository: {summary.repo_id}")
+    for item in summary.audits:
+        selector = item.audit_key.removeprefix("audit.")
+        if item.available:
+            score = "-" if item.score is None else f"{item.score:g}"
+            generated = item.generated_at or "-"
+            typer.echo(f"  {selector}  score={score} freshness={item.freshness.state} generated_at={generated}")
+        else:
+            typer.echo(f"  {selector}  unavailable={item.reason or 'unknown'} freshness={item.freshness.state}")
+
+
 def _with_catalog_changes(payload: object, changes: list[ApplicationCatalogChange]) -> object:
     rendered = [
         {
@@ -465,7 +503,11 @@ def repo_status(
     project: Annotated[str | None, typer.Option("--project")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    _run(lambda: _application().repository_status(repo, _selected_project(project)), _json_output(json_output))
+    _run(
+        lambda: _application().repository_status(repo, _selected_project(project)),
+        _json_output(json_output),
+        _emit_repository_status,
+    )
 
 
 @recon_app.command("start")
@@ -483,7 +525,11 @@ def recon_status(
     project: Annotated[str | None, typer.Option("--project")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    _run(lambda: _application().repository_status(repo, _selected_project(project)), _json_output(json_output))
+    _run(
+        lambda: _application().repository_status(repo, _selected_project(project)),
+        _json_output(json_output),
+        _emit_repository_status,
+    )
 
 
 def _audit_selectors(audits: list[str] | None) -> list[str]:
@@ -544,6 +590,7 @@ def audit_summary(
     _run(
         lambda: _application().audit_summary(repo, selected, project=_selected_project(project)),
         _json_output(json_output),
+        _emit_audit_summary,
     )
 
 
@@ -553,7 +600,11 @@ def audit_status(
     project: Annotated[str | None, typer.Option("--project")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    _run(lambda: _application().repository_status(repo, _selected_project(project)), _json_output(json_output))
+    _run(
+        lambda: _application().repository_status(repo, _selected_project(project)),
+        _json_output(json_output),
+        _emit_repository_status,
+    )
 
 
 @audit_app.command("wait")
@@ -649,7 +700,7 @@ def status(
         if repo is not None
         else (lambda: _application().portfolio_overview(_selected_project(project), _repository_sort(sort)))
     )
-    _run(action, _json_output(json_output), None if repo is not None else _emit_portfolio_overview)
+    _run(action, _json_output(json_output), _emit_repository_status if repo is not None else _emit_portfolio_overview)
 
 
 @app.command("wait")
