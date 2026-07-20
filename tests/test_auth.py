@@ -154,6 +154,24 @@ def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch
     assert slept_with == [60]
 
 
+def test_credential_change_wait_survives_timeout() -> None:
+    async def exercise() -> None:
+        async def wait_for_change() -> None:
+            await asyncio.Event().wait()
+
+        change_task = asyncio.create_task(wait_for_change())
+        try:
+            changed = await auto_refresh_module._wait_for_credential_change(change_task, 0, asyncio.sleep)
+
+            assert changed is False
+            assert not change_task.done()
+        finally:
+            change_task.cancel()
+            await asyncio.gather(change_task, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
 def test_merge_set_cookie_headers_updates_existing_cookie_without_keeping_attributes() -> None:
     updated = merge_set_cookie_headers(
         "access=old; refresh=long",

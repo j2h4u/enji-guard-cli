@@ -189,15 +189,17 @@ async def _wait_for_credential_change(
     sleep_fn: Callable[[float], Awaitable[None]],
 ) -> bool:
     sleep_task = asyncio.ensure_future(sleep_fn(timeout_seconds))
-    done, pending = await asyncio.wait({change_task, sleep_task}, return_when=asyncio.FIRST_COMPLETED)
-    for task in pending:
-        task.cancel()
-    await asyncio.gather(*pending, return_exceptions=True)
-    if change_task not in done:
-        sleep_task.result()
-        return False
-    change_task.result()
-    return True
+    try:
+        done, _pending = await asyncio.wait({change_task, sleep_task}, return_when=asyncio.FIRST_COMPLETED)
+        if change_task not in done:
+            sleep_task.result()
+            return False
+        change_task.result()
+        return True
+    finally:
+        if not sleep_task.done():
+            sleep_task.cancel()
+            await asyncio.gather(sleep_task, return_exceptions=True)
 
 
 def _is_resilience_retryable(exc: BaseException) -> bool:
