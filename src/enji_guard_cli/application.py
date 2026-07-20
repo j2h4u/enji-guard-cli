@@ -26,6 +26,7 @@ from enji_guard_cli.audit.email import set_for_targets as set_email_for_targets
 from enji_guard_cli.audit.errors import AuditMalformedError, AuditNotFoundError, AuditUpstreamError
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.ports import (
+    AuditAutofixDefinition,
     AuditAutofixJob,
     AuditAutofixUpdate,
     AuditCatalogResult,
@@ -33,6 +34,7 @@ from enji_guard_cli.audit.ports import (
     AuditLedgerPort,
     AuditRun,
     AuditRunResult,
+    AuditSchedule,
     AuditScheduleUpdate,
     AuditStatus,
     AuditWaitOptions,
@@ -117,6 +119,24 @@ class ApplicationCatalogChange:
 class ApplicationResult:
     payload: object
     catalog_changes: tuple[ApplicationCatalogChange, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleListing:
+    repository: RepositoryRef
+    schedules: tuple[AuditSchedule, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AutofixListingItem:
+    definition: AuditAutofixDefinition
+    job: AuditAutofixJob | None
+
+
+@dataclass(frozen=True, slots=True)
+class AutofixListing:
+    repository: RepositoryRef
+    items: tuple[AutofixListingItem, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -361,14 +381,16 @@ class Application:
         return status_for_repo(repo, project, gateway=self.portfolio_gateway, audits=_AuditStatusReader(self, catalog))
 
     # Schedules, autofixes, preferences --------------------------------
-    def list_schedules(self, repo: str | None = None, project: str | None = None) -> tuple[object, ...]:
+    def list_schedules(self, repo: str | None = None, project: str | None = None) -> tuple[ScheduleListing, ...]:
         catalog = self.audit_catalog()
+        targets = self._targets(repo, project)
         results = list_for_targets(
-            self._targets(repo, project),
+            targets,
             tuple(audit.action_key for audit in catalog.published_audits),
             self.audit_gateway,
         )
-        return tuple(schedule for result in results for schedule in result.schedules)
+        by_repo_id = {result.repo_id: result.schedules for result in results}
+        return tuple(ScheduleListing(target, by_repo_id[target.repo_id]) for target in targets)
 
     def set_schedules(  # noqa: PLR0913
         self,
@@ -398,13 +420,21 @@ class Application:
             self.audit_gateway,
         )
 
-    def list_autofixes(self, repo: str | None = None, project: str | None = None) -> tuple[object, ...]:
+    def list_autofixes(self, repo: str | None = None, project: str | None = None) -> tuple[AutofixListing, ...]:
         catalog = self.catalog()
         definitions = autofix_definitions(catalog)
-        return tuple(
-            (target, definitions, _normalize_autofix_jobs(self.audit_gateway.list_autofix_jobs(target.repo_id)))
-            for target in self._targets(repo, project)
-        )
+        result: list[AutofixListing] = []
+        for target in self._targets(repo, project):
+            jobs = _index_autofix_jobs(self.audit_gateway.list_autofix_jobs(target.repo_id))
+            items = tuple(
+                AutofixListingItem(
+                    definition,
+                    jobs.get(definition.action_key) or jobs.get(definition.kind or definition.selector),
+                )
+                for definition in definitions
+            )
+            result.append(AutofixListing(target, items))
+        return tuple(result)
 
     def set_autofixes(  # noqa: PLR0913
         self,
@@ -577,9 +607,12 @@ __all__ = [
     "ApplicationCatalogChange",
     "ApplicationCommandError",
     "ApplicationResult",
+    "AutofixListing",
+    "AutofixListingItem",
     "AutofixWriteScope",
     "EmailPreferencesUpdate",
     "PortfolioOverview",
+    "ScheduleListing",
 ]
 
 

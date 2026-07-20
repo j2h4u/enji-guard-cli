@@ -3,6 +3,7 @@ import pytest
 from enji_guard_cli.audit.autofixes import definitions, desired_job, select, set_one
 from enji_guard_cli.audit.ports import (
     AuditAutofixDefinition,
+    AuditAutofixJob,
     AuditAutofixUpdate,
     AuditCatalogAction,
     AuditCatalogAutofix,
@@ -72,4 +73,30 @@ def test_set_one_is_idempotent_and_skips_new_disable() -> None:
     assert existing is not None
     assert existing is not None
     result = set_one(definition, existing, AuditAutofixUpdate(True), lambda *_: pytest.fail("must not write"))
+    assert result.status == "unchanged"
+
+
+def test_set_one_treats_enji_short_action_key_as_same_job() -> None:
+    existing = AuditAutofixJob(
+        action_key="vuln-fix",
+        variant_key="default",
+        kind="vuln-fix",
+        enabled=True,
+        auto_fix=True,
+        autofix_variant_key="default",
+        frequency="workdays",
+        days_of_week=("mon", "tue", "wed", "thu", "fri"),
+        schedule_time="09:00",
+        schedule_time_source="auto",
+        timezone="UTC",
+        pentest_mode="off",
+    )
+
+    result = set_one(
+        _definition(),
+        existing,
+        AuditAutofixUpdate(True, "workdays", "UTC"),
+        lambda *_: pytest.fail("wire action-key alias must not trigger a write"),
+    )
+
     assert result.status == "unchanged"

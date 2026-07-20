@@ -11,10 +11,21 @@ from enji_guard_cli.application import (
     ApplicationAuthError,
     ApplicationCommandError,
     ApplicationResult,
+    AutofixListing,
+    AutofixListingItem,
     AutofixWriteScope,
+    ScheduleListing,
 )
 from enji_guard_cli.audit.artifacts import AuditSummary, AuditSummaryItem
-from enji_guard_cli.audit.ports import AuditFreshness, AuditGatewayPort, AuditStatus, AuditStatusItem
+from enji_guard_cli.audit.ports import (
+    AuditAutofixDefinition,
+    AuditAutofixJob,
+    AuditFreshness,
+    AuditGatewayPort,
+    AuditSchedule,
+    AuditStatus,
+    AuditStatusItem,
+)
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.delivery.cli.app import _command_exit_code, _run, app
 from enji_guard_cli.errors import EnjiApiError
@@ -121,6 +132,10 @@ class _FakeApplication:
         self.calls.append(("set_schedules", (repo, project, options)))
         return [{"state": "unchanged"}]
 
+    def list_schedules(self, repo: str | None, project: str | None) -> object:
+        self.calls.append(("list_schedules", (repo, project)))
+        return ()
+
     def set_email_preferences(self, repo: str | None, project: str | None, update: object, *, scope: object) -> object:
         self.calls.append(("set_email_preferences", (repo, project, update, scope)))
         return [{"state": "changed"}]
@@ -128,6 +143,10 @@ class _FakeApplication:
     def set_autofixes(self, *args: object, **options: object) -> object:
         self.calls.append(("set_autofixes", (*args, options)))
         return [{"state": "unchanged"}]
+
+    def list_autofixes(self, repo: str | None, project: str | None) -> object:
+        self.calls.append(("list_autofixes", (repo, project)))
+        return ()
 
 
 def test_audit_start_calls_typed_application_and_emits_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -249,6 +268,52 @@ def test_audit_summary_is_compact_in_text_and_json(monkeypatch: pytest.MonkeyPat
     assert json_result.exit_code == 0
     assert '"score": 73' in json_result.stdout
     assert '"body"' not in json_result.stdout
+
+
+def test_schedule_list_is_one_summary_line_per_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    repository = RepositoryRef("r1", "p1", "Pets", "acme/cat")
+    payload = (
+        ScheduleListing(
+            repository,
+            (
+                AuditSchedule("audit.security", True, "workdays", None, None, "09:00", "auto", "Asia/Almaty"),
+                AuditSchedule("audit.tests", False, "weekly", None, None, "10:00", "user", "UTC"),
+            ),
+        ),
+    )
+    monkeypatch.setattr(fake, "list_schedules", lambda repo, project: payload)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    text_result = CliRunner().invoke(app, ["schedule", "list"])
+    json_result = CliRunner().invoke(app, ["schedule", "list", "--json"])
+
+    assert text_result.exit_code == 0
+    assert text_result.stdout.strip() == (
+        "acme/cat  enabled=1/2 frequency=mixed timezone=mixed time=mixed disabled=tests"
+    )
+    assert json_result.exit_code == 0
+    assert '"repository"' in json_result.stdout
+    assert '"schedules"' in json_result.stdout
+
+
+def test_improvement_jobs_list_is_one_summary_line_per_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    repository = RepositoryRef("r1", "p1", "Pets", "acme/cat")
+    definition = AuditAutofixDefinition(
+        "improvement.test-writing", "default", "Tests", None, "audit.tests", "test-writing", True
+    )
+    job = AuditAutofixJob(
+        "improvement.test-writing", "default", "test-writing", True, True, frequency="workdays", timezone="UTC"
+    )
+    payload = (AutofixListing(repository, (AutofixListingItem(definition, job),)),)
+    monkeypatch.setattr(fake, "list_autofixes", lambda repo, project: payload)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    result = CliRunner().invoke(app, ["improvement-jobs", "list"])
+
+    assert result.exit_code == 0
+    assert result.stdout.strip() == ("acme/cat  enabled=1/1 configured=1/1 frequency=workdays timezone=UTC")
 
 
 def test_batch_write_options_are_forwarded_with_explicit_scope(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -131,11 +131,15 @@ def _definition(item: AuditCatalogAutofix, published_audits: set[str]) -> AuditA
 
 
 def _effective(job: AuditAutofixJob) -> tuple[object, ...]:
+    # Enji reads improvement jobs back with the short kind (for example,
+    # ``dependency-update``), while the catalog uses the namespaced action key
+    # (``improvement.dependency-update``).  The endpoint and variant already
+    # identify the job, so that wire-format alias is not part of its effective
+    # configuration.
     return (
         job.enabled,
         job.auto_fix,
         job.autofix_variant_key,
-        job.action_key,
         job.variant_key,
         job.frequency,
         job.days_of_week,

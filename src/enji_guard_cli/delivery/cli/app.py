@@ -26,10 +26,12 @@ from enji_guard_cli.application import (
     ApplicationCommandError,
     ApplicationResult,
     AuditSummary,
+    AutofixListing,
     AutofixWriteScope,
     EmailPreferencesUpdate,
     PortfolioOverview,
     RepositoryStatus,
+    ScheduleListing,
 )
 from enji_guard_cli.composition import create_application
 from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
@@ -301,6 +303,47 @@ def _emit_audit_summary(payload: object) -> None:
             typer.echo(f"  {selector}  score={score} freshness={item.freshness.state} generated_at={generated}")
         else:
             typer.echo(f"  {selector}  unavailable={item.reason or 'unknown'} freshness={item.freshness.state}")
+
+
+def _common_value(values: list[str]) -> str:
+    unique = set(values)
+    return next(iter(unique)) if len(unique) == 1 else "mixed"
+
+
+def _emit_schedule_list(payload: object) -> None:
+    listings = cast(tuple[ScheduleListing, ...], payload)
+    for listing in listings:
+        schedules = listing.schedules
+        enabled = [item for item in schedules if item.enabled is True]
+        disabled = [item.audit_key.removeprefix("audit.") for item in schedules if item.enabled is not True]
+        frequencies = [(item.cadence or "unset") for item in schedules]
+        timezones = [(item.timezone or "unset") for item in schedules]
+        time_sources = [(item.schedule_time_source or "unset") for item in schedules]
+        suffix = f" disabled={','.join(disabled)}" if disabled else ""
+        typer.echo(
+            f"{listing.repository.full_name or listing.repository.repo_id}  "
+            f"enabled={len(enabled)}/{len(schedules)} frequency={_common_value(frequencies)} "
+            f"timezone={_common_value(timezones)} time={_common_value(time_sources)}{suffix}"
+        )
+
+
+def _emit_autofix_list(payload: object) -> None:
+    listings = cast(tuple[AutofixListing, ...], payload)
+    for listing in listings:
+        supported = [item for item in listing.items if item.definition.supported]
+        configured = [item for item in supported if item.job is not None]
+        enabled = [item for item in supported if item.job is not None and item.job.enabled is True]
+        disabled = [item.definition.selector for item in supported if item.job is None or item.job.enabled is not True]
+        frequencies = [(item.job.frequency or "unset") for item in configured if item.job is not None]
+        timezones = [(item.job.timezone or "unset") for item in configured if item.job is not None]
+        frequency = _common_value(frequencies) if frequencies else "unset"
+        timezone = _common_value(timezones) if timezones else "unset"
+        suffix = f" disabled={','.join(disabled)}" if disabled else ""
+        typer.echo(
+            f"{listing.repository.full_name or listing.repository.repo_id}  "
+            f"enabled={len(enabled)}/{len(supported)} configured={len(configured)}/{len(supported)} "
+            f"frequency={frequency} timezone={timezone}{suffix}"
+        )
 
 
 def _with_catalog_changes(payload: object, changes: list[ApplicationCatalogChange]) -> object:
@@ -719,7 +762,11 @@ def schedule_list(
     project: Annotated[str | None, typer.Option("--project")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    _run(lambda: _application().list_schedules(repo, _selected_project(project)), _json_output(json_output))
+    _run(
+        lambda: _application().list_schedules(repo, _selected_project(project)),
+        _json_output(json_output),
+        _emit_schedule_list,
+    )
 
 
 @schedule_app.command("set")
@@ -786,7 +833,11 @@ def autofix_list(
     project: Annotated[str | None, typer.Option("--project")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    _run(lambda: _application().list_autofixes(repo, _selected_project(project)), _json_output(json_output))
+    _run(
+        lambda: _application().list_autofixes(repo, _selected_project(project)),
+        _json_output(json_output),
+        _emit_autofix_list,
+    )
 
 
 @autofix_app.command("set")
