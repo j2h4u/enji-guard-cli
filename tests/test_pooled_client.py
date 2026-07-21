@@ -116,9 +116,17 @@ def test_pooled_client_close_waits_for_inflight_request_and_is_idempotent(
     worker.start()
     assert executor.entered.wait(timeout=2)
 
+    close_waiting = threading.Event()
+    original_wait = cast(Callable[..., object], pooled_client_module.wait)
+
+    def instrumented_wait(*args: object, **kwargs: object) -> object:
+        close_waiting.set()
+        return original_wait(*args, **kwargs)
+
+    monkeypatch.setattr(pooled_client_module, "wait", instrumented_wait)
     closer = threading.Thread(target=client.close)
     closer.start()
-    time.sleep(0.05)
+    assert close_waiting.wait(timeout=2)
     assert closer.is_alive(), "close must wait for an in-flight owner-loop request"
 
     executor.owner_loop.call_soon_threadsafe(executor.release.set)
