@@ -308,6 +308,6 @@ dev = [
     "pytest-crap>=0.3.0",
     "pytest-xdist>=3.8.0",
     "radon>=6.0.1",
-    "ruff>=0.15.21",
+    "ruff>=0.15.22",
     "vulture>=2.16",
 ]
