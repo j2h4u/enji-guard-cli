@@ -199,6 +199,15 @@ after that PR is merged. Use `feat:` and `fix:` only for changes that should be
 visible in release notes; keep internal churn under `chore:`, `refactor:`,
 `test:`, `ci:`, or `docs:`.
 
+Commit-derived notes are sufficient for routine releases. A release that
+changes the user-facing CLI contract must instead carry curated conventional
+messages in the implementation PR's release-note override: name the new
+workflow, list every removed or renamed command under `BREAKING CHANGE:`, and
+include the replacement command. Release-please remains the only writer of
+`CHANGELOG.md`; review its generated release PR as the final user-facing
+artifact. See [CONTRIBUTING.md](CONTRIBUTING.md#release-notes) for the exact
+format and release checklist.
+
 Use the local release status check after merges and releases:
 
 ```bash
