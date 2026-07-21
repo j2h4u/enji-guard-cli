@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.0](https://github.com/j2h4u/enji-guard-cli/compare/v1.1.0...v2.0.0) (2026-07-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* repository selectors now require the provider-neutral form provider@host:path; legacy host:path selectors are no longer accepted.
+
+### Features
+
+* adopt provider-neutral repository identity ([#140](https://github.com/j2h4u/enji-guard-cli/issues/140)) ([72f88cf](https://github.com/j2h4u/enji-guard-cli/commit/72f88cfd400a7f9dcf26f3969a29f33903b37774))
+
+
+### Fixes
+
+* reconcile audit runs and pooled shutdown ([#138](https://github.com/j2h4u/enji-guard-cli/issues/138)) ([b5fa419](https://github.com/j2h4u/enji-guard-cli/commit/b5fa41999bb371fee77317f00e6807a86d7dd0b0))
+
 ## [1.1.0](https://github.com/j2h4u/enji-guard-cli/compare/v1.0.0...v1.1.0) (2026-07-21)
 
 
