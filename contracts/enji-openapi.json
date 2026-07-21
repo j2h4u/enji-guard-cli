@@ -1926,7 +1926,7 @@
         "parameters": [
           { "name": "credential_type", "in": "query", "required": true, "schema": { "type": "string", "const": "git" } },
           { "name": "provider", "in": "query", "required": true, "schema": { "type": "string", "const": "gitlab" } },
-          { "name": "scope_type", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "scope_type", "in": "query", "required": false, "schema": { "type": "string", "enum": ["personal", "project"] } },
           { "name": "scope_owner", "in": "query", "required": false, "schema": { "type": "string" } },
           { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1 } },
           { "name": "offset", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 0 } }
@@ -1943,7 +1943,7 @@
       "get": {
         "operationId": "listGitLabProjects",
         "summary": "Discover GitLab projects for a credential.",
-        "x-enji-observed": true,
+        "x-enji-observed": false,
         "parameters": [
           { "name": "credential_id", "in": "query", "required": true, "schema": { "type": "string" } },
           { "name": "host", "in": "query", "required": false, "schema": { "type": "string" } },
@@ -1951,7 +1951,7 @@
           { "name": "search", "in": "query", "required": false, "schema": { "type": "string" } },
           { "name": "page", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1 } },
           { "name": "per_page", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1 } },
-          { "name": "scope_type", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "scope_type", "in": "query", "required": false, "schema": { "type": "string", "enum": ["personal", "project"] } },
           { "name": "scope_owner", "in": "query", "required": false, "schema": { "type": "string" } }
         ],
         "responses": {
@@ -2367,7 +2367,7 @@
           "last_error": { "type": ["string", "null"] },
           "expires_at": { "type": ["string", "null"], "format": "date-time" },
           "metadata": {
-            "type": "object",
+            "type": ["object", "null"],
             "properties": {
               "git_host": { "type": ["string", "null"] },
               "api_base_url": { "type": ["string", "null"], "format": "uri" },
@@ -2399,12 +2399,12 @@
       },
       "GitLabProject": {
         "type": "object",
-        "required": ["path_with_namespace", "provider_project_id", "api_base_url"],
+        "required": ["path_with_namespace", "provider_project_id"],
         "properties": {
           "path_with_namespace": { "type": "string" },
           "provider_project_id": { "type": ["string", "integer"] },
           "web_url": { "type": ["string", "null"], "format": "uri" },
-          "api_base_url": { "type": "string", "format": "uri" }
+          "api_base_url": { "type": ["string", "null"], "format": "uri" }
         },
         "additionalProperties": false
       },

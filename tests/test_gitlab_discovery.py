@@ -1,13 +1,17 @@
+import json
 from pathlib import Path
 from typing import cast
 
 import pytest
 
 from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
+from enji_guard_cli.delivery.cli.app import _emit, _json
 from enji_guard_cli.enji_gateway import GitLabGateway
 from enji_guard_cli.enji_gateway import gitlab_gateway as gateway_module
 from enji_guard_cli.enji_gateway.http import gitlab_credentials, gitlab_projects
-from enji_guard_cli.json_types import JsonObjectPayload
+from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
+from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvider
+from enji_guard_cli.portfolio.selectors import parse_repository_selector
 from enji_guard_cli.transport import EnjiHttpClient, EnjiHttpRequest, EnjiHttpResponse
 
 AUTH_PORT = AuthSessionAdapter()
@@ -99,7 +103,7 @@ def test_gitlab_gateway_rejects_pagination_cycle_and_duplicate_projects(monkeypa
     ("payload", "message"),
     [
         ({"data": [], "meta": {"limit": 1, "offset": 0, "total": 0}}, "pagination"),
-        ({"data": [{"id": "x"}], "meta": {"limit": 50, "offset": 0, "total": 1}}, "metadata"),
+        ({"data": [{"id": "x"}], "meta": {"limit": 50, "offset": 0, "total": 1}}, "credential_type"),
         (
             {
                 "data": [_credential(metadata={"api_base_url": "https://user:pass@gitlab.example.com/api/v4"})],
@@ -180,3 +184,117 @@ def test_gitlab_http_endpoints_preserve_contract_queries() -> None:
     assert client.requests[1].url.endswith(
         "credential_id=cred-1&host=gitlab.example.com&api_base_url=https%3A%2F%2Fgitlab.example.com%2Fapi%2Fv4&search=service&page=2&per_page=25&scope_type=project&scope_owner=p"
     )
+
+
+def test_gitlab_credentials_accept_missing_or_null_metadata_with_defaults() -> None:
+    missing = _credential()
+    missing.pop("metadata")
+    null_metadata = _credential()
+    null_metadata["metadata"] = None
+    for payload in (missing, null_metadata):
+        result = gateway_module._parse_credentials(
+            {"data": [payload], "meta": {"limit": 50, "offset": 0, "total": 1}},
+            scope=gateway_module.GitLabScope(),
+            limit=50,
+            offset=0,
+        )
+        assert result.credentials[0].git_host == "gitlab.com"
+        assert result.credentials[0].api_base_url == "https://gitlab.com/api/v4"
+
+
+def test_gitlab_gateway_preserves_self_hosted_port_in_project_selector() -> None:
+    payload: JsonObjectPayload = {
+        "data": [_credential(metadata={"api_base_url": "https://gitlab.example.com:8443/api/v4"})],
+        "meta": {"limit": 50, "offset": 0, "total": 1},
+    }
+    credential = gateway_module._parse_credentials(
+        payload, scope=gateway_module.GitLabScope(), limit=50, offset=0
+    ).credentials[0]
+    projects, _ = gateway_module._parse_projects(_project(), credential=credential, seen_project_ids=set())
+    assert credential.git_host == "gitlab.example.com:8443"
+    assert projects[0].selector.matches(
+        RepositoryIdentity(RepositoryProvider.GITLAB, "team/service", "gitlab.example.com:8443")
+    )
+    assert parse_repository_selector("gitlab@gitlab.example.com:8443:team/service").matches(projects[0].selector)
+
+
+def test_gitlab_gateway_paginates_credentials_for_explicit_and_implicit_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_page: list[JsonValue] = [_credential(credential_id=f"cred-{index}") for index in range(50)]
+    second_page: list[JsonValue] = [_credential(credential_id="cred-51")]
+    calls: list[int] = []
+
+    def credentials(*args: object, **kwargs: object) -> JsonObjectPayload:
+        offset = cast(int, kwargs["offset"])
+        calls.append(offset)
+        return {
+            "data": first_page if offset == 0 else second_page,
+            "meta": {"limit": 50, "offset": offset, "total": 51},
+        }
+
+    monkeypatch.setattr(gateway_module.http, "gitlab_credentials", credentials)
+    monkeypatch.setattr(gateway_module.http, "gitlab_projects", lambda *args, **kwargs: _project())
+    result = _gateway().discover_projects(credential_id="cred-51")
+    assert result.credential.id == "cred-51"
+    assert calls == [0, 50]
+
+    calls.clear()
+    with pytest.raises(ValueError, match="ambiguous"):
+        _gateway().discover_projects()
+    assert calls == [0, 50]
+
+
+def test_gitlab_gateway_rejects_duplicate_credential_across_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    first_page: list[JsonValue] = [_credential(credential_id=f"cred-{index}") for index in range(50)]
+    duplicate_page: list[JsonValue] = [_credential(credential_id="cred-1")]
+
+    def credentials(*args: object, **kwargs: object) -> JsonObjectPayload:
+        offset = cast(int, kwargs["offset"])
+        return {
+            "data": first_page if offset == 0 else duplicate_page,
+            "meta": {"limit": 50, "offset": offset, "total": 51},
+        }
+
+    monkeypatch.setattr(gateway_module.http, "gitlab_credentials", credentials)
+    with pytest.raises(ValueError, match="duplicated"):
+        _gateway().discover_projects(credential_id="missing")
+
+
+def test_gitlab_http_endpoints_omit_empty_optional_query_values() -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.requests: list[EnjiHttpRequest] = []
+
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            self.requests.append(request)
+            return EnjiHttpResponse(200, {}, b'{"data":[],"meta":{}}')
+
+    client = Client()
+    gitlab_credentials(None, cast(EnjiHttpClient, client), scope_type="", scope_owner=" ", auth_port=AUTH_PORT)
+    gitlab_projects(
+        None,
+        cast(EnjiHttpClient, client),
+        credential_id="cred-1",
+        host="",
+        api_base_url="",
+        search="",
+        scope_type="",
+        scope_owner=" ",
+        auth_port=AUTH_PORT,
+    )
+    assert client.requests[0].url.endswith("credential_type=git&provider=gitlab&limit=50&offset=0")
+    assert client.requests[1].url.endswith("credential_id=cred-1&page=1&per_page=50")
+
+
+def test_gitlab_selector_is_pasteable_in_json_and_human_output(capsys: pytest.CaptureFixture[str]) -> None:
+    identity = RepositoryIdentity(RepositoryProvider.GITLAB, "team/service", "gitlab.example.com:8443")
+    selector = "gitlab@gitlab.example.com:8443:team/service"
+    assert cast(dict[str, object], _json({"selector": identity}))["selector"] == selector
+    _emit({"selector": identity}, True)
+    json_output: dict[str, object] = cast(dict[str, object], json.loads(capsys.readouterr().out))
+    _emit({"selector": identity}, False)
+    human_output = capsys.readouterr().out
+    assert json_output["selector"] == selector
+    assert selector in human_output
+    assert parse_repository_selector(selector).matches(identity)

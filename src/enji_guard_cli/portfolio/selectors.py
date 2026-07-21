@@ -12,6 +12,9 @@ from enji_guard_cli.portfolio.ports import PortfolioGatewayPort, SelectorResolve
 from enji_guard_cli.portfolio.scopes import MutationScope
 from enji_guard_cli.settings import default_settings
 
+_HOST_PORT_PARTS = 2
+_HOST_PORT_PARTS_WITH_LOCATOR = 3
+
 
 def project_matches(project: ProjectRef, selector: str) -> bool:
     return project.project_id.casefold() == selector.casefold() or (
@@ -157,7 +160,14 @@ def parse_repository_selector(value: str) -> RepositoryIdentity:
     if "@" not in raw or ":" not in raw:
         raise ValueError("repo must include provider and host, such as github@github.com:owner/name")
     prefix, remainder = raw.split("@", 1)
-    host, locator = remainder.split(":", 1)
+    parts = remainder.split(":", 2)
+    if len(parts) == _HOST_PORT_PARTS:
+        host, locator = parts
+    elif len(parts) == _HOST_PORT_PARTS_WITH_LOCATOR and parts[1].isdigit():
+        host = f"{parts[0]}:{parts[1]}"
+        locator = parts[2]
+    else:
+        host, locator = parts[0], ":".join(parts[1:])
     try:
         provider = RepositoryProvider(prefix.casefold())
     except ValueError as exc:

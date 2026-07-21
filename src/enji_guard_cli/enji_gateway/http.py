@@ -280,8 +280,9 @@ def gitlab_credentials(  # noqa: PLR0913
         ("limit", str(limit)),
         ("offset", str(offset)),
     ):
-        if value is not None:
-            query[key] = value  # noqa: PERF403
+        normalized = _optional_query_value(value)
+        if normalized is not None:
+            query[key] = normalized
     return run_api_request(
         auth_file,
         client,
@@ -316,14 +317,22 @@ def gitlab_projects(  # noqa: PLR0913
         ("scope_type", scope_type),
         ("scope_owner", scope_owner),
     ):
-        if value is not None:
-            query[key] = value  # noqa: PERF403
+        normalized = _optional_query_value(value)
+        if normalized is not None:
+            query[key] = normalized
     return run_api_request(
         auth_file,
         client,
         GITLAB_PROJECTS_ENDPOINT.request(query_params=query),
         auth_port=auth_port,
     )
+
+
+def _optional_query_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def project_detail(

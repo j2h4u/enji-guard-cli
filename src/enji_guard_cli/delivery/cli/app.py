@@ -96,6 +96,18 @@ def _version_callback(value: bool) -> None:
     raise typer.Exit
 
 
+def _repository_selector(value: object) -> str | None:
+    """Render a portfolio repository identity without importing the domain package."""
+    if type(value).__name__ != "RepositoryIdentity":
+        return None
+    provider = getattr(getattr(value, "provider", None), "value", None)
+    host = getattr(value, "host", None)
+    locator = getattr(value, "locator", None)
+    if not all(isinstance(part, str) for part in (provider, host, locator)):
+        return None
+    return f"{provider}@{host}:{locator}"
+
+
 def _close_cached_application() -> None:
     cached = _state.get("application")
     try:
@@ -198,6 +210,9 @@ def _json(value: object, *, preserve_mapping_nulls: bool = False) -> object:  # 
         return str(value)
     if isinstance(value, (datetime, date)):
         return value.isoformat()
+    selector = _repository_selector(value)
+    if selector is not None:
+        return selector
     if isinstance(value, Mapping):
         # Optional fields are absent rather than rendered as ``null`` inside
         # objects.  Keep semantic tri-state fields (and the unconfigured job
