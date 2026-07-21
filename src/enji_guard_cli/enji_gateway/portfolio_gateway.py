@@ -56,6 +56,7 @@ from enji_guard_cli.enji_gateway.http import (
 )
 from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayAuthPort, GatewayClient
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
+from enji_guard_cli.portfolio.errors import PortfolioMalformedError
 from enji_guard_cli.portfolio.models import (
     AccessInfo,
     AccessLimits,
@@ -64,6 +65,9 @@ from enji_guard_cli.portfolio.models import (
     PortfolioActiveRun,
     ProjectDetail,
     ProjectRef,
+    RepositoryIdentity,
+    RepositoryIdentitySource,
+    RepositoryProvider,
     RepositoryRef,
 )
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
@@ -125,11 +129,26 @@ class PortfolioGateway(PortfolioGatewayPort):
     def delete_project(self, project_id: str) -> None:
         _delete_project(project_id, self._auth_file, self._client, auth_port=self._auth_port)
 
-    def add_repository(self, project_id: str, owner: str, name: str) -> RepositoryRef:
-        payload = _add_project_repo(project_id, owner, name, self._auth_file, self._client, auth_port=self._auth_port)
+    def add_repository(
+        self, project_id: str, identity: RepositoryIdentity, repo_access_credential_id: str | None = None
+    ) -> RepositoryRef:
+        if identity.provider is RepositoryProvider.GITHUB and repo_access_credential_id is not None:
+            raise ValueError("repo access credential is only valid for GitLab repository adds")
+        if identity.provider is RepositoryProvider.GITLAB and repo_access_credential_id is None:
+            raise ValueError("GitLab repository add requires an explicit repo access credential id")
+        payload = _add_project_repo(
+            project_id,
+            identity.provider.value,
+            identity.locator,
+            host=identity.host,
+            repo_access_credential_id=repo_access_credential_id,
+            auth_file=self._auth_file,
+            client=self._client,
+            auth_port=self._auth_port,
+        )
         return _repository_ref(
             _object(payload.get("repo")) or _object(payload.get("repository")) or payload, ProjectRef(project_id, None)
-        ) or RepositoryRef("", project_id, None, f"{owner}/{name}")
+        )
 
     def remove_repository(self, project_id: str, repo_id: str) -> None:
         _delete_project_repo(project_id, repo_id, self._auth_file, self._client, auth_port=self._auth_port)
@@ -138,7 +157,7 @@ class PortfolioGateway(PortfolioGatewayPort):
         payload = _connect_project_repo(project_id, repo_id, self._auth_file, self._client, auth_port=self._auth_port)
         return _repository_ref(
             _object(payload.get("repo")) or _object(payload.get("repository")) or payload, ProjectRef(project_id, None)
-        ) or RepositoryRef(repo_id, project_id, None, None, connected=True)
+        )
 
     def preflight_repository_move(self, source_project_id: str, repo_id: str, target_project_id: str) -> MovePreflight:
         _preflight_repo_move(
@@ -156,7 +175,7 @@ class PortfolioGateway(PortfolioGatewayPort):
         return _repository_ref(
             _object(payload.get("repo")) or _object(payload.get("repository")) or payload,
             ProjectRef(target_project_id, None),
-        ) or RepositoryRef(repo_id, target_project_id, None, None)
+        )
 
     def get_preferences(self) -> AccountPreferences:
         payload = _user_preferences(self._auth_file, self._client, auth_port=self._auth_port)
@@ -203,22 +222,46 @@ def _project_ref(payload: JsonObjectPayload) -> ProjectRef | None:
     return ProjectRef(project_id=project_id, name=_optional_str(payload.get("name")))
 
 
-def _repository_ref(payload: JsonObjectPayload, project: ProjectRef) -> RepositoryRef | None:
+def _repository_ref(payload: JsonObjectPayload, project: ProjectRef) -> RepositoryRef:
     repo_id = _optional_str(payload.get("id")) or _optional_str(payload.get("repoId"))
     if repo_id is None:
-        return None
-    full_name = _optional_str(payload.get("fullName"))
-    if full_name is None:
-        owner = _optional_str(payload.get("githubOwner")) or _optional_str(payload.get("owner"))
-        name = _optional_str(payload.get("githubName")) or _optional_str(payload.get("name"))
-        full_name = f"{owner}/{name}" if owner and name else None
+        raise PortfolioMalformedError("repository response is missing repository id")
+    raw_provider = _optional_str(payload.get("provider"))
+    try:
+        provider = RepositoryProvider(raw_provider.casefold()) if raw_provider else None
+    except ValueError:
+        provider = None
+    locator = _optional_str(payload.get("repoPath"))
+    host = _optional_str(payload.get("host"))
+    provider_repo_id = _optional_str(payload.get("providerRepoId"))
+    identity_source = RepositoryIdentitySource.PROVIDER
+    web_url = _optional_str(payload.get("webUrl"))
+    # GitHub project details expose the provider-native path as separate
+    # owner/name fields.  Normalize those wire fields at this boundary so the
+    # Portfolio model never needs to know about them.  The live response does
+    # not populate providerRepoId; the Enji repository id is the only stable
+    # read identifier available there, so use it as the neutral id fallback.
+    if provider is RepositoryProvider.GITHUB:
+        owner = _optional_str(payload.get("githubOwner"))
+        name = _optional_str(payload.get("githubName"))
+        if owner is not None and name is not None:
+            locator = f"{owner}/{name}"
+        if provider_repo_id is None:
+            provider_repo_id = repo_id
+            identity_source = RepositoryIdentitySource.ENJI
+    if provider is None or host is None or locator is None or provider_repo_id is None or web_url is None:
+        raise PortfolioMalformedError("repository response is missing neutral provider identity fields")
     scores = payload.get("scores")
     score_map = scores if isinstance(scores, Mapping) else {}
+    try:
+        identity = RepositoryIdentity(provider, locator, host)
+    except ValueError as exc:
+        raise PortfolioMalformedError("repository response contains invalid neutral identity") from exc
     return RepositoryRef(
         repo_id=repo_id,
         project_id=_optional_str(payload.get("projectId")) or project.project_id,
         project_name=project.name,
-        full_name=full_name,
+        identity=identity,
         connected=_optional_bool(payload.get("connected")),
         recon_done=_optional_bool(payload.get("reconDone")),
         scores={
@@ -227,6 +270,9 @@ def _repository_ref(payload: JsonObjectPayload, project: ProjectRef) -> Reposito
             if isinstance(key, str)
             and ((isinstance(value, (int, float)) and not isinstance(value, bool)) or value is None)
         },
+        web_url=web_url,
+        provider_repo_id=provider_repo_id,
+        identity_source=identity_source,
     )
 
 

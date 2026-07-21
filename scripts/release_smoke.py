@@ -231,11 +231,21 @@ def _status_json_signature(value: object) -> tuple[str, str, dict[str, tuple[str
     if not isinstance(summary, Mapping) or not isinstance(summary.get("items"), list):
         raise SmokeFailure("JSON status omitted audit summary")
     audits = dict(_status_json_item(item) for item in summary["items"])
-    full_name = repository.get("full_name")
+    identity = repository.get("identity")
+    if not isinstance(identity, Mapping):
+        raise SmokeFailure("JSON status omitted neutral repository identity")
+    provider = identity.get("provider")
+    host = identity.get("host")
+    locator = identity.get("locator")
+    qualified = f"{provider}@{host}:{locator}"
     head = summary.get("current_head_sha")
-    if not isinstance(full_name, str) or not isinstance(head, str) or not audits:
+    if (
+        not all(isinstance(item, str) and item for item in (provider, host, locator))
+        or not isinstance(head, str)
+        or not audits
+    ):
         raise SmokeFailure("JSON status omitted repository, head, or audits")
-    return full_name, head, audits
+    return qualified, head, audits
 
 
 def _check_cli(settings: DockerSmokeSettings, runner: CommandRunner, reporter: Reporter) -> None:
@@ -458,7 +468,11 @@ def run_smoke(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", required=True, help="Repository owner/name used for read-only probes.")
+    parser.add_argument(
+        "--repo",
+        required=True,
+        help="Qualified repository selector provider@host:locator used for read-only probes.",
+    )
     parser.add_argument("--project", help="Exact project selector.")
     parser.add_argument("--container", default="enji-guard-cli")
     parser.add_argument("--mcp-url", default="http://127.0.0.1:8001/mcp")

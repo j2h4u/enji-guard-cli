@@ -57,6 +57,7 @@ from enji_guard_cli.transport import EnjiHttpClient, EnjiHttpError, EnjiJsonValu
 HTTP_OK = 200
 HTTP_CREATED = 201
 HTTP_NO_CONTENT = 204
+GITHUB_LOCATOR_PARTS = 2
 REPORTS_LIST_DEFAULT_SELECTOR = "*"
 REPORTS_LIST_DEFAULT_STALE = False
 REPORTS_LIST_DEFAULT_MIN_SEVERITY: str | None = None
@@ -146,9 +147,13 @@ class RepoTransferRequest(TypedDict):
     scheduleReplacements: NotRequired[dict[str, JsonValue]]
 
 
-class RepoAddRequest(TypedDict):
+class RepoAddRequest(TypedDict, total=False):
     githubOwner: str
     githubName: str
+    provider: str
+    host: str
+    repoPath: str
+    repoAccessCredentialId: str
 
 
 class RepoConnectionRequest(TypedDict):
@@ -463,14 +468,32 @@ def runbook(
 
 def add_project_repo(  # noqa: PLR0913
     project_id: str,
-    github_owner: str,
-    github_name: str,
+    provider: str,
+    locator: str,
+    auth_port: GatewayAuthPort,
+    *,
+    host: str | None = None,
+    repo_access_credential_id: str | None = None,
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
-    *,
-    auth_port: GatewayAuthPort,
 ) -> JsonObjectPayload:
-    request: RepoAddRequest = {"githubOwner": github_owner, "githubName": github_name}
+    request: RepoAddRequest
+    if provider == "github":
+        parts = locator.split("/")
+        if len(parts) != GITHUB_LOCATOR_PARTS:
+            raise ValueError("GitHub repository locator must be owner/name")
+        request = {"githubOwner": parts[0], "githubName": parts[1]}
+    elif provider == "gitlab":
+        if host is None or repo_access_credential_id is None:
+            raise ValueError("GitLab repository add requires host and repoAccessCredentialId")
+        request = {
+            "provider": provider,
+            "host": host,
+            "repoPath": locator,
+            "repoAccessCredentialId": repo_access_credential_id,
+        }
+    else:
+        raise ValueError(f"unsupported repository provider: {provider}")
     return run_api_request(
         auth_file,
         client,

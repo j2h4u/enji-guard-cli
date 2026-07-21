@@ -138,7 +138,7 @@ class _GatewayHarness:
             "project-1",
             "audit.security",
             AuditTaskBody(
-                "Run security", "description", "project-1", "single", {}, "runbook-1", "project-1", "org/repo"
+                "Run security", "description", "project-1", "single", {}, "runbook-1", "project-1", "github", "org/repo"
             ),
         )
 
@@ -396,7 +396,15 @@ def test_audit_gateway_resolves_external_schema_placeholder_at_wire_boundary(
         "project-1",
         "audit.recon",
         AuditTaskBody(
-            "Run recon", "schema={{reportSchemaName}}", "project-1", "single", {}, "runbook-1", "project-1", "org/repo"
+            "Run recon",
+            "schema={{reportSchemaName}}",
+            "project-1",
+            "single",
+            {},
+            "runbook-1",
+            "project-1",
+            "github",
+            "org/repo",
         ),
     )
 

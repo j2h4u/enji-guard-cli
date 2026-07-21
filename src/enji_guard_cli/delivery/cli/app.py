@@ -31,6 +31,7 @@ from enji_guard_cli.application import (
     AutofixWriteScope,
     EmailPreferencesUpdate,
     PortfolioOverview,
+    RepositoryRef,
     RepositoryStatus,
     ScheduleListing,
 )
@@ -294,7 +295,7 @@ def _emit_portfolio_overview(payload: object) -> None:
             overall = f"{sum(scores) / len(scores):.1f}" if scores else "-"
             active = sum(run.completed_at is None for run in item.active_runs)
             typer.echo(
-                f"  {repository.full_name or repository.repo_id}  "
+                f"  {_repository_label(repository)}  "
                 f"weakest={weakest} overall={overall} "
                 f"recon={_state_label(repository.recon_done)} active={active}"
             )
@@ -308,6 +309,10 @@ def _state_label(value: bool | None) -> str:
     return "unknown"
 
 
+def _repository_label(repository: RepositoryRef) -> str:
+    return f"{repository.identity.provider.value}@{repository.identity.host}:{repository.identity.locator}"
+
+
 def _emit_repository_status(payload: object) -> None:
     statuses = cast(tuple[RepositoryStatus, ...], payload)
     for index, status in enumerate(statuses):
@@ -315,7 +320,7 @@ def _emit_repository_status(payload: object) -> None:
             typer.echo()
         repository = status.repository
         audits = status.audit.summary
-        typer.echo(f"repository: {repository.full_name or repository.repo_id}")
+        typer.echo(f"repository: {_repository_label(repository)}")
         typer.echo(f"current_head: {audits.current_head_sha or '-'}")
         typer.echo(
             f"audits: total={len(audits.items)} ready={len(audits.readable)} "
@@ -438,10 +443,7 @@ def _emit_schedule_list(payload: object) -> None:
             fields.append(f"disabled={','.join(disabled)}")
         if window_days := _window_days_dimension(listing):
             fields.append(window_days)
-        typer.echo(
-            f"{listing.repository.full_name or listing.repository.repo_id}  "
-            + " ".join(field for field in fields if field)
-        )
+        typer.echo(f"{_repository_label(listing.repository)}  " + " ".join(field for field in fields if field))
 
 
 def _emit_autofix_list(payload: object) -> None:
@@ -464,10 +466,7 @@ def _emit_autofix_list(payload: object) -> None:
             fields.append(f"disabled={','.join(disabled)}")
         if unknown:
             fields.append(f"enabled_unknown={','.join(unknown)}")
-        typer.echo(
-            f"{listing.repository.full_name or listing.repository.repo_id}  "
-            + " ".join(field for field in fields if field)
-        )
+        typer.echo(f"{_repository_label(listing.repository)}  " + " ".join(field for field in fields if field))
 
 
 def _with_catalog_changes(payload: object, changes: list[ApplicationCatalogChange]) -> object:
@@ -637,9 +636,13 @@ def repo_resolve(
 def repo_add(
     repo: str,
     project: Annotated[str | None, typer.Option("--project")] = None,
+    repo_access_credential_id: Annotated[str | None, typer.Option("--repo-access-credential-id")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    _run(lambda: _application().add_repository(repo, _selected_project(project)), _json_output(json_output))
+    _run(
+        lambda: _application().add_repository(repo, _selected_project(project), repo_access_credential_id),
+        _json_output(json_output),
+    )
 
 
 @repo_app.command("remove")

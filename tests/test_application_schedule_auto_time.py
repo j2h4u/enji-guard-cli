@@ -6,7 +6,7 @@ from enji_guard_cli.application import Application
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.ports import AuditGatewayPort, AuditSchedule
 from enji_guard_cli.auth_session.service import AuthSessionService
-from enji_guard_cli.portfolio.models import RepositoryRef
+from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvider, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
 
 
@@ -37,7 +37,16 @@ def test_schedule_auto_time_skips_write_when_already_auto(
     monkeypatch.setattr(
         Application,
         "_write_targets",
-        lambda _self, _repo, _project, _scope: (RepositoryRef("repo-1", "project-1", "Pets", "acme/cat"),),
+        lambda _self, _repo, _project, _scope: (
+            RepositoryRef(
+                "repo-1",
+                "project-1",
+                "Pets",
+                RepositoryIdentity(RepositoryProvider.GITHUB, "acme/cat", "github.com"),
+                web_url="https://example.test/repository",
+                provider_repo_id="provider-test",
+            ),
+        ),
     )
     monkeypatch.setattr(
         Application,

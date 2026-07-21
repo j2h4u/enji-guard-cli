@@ -1,5 +1,7 @@
 """Explicit mutation scope parsing; no implicit batch writes are allowed."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Literal
 

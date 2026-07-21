@@ -166,7 +166,7 @@ PROJECT_REPOS_ADD_ENDPOINT_SPEC = EnjiEndpointSpec(
     operation_id="addProjectRepo",
     operation="repo add",
     retry_profile=RetryProfile.UNSAFE_MUTATION,
-    request_body_ref="#/components/requestBodies/GitHubRepoConnect",
+    request_body_ref="#/components/requestBodies/RepositoryConnect",
 )
 PROJECT_REPO_DELETE_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="DELETE",

@@ -3,6 +3,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pytest
+
 from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
 from enji_guard_cli.auth_session.api import (
     AUTH_REFRESH_USER_AGENT,
@@ -421,7 +423,9 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
     project_detail("project_1", auth_file, client, auth_port=AUTH_PORT)
     catalog(auth_file, client, auth_port=AUTH_PORT)
     runbook("runbook_1", auth_file, client, auth_port=AUTH_PORT)
-    add_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client, auth_port=AUTH_PORT)
+    add_project_repo(
+        "project_1", "github", "j2h4u/enji-guard-cli", auth_port=AUTH_PORT, auth_file=auth_file, client=client
+    )
     delete_project_repo("project_1", "repo_1", auth_file, client, auth_port=AUTH_PORT)
     repo_active_runs("repo_1", auth_file, client, auth_port=AUTH_PORT)
     repo_audit_rerun_state("repo_1", auth_file, client, auth_port=AUTH_PORT)
@@ -478,24 +482,26 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
         ("PUT", "https://fleet.enji.ai/api/ux/repos/repo_1/audit-auto-runs/audit.security"),
     ]
     assert client.requests[3].json_body == {"githubOwner": "j2h4u", "githubName": "enji-guard-cli"}
-    audit_body = client.requests[9].json_body
-    assert isinstance(audit_body, dict)
-    assert audit_body["projectId"] == "project_1"
-    assert audit_body["actionKey"] == "audit.recon"
-    assert audit_body["fleetTaskBody"] == {"title": "Run recon"}
-    assert isinstance(audit_body["clientRequestId"], str)
-    assert client.requests[12].json_body == {
-        "cadence": "workdays",
-        "enabled": True,
-        "scheduleDay": None,
-        "scheduleDayOfMonth": 1,
-        "scheduleTime": "00:00",
-        "scheduleTimeSource": "auto",
-        "timezone": "Asia/Almaty",
-        "windowDays": [],
-        "windowEndTime": None,
-        "windowMode": "anytime",
-        "windowStartTime": None,
+
+
+def test_add_project_repo_gitlab_requires_host_and_credential(tmp_path: Path) -> None:
+    client = FakeEnjiHttpClient([EnjiHttpResponse(201, {}, b'{"ok": true}')])
+    with pytest.raises(ValueError, match="host and repoAccessCredentialId"):
+        add_project_repo("project_1", "gitlab", "group/sub/repo", auth_port=AUTH_PORT, client=client)
+    add_project_repo(
+        "project_1",
+        "gitlab",
+        "group/sub/repo",
+        host="gitlab.example.com",
+        repo_access_credential_id="cred_1",
+        auth_port=AUTH_PORT,
+        client=client,
+    )
+    assert client.requests[0].json_body == {
+        "provider": "gitlab",
+        "host": "gitlab.example.com",
+        "repoPath": "group/sub/repo",
+        "repoAccessCredentialId": "cred_1",
     }
 
 

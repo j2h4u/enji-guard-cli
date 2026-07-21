@@ -323,7 +323,7 @@ def _audit_description_template(template: str | None) -> str | None:
         return None
     placeholders = {
         "recurringPrefix": "recurring_prefix",
-        "repoFullName": "repository_full_name",
+        "repoFullName": "repository_locator",
         "repoUrl": "repository_url",
         "linkedSites": "linked_websites",
         "artifactSchemaName": "artifact_schema_name",
@@ -454,7 +454,12 @@ def _fleet_task_body(action_key: str, task: AuditTaskBody) -> dict[str, JsonValu
         "scope_type": "project",
         "scope_owner": task.scope_owner,
         "origin_type": "manual",
-        "repo_access_contexts": [{"provider": "github", "repo_full_name": task.repository_full_name}],
+        "repo_access_contexts": [
+            {
+                "provider": task.repository_provider,
+                "repo_full_name": task.repository_locator,
+            }
+        ],
     }
 
 

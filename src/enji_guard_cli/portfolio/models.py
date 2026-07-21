@@ -6,6 +6,59 @@ Adapters translate wire responses before they enter this package.
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
+
+
+class RepositoryProvider(StrEnum):
+    GITHUB = "github"
+    GITLAB = "gitlab"
+
+
+class RepositoryIdentitySource(StrEnum):
+    """Namespace of the stable identifier carried by a repository reference."""
+
+    PROVIDER = "provider"
+    ENJI = "enji"
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryIdentity:
+    provider: RepositoryProvider
+    locator: str
+    host: str
+
+    def __post_init__(self) -> None:
+        host = self.host.strip().casefold().rstrip("/")
+        locator = self.locator.strip()
+        if not host or "/" in host or ":" in host:
+            raise ValueError("repository host must be a canonical hostname")
+        parts = locator.split("/")
+        minimum = 2
+        if (
+            not locator
+            or len(parts) < minimum
+            or locator.startswith("/")
+            or locator.endswith("/")
+            or any(not part for part in parts)
+        ):
+            raise ValueError("repository locator must be a non-empty provider-native path")
+        if self.provider is RepositoryProvider.GITHUB and len(parts) != minimum:
+            raise ValueError("GitHub repository locator must contain exactly owner/name")
+        object.__setattr__(self, "host", host)
+        object.__setattr__(self, "locator", locator)
+
+    @property
+    def canonical_locator(self) -> str:
+        """Provider-aware lookup key; GitHub names are case-insensitive."""
+        return self.locator.casefold() if self.provider is RepositoryProvider.GITHUB else self.locator
+
+    @property
+    def canonical_key(self) -> tuple[str, str, str]:
+        return self.provider.value, self.host, self.canonical_locator
+
+    def matches(self, other: object) -> bool:
+        """Compare the stable provider locator used for idempotent writes."""
+        return isinstance(other, RepositoryIdentity) and self.canonical_key == other.canonical_key
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,10 +72,19 @@ class RepositoryRef:
     repo_id: str
     project_id: str
     project_name: str | None
-    full_name: str | None
+    identity: RepositoryIdentity
+    web_url: str
+    provider_repo_id: str
     connected: bool | None = None
     recon_done: bool | None = None
     scores: Mapping[str, float | int | None] = field(default_factory=dict)
+    identity_source: RepositoryIdentitySource = RepositoryIdentitySource.PROVIDER
+
+    @property
+    def stable_identity_key(self) -> tuple[str, str, str, str]:
+        """Return an explicitly namespaced stable read identity key."""
+
+        return self.identity_source.value, self.identity.provider.value, self.identity.host, self.provider_repo_id
 
 
 @dataclass(frozen=True, slots=True)

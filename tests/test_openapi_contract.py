@@ -94,7 +94,9 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
     move_repo(RepoTransfer("project_1", "repo_1", "project_2"), auth_file, client, auth_port=AUTH_PORT)
     catalog(auth_file, client, auth_port=AUTH_PORT)
     runbook("runbook_1", auth_file, client, auth_port=AUTH_PORT)
-    add_project_repo("project_1", "j2h4u", "enji-guard-cli", auth_file, client, auth_port=AUTH_PORT)
+    add_project_repo(
+        "project_1", "github", "j2h4u/enji-guard-cli", auth_port=AUTH_PORT, auth_file=auth_file, client=client
+    )
     delete_project_repo("project_1", "repo_1", auth_file, client, auth_port=AUTH_PORT)
     connect_project_repo("project_1", "repo_1", auth_file, client, auth_port=AUTH_PORT)
     repo_active_runs("repo_1", auth_file, client, auth_port=AUTH_PORT)

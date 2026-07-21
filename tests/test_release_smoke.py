@@ -20,10 +20,10 @@ class FakeRunner:
             result = release_smoke.CommandResult(2, "", "sort must be one of: default, name\n")
         elif "--help" in call:
             result = release_smoke.CommandResult(0, "Usage: enji-guard\n", "")
-        elif call[-2:] == ["owner/repo", "--json"]:
+        elif call[-2:] == ["github@github.com:owner/repo", "--json"]:
             payload = [
                 {
-                    "repository": {"full_name": "owner/repo"},
+                    "repository": {"identity": {"provider": "github", "host": "github.com", "locator": "owner/repo"}},
                     "audit": {
                         "summary": {
                             "current_head_sha": "abc123",
@@ -42,10 +42,10 @@ class FakeRunner:
             result = release_smoke.CommandResult(0, json.dumps(payload), "")
         elif "--json" in call:
             result = release_smoke.CommandResult(0, json.dumps({"status": "ready"}), "")
-        elif call[-2:] == ["status", "owner/repo"]:
+        elif call[-2:] == ["status", "github@github.com:owner/repo"]:
             result = release_smoke.CommandResult(
                 0,
-                "repository: owner/repo\ncurrent_head: abc123\naudits: total=1 ready=1 active=0 stale=0 failed=0\n"
+                "repository: github@github.com:owner/repo\ncurrent_head: abc123\naudits: total=1 ready=1 active=0 stale=0 failed=0\n"
                 "  security  state=ready freshness=fresh\n",
                 "",
             )
@@ -103,7 +103,7 @@ def fake_mcp(
 def test_read_only_smoke_checks_docker_cli_and_exact_mcp_surface() -> None:
     runner = FakeRunner()
     mcp = RecordingMcp()
-    settings = release_smoke.DockerSmokeSettings(repo="owner/repo", project="Release")
+    settings = release_smoke.DockerSmokeSettings(repo="github@github.com:owner/repo", project="Release")
 
     assert release_smoke.run_smoke(settings, runner=runner, transport_factory=mcp) == 0
     assert any("inspect" in call for call in runner.calls)
@@ -128,20 +128,24 @@ def test_smoke_rejects_mcp_tool_drift() -> None:
 
     assert (
         release_smoke.run_smoke(
-            release_smoke.DockerSmokeSettings(repo="owner/repo"), runner=runner, transport_factory=drifted_mcp
+            release_smoke.DockerSmokeSettings(repo="github@github.com:owner/repo"),
+            runner=runner,
+            transport_factory=drifted_mcp,
         )
         == 1
     )
 
 
 def test_invalid_timeout_is_configuration_failure() -> None:
-    assert release_smoke.main(["--repo", "owner/repo", "--timeout", "0"]) == release_smoke.EXIT_CONFIG
+    assert release_smoke.main(["--repo", "github@github.com:owner/repo", "--timeout", "0"]) == release_smoke.EXIT_CONFIG
 
 
-@pytest.mark.parametrize("argv", [["--repo", "owner/repo"], ["--repo", "owner/repo", "--project", ""]])
+@pytest.mark.parametrize(
+    "argv", [["--repo", "github@github.com:owner/repo"], ["--repo", "github@github.com:owner/repo", "--project", ""]]
+)
 def test_parser_accepts_explicit_target(argv: list[str]) -> None:
     args = release_smoke.build_parser().parse_args(argv)
-    assert cast(str, args.repo) == "owner/repo"
+    assert cast(str, args.repo) == "github@github.com:owner/repo"
 
 
 @pytest.mark.parametrize("variant", ["error", "missing", "empty", "malformed"])
@@ -167,7 +171,7 @@ def test_authenticated_mcp_smoke_rejects_invalid_tool_result(variant: str) -> No
 
     assert (
         release_smoke.run_smoke(
-            release_smoke.DockerSmokeSettings(repo="owner/repo"),
+            release_smoke.DockerSmokeSettings(repo="github@github.com:owner/repo"),
             runner=runner,
             transport_factory=invalid_mcp,
         )
@@ -178,7 +182,7 @@ def test_authenticated_mcp_smoke_rejects_invalid_tool_result(variant: str) -> No
 def test_status_json_rejects_inconsistent_lifecycle_fields() -> None:
     payload = [
         {
-            "repository": {"full_name": "owner/repo"},
+            "repository": {"identity": {"provider": "github", "host": "github.com", "locator": "owner/repo"}},
             "audit": {
                 "summary": {
                     "current_head_sha": "abc123",
@@ -204,7 +208,7 @@ def test_status_parity_rejects_freshness_mismatch() -> None:
 
     def stale_json(args: Sequence[str], *, input: str | None = None, timeout: float) -> release_smoke.CommandResult:
         result = runner(args, input=input, timeout=timeout)
-        if list(args)[-2:] == ["owner/repo", "--json"]:
+        if list(args)[-2:] == ["github@github.com:owner/repo", "--json"]:
             payload = cast(list[object], json.loads(result.stdout))
             item = cast(dict[str, object], cast(dict[str, object], payload[0])["audit"])
             summary = cast(dict[str, object], item["summary"])
@@ -216,7 +220,7 @@ def test_status_parity_rejects_freshness_mismatch() -> None:
 
     assert (
         release_smoke.run_smoke(
-            release_smoke.DockerSmokeSettings(repo="owner/repo"),
+            release_smoke.DockerSmokeSettings(repo="github@github.com:owner/repo"),
             runner=stale_json,
             transport_factory=fake_mcp,
         )

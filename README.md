@@ -13,10 +13,12 @@ hardening work.
 
 ## Mental Model
 
-Enji Guard groups GitHub repositories into projects. Most workflows should use
-the GitHub `owner/name` repository selector; add `--project NAME_OR_ID` only
-when the account has ambiguous repositories or when a batch operation must be
-scoped to one project.
+Enji Guard groups repositories into projects. Repository identity is
+provider-neutral: selectors use `provider@host:locator` (for example,
+`github@github.com:j2h4u/enji-guard-cli` or
+`gitlab@gitlab.example:group/subgroup/service`). Add `--project NAME_OR_ID` when the
+account has ambiguous repositories or when a batch operation must be scoped to
+one project.
 
 An audit is the main unit of repository analysis in this CLI. It has a run
 lifecycle, freshness relative to the repository head, scores, and readable
@@ -127,13 +129,14 @@ not write to the persistent telemetry file unless they explicitly configure a
 temporary log path. Keep stdout/stderr for CLI results, progress, and errors
 only.
 
-When working on another repository, pass the repository as `OWNER/NAME`. If an
-agent is already in a GitHub checkout and wants to derive it from `origin`, it
-can do that in the host shell and still pass an explicit selector to the
-container:
+When working on another repository, pass the fully qualified provider-neutral
+selector `provider@host:locator`. GitLab locators preserve nested groups and
+require the host. If an agent is already in a GitHub checkout and wants to
+derive it from `origin`, it can do that in the host shell and still pass the
+qualified selector to the container:
 
 ```bash
-REPO=$(git config --get remote.origin.url | sed -E 's#^git@github.com:##; s#^https://github.com/##; s#\.git$##')
+REPO="github@github.com:$(git config --get remote.origin.url | sed -E 's#^git@github.com:##; s#^https://github.com/##; s#\.git$##')"
 
 docker exec -i enji-guard-cli enji-guard auth status
 docker exec -i enji-guard-cli enji-guard repo resolve "$REPO"
@@ -145,6 +148,15 @@ If the repository is absent from Enji:
 ```bash
 docker exec -i enji-guard-cli enji-guard repo add "$REPO"
 docker exec -i enji-guard-cli enji-guard status "$REPO"
+```
+
+For a GitLab repository, provide the host and Enji access-credential ID when
+adding it:
+
+```bash
+docker exec -i enji-guard-cli enji-guard repo add \
+  "gitlab@gitlab.example:group/subgroup/service" \
+  --repo-access-credential-id "$ENJI_GITLAB_CREDENTIAL_ID"
 ```
 
 `repo add` is idempotent project membership. If the repository is already
@@ -238,9 +250,9 @@ Before merging runtime-sensitive work, exercise the already running authenticate
 service through its public CLI and MCP surfaces:
 
 ```bash
-just release-smoke j2h4u/enji-guard-cli
-just release-smoke-recreate j2h4u/enji-guard-cli
-just release-smoke-soak j2h4u/enji-guard-cli 300 30 0
+just release-smoke github@github.com:j2h4u/enji-guard-cli
+just release-smoke-recreate github@github.com:j2h4u/enji-guard-cli
+just release-smoke-soak github@github.com:j2h4u/enji-guard-cli 300 30 0
 ```
 
 The first command is read-only. The recreate check proves that authentication
@@ -363,22 +375,23 @@ docker exec -i enji-guard-cli enji-guard project rename Pets Friends
 docker exec -i enji-guard-cli enji-guard project delete Pets
 docker exec -i enji-guard-cli enji-guard language show
 docker exec -i enji-guard-cli enji-guard language set ru
-docker exec -i enji-guard-cli enji-guard repo add j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard repo remove j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard repo resolve j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard repo move j2h4u/enji-guard-cli --to-project Friends
-docker exec -i enji-guard-cli enji-guard status j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard audit start j2h4u/enji-guard-cli --all
-docker exec -i enji-guard-cli enji-guard wait j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard audit summary j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard audit summary j2h4u/enji-guard-cli --json
-docker exec -i enji-guard-cli enji-guard audit read j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard audit read j2h4u/enji-guard-cli --json
+docker exec -i enji-guard-cli enji-guard repo add github@github.com:j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard repo add gitlab@gitlab.example:group/subgroup/service --repo-access-credential-id "$ENJI_GITLAB_CREDENTIAL_ID"
+docker exec -i enji-guard-cli enji-guard repo remove github@github.com:j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard repo resolve github@github.com:j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard repo move github@github.com:j2h4u/enji-guard-cli --to-project Friends
+docker exec -i enji-guard-cli enji-guard status github@github.com:j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard audit start github@github.com:j2h4u/enji-guard-cli --all
+docker exec -i enji-guard-cli enji-guard wait github@github.com:j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard audit summary github@github.com:j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard audit summary github@github.com:j2h4u/enji-guard-cli --json
+docker exec -i enji-guard-cli enji-guard audit read github@github.com:j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard audit read github@github.com:j2h4u/enji-guard-cli --json
 docker exec -i enji-guard-cli enji-guard --project Pets schedule list
 docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos --enabled on --frequency workdays --timezone Asia/Almaty
 docker exec -i enji-guard-cli enji-guard --project Pets schedule auto-time --all-repos
-docker exec -i enji-guard-cli enji-guard improvement-jobs list j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard improvement-jobs set j2h4u/enji-guard-cli security vuln-fix --enabled on
+docker exec -i enji-guard-cli enji-guard improvement-jobs list github@github.com:j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard improvement-jobs set github@github.com:j2h4u/enji-guard-cli security vuln-fix --enabled on
 docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --scheduled off
 ```
 
