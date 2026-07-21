@@ -159,6 +159,23 @@ docker exec -i enji-guard-cli enji-guard repo add \
   --repo-access-credential-id "$ENJI_GITLAB_CREDENTIAL_ID"
 ```
 
+To discover the credential and project metadata first, use the read-only
+GitLab group. Credential output contains status and endpoint metadata only;
+project output contains a copy-ready repository selector and never prints
+clone URLs or secrets:
+
+```bash
+docker exec -i enji-guard-cli enji-guard gitlab credentials \
+  --scope-type project --scope-owner "$ENJI_PROJECT_ID" --json
+docker exec -i enji-guard-cli enji-guard gitlab projects \
+  --credential-id "$ENJI_GITLAB_CREDENTIAL_ID" --search service --all-pages
+```
+
+Use `--page` and `--per-page` for one project page, or `--all-pages` to follow
+the server's `meta.next_page` cursor. Scope filters are always explicit; when
+more than one GitLab credential is visible, `gitlab projects` requires
+`--credential-id`.
+
 `repo add` is idempotent project membership. If the repository is already
 present, continue with the same flow. It starts recon when baseline diagnostics
 are not ready. Use `status` to watch progress before expecting audits or

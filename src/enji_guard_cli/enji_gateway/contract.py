@@ -42,6 +42,20 @@ ACCESS_ENDPOINT_SPEC = EnjiEndpointSpec(
     operation="access",
     retry_profile=RetryProfile.READ,
 )
+GIT_CREDENTIALS_ENDPOINT_SPEC = EnjiEndpointSpec(
+    method="GET",
+    path_template="/api/v1/credentials",
+    operation_id="listGitCredentials",
+    operation="gitlab credentials",
+    retry_profile=RetryProfile.READ,
+)
+GITLAB_PROJECTS_ENDPOINT_SPEC = EnjiEndpointSpec(
+    method="GET",
+    path_template="/api/v1/gitlab/projects",
+    operation_id="listGitLabProjects",
+    operation="gitlab projects",
+    retry_profile=RetryProfile.READ,
+)
 USER_PREFERENCES_GET_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="GET",
     path_template="/api/ux/user-preferences",
@@ -274,6 +288,8 @@ IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC = EnjiEndpointSpec(
 
 IMPLEMENTED_ENJI_ENDPOINTS = (
     ACCESS_ENDPOINT_SPEC,
+    GIT_CREDENTIALS_ENDPOINT_SPEC,
+    GITLAB_PROJECTS_ENDPOINT_SPEC,
     REPORTS_LIST_ENDPOINT_SPEC,
     PROJECTS_ENDPOINT_SPEC,
     PROJECT_DETAIL_ENDPOINT_SPEC,

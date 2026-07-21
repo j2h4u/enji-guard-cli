@@ -7,7 +7,7 @@ from enji_guard_cli.audit.catalog_observation import AuditCatalogObserver
 from enji_guard_cli.audit.ledger import FileAuditLedger
 from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
 from enji_guard_cli.auth_session.service import AuthSessionService
-from enji_guard_cli.enji_gateway import AuditGateway, PortfolioGateway
+from enji_guard_cli.enji_gateway import AuditGateway, GitLabGateway, PortfolioGateway
 from enji_guard_cli.enji_gateway.pooled_client import PooledEnjiHttpClient
 from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.mcp_facade import McpQueryFacade
@@ -33,6 +33,7 @@ def create_application(auth_file: Path | None = None) -> Application:
         return Application(
             audit_gateway=AuditGateway(auth_file, pooled_client, auth_port=auth_adapter),
             portfolio_gateway=portfolio_gateway,
+            gitlab_gateway=GitLabGateway(auth_file, pooled_client, auth_port=auth_adapter),
             auth=auth_service,
             ledger=ledger,
             catalog_observer=AuditCatalogObserver(settings.audit_catalog.state_file),

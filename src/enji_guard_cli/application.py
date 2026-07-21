@@ -56,6 +56,8 @@ from enji_guard_cli.auth_session.models import (
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.fanout import BoundedFanout
+from enji_guard_cli.gitlab.models import GitLabCredentialsResult, GitLabProjectsResult
+from enji_guard_cli.gitlab.ports import GitLabDiscoveryPort
 from enji_guard_cli.portfolio.errors import PortfolioMalformedError, PortfolioNotFoundError, PortfolioUpstreamError
 from enji_guard_cli.portfolio.models import (
     AccessInfo,
@@ -170,6 +172,7 @@ class Application:
     runtime_auth: RuntimeAuthPort | None = None
     fanout: BoundedFanout = field(default_factory=lambda: BoundedFanout(default_settings().fanout))
     lifecycle: ApplicationLifecyclePort | None = None
+    gitlab_gateway: GitLabDiscoveryPort | None = None
     _catalog_result: ContextVar[AuditCatalogResult | None] = field(default_factory=_catalog_result_context, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
 
@@ -348,6 +351,47 @@ class Application:
     # Portfolio --------------------------------------------------------
     def list_projects(self) -> tuple[ProjectRef, ...]:
         return self.portfolio_gateway.list_projects()
+
+    # GitLab discovery -------------------------------------------------
+    def gitlab_credentials(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_owner: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> GitLabCredentialsResult:
+        if self.gitlab_gateway is None:
+            raise RuntimeError("GitLab discovery is not configured")
+        return self.gitlab_gateway.list_credentials(
+            scope_type=scope_type,
+            scope_owner=scope_owner,
+            limit=limit,
+            offset=offset,
+        )
+
+    def gitlab_projects(  # noqa: PLR0913
+        self,
+        *,
+        credential_id: str | None = None,
+        search: str | None = None,
+        page: int = 1,
+        per_page: int = 50,
+        all_pages: bool = False,
+        scope_type: str | None = None,
+        scope_owner: str | None = None,
+    ) -> GitLabProjectsResult:
+        if self.gitlab_gateway is None:
+            raise RuntimeError("GitLab discovery is not configured")
+        return self.gitlab_gateway.discover_projects(
+            credential_id=credential_id,
+            search=search,
+            page=page,
+            per_page=per_page,
+            all_pages=all_pages,
+            scope_type=scope_type,
+            scope_owner=scope_owner,
+        )
 
     def create_project(self, name: str) -> OperationResult:
         return create_project_use_case(name, gateway=self.portfolio_gateway)

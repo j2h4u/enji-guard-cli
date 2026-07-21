@@ -62,6 +62,7 @@ schedule_app = typer.Typer(help="Manage automatic audit schedules.")
 autofix_app = typer.Typer(help="Manage curated improvement jobs.")
 email_app = typer.Typer(help="Manage audit completion email preferences.")
 language_app = typer.Typer(help="Manage the account-wide audit language.")
+gitlab_app = typer.Typer(help="Discover GitLab credentials and projects.")
 
 for group, name in (
     (auth_app, "auth"),
@@ -74,6 +75,7 @@ for group, name in (
     (autofix_app, "improvement-jobs"),
     (email_app, "email"),
     (language_app, "language"),
+    (gitlab_app, "gitlab"),
 ):
     app.add_typer(group, name=name)
 
@@ -151,6 +153,7 @@ for _group_name, _group in (
     ("improvement-jobs", autofix_app),
     ("email", email_app),
     ("language", language_app),
+    ("gitlab", gitlab_app),
 ):
     _group.callback()(_configure_group_operation(_group_name))
 
@@ -583,6 +586,51 @@ def auth_status(
 @project_app.command("list")
 def project_list(json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
     _run(lambda: _application().list_projects(), _json_output(json_output))
+
+
+@gitlab_app.command("credentials")
+def gitlab_credentials(
+    scope_type: Annotated[str | None, typer.Option("--scope-type")] = None,
+    scope_owner: Annotated[str | None, typer.Option("--scope-owner")] = None,
+    limit: Annotated[int, typer.Option("--limit", min=1)] = 50,
+    offset: Annotated[int, typer.Option("--offset", min=0)] = 0,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    _run(
+        lambda: _application().gitlab_credentials(
+            scope_type=scope_type,
+            scope_owner=scope_owner,
+            limit=limit,
+            offset=offset,
+        ),
+        _json_output(json_output),
+    )
+
+
+@gitlab_app.command("projects")
+def gitlab_projects(  # noqa: PLR0913
+    *,
+    credential_id: Annotated[str | None, typer.Option("--credential-id")] = None,
+    search: Annotated[str | None, typer.Option("--search")] = None,
+    page: Annotated[int, typer.Option("--page", min=1)] = 1,
+    per_page: Annotated[int, typer.Option("--per-page", min=1)] = 50,
+    all_pages: Annotated[bool, typer.Option("--all-pages", "--all")] = False,
+    scope_type: Annotated[str | None, typer.Option("--scope-type")] = None,
+    scope_owner: Annotated[str | None, typer.Option("--scope-owner")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    _run(
+        lambda: _application().gitlab_projects(
+            credential_id=credential_id,
+            search=search,
+            page=page,
+            per_page=per_page,
+            all_pages=all_pages,
+            scope_type=scope_type,
+            scope_owner=scope_owner,
+        ),
+        _json_output(json_output),
+    )
 
 
 @project_app.command("create")
