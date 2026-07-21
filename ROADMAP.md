@@ -29,7 +29,7 @@ surface.
 The product is working for its primary scope: Docker-first Enji Guard access
 through a validated CLI and a smaller read-only MCP surface. The supervisor
 owns MCP, automatic cookie refresh, and backend readiness. Current work is live
-operational hardening before merge and release.
+operational hardening for maintenance and future releases.
 
 ## Remaining
 
