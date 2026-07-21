@@ -485,6 +485,8 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
 
 
 def test_add_project_repo_gitlab_requires_host_and_credential(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_bearer_token("token-123", auth_file)
     client = FakeEnjiHttpClient([EnjiHttpResponse(201, {}, b'{"ok": true}')])
     with pytest.raises(ValueError, match="host and repoAccessCredentialId"):
         add_project_repo("project_1", "gitlab", "group/sub/repo", auth_port=AUTH_PORT, client=client)
@@ -494,6 +496,7 @@ def test_add_project_repo_gitlab_requires_host_and_credential(tmp_path: Path) ->
         "group/sub/repo",
         host="gitlab.example.com",
         repo_access_credential_id="cred_1",
+        auth_file=auth_file,
         auth_port=AUTH_PORT,
         client=client,
     )
