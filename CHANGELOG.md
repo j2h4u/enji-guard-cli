@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/j2h4u/enji-guard-cli/compare/v2.0.0...v2.1.0) (2026-07-21)
+
+
+### Features
+
+* add GitLab repository discovery ([#142](https://github.com/j2h4u/enji-guard-cli/issues/142)) ([d10dc33](https://github.com/j2h4u/enji-guard-cli/commit/d10dc334f071d377c3d9788bfe0fe1871ad10586))
+
 ## [2.0.0](https://github.com/j2h4u/enji-guard-cli/compare/v1.1.0...v2.0.0) (2026-07-21)
 
 
