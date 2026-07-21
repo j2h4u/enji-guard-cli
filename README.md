@@ -159,6 +159,23 @@ docker exec -i enji-guard-cli enji-guard repo add \
   --repo-access-credential-id "$ENJI_GITLAB_CREDENTIAL_ID"
 ```
 
+To discover the credential and project metadata first, use the read-only
+GitLab group. Credential output contains status and endpoint metadata only;
+project output contains a copy-ready repository selector and never prints
+clone URLs or secrets:
+
+```bash
+docker exec -i enji-guard-cli enji-guard gitlab credentials \
+  --scope-type project --scope-owner "$ENJI_PROJECT_ID" --json
+docker exec -i enji-guard-cli enji-guard gitlab projects \
+  --credential-id "$ENJI_GITLAB_CREDENTIAL_ID" --search service --all-pages
+```
+
+Use `--page` and `--per-page` for one project page, or `--all-pages` to follow
+the server's `meta.next_page` cursor. Scope filters are always explicit; when
+more than one GitLab credential is visible, `gitlab projects` requires
+`--credential-id`.
+
 `repo add` is idempotent project membership. If the repository is already
 present, continue with the same flow. It starts recon when baseline diagnostics
 are not ready. Use `status` to watch progress before expecting audits or
@@ -345,10 +362,15 @@ Useful telemetry events are written to
 `~/.config/enji-guard/logs/telemetry.jsonl`: `enji_http_retry`,
 `enji_auth_auto_refresh_scheduled`, `enji_auth_auto_refresh_retry`,
 `enji_auth_auto_refresh_succeeded`, `enji_auth_auto_refresh_schedule_failed`,
+`enji_auth_refresh_cookie_rejected`,
 `enji_auth_refresh_rotation_deferred`,
 `enji_auth_refresh_rotation_recovered`, and
 `enji_auth_refresh_rotation_superseded`. Records contain retry classification
 and timing fields; credentials are not an operator-facing log output.
+`enji_auth_refresh_cookie_rejected` means Enji rejected the refresh cookie with
+HTTP 401 or 403; its `classification` is `upstream_refresh_cookie_rejected`.
+The upstream response does not distinguish an expired cookie from a revoked
+one, so telemetry intentionally does not claim either diagnosis.
 
 After a real cookie re-authentication, refresh the session in the browser,
 request `/api/v1/auth/me`, and import the current `Cookie` request header using

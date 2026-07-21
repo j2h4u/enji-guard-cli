@@ -61,10 +61,13 @@ docker exec -i enji-guard-cli enji-guard health --ready
 
 Use the telemetry JSONL to inspect
 `enji_auth_auto_refresh_retry`, `enji_auth_auto_refresh_succeeded`,
+`enji_auth_refresh_cookie_rejected`,
 `enji_auth_refresh_rotation_deferred`,
 `enji_auth_refresh_rotation_recovered`, and
 `enji_auth_refresh_rotation_superseded`. These are validation signals, not a
 guarantee that the current Enji session is valid. If checks remain unhealthy,
+`enji_auth_refresh_cookie_rejected` identifies an upstream HTTP 401/403 response
+to the refresh-cookie request; it cannot distinguish expiry from revocation.
 verify uid `1000` ownership and write permissions for credential storage, then
 repeat the browser re-auth/import and validation sequence.
 

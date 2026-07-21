@@ -1917,6 +1917,50 @@
           }
         }
       }
+    },
+    "/api/v1/credentials": {
+      "get": {
+        "operationId": "listGitCredentials",
+        "summary": "List safe GitLab credential metadata.",
+        "x-enji-observed": true,
+        "parameters": [
+          { "name": "credential_type", "in": "query", "required": true, "schema": { "type": "string", "const": "git" } },
+          { "name": "provider", "in": "query", "required": true, "schema": { "type": "string", "const": "gitlab" } },
+          { "name": "scope_type", "in": "query", "required": false, "schema": { "type": "string", "enum": ["personal", "project"], "default": "personal" } },
+          { "name": "scope_owner", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1 } },
+          { "name": "offset", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 0 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credential metadata page.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GitLabCredentialsResponse" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/gitlab/projects": {
+      "get": {
+        "operationId": "listGitLabProjects",
+        "summary": "Discover GitLab projects for a credential.",
+        "x-enji-observed": false,
+        "parameters": [
+          { "name": "credential_id", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "host", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "api_base_url", "in": "query", "required": false, "schema": { "type": "string", "format": "uri" } },
+          { "name": "search", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "page", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1 } },
+          { "name": "per_page", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1 } },
+          { "name": "scope_type", "in": "query", "required": false, "schema": { "type": "string", "enum": ["personal", "project"], "default": "personal" } },
+          { "name": "scope_owner", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "GitLab project page.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GitLabProjectsResponse" } } }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2288,6 +2332,82 @@
       }
     },
     "schemas": {
+      "GitLabCredentialsResponse": {
+        "type": "object",
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/GitLabCredential" }
+          },
+          "meta": {
+            "type": "object",
+            "required": ["limit", "offset", "total"],
+            "properties": {
+              "limit": { "type": "integer", "minimum": 1 },
+              "offset": { "type": "integer", "minimum": 0 },
+              "total": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "GitLabCredential": {
+        "type": "object",
+        "required": ["id", "name", "credential_type", "provider", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "credential_type": { "type": "string", "const": "git" },
+          "provider": { "type": "string", "const": "gitlab" },
+          "scope_type": { "type": ["string", "null"] },
+          "scope_owner": { "type": ["string", "null"] },
+          "status": { "type": "string" },
+          "last_error": { "type": ["string", "null"] },
+          "expires_at": { "type": ["string", "null"], "format": "date-time" },
+          "metadata": {
+            "type": ["object", "null"],
+            "properties": {
+              "git_host": { "type": ["string", "null"] },
+              "api_base_url": { "type": ["string", "null"], "format": "uri" },
+              "gitlab_health_reason": { "type": ["string", "null"] }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "GitLabProjectsResponse": {
+        "type": "object",
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/GitLabProject" }
+          },
+          "meta": {
+            "type": "object",
+            "required": ["next_page"],
+            "properties": {
+              "next_page": { "type": ["integer", "null"], "minimum": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "GitLabProject": {
+        "type": "object",
+        "required": ["path_with_namespace", "provider_project_id"],
+        "properties": {
+          "path_with_namespace": { "type": "string" },
+          "provider_project_id": { "type": ["string", "integer"] },
+          "web_url": { "type": ["string", "null"], "format": "uri" },
+          "api_base_url": { "type": ["string", "null"], "format": "uri" }
+        },
+        "additionalProperties": false
+      },
       "ReportLanguage": {
         "type": "string",
         "enum": [

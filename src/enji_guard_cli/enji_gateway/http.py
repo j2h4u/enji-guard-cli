@@ -24,6 +24,8 @@ from enji_guard_cli.enji_gateway.contract import (
     CATALOG_ENDPOINT_SPEC,
     FLEET_PROJECT_CREATE_ENDPOINT_SPEC,
     FLEET_PROJECT_DELETE_ENDPOINT_SPEC,
+    GIT_CREDENTIALS_ENDPOINT_SPEC,
+    GITLAB_PROJECTS_ENDPOINT_SPEC,
     IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC,
     IMPROVEMENT_JOBS_ENDPOINT_SPEC,
     PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC,
@@ -256,6 +258,81 @@ def projects(
     auth_file: Path | None = None, client: EnjiHttpClient | None = None, *, auth_port: GatewayAuthPort
 ) -> JsonObjectPayload:
     return run_api_request(auth_file, client, PROJECTS_ENDPOINT.request(), auth_port=auth_port)
+
+
+def gitlab_credentials(  # noqa: PLR0913
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+    *,
+    scope_type: str | None = None,
+    scope_owner: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    auth_port: GatewayAuthPort,
+) -> JsonObjectPayload:
+    query: dict[str, str] = {
+        "credential_type": "git",
+        "provider": "gitlab",
+    }
+    for key, value in (
+        ("scope_type", scope_type),
+        ("scope_owner", scope_owner),
+        ("limit", str(limit)),
+        ("offset", str(offset)),
+    ):
+        normalized = _optional_query_value(value)
+        if normalized is not None:
+            query[key] = normalized
+    return run_api_request(
+        auth_file,
+        client,
+        GIT_CREDENTIALS_ENDPOINT.request(query_params=query),
+        auth_port=auth_port,
+    )
+
+
+def gitlab_projects(  # noqa: PLR0913
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+    *,
+    credential_id: str,
+    host: str | None = None,
+    api_base_url: str | None = None,
+    search: str | None = None,
+    page: int = 1,
+    per_page: int = 50,
+    scope_type: str | None = None,
+    scope_owner: str | None = None,
+    auth_port: GatewayAuthPort,
+) -> JsonObjectPayload:
+    query: dict[str, str] = {
+        "credential_id": credential_id,
+    }
+    for key, value in (
+        ("host", host),
+        ("api_base_url", api_base_url),
+        ("search", search),
+        ("page", str(page)),
+        ("per_page", str(per_page)),
+        ("scope_type", scope_type),
+        ("scope_owner", scope_owner),
+    ):
+        normalized = _optional_query_value(value)
+        if normalized is not None:
+            query[key] = normalized
+    return run_api_request(
+        auth_file,
+        client,
+        GITLAB_PROJECTS_ENDPOINT.request(query_params=query),
+        auth_port=auth_port,
+    )
+
+
+def _optional_query_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def project_detail(
@@ -859,6 +936,14 @@ REPORTS_LIST_ENDPOINT = ApiEndpoint(
 )
 PROJECTS_ENDPOINT = ApiEndpoint(
     spec=PROJECTS_ENDPOINT_SPEC,
+    parser=_parse_json_object_payload,
+)
+GIT_CREDENTIALS_ENDPOINT = ApiEndpoint(
+    spec=GIT_CREDENTIALS_ENDPOINT_SPEC,
+    parser=_parse_json_object_payload,
+)
+GITLAB_PROJECTS_ENDPOINT = ApiEndpoint(
+    spec=GITLAB_PROJECTS_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 PROJECT_DETAIL_ENDPOINT = ApiEndpoint(

@@ -321,6 +321,23 @@ Credential UI response usage is `id`, `name`, `credential_type`, `provider`,
 `path_with_namespace`, `provider_project_id`, `web_url`, `clone_http_url`,
 `clone_ssh_url`, and `api_base_url` in `star-button-BvtzxAJl.js`.
 
+The CLI now exposes the two read-only discovery operations without exposing
+credential secrets or clone URLs:
+
+- `GET /api/v1/credentials?credential_type=git&provider=gitlab` accepts the
+  optional `scope_type`, `scope_owner`, `limit`, and `offset` filters and
+  returns `{data,meta:{limit,offset,total}}`.
+- `GET /api/v1/gitlab/projects` accepts `credential_id`, optional credential
+  endpoint metadata (`host`, `api_base_url`), `search`, `page`, `per_page`, and
+  scope filters, returning `{data,meta:{next_page}}`.
+
+`gitlab credentials` and `gitlab projects` translate these envelopes through a
+narrow typed gateway. Projects resolve exactly one credential (or require an
+explicit `--credential-id`), validate the provider URLs, and can follow
+`next_page` sequentially with `--all-pages`; cycles and duplicate provider IDs
+are rejected. The resulting selector is `gitlab@host:path_with_namespace`,
+ready for `repo add`.
+
 ### Catalog, Triggers, Project, And Repository
 
 Catalog reads of `curatedActions` and `auditAutofixes` remain current.

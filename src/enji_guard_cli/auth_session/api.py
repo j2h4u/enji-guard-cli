@@ -519,6 +519,15 @@ async def _refresh_cookie_auth_unlocked(
         )
     )
     if response.status_code in {HTTP_UNAUTHORIZED, HTTP_FORBIDDEN}:
+        event_sink(
+            _LOGGER,
+            logging.WARNING,
+            "enji_auth_refresh_cookie_rejected",
+            {
+                "classification": "upstream_refresh_cookie_rejected",
+                "status_code": response.status_code,
+            },
+        )
         raise EnjiHttpError(
             "AUTH_REQUIRED", "stored refresh cookie is not authenticated", status_code=response.status_code
         )

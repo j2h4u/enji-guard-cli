@@ -7,6 +7,9 @@ Adapters translate wire responses before they enter this package.
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from urllib.parse import urlsplit
+
+_MAX_PORT = 65535
 
 
 class RepositoryProvider(StrEnum):
@@ -30,8 +33,23 @@ class RepositoryIdentity:
     def __post_init__(self) -> None:
         host = self.host.strip().casefold().rstrip("/")
         locator = self.locator.strip()
-        if not host or "/" in host or ":" in host:
+        if not host or "/" in host or "@" in host or "?" in host or "#" in host:
             raise ValueError("repository host must be a canonical hostname")
+        if ":" in host:
+            if self.provider is not RepositoryProvider.GITLAB:
+                raise ValueError("repository host must be a canonical hostname")
+            try:
+                parsed_host = urlsplit(f"https://{host}")
+                if (
+                    parsed_host.hostname is None
+                    or ":" in parsed_host.hostname
+                    or parsed_host.port is None
+                    or not 1 <= parsed_host.port <= _MAX_PORT
+                ):
+                    raise ValueError
+                host = f"{parsed_host.hostname.casefold()}:{parsed_host.port}"
+            except ValueError as exc:
+                raise ValueError("repository host must be a canonical hostname") from exc
         parts = locator.split("/")
         minimum = 2
         if (
