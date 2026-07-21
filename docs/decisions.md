@@ -66,7 +66,12 @@ agents can orient quickly before making changes.
   and status reads do not trust upstream active-run projections alone. They
   reconcile those projections with a durable local started-task ledger and
   `task-by-id` lookups so recently started audits are not duplicated while
-  upstream state is catching up.
+  upstream state is catching up. `task_id` is the identity boundary: every
+  unexpired id-bearing ledger entry is refreshed independently, same-task
+  upstream rows are suppressed after reconciliation, and terminal task
+  details remove the local guard. Status reduction uses one shared lifecycle
+  precedence (`failed`, `completed`, `running`, `queued`) and deterministic
+  newest projections when upstream returns duplicates.
 - **Temporary cookie auth with first-class API tokens**: cookie auth is a
   compatibility path. Bearer/API-token support is the preferred stable auth
   path and should remain first-class.

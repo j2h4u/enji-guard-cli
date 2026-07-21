@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from typing import Literal
 
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition
-from enji_guard_cli.audit.lifecycle import is_active_run
+from enji_guard_cli.audit.lifecycle import (
+    active_runs_for_action,
+    representative_projection,
+    task_lifecycle,
+)
 from enji_guard_cli.audit.ports import (
     AuditItemStatus,
     AuditProject,
@@ -142,9 +146,17 @@ def _start_one_audit[TCreateRequest](
     last_sha = state.rerun_state.audited_head_shas.get(action_key)
     matching = active_runs_for_action(state.active_runs, action_key)
     if matching:
-        task_id, task_status = _active_run_task(matching[0])
+        representative = representative_projection(matching)
+        task_id, task_status = _active_run_task(representative)
         run_state: Literal["queued", "already_running"] = (
-            "queued" if matching[0].started_at is None else "already_running"
+            "already_running"
+            if task_lifecycle(
+                representative.status,
+                started_at=representative.started_at,
+                completed_at=representative.completed_at,
+            )
+            == "running"
+            else "queued"
         )
         return _batch_result_item(action_key, action_key, run_state, (current_sha, last_sha), (task_id, task_status))
     if out_of_date(current_sha, last_sha) is False:
@@ -227,10 +239,6 @@ def ordered_audit_results(
     by_action = {result["action_key"]: result for result in started_results}
     by_action.update(linked_results)
     return [by_action[audit.action_key] for audit in audits]
-
-
-def active_runs_for_action(active_runs: tuple[AuditRun, ...], action_key: str) -> tuple[AuditRun, ...]:
-    return tuple(run for run in active_runs if run.action_key == action_key and is_active_run(run))
 
 
 def out_of_date(current: str | None, audited: str | None) -> bool | None:

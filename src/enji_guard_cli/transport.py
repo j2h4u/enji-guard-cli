@@ -106,9 +106,14 @@ class EnjiRateLimitError(EnjiHttpError):
         )
 
 
-class EnjiResponseDecodeError(EnjiHttpError):
+class EnjiMalformedResponseError(EnjiHttpError):
+    def __init__(self, operation: str, detail: str) -> None:
+        super().__init__("UPSTREAM", f"{operation} returned {detail}")
+
+
+class EnjiResponseDecodeError(EnjiMalformedResponseError):
     def __init__(self, operation: str) -> None:
-        super().__init__("UPSTREAM", f"{operation} returned invalid JSON")
+        super().__init__(operation, "invalid JSON")
 
 
 class _RetryableResponseError(Exception):

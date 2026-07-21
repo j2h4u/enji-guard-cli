@@ -17,6 +17,7 @@ from enji_guard_cli.transport import (
     EnjiHttpRequest,
     EnjiHttpResponse,
     EnjiJsonValue,
+    EnjiMalformedResponseError,
     HttpxEnjiHttpClient,
     raise_for_response_status,
 )
@@ -142,7 +143,12 @@ async def run_api_request_async[T](
         async with HttpxEnjiHttpClient() as owned_client:
             return await request_parsed_json_object(session, owned_client, spec)
     except EnjiHttpError as exc:
-        raise EnjiApiError(exc.code, exc.message) from exc
+        raise EnjiApiError(
+            exc.code,
+            exc.message,
+            status_code=exc.status_code,
+            response_malformed=isinstance(exc, EnjiMalformedResponseError),
+        ) from exc
 
 
 def run_api_no_content(
@@ -170,7 +176,12 @@ async def run_api_no_content_async(
         async with HttpxEnjiHttpClient() as owned_client:
             return await request_no_content(session, owned_client, spec)
     except EnjiHttpError as exc:
-        raise EnjiApiError(exc.code, exc.message) from exc
+        raise EnjiApiError(
+            exc.code,
+            exc.message,
+            status_code=exc.status_code,
+            response_malformed=isinstance(exc, EnjiMalformedResponseError),
+        ) from exc
 
 
 async def request_parsed_json_object[T](
@@ -203,7 +214,7 @@ async def request_no_content(
         return {}
     payload = response.json(operation=spec.operation)
     if not isinstance(payload, dict):
-        raise EnjiHttpError("UPSTREAM", f"{spec.operation} returned unexpected JSON")
+        raise EnjiMalformedResponseError(spec.operation, "unexpected JSON")
     return normalize_json_object(payload)
 
 
@@ -247,7 +258,7 @@ async def request_json_object[T](
     raise_for_api_response_status(response, operation=spec.operation, expected_statuses=spec.expected_statuses)
     payload = response.json(operation=spec.operation)
     if not isinstance(payload, dict):
-        raise EnjiHttpError("UPSTREAM", f"{spec.operation} returned unexpected JSON")
+        raise EnjiMalformedResponseError(spec.operation, "unexpected JSON")
     return cast(dict[str, object], payload)
 
 
