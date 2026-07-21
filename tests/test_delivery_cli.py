@@ -1,6 +1,6 @@
 import importlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import cast
 
 import pytest
@@ -32,9 +32,22 @@ from enji_guard_cli.audit.ports import (
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.delivery.cli.app import _command_exit_code, _json, _run, app
 from enji_guard_cli.errors import EnjiApiError
-from enji_guard_cli.portfolio.models import ProjectRef, RepositoryRef
+from enji_guard_cli.portfolio.models import ProjectRef, RepositoryIdentity, RepositoryProvider, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioAuditStatus, PortfolioGatewayPort
 from enji_guard_cli.portfolio.status import PortfolioOverview, ProjectOverview, RepositoryOverview, RepositoryStatus
+
+
+def _repo(locator: str, *, scores: Mapping[str, float | int | None] | None = None) -> RepositoryRef:
+    return RepositoryRef(
+        "r1",
+        "p1",
+        "Pets",
+        RepositoryIdentity(RepositoryProvider.GITHUB, locator, "github.com"),
+        scores=scores or {},
+        web_url="https://example.test/repository",
+        provider_repo_id="provider-test",
+    )
+
 
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
 
@@ -127,7 +140,13 @@ class _FakeApplication:
 
     def repository_status(self, repo: str, project: str | None) -> object:
         self.calls.append(("repository_status", (repo, project)))
-        return {"repository": {"full_name": repo}}
+        return {
+            "repository": {
+                "identity": {"provider": "github", "host": "github.com", "locator": repo},
+                "web_url": f"https://github.com/{repo}",
+                "provider_repo_id": "provider-1",
+            }
+        }
 
     def audit_summary(self, repo: str, selectors: list[str], *, project: str | None) -> object:
         self.calls.append(("audit_summary", (repo, selectors, project)))
@@ -202,10 +221,10 @@ def test_status_for_one_repository_keeps_detailed_status(monkeypatch: pytest.Mon
     fake = _FakeApplication()
     monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
 
-    result = CliRunner().invoke(app, ["--project", "Pets", "status", "acme/cat", "--json"])
+    result = CliRunner().invoke(app, ["--project", "Pets", "status", "github@github.com:acme/cat", "--json"])
 
     assert result.exit_code == 0
-    assert fake.calls == [("repository_status", ("acme/cat", "Pets"))]
+    assert fake.calls == [("repository_status", ("github@github.com:acme/cat", "Pets"))]
 
 
 def test_portfolio_text_is_compact_and_scenario_oriented(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -218,7 +237,14 @@ def test_portfolio_text_is_compact_and_scenario_oriented(monkeypatch: pytest.Mon
                 (
                     RepositoryOverview(
                         RepositoryRef(
-                            "r1", "p1", "Pets", "acme/cat", recon_done=True, scores={"tests": 80, "vulns": 40}
+                            "r1",
+                            "p1",
+                            "Pets",
+                            RepositoryIdentity(RepositoryProvider.GITHUB, "acme/cat", "github.com"),
+                            recon_done=True,
+                            scores={"tests": 80, "vulns": 40},
+                            web_url="https://example.test/repository",
+                            provider_repo_id="provider-test",
                         )
                     ),
                 ),
@@ -232,7 +258,7 @@ def test_portfolio_text_is_compact_and_scenario_oriented(monkeypatch: pytest.Mon
 
     assert result.exit_code == 0
     assert "Pets" in result.stdout
-    assert "acme/cat  weakest=40 overall=60.0 recon=ready active=0" in result.stdout
+    assert "github@github.com:acme/cat  weakest=40 overall=60.0 recon=ready active=0" in result.stdout
     assert '"projects"' not in result.stdout
 
 
@@ -242,14 +268,14 @@ def test_repository_status_text_is_compact_and_does_not_dump_json(monkeypatch: p
     item = AuditStatusItem("audit.security", "Security", freshness, True, "completed", "t1", "completed")
     payload = (
         RepositoryStatus(
-            RepositoryRef("r1", "p1", "Pets", "acme/cat"),
+            _repo("acme/cat"),
             PortfolioAuditStatus(AuditStatus("r1", "head", (item,))),
         ),
     )
     monkeypatch.setattr(fake, "repository_status", lambda repo, project: payload)
     monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
 
-    result = CliRunner().invoke(app, ["status", "acme/cat"])
+    result = CliRunner().invoke(app, ["status", "github@github.com:acme/cat"])
 
     assert result.exit_code == 0
     assert "audits: total=1 ready=1 active=0 stale=0 failed=0" in result.stdout
@@ -270,8 +296,8 @@ def test_audit_summary_is_compact_in_text_and_json(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(fake, "audit_summary", lambda repo, selectors, project=None: payload)
     monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
 
-    text_result = CliRunner().invoke(app, ["audit", "summary", "acme/cat"])
-    json_result = CliRunner().invoke(app, ["audit", "summary", "acme/cat", "--json"])
+    text_result = CliRunner().invoke(app, ["audit", "summary", "github@github.com:acme/cat"])
+    json_result = CliRunner().invoke(app, ["audit", "summary", "github@github.com:acme/cat", "--json"])
 
     assert text_result.exit_code == 0
     assert "security  score=73 freshness=fresh" in text_result.stdout
@@ -321,7 +347,7 @@ def test_json_preserves_semantic_nulls_and_non_null_falsy_values() -> None:
 
 def test_schedule_list_is_one_summary_line_per_repository(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeApplication()
-    repository = RepositoryRef("r1", "p1", "Pets", "acme/cat")
+    repository = _repo("acme/cat")
     payload = (
         ScheduleListing(
             repository,
@@ -340,7 +366,7 @@ def test_schedule_list_is_one_summary_line_per_repository(monkeypatch: pytest.Mo
     assert text_result.exit_code == 0
     output = text_result.stdout.strip()
     for field in (
-        "acme/cat",
+        "github@github.com:acme/cat",
         "enabled=1/2",
         "frequency=mixed[security=workdays,tests=weekly]",
         "timezone=mixed[security=Asia/Almaty,tests=UTC]",
@@ -354,12 +380,13 @@ def test_schedule_list_is_one_summary_line_per_repository(monkeypatch: pytest.Mo
     payload = cast(list[dict[str, object]], json.loads(json_result.stdout))
     repository = cast(dict[str, object], payload[0]["repository"])
     schedules = cast(list[object], payload[0]["schedules"])
-    assert repository["full_name"] == "acme/cat"
+    identity = cast(dict[str, object], repository["identity"])
+    assert identity["locator"] == "acme/cat"
     assert len(schedules) == 2
 
 
 def test_json_preserves_null_scores_from_typed_repository_dto() -> None:
-    rendered = _json(RepositoryRef("r1", "p1", "Pets", "acme/cat", scores={"audit.security": None, "audit.tests": 0}))
+    rendered = _json(_repo("acme/cat", scores={"audit.security": None, "audit.tests": 0}))
 
     assert isinstance(rendered, dict)
     assert rendered["scores"] == {"audit.security": None, "audit.tests": 0}
@@ -367,7 +394,7 @@ def test_json_preserves_null_scores_from_typed_repository_dto() -> None:
 
 def test_improvement_jobs_list_is_one_summary_line_per_repository(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeApplication()
-    repository = RepositoryRef("r1", "p1", "Pets", "acme/cat")
+    repository = _repo("acme/cat")
     definition = AuditAutofixDefinition(
         "improvement.test-writing", "default", "Tests", None, "audit.tests", "test-writing", True
     )
@@ -383,7 +410,7 @@ def test_improvement_jobs_list_is_one_summary_line_per_repository(monkeypatch: p
     assert result.exit_code == 0
     output = result.stdout.strip()
     for field in (
-        "acme/cat",
+        "github@github.com:acme/cat",
         "enabled=1/1",
         "configured=1/1",
         "auto_fix=1/1",
@@ -400,7 +427,7 @@ def test_improvement_jobs_text_preserves_mixed_dimensions_and_states(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _FakeApplication()
-    repository = RepositoryRef("r1", "p1", "Pets", "acme/cat")
+    repository = _repo("acme/cat")
     definitions = tuple(
         AuditAutofixDefinition(f"improvement.{selector}", "default", selector, None, None, selector, True)
         for selector in ("security-fix", "dependency-update", "test-writing")
@@ -459,7 +486,7 @@ def test_improvement_jobs_text_does_not_report_unknown_enabled_state_as_disabled
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _FakeApplication()
-    repository = RepositoryRef("r1", "p1", "Pets", "acme/cat")
+    repository = _repo("acme/cat")
     definition = AuditAutofixDefinition(
         "improvement.test-writing", "default", "Tests", None, "audit.tests", "test-writing", True
     )
@@ -478,7 +505,7 @@ def test_improvement_jobs_text_does_not_report_unknown_enabled_state_as_disabled
 
 def test_schedule_list_groups_restricted_window_days_by_selector(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeApplication()
-    repository = RepositoryRef("r1", "p1", "Pets", "acme/cat")
+    repository = _repo("acme/cat")
     payload = (
         ScheduleListing(
             repository,

@@ -6,7 +6,14 @@ import pytest
 
 from enji_guard_cli.audit.ports import AuditFreshness, AuditStatus, AuditStatusItem
 from enji_guard_cli.fanout import BoundedFanout
-from enji_guard_cli.portfolio.models import PortfolioActiveRun, ProjectDetail, ProjectRef, RepositoryRef
+from enji_guard_cli.portfolio.models import (
+    PortfolioActiveRun,
+    ProjectDetail,
+    ProjectRef,
+    RepositoryIdentity,
+    RepositoryProvider,
+    RepositoryRef,
+)
 from enji_guard_cli.portfolio.ports import PortfolioAuditStatus
 from enji_guard_cli.portfolio.status import assemble_overview, assemble_status
 from enji_guard_cli.settings import FanoutSettings
@@ -19,7 +26,19 @@ class Gateway:
         return (ProjectRef("p1", "Pets"),)
 
     def project_detail(self, project_id):
-        return ProjectDetail(ProjectRef("p1", "Pets"), (RepositoryRef("r1", "p1", "Pets", "acme/cat"),))
+        return ProjectDetail(
+            ProjectRef("p1", "Pets"),
+            (
+                RepositoryRef(
+                    "r1",
+                    "p1",
+                    "Pets",
+                    RepositoryIdentity(RepositoryProvider.GITHUB, "acme/cat", "github.com"),
+                    web_url="https://example.test/repository",
+                    provider_repo_id="provider-test",
+                ),
+            ),
+        )
 
 
 class Audits:
@@ -57,8 +76,24 @@ class SortGateway:
         return ProjectDetail(
             ProjectRef("p1", "Pets"),
             (
-                RepositoryRef("r1", "p1", "Pets", "acme/zebra", scores={"tests": 90}),
-                RepositoryRef("r2", "p1", "Pets", "acme/ant", scores={"tests": 40}),
+                RepositoryRef(
+                    "r1",
+                    "p1",
+                    "Pets",
+                    RepositoryIdentity(RepositoryProvider.GITHUB, "acme/zebra", "github.com"),
+                    scores={"tests": 90},
+                    web_url="https://example.test/repository",
+                    provider_repo_id="provider-test",
+                ),
+                RepositoryRef(
+                    "r2",
+                    "p1",
+                    "Pets",
+                    RepositoryIdentity(RepositoryProvider.GITHUB, "acme/ant", "github.com"),
+                    scores={"tests": 40},
+                    web_url="https://example.test/repository",
+                    provider_repo_id="provider-test",
+                ),
             ),
         )
 
@@ -83,8 +118,24 @@ class OverviewGateway:
         return ProjectDetail(
             ProjectRef(project_id, name),
             (
-                RepositoryRef(f"r-{project_id}", project_id, name, f"acme/{name.lower()}", scores={"tests": 90}),
-                RepositoryRef(f"r2-{project_id}", project_id, name, f"acme/a-{name.lower()}", scores={"tests": 40}),
+                RepositoryRef(
+                    f"r-{project_id}",
+                    project_id,
+                    name,
+                    RepositoryIdentity(RepositoryProvider.GITHUB, f"acme/{name.lower()}", "github.com"),
+                    scores={"tests": 90},
+                    web_url="https://example.test/repository",
+                    provider_repo_id="provider-test",
+                ),
+                RepositoryRef(
+                    f"r2-{project_id}",
+                    project_id,
+                    name,
+                    RepositoryIdentity(RepositoryProvider.GITHUB, f"acme/a-{name.lower()}", "github.com"),
+                    scores={"tests": 40},
+                    web_url="https://example.test/repository",
+                    provider_repo_id="provider-test",
+                ),
             ),
         )
 

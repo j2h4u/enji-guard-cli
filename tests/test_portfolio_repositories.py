@@ -2,14 +2,30 @@
 
 from typing import Any, cast
 
-from enji_guard_cli.portfolio.models import ProjectDetail, ProjectRef, RepositoryRef
+from enji_guard_cli.portfolio.models import (
+    ProjectDetail,
+    ProjectRef,
+    RepositoryIdentity,
+    RepositoryProvider,
+    RepositoryRef,
+)
 from enji_guard_cli.portfolio.repositories import add_repository, move_repository
 
 
 class Gateway:
     def __init__(self) -> None:
         self.projects = (ProjectRef("p1", "Pets"), ProjectRef("p2", "Dogs"))
-        self.repos = [RepositoryRef("r1", "p1", "Pets", "acme/cat", connected=True)]
+        self.repos = [
+            RepositoryRef(
+                "r1",
+                "p1",
+                "Pets",
+                RepositoryIdentity(RepositoryProvider.GITHUB, "acme/cat", "github.com"),
+                connected=True,
+                web_url="https://example.test/repository",
+                provider_repo_id="provider-test",
+            )
+        ]
 
     def list_projects(self):
         return self.projects
@@ -21,7 +37,14 @@ class Gateway:
         )
 
     def add_repository(self, project_id, owner, name):
-        r = RepositoryRef("r2", project_id, "Pets", f"{owner}/{name}")
+        r = RepositoryRef(
+            "r2",
+            project_id,
+            "Pets",
+            RepositoryIdentity(RepositoryProvider.GITHUB, f"{owner}/{name}", "github.com"),
+            web_url="https://example.test/repository",
+            provider_repo_id="provider-test",
+        )
         self.repos.append(r)
         return r
 
@@ -35,7 +58,16 @@ class Gateway:
 
     def move_repository(self, source, repo, target):
         old = next(r for r in self.repos if r.repo_id == repo)
-        moved = RepositoryRef(old.repo_id, target, "Dogs", old.full_name, old.connected)
+        assert old.identity is not None
+        moved = RepositoryRef(
+            old.repo_id,
+            target,
+            "Dogs",
+            old.identity,
+            web_url="https://example.test/repository",
+            provider_repo_id="provider-test",
+            connected=old.connected,
+        )
         self.repos[self.repos.index(old)] = moved
         return moved
 
@@ -43,5 +75,5 @@ class Gateway:
 def test_existing_add_and_move() -> None:
     gateway = Gateway()
     typed = cast(Any, gateway)
-    assert add_repository("acme/cat", "Pets", gateway=typed).state == "already_present"
+    assert add_repository("github@github.com:acme/cat", "Pets", gateway=typed).state == "already_present"
     assert move_repository("r1", "Pets", "Dogs", gateway=typed).state == "moved"

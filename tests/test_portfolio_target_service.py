@@ -2,7 +2,13 @@ from typing import cast
 
 import pytest
 
-from enji_guard_cli.portfolio.models import ProjectDetail, ProjectRef, RepositoryRef
+from enji_guard_cli.portfolio.models import (
+    ProjectDetail,
+    ProjectRef,
+    RepositoryIdentity,
+    RepositoryProvider,
+    RepositoryRef,
+)
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
 from enji_guard_cli.portfolio.selectors import GatewayPortfolioTargetService
 
@@ -19,18 +25,39 @@ class Gateway:
         if project_id == "p1":
             return ProjectDetail(
                 ProjectRef("p1", "Pets"),
-                (RepositoryRef("r1", "p1", "Pets", "Acme/Cat"),),
+                (
+                    RepositoryRef(
+                        "r1",
+                        "p1",
+                        "Pets",
+                        RepositoryIdentity(RepositoryProvider.GITHUB, "Acme/Cat", "github.com"),
+                        web_url="https://example.test/repository",
+                        provider_repo_id="provider-test",
+                    ),
+                ),
                 ("https://pets.example",),
                 {"https://pets.example": ("r1",)},
             )
-        return ProjectDetail(ProjectRef("p2", "Work"), (RepositoryRef("r2", "p2", "Work", "acme/dog"),))
+        return ProjectDetail(
+            ProjectRef("p2", "Work"),
+            (
+                RepositoryRef(
+                    "r2",
+                    "p2",
+                    "Work",
+                    RepositoryIdentity(RepositoryProvider.GITHUB, "acme/dog", "github.com"),
+                    web_url="https://example.test/repository",
+                    provider_repo_id="provider-test",
+                ),
+            ),
+        )
 
 
 def test_target_service_resolves_and_expands_explicit_scopes() -> None:
     service = GatewayPortfolioTargetService(cast(PortfolioGatewayPort, Gateway()))
 
     assert service.resolve_project("PETS").project_id == "p1"
-    assert service.resolve_repository("acme/cat", project="pets").repo_id == "r1"
+    assert service.resolve_repository("github@github.com:acme/cat", project="pets").repo_id == "r1"
     assert [repo.repo_id for repo in service.write_targets(None, "p1", all_repos=True)] == ["r1"]
     assert [repo.repo_id for repo in service.write_targets(None, None, all_projects=True)] == ["r1", "r2"]
 
@@ -39,7 +66,7 @@ def test_repository_resolution_only_loads_selected_project_detail() -> None:
     gateway = Gateway()
     service = GatewayPortfolioTargetService(cast(PortfolioGatewayPort, gateway))
 
-    assert service.resolve_repository("acme/cat", project="pets").repo_id == "r1"
+    assert service.resolve_repository("github@github.com:acme/cat", project="pets").repo_id == "r1"
     assert gateway.detail_calls == ["p1"]
 
 

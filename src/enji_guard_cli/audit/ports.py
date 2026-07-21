@@ -22,14 +22,18 @@ class AuditTaskBody:
     flow_config: AuditFlowConfig
     runbook_id: str
     scope_owner: str
-    repository_full_name: str
+    repository_provider: str
+    repository_locator: str
+    repository_web_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class AuditRepository:
     repo_id: str
-    full_name: str
+    provider: str
+    locator: str
     connected: bool
+    web_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

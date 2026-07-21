@@ -7,7 +7,7 @@ from typing import Protocol
 
 from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.errors import PortfolioNotFoundError
-from enji_guard_cli.portfolio.models import ProjectRef, RepositoryRef
+from enji_guard_cli.portfolio.models import ProjectRef, RepositoryIdentity, RepositoryProvider, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort, SelectorResolver
 from enji_guard_cli.portfolio.scopes import MutationScope
 from enji_guard_cli.settings import default_settings
@@ -44,9 +44,12 @@ def project_candidates(projects: Sequence[ProjectRef]) -> str:
 
 def repository_matches(repository: RepositoryRef, selector: str) -> bool:
     normalized = selector.casefold()
-    return repository.repo_id.casefold() == normalized or (
-        repository.full_name is not None and repository.full_name.casefold() == normalized
-    )
+    if repository.repo_id.casefold() == normalized:
+        return True
+    try:
+        return repository.identity.matches(parse_repository_selector(selector))
+    except ValueError:
+        return False
 
 
 def resolve_repository(targets: Sequence[RepositoryRef], selector: str, *, project: str | None = None) -> RepositoryRef:
@@ -66,9 +69,13 @@ def resolve_repository(targets: Sequence[RepositoryRef], selector: str, *, proje
 
 
 def repository_candidate(target: RepositoryRef) -> str:
-    full_name = target.full_name or target.repo_id
+    locator = repository_label(target)
     project = target.project_name or target.project_id
-    return f"{full_name} in {project} ({target.repo_id})"
+    return f"{locator} in {project} ({target.repo_id})"
+
+
+def repository_label(target: RepositoryRef) -> str:
+    return f"{target.identity.provider.value}@{target.identity.host}:{target.identity.locator}"
 
 
 def repository_targets(details: Sequence[ProjectDetailLike]) -> tuple[RepositoryRef, ...]:
@@ -145,13 +152,20 @@ class GatewayPortfolioTargetService(GatewaySelectorResolver):
         }
 
 
-def parse_github_repo(value: str) -> tuple[str, str]:
-    owner, separator, name = value.strip().partition("/")
-    owner = owner.strip()
-    name = name.strip()
-    if not separator or not owner or not name or "/" in name:
-        raise ValueError("repo must be an owner/name GitHub slug")
-    return owner, name
+def parse_repository_selector(value: str) -> RepositoryIdentity:
+    raw = value.strip()
+    if "@" not in raw or ":" not in raw:
+        raise ValueError("repo must include provider and host, such as github@github.com:owner/name")
+    prefix, remainder = raw.split("@", 1)
+    host, locator = remainder.split(":", 1)
+    try:
+        provider = RepositoryProvider(prefix.casefold())
+    except ValueError as exc:
+        raise ValueError(f"unsupported repository provider: {prefix}") from exc
+    try:
+        return RepositoryIdentity(provider, "/".join(part.strip() for part in locator.split("/")), host)
+    except ValueError as exc:
+        raise ValueError(f"repo must be a {provider.value} provider-native path") from exc
 
 
 def validated_project_name(name: str) -> str:

@@ -28,21 +28,21 @@ def selector_kind_for_repo(repo: str | None, *, project: str | None = None, all_
     if all_flag:
         return "all"
     if repo is not None:
-        return "owner_name" if "/" in repo else "repo_id"
+        return "repository_locator" if "/" in repo else "repository_id"
     if project is not None:
         return "project"
     return "unknown"
 
 
-def selector_kind_for_github_repo(github_repo: str) -> str:
-    return "owner_name" if "/" in github_repo else "unknown"
+def selector_kind_for_repository(repository: str) -> str:
+    return "repository_locator" if "/" in repository else "unknown"
 
 
 def selector_kind_for_mcp_repo(repo: str) -> str:
     if "/" in repo:
-        return "owner_name"
+        return "repository_locator"
     if repo.startswith("repo_"):
-        return "repo_id"
+        return "repository_id"
     return "selector"
 
 

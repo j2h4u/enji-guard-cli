@@ -11,3 +11,7 @@ class PortfolioUpstreamError(RuntimeError):
 
 class PortfolioMalformedError(ValueError):
     """An upstream portfolio response violated its typed contract."""
+
+
+class UnsupportedRepositoryProviderError(ValueError):
+    """The live mutation contract does not yet support this provider."""

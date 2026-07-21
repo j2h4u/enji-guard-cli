@@ -9,7 +9,7 @@ from enji_guard_cli.audit.schedules import (
     validate_schedule_update,
 )
 from enji_guard_cli.fanout import BoundedFanout
-from enji_guard_cli.portfolio.models import RepositoryRef
+from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvider, RepositoryRef
 from enji_guard_cli.settings import FanoutSettings
 
 
@@ -29,7 +29,14 @@ class _ScheduleGateway:
 def test_schedule_listing_fetches_each_repository_once() -> None:
     current = AuditSchedule("audit.security", True, "daily", None, 1, "08:00", "user", "UTC")
     gateway = _ScheduleGateway((current,))
-    target = RepositoryRef("repo-1", "project-1", "Pets", "acme/cat")
+    target = RepositoryRef(
+        "repo-1",
+        "project-1",
+        "Pets",
+        RepositoryIdentity(RepositoryProvider.GITHUB, "acme/cat", "github.com"),
+        web_url="https://example.test/repository",
+        provider_repo_id="provider-test",
+    )
 
     result = list_for_targets(
         (target,),

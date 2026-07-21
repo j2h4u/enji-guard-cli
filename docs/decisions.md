@@ -6,6 +6,13 @@ agents can orient quickly before making changes.
 
 ## Decisions
 
+- **Provider-neutral repository identity**: Portfolio identifies a repository
+  with `(provider, host, locator)` rather than provider-specific upstream field names.
+  Selectors always use `provider@host:locator`; GitLab preserves nested group
+  paths. Repository references carry neutral provider ID and web URL fields,
+  and idempotency compares the normalized identity tuple. GitLab adds require
+  an explicit host and a provider access credential; GitHub adds keep the
+  existing App-installation payload.
 - **Audit bounded-context vocabulary**: Audit, Portfolio, Application, Auth
   Session, Runtime/Observability, gateway, and delivery have separate
   ownership. An audit is the product-level repository analysis: it owns run

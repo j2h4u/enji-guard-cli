@@ -9,6 +9,8 @@ from enji_guard_cli.portfolio.models import (
     AccountPreferences,
     ProjectDetail,
     ProjectRef,
+    RepositoryIdentity,
+    RepositoryProvider,
     RepositoryRef,
 )
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
@@ -17,7 +19,14 @@ from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
 class _Portfolio:
     def __init__(self) -> None:
         self.project = ProjectRef("p1", "Pets")
-        self.repository = RepositoryRef("r1", "p1", "Pets", "acme/cat")
+        self.repository = RepositoryRef(
+            "r1",
+            "p1",
+            "Pets",
+            RepositoryIdentity(RepositoryProvider.GITHUB, "acme/cat", "github.com"),
+            web_url="https://example.test/repository",
+            provider_repo_id="provider-test",
+        )
         self.preferences = AccountPreferences("en")
 
     def list_projects(self):

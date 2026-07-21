@@ -6,7 +6,7 @@ from enji_guard_cli.audit.ledger import FileAuditLedger, new_entry
 from enji_guard_cli.audit.ports import AuditFreshness, AuditStatus, AuditStatusItem
 from enji_guard_cli.delivery.mcp.server import _json
 from enji_guard_cli.enji_gateway.audit_gateway import _schedule
-from enji_guard_cli.portfolio.models import RepositoryRef
+from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvider, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioAuditStatus
 from enji_guard_cli.portfolio.status import RepositoryStatus
 
@@ -28,7 +28,14 @@ def test_schedule_maps_fields_and_rejects_missing_action() -> None:
 
 
 def test_repository_freshness_all_states() -> None:
-    repo = RepositoryRef("r", "p", None, "o/r")
+    repo = RepositoryRef(
+        "r",
+        "p",
+        None,
+        RepositoryIdentity(RepositoryProvider.GITHUB, "o/r", "github.com"),
+        web_url="https://example.test/repository",
+        provider_repo_id="provider-test",
+    )
 
     def status(items: tuple[AuditStatusItem, ...]) -> RepositoryStatus:
         return RepositoryStatus(repo, PortfolioAuditStatus(AuditStatus("r", "x", items)))

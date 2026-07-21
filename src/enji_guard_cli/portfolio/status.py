@@ -133,14 +133,14 @@ def _sort_overview_repositories(
         raise ValueError(f"unknown repository sort: {sort}") from exc
 
 
-def _overview_name(item: RepositoryOverview) -> str:
-    return (item.repository.full_name or "").casefold()
+def _overview_name(item: RepositoryOverview) -> tuple[str, str, str]:
+    return item.repository.identity.canonical_key
 
 
-def _overview_score(item: RepositoryOverview, *, weakest: bool) -> tuple[float, str]:
+def _overview_score(item: RepositoryOverview, *, weakest: bool) -> tuple[float, tuple[str, str, str]]:
     values = [float(value) for value in item.repository.scores.values() if value is not None]
     score = (min(values) if weakest else sum(values) / len(values)) if values else float("inf")
-    return score, item.repository.full_name or ""
+    return score, item.repository.identity.canonical_key
 
 
 def _overview_latest_audit_at(item: RepositoryOverview) -> str:
@@ -153,7 +153,12 @@ def _sort_repositories(
     if sort == "default":
         return repositories
     if sort == "name":
-        return tuple(sorted(repositories, key=lambda item: (item.repository.full_name or "").casefold()))
+        return tuple(
+            sorted(
+                repositories,
+                key=lambda item: item.repository.identity.canonical_key,
+            )
+        )
     if sort in {"weakest", "overall"}:
 
         def score(item: RepositoryStatus) -> float:
@@ -162,7 +167,15 @@ def _sort_repositories(
                 return float("inf")
             return min(values) if sort == "weakest" else sum(values) / len(values)
 
-        return tuple(sorted(repositories, key=lambda item: (score(item), item.repository.full_name or "")))
+        return tuple(
+            sorted(
+                repositories,
+                key=lambda item: (
+                    score(item),
+                    item.repository.identity.canonical_key,
+                ),
+            )
+        )
     if sort == "latest-audit":
         return tuple(sorted(repositories, key=_latest_audit_at, reverse=True))
     raise ValueError(f"unknown repository sort: {sort}")

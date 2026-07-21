@@ -28,7 +28,7 @@ def _context() -> AuditTaskContext:
     return AuditTaskContext(
         project=AuditProject(
             project_id="project_1",
-            repositories=(AuditRepository("repo_1", "j2h4u/example", True),),
+            repositories=(AuditRepository("repo_1", "github", "j2h4u/example", True),),
             linked_websites=(AuditWebsite("https://example.test", ("repo_1",)),),
         ),
         audit=AuditDefinition("audit.security", "Security", "vulns", "vuln-audit"),
@@ -36,7 +36,7 @@ def _context() -> AuditTaskContext:
         runbook_id="runbook_1",
         artifact_schema_name="upfront.audit.summary",
         artifact_schema_version="v1",
-        description_template="Repo {{repository_full_name}}\n{{linked_websites}}",
+        description_template="Repo {{repository_locator}}\n{{linked_websites}}",
     )
 
 
@@ -44,7 +44,7 @@ def test_audit_task_body_is_neutral_until_gateway_translation() -> None:
     body = task_for_repo(_context(), "repo_1")
 
     assert isinstance(body, AuditTaskBody)
-    assert body.repository_full_name == "j2h4u/example"
+    assert body.repository_locator == "j2h4u/example"
     assert body.scope_owner == "project_1"
     assert not hasattr(body, "scope_type")
     assert body == AuditTaskBody(
@@ -55,7 +55,8 @@ def test_audit_task_body_is_neutral_until_gateway_translation() -> None:
         flow_config={},
         runbook_id="runbook_1",
         scope_owner="project_1",
-        repository_full_name="j2h4u/example",
+        repository_provider="github",
+        repository_locator="j2h4u/example",
     )
     assert _fleet_task_body("audit.security", body) == {
         "title": "Security for j2h4u/example",
@@ -145,12 +146,12 @@ def test_task_for_repo_rejects_missing_artifact_contract(field: str, message: st
         task_for_repo(invalid, "repo_1")
 
 
-def test_task_for_repo_rejects_incomplete_repository_full_name() -> None:
+def test_task_for_repo_rejects_incomplete_repository_locator() -> None:
     context = _context()
     invalid = AuditTaskContext(
         project=AuditProject(
             project_id=context.project.project_id,
-            repositories=(AuditRepository("repo_1", "/", True),),
+            repositories=(AuditRepository("repo_1", "github", "/", True),),
             linked_websites=context.project.linked_websites,
         ),
         audit=context.audit,
@@ -161,7 +162,7 @@ def test_task_for_repo_rejects_incomplete_repository_full_name() -> None:
         description_template=context.description_template,
     )
 
-    with pytest.raises(ValueError, match="incomplete full name"):
+    with pytest.raises(ValueError, match="incomplete locator"):
         task_for_repo(invalid, "repo_1")
 
 
@@ -200,8 +201,8 @@ def test_task_for_repo_selects_requested_repository_from_multi_repo_project() ->
         project=AuditProject(
             project_id="project_1",
             repositories=(
-                AuditRepository("repo_1", "j2h4u/first", True),
-                AuditRepository("repo_2", "j2h4u/second", True),
+                AuditRepository("repo_1", "github", "j2h4u/first", True),
+                AuditRepository("repo_2", "github", "j2h4u/second", True),
             ),
             linked_websites=context.project.linked_websites,
         ),
@@ -213,7 +214,7 @@ def test_task_for_repo_selects_requested_repository_from_multi_repo_project() ->
         description_template=context.description_template,
     )
 
-    assert task_for_repo(context, "repo_2").repository_full_name == "j2h4u/second"
+    assert task_for_repo(context, "repo_2").repository_locator == "j2h4u/second"
 
 
 def test_task_for_repo_uses_only_sites_linked_to_requested_repository() -> None:
@@ -222,8 +223,8 @@ def test_task_for_repo_uses_only_sites_linked_to_requested_repository() -> None:
         project=AuditProject(
             project_id="project_1",
             repositories=(
-                AuditRepository("repo_1", "j2h4u/first", True),
-                AuditRepository("repo_2", "j2h4u/second", True),
+                AuditRepository("repo_1", "github", "j2h4u/first", True),
+                AuditRepository("repo_2", "github", "j2h4u/second", True),
             ),
             linked_websites=(
                 AuditWebsite("https://first.example", ("repo_1",)),

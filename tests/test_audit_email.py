@@ -1,7 +1,7 @@
 from enji_guard_cli.audit.email import list_for_targets
 from enji_guard_cli.audit.ports import AuditEmailPreference, AuditEmailPreferenceUpdate
 from enji_guard_cli.fanout import BoundedFanout
-from enji_guard_cli.portfolio.models import RepositoryRef
+from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvider, RepositoryRef
 from enji_guard_cli.settings import FanoutSettings
 
 
@@ -17,8 +17,22 @@ class EmailGateway:
 
 def test_email_listing_preserves_target_and_audit_order() -> None:
     targets = (
-        RepositoryRef("repo-1", "project", "Project", "acme/one"),
-        RepositoryRef("repo-2", "project", "Project", "acme/two"),
+        RepositoryRef(
+            "repo-1",
+            "project",
+            "Project",
+            RepositoryIdentity(RepositoryProvider.GITHUB, "acme/one", "github.com"),
+            web_url="https://example.test/repository",
+            provider_repo_id="provider-test",
+        ),
+        RepositoryRef(
+            "repo-2",
+            "project",
+            "Project",
+            RepositoryIdentity(RepositoryProvider.GITHUB, "acme/two", "github.com"),
+            web_url="https://example.test/repository",
+            provider_repo_id="provider-test",
+        ),
     )
 
     result = list_for_targets(

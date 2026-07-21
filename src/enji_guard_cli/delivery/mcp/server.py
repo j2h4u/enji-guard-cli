@@ -106,7 +106,7 @@ def create_mcp_server(
                     operation=MCP_TOOL_NAMES[1],
                     surface="mcp",
                     provenance="mcp",
-                    selector_kind="owner_name" if "/" in repo else "repo_id",
+                    selector_kind="repository_locator" if "/" in repo else "repository_id",
                 ),
             ),
         )

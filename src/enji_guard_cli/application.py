@@ -32,6 +32,7 @@ from enji_guard_cli.audit.ports import (
     AuditCatalogResult,
     AuditGatewayPort,
     AuditLedgerPort,
+    AuditRepository,
     AuditRun,
     AuditRunResult,
     AuditSchedule,
@@ -357,8 +358,15 @@ class Application:
     def delete_project(self, project: str) -> OperationResult:
         return delete_project_use_case(project, gateway=self.portfolio_gateway)
 
-    def add_repository(self, repo: str, project: str | None = None) -> OperationResult:
-        result = add_repository(repo, project, gateway=self.portfolio_gateway)
+    def add_repository(
+        self, repo: str, project: str | None = None, repo_access_credential_id: str | None = None
+    ) -> OperationResult:
+        result = add_repository(
+            repo,
+            project,
+            gateway=self.portfolio_gateway,
+            repo_access_credential_id=repo_access_credential_id,
+        )
         if result.repository is not None:
             catalog = self.audit_catalog()
             recon = recon_after_add(
@@ -562,18 +570,25 @@ class Application:
         )
 
     def _audit_project(self, project_id: str):
-        from enji_guard_cli.audit.ports import AuditProject, AuditRepository, AuditWebsite
+        from enji_guard_cli.audit.ports import AuditProject, AuditWebsite
 
         detail = self.portfolio_gateway.project_detail(project_id)
         return AuditProject(
             project_id=detail.project.project_id,
-            repositories=tuple(
-                AuditRepository(repo.repo_id, repo.full_name or "", repo.connected is True)
-                for repo in detail.repositories
-            ),
+            repositories=tuple(self._audit_repository(repo) for repo in detail.repositories),
             linked_websites=tuple(
                 AuditWebsite(url, tuple(detail.linked_website_repo_ids.get(url, ()))) for url in detail.linked_websites
             ),
+        )
+
+    @staticmethod
+    def _audit_repository(repo: RepositoryRef) -> AuditRepository:
+        return AuditRepository(
+            repo.repo_id,
+            repo.identity.provider.value,
+            repo.identity.locator,
+            repo.connected is True,
+            repo.web_url,
         )
 
     def _select_audits(
