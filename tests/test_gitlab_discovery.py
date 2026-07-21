@@ -5,6 +5,7 @@ from typing import cast
 import pytest
 
 from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
+from enji_guard_cli.auth_session.api import import_bearer_token
 from enji_guard_cli.delivery.cli.app import _emit, _json
 from enji_guard_cli.enji_gateway import GitLabGateway
 from enji_guard_cli.enji_gateway import gitlab_gateway as gateway_module
@@ -167,7 +168,7 @@ def test_gitlab_gateway_rejects_unsafe_project_url() -> None:
         )
 
 
-def test_gitlab_http_endpoints_preserve_contract_queries() -> None:
+def test_gitlab_http_endpoints_preserve_contract_queries(tmp_path: Path) -> None:
     class Client:
         def __init__(self) -> None:
             self.requests: list[EnjiHttpRequest] = []
@@ -176,9 +177,11 @@ def test_gitlab_http_endpoints_preserve_contract_queries() -> None:
             self.requests.append(request)
             return EnjiHttpResponse(200, {}, b'{"data":[],"meta":{}}')
 
+    auth_file = tmp_path / "auth.json"
+    import_bearer_token("token-123", auth_file)
     client = Client()
     gitlab_credentials(
-        None,
+        auth_file,
         cast(EnjiHttpClient, client),
         scope_type="project",
         scope_owner="p",
@@ -187,7 +190,7 @@ def test_gitlab_http_endpoints_preserve_contract_queries() -> None:
         auth_port=AUTH_PORT,
     )
     gitlab_projects(
-        None,
+        auth_file,
         cast(EnjiHttpClient, client),
         credential_id="cred-1",
         host="gitlab.example.com",
@@ -310,7 +313,7 @@ def test_gitlab_gateway_normalizes_default_scope_and_rejects_personal_owner(
     assert len(calls) == call_count
 
 
-def test_gitlab_http_endpoints_omit_empty_optional_query_values() -> None:
+def test_gitlab_http_endpoints_omit_empty_optional_query_values(tmp_path: Path) -> None:
     class Client:
         def __init__(self) -> None:
             self.requests: list[EnjiHttpRequest] = []
@@ -319,10 +322,12 @@ def test_gitlab_http_endpoints_omit_empty_optional_query_values() -> None:
             self.requests.append(request)
             return EnjiHttpResponse(200, {}, b'{"data":[],"meta":{}}')
 
+    auth_file = tmp_path / "auth.json"
+    import_bearer_token("token-123", auth_file)
     client = Client()
-    gitlab_credentials(None, cast(EnjiHttpClient, client), scope_type="", scope_owner=" ", auth_port=AUTH_PORT)
+    gitlab_credentials(auth_file, cast(EnjiHttpClient, client), scope_type="", scope_owner=" ", auth_port=AUTH_PORT)
     gitlab_projects(
-        None,
+        auth_file,
         cast(EnjiHttpClient, client),
         credential_id="cred-1",
         host="",
