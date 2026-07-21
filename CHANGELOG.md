@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/j2h4u/enji-guard-cli/compare/v1.0.0...v1.1.0) (2026-07-21)
+
+
+### Features
+
+* expose CLI build provenance ([#136](https://github.com/j2h4u/enji-guard-cli/issues/136)) ([a4a0b0e](https://github.com/j2h4u/enji-guard-cli/commit/a4a0b0ef107e27fb5924e6943f91a376d9bfdb84))
+
 ## [1.0.0](https://github.com/j2h4u/enji-guard-cli/compare/v0.6.2...v1.0.0) (2026-07-21)
 
 
