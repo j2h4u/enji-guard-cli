@@ -45,34 +45,17 @@ notes. Do not edit an unreleased version into `CHANGELOG.md`; release-please
 owns version headings, dates, comparison links, and the generated GitHub
 Release.
 
-When one squash PR changes several user workflows or any public CLI contract,
-its PR body must contain a release-note override. Treat it as part of the user
-interface: describe outcomes rather than the internal refactor, put every
-removal or rename in `BREAKING CHANGE:`, and show its replacement. Keep each
-independent feature, fix, or performance change as a separate conventional
-message so release-please places it in the configured section.
+When a broad user-facing change cannot be understood from the commit subjects,
+use the implementation PR's release-note override to tell the short product
+story. Describe the current concepts and likely user workflows rather than the
+refactor history. For example, explain that audits now own run state,
+freshness, scores, and findings; that improvements are optional operator work;
+and that MCP intentionally exposes only portfolio context and repository audit
+reading.
 
-```text
-BEGIN_COMMIT_OVERRIDE
-feat(cli)!: make audit the canonical repository workflow
-
-BREAKING CHANGE: `old command` moved to `replacement command`; `removed command`
-was removed because the service now performs that work automatically.
-
-feat(cli): add compact scenario-oriented status output
-fix(auth): react immediately to imported credentials
-perf(cli): pool and bound portfolio reads
-
-Release-As: 1.0.0
-END_COMMIT_OVERRIDE
-```
-
-Before squash-merging a user-facing release:
-
-- compare the public CLI help and README workflows with the target branch;
-- account for added, removed, renamed, and behaviorally changed commands;
-- verify both human output and `--json` contracts;
-- put the curated override in the implementation PR body;
-- run the acceptance and release-smoke gates above;
-- review the generated release PR's `CHANGELOG.md` as user documentation before
-  merging it.
+Do not turn this into an exhaustive migration plan. Mention removed or renamed
+syntax only when it materially helps a person switch workflows or when the
+deterministic `--json` contract used by scripts changed. Keep independent
+features, fixes, and performance changes as separate conventional messages so
+release-please places them in the configured section. Review the generated
+release PR's `CHANGELOG.md` as user documentation before merging it.

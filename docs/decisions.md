@@ -6,12 +6,12 @@ agents can orient quickly before making changes.
 
 ## Decisions
 
-- **Audit bounded-context vocabulary and migration**: the completed refactor
-  separates Audit, Portfolio, Application, Auth Session,
-  Runtime/Observability, gateway, and delivery ownership. Product language
-  uses `audit`; `report` is reserved for Enji/OpenAPI wire
-  contracts, raw upstream translators, and documentation explicitly naming
-  external integration vocabulary. No compatibility aliases are required.
+- **Audit bounded-context vocabulary**: Audit, Portfolio, Application, Auth
+  Session, Runtime/Observability, gateway, and delivery have separate
+  ownership. An audit is the product-level repository analysis: it owns run
+  state, freshness, scores, and readable findings. `report` is reserved for
+  Enji/OpenAPI wire contracts, raw upstream translators, and documentation
+  explicitly naming external integration vocabulary.
 - **Audit Catalog authority and notification**: every command in the Audit
   Catalog context fetches `GET /api/ux/catalog` once per invocation.
   `curatedActions` is authoritative: published audits in the live response

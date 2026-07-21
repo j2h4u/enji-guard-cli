@@ -18,6 +18,11 @@ the GitHub `owner/name` repository selector; add `--project NAME_OR_ID` only
 when the account has ambiguous repositories or when a batch operation must be
 scoped to one project.
 
+An audit is the main unit of repository analysis in this CLI. It has a run
+lifecycle, freshness relative to the repository head, scores, and readable
+findings. The Enji API may still call some wire payloads reports, but that
+transport vocabulary is not part of the user-facing model.
+
 Mutating batch commands require explicit scope. Use a `REPO` argument for one
 repository, `--all-repos` with `--project NAME_OR_ID` for every repository in
 one project, or `--all-projects` for every repository in every project.
@@ -158,7 +163,7 @@ These portfolio-wide commands return the compact overview: project and
 repository identity, scores, recon/connection state, and active runs. They do
 not fetch every audit status for every repository. Use `status REPO` for the
 detailed status of one repository, `audit summary REPO` for compact audit
-triage, and `audit read REPO` for report contents. Add `--json` only when the
+triage, and `audit read REPO` for audit findings. Add `--json` only when the
 result is being consumed programmatically.
 
 For audits:
@@ -199,14 +204,15 @@ after that PR is merged. Use `feat:` and `fix:` only for changes that should be
 visible in release notes; keep internal churn under `chore:`, `refactor:`,
 `test:`, `ci:`, or `docs:`.
 
-Commit-derived notes are sufficient for routine releases. A release that
-changes the user-facing CLI contract must instead carry curated conventional
-messages in the implementation PR's release-note override: name the new
-workflow, list every removed or renamed command under `BREAKING CHANGE:`, and
-include the replacement command. Release-please remains the only writer of
-`CHANGELOG.md`; review its generated release PR as the final user-facing
-artifact. See [CONTRIBUTING.md](CONTRIBUTING.md#release-notes) for the exact
-format and release checklist.
+Commit-derived notes are sufficient for routine releases. For a broad
+user-facing change, curate the implementation PR's release notes when commit
+subjects do not tell one coherent story. Explain the current mental model and
+the important workflows in plain language; this is a lightweight release
+summary, not a command-by-command migration plan. Call out old syntax only
+when users of the deterministic CLI/JSON contract would otherwise be surprised.
+Release-please remains the only writer of `CHANGELOG.md`; review its generated
+release PR as the final user-facing artifact. See
+[CONTRIBUTING.md](CONTRIBUTING.md#release-notes).
 
 Use the local release status check after merges and releases:
 
