@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 from watchfiles import Change
@@ -38,20 +39,48 @@ def test_credential_watcher_filters_unrelated_directory_changes(
     assert captured["kwargs"] == {"recursive": False}
 
 
-def test_credential_watcher_observes_atomic_replacement(tmp_path: Path) -> None:
+def test_credential_watcher_observes_atomic_replacement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     auth_file = tmp_path / "auth.json"
     replacement = tmp_path / "auth.json.tmp"
     auth_file.write_text("old", encoding="utf-8")
 
     async def replace_and_wait() -> None:
+        watch_ready = asyncio.Event()
+        original_awatch = cast(
+            Callable[..., AsyncIterator[set[tuple[Change, str]]]],
+            changes_module.awatch,
+        )
+
+        async def coordinated_awatch(
+            *paths: Path,
+            watch_filter: Callable[[Change, str], bool] | None = None,
+            **kwargs: object,
+        ) -> AsyncIterator[set[tuple[Change, str]]]:
+            async for changes in original_awatch(
+                *paths,
+                watch_filter=watch_filter,
+                yield_on_timeout=True,
+                rust_timeout=50,
+                **kwargs,
+            ):
+                if not changes and not watch_ready.is_set():
+                    watch_ready.set()
+                    continue
+                yield changes
+
+        # The first empty timeout proves the real watcher is installed and has
+        # completed a bounded wait before the atomic replacement is performed.
+        monkeypatch.setattr(changes_module, "awatch", coordinated_awatch)
+
         async def observe_one_change() -> None:
             async for _ in changes_module.credential_changes(auth_file):
                 return
 
         observer = asyncio.create_task(observe_one_change())
-        await asyncio.sleep(0.2)
+        await asyncio.wait_for(watch_ready.wait(), timeout=2)
         replacement.write_text("new", encoding="utf-8")
         replacement.replace(auth_file)
+        assert auth_file.read_text(encoding="utf-8") == "new"
         await asyncio.wait_for(observer, timeout=5)
 
     asyncio.run(replace_and_wait())

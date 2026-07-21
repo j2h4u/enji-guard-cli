@@ -187,6 +187,9 @@ jobs:
           load: true
           push: false
           tags: enji-guard-cli:ci
+          build-args: |
+            PACKAGE_VERSION=0.0.0+sha.${{ github.sha }}
+            SOURCE_COMMIT=${{ github.sha }}
 
       - name: Verify credentialless runtime contract
         if: needs.changes.outputs.requires-code-checks == 'true'

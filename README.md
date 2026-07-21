@@ -196,7 +196,9 @@ noisy scheduled mail when it is not part of the workflow.
 
 Package versions come from git tags. GitHub Release `v0.1.0` produces Python
 version `0.1.0`; untagged checkouts report a development version derived from
-the nearest tag and commit.
+the nearest tag and commit. `enji-guard --version` prints that package version
+and the short source commit used for the build; the commit is display-only and
+does not alter the package's SemVer.
 
 Release automation is handled by release-please. It opens a release PR from
 conventional commits, updates `CHANGELOG.md`, and creates the GitHub Release

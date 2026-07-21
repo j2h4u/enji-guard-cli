@@ -12,6 +12,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 
 ARG PACKAGE_VERSION=0.0.0+local
+ARG SOURCE_COMMIT=unknown
 ENV SETUPTOOLS_SCM_PRETEND_VERSION=${PACKAGE_VERSION} \
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ENJI_GUARD_CLI=${PACKAGE_VERSION}
 
@@ -20,6 +21,19 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --no-build --no-install-project --no-dev
 
 COPY src ./src
+RUN SOURCE_COMMIT="${SOURCE_COMMIT}" python - <<'PY'
+import os
+import re
+from pathlib import Path
+
+commit = os.environ["SOURCE_COMMIT"]
+if commit != "unknown" and re.fullmatch(r"[0-9a-fA-F]{7,40}", commit) is None:
+    raise SystemExit("SOURCE_COMMIT must be a Git object id or 'unknown'")
+Path("src/enji_guard_cli/_build_provenance.py").write_text(
+    f'"""Build-time source provenance."""\n\nCOMMIT_SHA = "{commit.lower()}"\n',
+    encoding="utf-8",
+)
+PY
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --no-dev --no-editable
 

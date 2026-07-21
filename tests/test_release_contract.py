@@ -23,6 +23,8 @@ class FakeRunner:
             return release_contract.CommandResult(1, "", "UNREADY: authentication is not configured\n")
         if call[-1] == "--help":
             return release_contract.CommandResult(0, "Usage: enji-guard\n", "")
+        if call[-1] == "--version":
+            return release_contract.CommandResult(0, "enji-guard-cli 1.0.0 (commit 13920645c8c7)\n", "")
         if call[-1] == "health":
             return release_contract.CommandResult(0, '{"status":"ok"}\n', "")
         raise AssertionError(f"unexpected command: {call}")

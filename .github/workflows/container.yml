@@ -147,6 +147,7 @@ jobs:
           tags: ${{ steps.image-tags.outputs.tags }}
           build-args: |
             PACKAGE_VERSION=${{ steps.package-version.outputs.version }}
+            SOURCE_COMMIT=${{ steps.release-metadata.outputs.source-sha }}
 
       - name: Verify candidate runtime contract
         env:

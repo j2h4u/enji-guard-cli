@@ -48,6 +48,7 @@ from enji_guard_cli.settings import (
     RepositorySortName,
     default_settings,
 )
+from enji_guard_cli.version import version_text
 
 app = typer.Typer(help="Agent-oriented Enji Guard portfolio and audit CLI.")
 auth_app = typer.Typer(help="Manage Enji authentication.")
@@ -85,6 +86,13 @@ _state: dict[str, object] = {
 }
 
 
+def _version_callback(value: bool) -> None:
+    if not value:
+        return
+    typer.echo(version_text())
+    raise typer.Exit
+
+
 def _close_cached_application() -> None:
     cached = _state.get("application")
     try:
@@ -98,10 +106,15 @@ def _close_cached_application() -> None:
 @app.callback()
 def main(
     ctx: typer.Context,
+    version: Annotated[
+        bool,
+        typer.Option("--version", callback=_version_callback, is_eager=True, help="Show version and source commit."),
+    ] = False,
     project: Annotated[str | None, typer.Option("--project", help="Exact project id or name filter.")] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
     auth_file: Annotated[Path | None, typer.Option("--auth-file", hidden=True)] = None,
 ) -> None:
+    del version
     _close_cached_application()
     _state["project"] = project
     _state["json"] = json_output
