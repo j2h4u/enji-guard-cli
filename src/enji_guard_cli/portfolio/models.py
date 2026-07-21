@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from urllib.parse import urlsplit
 
+_MAX_PORT = 65535
+
 
 class RepositoryProvider(StrEnum):
     GITHUB = "github"
@@ -38,7 +40,12 @@ class RepositoryIdentity:
                 raise ValueError("repository host must be a canonical hostname")
             try:
                 parsed_host = urlsplit(f"https://{host}")
-                if parsed_host.hostname is None or ":" in parsed_host.hostname or parsed_host.port is None:
+                if (
+                    parsed_host.hostname is None
+                    or ":" in parsed_host.hostname
+                    or parsed_host.port is None
+                    or not 1 <= parsed_host.port <= _MAX_PORT
+                ):
                     raise ValueError
                 host = f"{parsed_host.hostname.casefold()}:{parsed_host.port}"
             except ValueError as exc:

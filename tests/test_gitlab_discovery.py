@@ -118,6 +118,27 @@ def test_gitlab_gateway_rejects_pagination_cycle_and_duplicate_projects(monkeypa
             },
             "unsafe",
         ),
+        (
+            {
+                "data": [_credential(metadata={"git_host": "gitlab.example.com:0"})],
+                "meta": {"limit": 50, "offset": 0, "total": 1},
+            },
+            "unsafe",
+        ),
+        (
+            {
+                "data": [_credential(metadata={"git_host": "gitlab.example.com:65536"})],
+                "meta": {"limit": 50, "offset": 0, "total": 1},
+            },
+            "unsafe",
+        ),
+        (
+            {
+                "data": [_credential(metadata={"git_host": "gitlab.example.com:eighty"})],
+                "meta": {"limit": 50, "offset": 0, "total": 1},
+            },
+            "unsafe",
+        ),
     ],
 )
 def test_gitlab_gateway_rejects_malformed_credentials(payload: JsonObjectPayload, message: str) -> None:
@@ -258,7 +279,35 @@ def test_gitlab_gateway_rejects_duplicate_credential_across_pages(monkeypatch: p
 
     monkeypatch.setattr(gateway_module.http, "gitlab_credentials", credentials)
     with pytest.raises(ValueError, match="duplicated"):
-        _gateway().discover_projects(credential_id="missing")
+        _gateway().discover_projects(credential_id="cred-1")
+
+
+def test_gitlab_gateway_normalizes_default_scope_and_rejects_personal_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload: JsonObjectPayload = {"data": [_credential()], "meta": {"limit": 50, "offset": 0, "total": 1}}
+    calls: list[dict[str, object]] = []
+
+    def credentials(*args: object, **kwargs: object) -> JsonObjectPayload:
+        calls.append(kwargs)
+        return payload
+
+    monkeypatch.setattr(gateway_module.http, "gitlab_credentials", credentials)
+    result = _gateway().list_credentials()
+    assert result.scope == gateway_module.GitLabScope("personal", None)
+    assert calls[0]["scope_type"] == "personal"
+    assert calls[0]["scope_owner"] is None
+
+    calls.clear()
+    result = _gateway().list_credentials(scope_type=" ", scope_owner=" ")
+    assert result.scope == gateway_module.GitLabScope("personal", None)
+    assert calls[0]["scope_type"] == "personal"
+    assert calls[0]["scope_owner"] is None
+
+    call_count = len(calls)
+    with pytest.raises(ValueError, match="only valid for project"):
+        _gateway().list_credentials(scope_type="personal", scope_owner="owner")
+    assert len(calls) == call_count
 
 
 def test_gitlab_http_endpoints_omit_empty_optional_query_values() -> None:
@@ -298,3 +347,22 @@ def test_gitlab_selector_is_pasteable_in_json_and_human_output(capsys: pytest.Ca
     assert json_output["selector"] == selector
     assert selector in human_output
     assert parse_repository_selector(selector).matches(identity)
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [
+        "gitlab@gitlab.example.com:0:team/service",
+        "gitlab@gitlab.example.com:65536:team/service",
+        "gitlab@gitlab.example.com:eighty:team/service",
+    ],
+)
+def test_gitlab_selector_rejects_invalid_host_ports(selector: str) -> None:
+    with pytest.raises(ValueError, match="port"):
+        parse_repository_selector(selector)
+
+
+def test_gitlab_selector_preserves_namespace_paths_without_host_port() -> None:
+    identity = parse_repository_selector("gitlab@gitlab.com:group/subgroup/service")
+    assert identity.host == "gitlab.com"
+    assert identity.locator == "group/subgroup/service"

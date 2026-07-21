@@ -140,9 +140,6 @@ class GitLabGateway:
         credentials = list(first.credentials)
         seen_ids = {item.id for item in credentials}
         _validate_credential_page(first, expected_total=expected_total, expected_limit=expected_limit)
-        selected = _find_credential(credentials, requested_id)
-        if selected is not None:
-            return selected
         seen_offsets = {first.pagination.offset}
         offset = first.pagination.offset + expected_limit
         while offset < expected_total:
@@ -163,13 +160,8 @@ class GitLabGateway:
                     raise ValueError(f"GitLab credential id is duplicated: {item.id}")
                 seen_ids.add(item.id)
                 credentials.append(item)
-            selected = _find_credential(credentials, requested_id)
-            if selected is not None:
-                return selected
             offset += expected_limit
-        if requested_id is not None:
-            raise ValueError(f"GitLab credential not found: {requested_id}")
-        return _select_credential(tuple(credentials), None)
+        return _select_credential(tuple(credentials), requested_id)
 
 
 def _select_credential(credentials: tuple[GitLabCredential, ...], credential_id: str | None) -> GitLabCredential:
@@ -185,15 +177,6 @@ def _select_credential(credentials: tuple[GitLabCredential, ...], credential_id:
     return credentials[0]
 
 
-def _find_credential(credentials: list[GitLabCredential], credential_id: str | None) -> GitLabCredential | None:
-    if credential_id is None:
-        return None
-    matches = tuple(item for item in credentials if item.id == credential_id)
-    if len(matches) > 1:
-        raise ValueError(f"GitLab credential id is duplicated: {credential_id}")
-    return matches[0] if matches else None
-
-
 def _validate_credential_page(page: GitLabCredentialsResult, *, expected_total: int, expected_limit: int) -> None:
     count = len(page.credentials)
     if page.pagination.limit != expected_limit or page.pagination.offset + count > expected_total:
@@ -202,11 +185,15 @@ def _validate_credential_page(page: GitLabCredentialsResult, *, expected_total: 
         raise ValueError("GitLab credential pagination is inconsistent")
 
 
-def _normalize_scope(scope_type: str | None, scope_owner: str | None) -> tuple[str | None, str | None]:
-    normalized_type = _optional_str(scope_type)
+def _normalize_scope(scope_type: str | None, scope_owner: str | None) -> tuple[str, str | None]:
+    normalized_type = _optional_str(scope_type) or "personal"
     normalized_owner = _optional_str(scope_owner)
     if normalized_type is not None and normalized_type not in {"personal", "project"}:
         raise ValueError("GitLab scope type must be personal or project")
+    if normalized_type == "personal" and normalized_owner is not None:
+        raise ValueError("GitLab scope owner is only valid for project scope")
+    if normalized_type == "personal":
+        normalized_owner = None
     return normalized_type, normalized_owner
 
 
@@ -250,13 +237,17 @@ def _parse_credential(value: object) -> GitLabCredential:
     if git_host is None and api_base_url is None:
         git_host = "gitlab.com"
         api_base_url = "https://gitlab.com/api/v4"
+    credential_scope_type, credential_scope_owner = _normalize_scope(
+        _optional_str(item.get("scope_type")),
+        _optional_str(item.get("scope_owner")),
+    )
     return GitLabCredential(
         id=_required_str(item, "id"),
         name=_required_str(item, "name"),
         credential_type=credential_type,
         provider=provider,
-        scope_type=_optional_str(item.get("scope_type")),
-        scope_owner=_optional_str(item.get("scope_owner")),
+        scope_type=credential_scope_type,
+        scope_owner=credential_scope_owner,
         status=_required_str(item, "status"),
         last_error=_optional_str(item.get("last_error")),
         expires_at=_optional_str(item.get("expires_at")),
@@ -368,6 +359,8 @@ def _optional_host(value: object) -> str | None:
         port = parsed.port
         if ":" in host and port is None:
             raise ValueError
+        if port is not None and not 1 <= port <= _MAX_PORT:
+            raise ValueError
     except ValueError as exc:
         raise ValueError("GitLab host is unsafe") from exc
     return f"{parsed.hostname.casefold()}:{port}" if port is not None else parsed.hostname.casefold()
@@ -403,4 +396,6 @@ def _url_host(url: str) -> str:
         port = parsed.port
     except ValueError as exc:
         raise ValueError("GitLab URL has an invalid port") from exc
+    if port is not None and not 1 <= port <= _MAX_PORT:
+        raise ValueError("GitLab URL has an invalid port")
     return f"{parsed.hostname.casefold()}:{port}" if port is not None else parsed.hostname.casefold()

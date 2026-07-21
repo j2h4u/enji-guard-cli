@@ -14,6 +14,8 @@ from enji_guard_cli.settings import default_settings
 
 _HOST_PORT_PARTS = 2
 _HOST_PORT_PARTS_WITH_LOCATOR = 3
+_MIN_PORT = 1
+_MAX_PORT = 65535
 
 
 def project_matches(project: ProjectRef, selector: str) -> bool:
@@ -163,8 +165,10 @@ def parse_repository_selector(value: str) -> RepositoryIdentity:
     parts = remainder.split(":", 2)
     if len(parts) == _HOST_PORT_PARTS:
         host, locator = parts
-    elif len(parts) == _HOST_PORT_PARTS_WITH_LOCATOR and parts[1].isdigit():
-        host = f"{parts[0]}:{parts[1]}"
+    elif len(parts) == _HOST_PORT_PARTS_WITH_LOCATOR:
+        if not parts[1].isdigit() or not _MIN_PORT <= int(parts[1]) <= _MAX_PORT:
+            raise ValueError("repo selector has an invalid host port")
+        host = f"{parts[0]}:{int(parts[1])}"
         locator = parts[2]
     else:
         host, locator = parts[0], ":".join(parts[1:])
