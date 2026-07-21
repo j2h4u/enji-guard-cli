@@ -754,13 +754,15 @@ def test_refresh_auth_rejects_deleting_auth_cookie_from_success_response(tmp_pat
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}
 
 
-def test_refresh_auth_does_not_persist_cookies_from_auth_failure(tmp_path: Path) -> None:
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_refresh_auth_does_not_persist_cookies_from_auth_failure(tmp_path: Path, status_code: int) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=old", auth_file)
+    events: list[tuple[str, Mapping[str, object]]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
-            401,
+            status_code,
             headers=[
                 ("Set-Cookie", f"access_token={unsigned_jwt({'exp': 1782744000})}; Path=/; HttpOnly"),
                 ("Set-Cookie", "refresh_token=rejected; Path=/api/v1/auth; HttpOnly"),
@@ -770,12 +772,22 @@ def test_refresh_auth_does_not_persist_cookies_from_auth_failure(tmp_path: Path)
 
     async def run_refresh() -> AuthRefreshPayload:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await refresh_auth_async(auth_file, HttpxEnjiHttpClient(client))
+            return await refresh_auth_async(
+                auth_file,
+                HttpxEnjiHttpClient(client),
+                event_sink=lambda logger, level, event, fields: events.append((event, fields)),
+            )
 
     with pytest.raises(AuthError) as exc_info:
         asyncio.run(run_refresh())
 
     assert exc_info.value.code == "AUTH_REQUIRED"
+    assert events == [
+        (
+            "enji_auth_refresh_cookie_rejected",
+            {"classification": "upstream_refresh_cookie_rejected", "status_code": status_code},
+        )
+    ]
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}

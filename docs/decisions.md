@@ -102,6 +102,7 @@ agents can orient quickly before making changes.
   `enji_http_retry`, `enji_auth_auto_refresh_scheduled`,
   `enji_auth_auto_refresh_retry`, `enji_auth_auto_refresh_succeeded`,
   `enji_auth_auto_refresh_schedule_failed`,
+  `enji_auth_refresh_cookie_rejected`,
   `enji_auth_refresh_rotation_deferred`,
   `enji_auth_refresh_rotation_recovered`, and
   `enji_auth_refresh_rotation_superseded`; event payloads contain classification
