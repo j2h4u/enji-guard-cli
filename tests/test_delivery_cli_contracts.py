@@ -1,14 +1,17 @@
+from typer.core import TyperGroup
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from enji_guard_cli.delivery.cli.app import app
 
 
 def test_full_operator_tree_and_report_break() -> None:
-    out = CliRunner().invoke(app, ["--help"])
-    assert out.exit_code == 0
+    root = get_command(app)
+    assert isinstance(root, TyperGroup)
+    commands = root.commands
     for command in ("auth", "project", "repo", "recon", "audit", "schedule", "improvement-jobs", "email", "language"):
-        assert f"│ {command}" in out.stdout
-    assert "│ report " not in out.stdout
+        assert command in commands
+    assert "report" not in commands
 
 
 def test_audit_help_exposes_read_summary_start_wait() -> None:
