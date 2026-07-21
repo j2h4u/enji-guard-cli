@@ -1,19 +1,24 @@
-from enji_guard_cli.core import RepoSort, RepoStatusAllPayload, read_reports_for_repo, runtime_status
+"""Narrow read-only application surface owned by MCP delivery."""
 
-__all__ = [
-    "RepoSort",
-    "RepoStatusAllPayload",
-    "read_repository_reports",
-    "repository_portfolio_overview",
-]
+from dataclasses import dataclass
 
+from enji_guard_cli.application import Application, ApplicationResult
+from enji_guard_cli.settings import RepositorySortName
 
-def repository_portfolio_overview(
-    project: str | None,
-    sort: RepoSort,
-) -> RepoStatusAllPayload:
-    return runtime_status(None, project, sort)
+type McpQueryResult = ApplicationResult
 
 
-def read_repository_reports(repo: str, project: str | None) -> dict[str, object]:
-    return read_reports_for_repo(repo, project, [], all_reports=True)
+@dataclass(frozen=True, slots=True)
+class McpQueryFacade:
+    """Expose only the two curated MCP query scenarios."""
+
+    _application: Application
+
+    def portfolio_overview(self, project: str | None, sort: RepositorySortName) -> ApplicationResult:
+        return self._application.execute(lambda: self._application.portfolio_overview(project, sort))
+
+    def repository_audits(self, repo: str, project: str | None) -> ApplicationResult:
+        return self._application.execute(lambda: self._application.audit_read(repo, project=project, all_audits=True))
+
+
+__all__ = ["McpQueryFacade", "McpQueryResult"]

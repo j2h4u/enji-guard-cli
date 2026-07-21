@@ -10,9 +10,13 @@ surface.
 - Built the shared core that hides Enji authentication, refresh, retries, rate
   limits, and API details behind stable operations.
 - Shaped the CLI into the primary operator surface for agents: repositories,
-  projects, report runs, readiness, freshness, schedules, email preferences,
-  and report reading.
-- Added persistent JSONL telemetry so long-running report and auth behavior can
+  projects, audit runs, readiness, freshness, schedules, improvement jobs,
+  email preferences, and audit reading.
+- Added the curated read-only MCP surface for portfolio overview and repository
+  audit reading without operator controls.
+- Split Audit, Portfolio, Auth Session, Runtime/Observability, gateway, and
+  delivery ownership into enforced bounded contexts.
+- Added persistent JSONL telemetry so long-running audit and auth behavior can
   be inspected after restarts. CLI and MCP agent journey events use the same
   telemetry layer. This is currently JSONL-only and is the minimal foundation
   for future external sinks and OpenTelemetry-style export.
@@ -23,18 +27,16 @@ surface.
 ## Current State
 
 The product is working for its primary scope: Docker-first Enji Guard access
-through a validated CLI for daily agent workflows. Docker is the supported
-runtime. The remaining product work is concentrated in the smaller read-only
-MCP surface and optional future install modes.
+through a validated CLI and a smaller read-only MCP surface. The supervisor
+owns MCP, automatic cookie refresh, and backend readiness. Current work is live
+operational hardening before merge and release.
 
 ## Remaining
 
-- Finish the MCP surface around the same product model as the CLI, but keep it
-  smaller, read-only, and free of operator/control-plane details.
-- Refine MCP report-reading ergonomics with real agents while keeping the
-  surface centered on portfolio overview and concrete repository reports.
-- Validate the MCP surface with real agents and adjust only where the workflow
-  is unclear or noisy.
+- Exercise the CLI and supervisor against the live Enji service long enough to
+  catch operational regressions before merge.
+- Refine MCP audit-reading ergonomics with real agents while keeping the
+  surface centered on portfolio overview and concrete repository audits.
 - Explore modular install modes so the tool can be used as CLI-only when API
   tokens make background cookie refresh unnecessary.
 

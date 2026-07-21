@@ -16,6 +16,10 @@ Credentials belong in the configured auth file, which defaults to:
 
 Cookie auth is a temporary compatibility path for local authorized use. Prefer
 API tokens once Enji provides them.
+Keep the credential directory writable by the container user uid `1000`; cookie
+rotation and credential replacement are service-owned runtime behavior, not a
+manual operator workflow. Treat the pending-rotation journal stored beside the
+auth file as protected credential storage.
 
 ## Supply Chain
 

@@ -6,6 +6,12 @@ agents can orient quickly before making changes.
 
 ## Decisions
 
+- **Audit bounded-context vocabulary**: Audit, Portfolio, Application, Auth
+  Session, Runtime/Observability, gateway, and delivery have separate
+  ownership. An audit is the product-level repository analysis: it owns run
+  state, freshness, scores, and readable findings. `report` is reserved for
+  Enji/OpenAPI wire contracts, raw upstream translators, and documentation
+  explicitly naming external integration vocabulary.
 - **Audit Catalog authority and notification**: every command in the Audit
   Catalog context fetches `GET /api/ux/catalog` once per invocation.
   `curatedActions` is authoritative: published audits in the live response
@@ -24,6 +30,15 @@ agents can orient quickly before making changes.
   subscription stores its cadence, IANA timezone, and auto or user-selected
   time. `improvement-jobs` is autofix-only and is never a scheduling fallback;
   project-wide operations are explicit client-side batches.
+- **Bounded read fan-out**: upstream Enji currently exposes several resources
+  only at project, repository, or repository-plus-audit granularity. Independent
+  batch reads use the shared order-preserving `BoundedFanout` application
+  policy, with concurrency fixed in frozen settings. Selector expansion,
+  portfolio status/overview, schedule listing, autofix listing, and email
+  preference listing must not create private executors. Mutating batches remain
+  explicit sequential loops so idempotency and partial-failure behavior stay
+  understandable. A future upstream batch endpoint replaces client fan-out at
+  its gateway seam rather than changing domain workflows.
 - **Curated autofix management**: the mental model is audit -> findings ->
   optional improvement. `auditAutofixes` is the typed catalog of available
   variants, while `improvement-jobs` is the canonical CLI operator resource
@@ -34,12 +49,24 @@ agents can orient quickly before making changes.
 - **Report language scope**: language is an account-wide `en`/`ru` preference,
   not a project mutation. CLI reads and writes user preferences idempotently;
   it does not expose redundant per-project resolved values.
-- **Narrow read-only MCP facade**: MCP stays curated and read-only. It exposes
-  portfolio overview and repository report reading, not auth bootstrap,
-  project/repo writes, scheduling, or other operator controls.
+- **Narrow read-only MCP facade**: MCP stays curated and read-only. MCP
+  delivery imports only `McpQueryFacade`, which exposes portfolio overview and
+  repository audit reading. It does not surface auth bootstrap, project/repo
+  writes, scheduling, improvement-job mutation, or other operator controls.
 - **Docker-first runtime with a supervisor**: the service runs in Docker and
   `enji-guard run` owns MCP, background cookie refresh, and backend readiness
   as sibling tasks.
+- **Two-tier release QA through public surfaces**: credentialless CI starts the
+  exact candidate image and validates its hardened Docker, CLI, health, and MCP
+  contracts before publication. Authenticated pre-merge smoke and bounded soak
+  exercise the running service read-only; optional mutation smoke owns and
+  removes only its unique disposable fixture. QA scripts do not import product
+  internals, so they validate the same process and protocol boundaries users do.
+- **Started-task reconciliation before duplicate audit starts**: `audit start`
+  and status reads do not trust upstream active-run projections alone. They
+  reconcile those projections with a durable local started-task ledger and
+  `task-by-id` lookups so recently started audits are not duplicated while
+  upstream state is catching up.
 - **Temporary cookie auth with first-class API tokens**: cookie auth is a
   compatibility path. Bearer/API-token support is the preferred stable auth
   path and should remain first-class.
@@ -52,8 +79,13 @@ agents can orient quickly before making changes.
   HTTP retry profiles allow retries only for reads, safe probes, and idempotent
   mutations; unsafe mutations and auth refresh are not retried by transport.
   Transport delay is exponential with jitter and a 30-second cap. Supervisor
-  recovery retries indefinitely with exponential jitter, caps each delay at one
-  hour, and uses the configured re-auth interval for `AUTH_REQUIRED` failures.
+  recovery retries indefinitely with exponential jitter capped by the frozen
+  `auto_refresh.retry_max_seconds` setting, and uses the configured re-auth
+  interval for `AUTH_REQUIRED` failures.
+  Credential-file changes wake the refresh scheduler and backend-readiness loop
+  immediately instead of waiting for the next heartbeat. There is no manual
+  operator-facing `auth refresh` command; `auth status`, readiness, and
+  telemetry are the validation surfaces.
 - **Auth resilience observability**: runtime diagnosis uses telemetry events
   `enji_http_retry`, `enji_auth_auto_refresh_scheduled`,
   `enji_auth_auto_refresh_retry`, `enji_auth_auto_refresh_succeeded`,
@@ -71,4 +103,30 @@ agents can orient quickly before making changes.
   is the source of truth for the service API. Markdown docs do not define a
   second contract.
 - **Import-linter as architecture policy**: import-linter expresses enforced
-  module boundaries, not style preferences.
+  module boundaries, not style preferences. Audit cannot depend on Portfolio.
+  Portfolio cannot depend on Audit except for the explicit typed
+  `portfolio.ports -> audit.ports` seam used by recon and status composition;
+  new cross-context imports must be moved to application orchestration or an
+  intentionally designed shared kernel. Protected ownership contracts reserve
+  raw Enji HTTP/wire modules for the gateway and transport for Auth Session and
+  the gateway. A protected concurrency contract reserves thread-pool ownership
+  for the shared fan-out policy. Contract names state when a rule governs
+  direct imports only.
+- **Explicit composition root**: dependency construction lives in
+  `composition.py`; the application module contains orchestration and typed
+  facades, not concrete adapter construction.
+- **Auth Session and Runtime/Observability ownership**: Auth Session is
+  credential-focused and cannot depend on Audit, Portfolio, application,
+  delivery, or raw gateway translators. Runtime/Observability owns supervisor,
+  readiness, telemetry, and journey coordination; it may use the narrow MCP
+  factory boundary required by the current runtime, but not domain
+  implementations or raw gateway HTTP/wire modules.
+- **Source ownership policy**: current product layers are checked for imports
+  of raw gateway implementations; the anti-corruption boundary remains the
+  explicit owner of transport and wire translation.
+- **Shared transport lifecycle**: operator gateways share one pooled
+  `httpx.AsyncClient` owned by a dedicated event-loop thread. Synchronous
+  delivery calls bridge to that loop, and the application lifecycle closes the
+  pool idempotently after each CLI invocation. Pool limits and graceful MCP
+  shutdown timeout are frozen hierarchical settings rather than module-level
+  tuning constants.

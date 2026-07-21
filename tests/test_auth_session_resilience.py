@@ -6,30 +6,31 @@ from typing import cast
 import httpx
 import pytest
 
-import enji_guard_cli.auth as auth_module
-import enji_guard_cli.auth_impl.auto_refresh as auto_refresh_module
-import enji_guard_cli.enji_api_impl.client as api_client_module
-from enji_guard_cli._enji_api_contract import (
-    IMPLEMENTED_ENJI_ENDPOINTS,
-    RetryProfile,
-)
-from enji_guard_cli.auth import (
+import enji_guard_cli.auth_session.api as auth_module
+import enji_guard_cli.auth_session.auto_refresh as auto_refresh_module
+import enji_guard_cli.enji_gateway.client as api_client_module
+from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
+from enji_guard_cli.auth_session.api import (
     backend_readiness_probe_async,
     import_cookie,
     load_stored_auth,
     refresh_cookie_auth,
 )
-from enji_guard_cli.auth_impl.store import (
+from enji_guard_cli.auth_session.store import (
     load_pending_rotation,
     mark_pending_rotation_rotated,
     pending_rotation_path,
     reserve_pending_rotation,
 )
-from enji_guard_cli.enji_api_impl.client import (
+from enji_guard_cli.enji_gateway.client import (
     ApiEndpoint,
     ApiRequestSpec,
     EnjiApiSession,
     request_json_object,
+)
+from enji_guard_cli.enji_gateway.contract import (
+    IMPLEMENTED_ENJI_ENDPOINTS,
+    RetryProfile,
 )
 from enji_guard_cli.settings import AutoRefreshSettings
 from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient, RetryConfig
@@ -140,7 +141,7 @@ def test_non_replayable_profiles_do_not_auto_retry_status_responses(profile: Ret
 def test_unsafe_request_is_not_replayed_after_cookie_refresh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access=old; refresh=long", auth_file)
-    session = api_client_module.load_api_session(auth_file)
+    session = api_client_module.load_api_session(auth_file, auth_port=AuthSessionAdapter())
     calls: list[EnjiHttpRequest] = []
 
     class Client:
@@ -254,5 +255,5 @@ def test_auto_refresh_backoff_grows_caps_and_auth_required_is_calmer(
         return wait(cast(auto_refresh_module.RetryCallState, state))
 
     assert [delay(attempt, RuntimeError()) for attempt in range(1, 5)] == [30, 60, 120, 240]
-    assert delay(20, RuntimeError()) == 3600
+    assert delay(20, RuntimeError()) == 10_000
     assert [delay(attempt, SimpleNamespace(code="AUTH_REQUIRED")) for attempt in range(1, 4)] == [900, 900, 900]

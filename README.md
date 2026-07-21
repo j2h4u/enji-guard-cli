@@ -3,12 +3,13 @@
 Python 3.14 CLI and MCP bridge for Enji Guard.
 
 This is a working Docker-first product for local coding agents that use Enji
-Guard as an external repository-audit backend. It provides a shared core, a
+Guard as an external repository-audit backend. It provides typed Audit and
+Portfolio contexts behind one application facade, a
 validated Typer CLI operator surface, and a curated read-only FastMCP surface
-for portfolio and report access.
+for portfolio and audit access.
 
-See [ROADMAP.md](ROADMAP.md) for the current product status and remaining MCP
-scope.
+See [ROADMAP.md](ROADMAP.md) for the current product status and remaining
+hardening work.
 
 ## Mental Model
 
@@ -16,6 +17,11 @@ Enji Guard groups GitHub repositories into projects. Most workflows should use
 the GitHub `owner/name` repository selector; add `--project NAME_OR_ID` only
 when the account has ambiguous repositories or when a batch operation must be
 scoped to one project.
+
+An audit is the main unit of repository analysis in this CLI. It has a run
+lifecycle, freshness relative to the repository head, scores, and readable
+findings. The Enji API may still call some wire payloads reports, but that
+transport vocabulary is not part of the user-facing model.
 
 Mutating batch commands require explicit scope. Use a `REPO` argument for one
 repository, `--all-repos` with `--project NAME_OR_ID` for every repository in
@@ -26,43 +32,36 @@ of duplicating upstream work.
 
 Project admin commands are direct domain actions: create, rename, delete, and
 move repositories between projects. `project delete` succeeds only for empty
-projects; a project with any repository is rejected by the core layer.
+projects; a project with any repository is rejected by the Portfolio context.
 
-Recon is baseline discovery. Report audits are separate, slow jobs that produce
-readable reports and scores. `status` is the snapshot/readiness/freshness view,
-`wait` is the completion check after `status`, `report summary` is the compact
-metadata path, and `report read` is the content path. `status --json`
-separates the latest readable report artifact from the
-current audit task lifecycle, so a stale readable report and a newly queued or
+Recon is baseline discovery. Audit runs are separate, slow jobs that produce
+readable findings and scores. `status` is the snapshot/readiness/freshness view,
+`wait` is the completion check after `status`, `audit summary` is the compact
+metadata path, and `audit read` is the content path. `status --json`
+separates the latest readable audit artifact from the
+current audit task lifecycle, so a stale readable audit and a newly queued or
 running task can both be true. Scores are triage hints: use them to sort and
-prioritize repositories, then read the reports before changing code. When a
-report exposes commit hashes, compare them with the current checkout before
-treating the report as fresh. Starting a new audit can temporarily hide older
+prioritize repositories, then read the audits before changing code. When an
+audit exposes commit hashes, compare them with the current checkout before
+treating the audit as fresh. Starting a new audit can temporarily hide older
 snapshots behind running work, so read any needed snapshots before you start a
 fresh audit. CLI `status` and `audit start` do not trust Enji active-runs
 alone; the service keeps a short local started-task ledger and reconciles it
 with `task-by-id` so incomplete active-runs projections do not trigger duplicate
 starts.
-`report read --json` returns the full structured read payload, including each
-available Markdown report body. `report summary --json` is the compact batch
-contract: readable reports include summary metadata, and unavailable reports are
+`audit read --json` returns the full structured read payload, including each
+available Markdown findings body. `audit summary --json` is the compact batch
+contract: readable audits include summary metadata, and unavailable audits are
 returned with `available: false` plus a reason instead of aborting the whole
 batch.
 
-Every command in the Audit Catalog context fetches `GET /api/ux/catalog` once
-for its invocation. `curatedActions` is authoritative: published audits in the
-live response are the available audits, so newly published audits participate
-automatically. The CLI keeps a best-effort previous observation at
-`~/.config/enji-guard/state/audit-catalog.json`; it is never an API fallback and
-never supplies selectors. The first valid catalog establishes a baseline
-without a business notice. Later added, removed, or changed audits are emitted
-as a text business notice on stdout. With `--json`, the same information is
-under the stable top-level `audit_catalog` business section, whose `changes`
-field is an array and is empty when there are no changes. stderr is reserved for
-errors. CLI report selectors use
+Every audit-aware operation fetches `GET /api/ux/catalog` once for its
+invocation. `curatedActions` is authoritative: published audits in the live
+response are the available audits, so newly published audits participate
+automatically. The catalog is not cached and has no fallback. CLI audit selectors use
 the action-key suffix without the `audit.` prefix (for example, `security`
 selects `audit.security`). Recon is a separate `audit.recon` action and is not
-a report selector.
+an audit selector.
 
 The workflow is audit -> findings -> optional improvement. The live catalog's
 `auditAutofixes` entries describe available variants. The supported typed
@@ -73,7 +72,7 @@ remains read-only. Use an explicit `REPO`, `--all-repos` with `--project`, or
 `--all-projects` for batch scope. The relationship mapping is temporary and
 can be removed when Enji exposes relationships directly.
 
-Report language is an account-wide preference (`en` or `ru`) shared by all
+Audit language is an account-wide preference (`en` or `ru`) shared by all
 projects.
 
 CLI output is human text and tables by default. Use `--json` only when another
@@ -81,8 +80,11 @@ tool needs structured output.
 
 ## Surfaces
 
-Core owns Enji/auth behavior and task-level use cases. The CLI and MCP layers
-stay thin and call core instead of duplicating backend logic.
+Audit and Portfolio own product rules, Application composes their use cases,
+and gateway/auth/runtime packages own infrastructure. CLI and MCP stay thin
+and call Application instead of duplicating product or backend logic. The
+repository treats these DDD-style boundaries as architecture policy, and
+`import-linter` enforces them in the verification gate.
 
 The CLI is the broad operator surface for agents. It exposes reads, writes,
 project administration, repository moves, schedule changes, email preferences,
@@ -90,7 +92,7 @@ auth bootstrap, and runtime checks.
 
 MCP is the curated read-only surface for agents that need the Enji picture:
 portfolio overview across projects and repositories, scores, freshness, active
-work, and report reading for a concrete repository. MCP does not mirror every CLI
+work, and audit reading for a concrete repository. MCP does not mirror every CLI
 command or Enji frontend endpoint, and it does not expose auth bootstrap,
 auth-file diagnostics, project administration, or scheduling controls. Auth
 belongs to the Docker runtime and CLI operator surface.
@@ -147,33 +149,40 @@ docker exec -i enji-guard-cli enji-guard status "$REPO"
 
 `repo add` is idempotent project membership. If the repository is already
 present, continue with the same flow. It starts recon when baseline diagnostics
-are not ready. Use `status` to watch progress before expecting reports or
+are not ready. Use `status` to watch progress before expecting audits or
 scores.
 
 For triage across all visible repositories:
 
 ```bash
 docker exec -i enji-guard-cli enji-guard status --sort weakest
-docker exec -i enji-guard-cli enji-guard repo list --sort latest-report
+docker exec -i enji-guard-cli enji-guard repo list --sort latest-audit
 ```
 
-For reports:
+These portfolio-wide commands return the compact overview: project and
+repository identity, scores, recon/connection state, and active runs. They do
+not fetch every audit status for every repository. Use `status REPO` for the
+detailed status of one repository, `audit summary REPO` for compact audit
+triage, and `audit read REPO` for audit findings. Add `--json` only when the
+result is being consumed programmatically.
+
+For audits:
 
 ```bash
 docker exec -i enji-guard-cli enji-guard audit start "$REPO" --all
 docker exec -i enji-guard-cli enji-guard wait "$REPO"
-docker exec -i enji-guard-cli enji-guard report summary "$REPO"
-docker exec -i enji-guard-cli enji-guard report read "$REPO"
+docker exec -i enji-guard-cli enji-guard audit summary "$REPO"
+docker exec -i enji-guard-cli enji-guard audit read "$REPO"
 ```
 
-Recon and report audits can take tens of minutes. Use `status` for a snapshot,
-`wait` as a follow-up completion check, `report summary` for compact triage,
-and `report read` after reports are ready. `status` shows stale audits
+Recon and audit runs can take tens of minutes. Use `status` for a snapshot,
+`wait` as a follow-up completion check, `audit summary` for compact triage,
+and `audit read` after audits are ready. `status` shows stale audits
 explicitly and uses `audited=mixed` when
-report audits were generated from different commits. `audit start --json`
-returns a `results` matrix, one item per requested report audit, with states
+audits were generated from different commits. `audit start --json`
+returns a `results` matrix, one item per requested audit, with states
 such as `started`, `queued`, `already_running`, `up_to_date`, or `failed`.
-Prefer reading reports through CLI/MCP instead of relying on email; disable
+Prefer reading audits through CLI/MCP instead of relying on email; disable
 noisy scheduled mail when it is not part of the workflow.
 
 ## Requirements
@@ -195,6 +204,16 @@ after that PR is merged. Use `feat:` and `fix:` only for changes that should be
 visible in release notes; keep internal churn under `chore:`, `refactor:`,
 `test:`, `ci:`, or `docs:`.
 
+Commit-derived notes are sufficient for routine releases. For a broad
+user-facing change, curate the implementation PR's release notes when commit
+subjects do not tell one coherent story. Explain the current mental model and
+the important workflows in plain language; this is a lightweight release
+summary, not a command-by-command migration plan. Call out old syntax only
+when users of the deterministic CLI/JSON contract would otherwise be surprised.
+Release-please remains the only writer of `CHANGELOG.md`; review its generated
+release PR as the final user-facing artifact. See
+[CONTRIBUTING.md](CONTRIBUTING.md#release-notes).
+
 Use the local release status check after merges and releases:
 
 ```bash
@@ -205,6 +224,27 @@ It needs `gh` and Docker buildx available for release checks; those are only
 required for this command, not for normal runtime use.
 It reports git state, open PRs, the latest GitHub Release, GHCR image
 publication, and recent GitHub Actions.
+
+Every candidate image must pass the credentialless runtime contract before it
+is published:
+
+```bash
+just release-contract enji-guard-cli:local
+```
+
+Before merging runtime-sensitive work, exercise the already running authenticated
+service through its public CLI and MCP surfaces:
+
+```bash
+just release-smoke j2h4u/enji-guard-cli
+just release-smoke-recreate j2h4u/enji-guard-cli
+just release-smoke-soak j2h4u/enji-guard-cli 300 30 0
+```
+
+The first command is read-only. The recreate check proves that authentication
+survives container replacement; the bounded soak repeats the same read-only
+journey. `release-smoke-mutations` is opt-in and accepts only a unique project
+fixture created by that run; do not use it against an existing project.
 
 ## Runtime
 
@@ -241,22 +281,23 @@ For registry-based deployment, use the GHCR image and compose example in
 Bearer/API-token auth is the preferred stable path:
 
 ```bash
-printf '%s' "$ENJI_API_TOKEN" | docker exec -i enji-guard-cli enji-guard auth import-token --stdin
+printf '%s' "$ENJI_API_TOKEN" | docker exec -i enji-guard-cli enji-guard auth import-bearer --stdin
 ```
 
 Until API tokens are available, cookie auth is supported as a temporary
 compatibility path:
 
-Run in the guard.enji.ai DevTools Console:
+Refresh the Enji session in the browser first, then trigger an authenticated
+Fleet request such as:
 
 ```javascript
-await fetch('https://fleet.enji.ai/api/v1/auth/refresh', { method: 'POST', credentials: 'include' });
 await fetch('https://fleet.enji.ai/api/v1/auth/me', { credentials: 'include' });
 ```
 
-In DevTools Network, open the second `GET /api/v1/auth/me` and copy
-Request Headers -> Cookie, not response headers. The refresh request's Request
-Cookie contains the old refresh token.
+In DevTools Network, open `GET /api/v1/auth/me` and copy Request Headers ->
+Cookie, not response headers. If you inspect the refresh request itself, merge
+its response `Set-Cookie` values because that request's `Cookie` header still
+contains the old refresh token.
 
 ```bash
 pbpaste | docker exec -i enji-guard-cli enji-guard auth import-cookie --stdin
@@ -297,11 +338,11 @@ and timing fields; credentials are not an operator-facing log output.
 
 After a real cookie re-authentication, refresh the session in the browser,
 request `/api/v1/auth/me`, and import the current `Cookie` request header using
-the procedure above. Then validate the running service with:
+the procedure above. The supervisor notices the new credentials immediately,
+takes over cookie refresh, and updates backend readiness without a restart.
+Validate the running service with:
 
 ```bash
-docker exec -i enji-guard-cli enji-guard auth refresh
-docker exec -i enji-guard-cli enji-guard auth status
 docker exec -i enji-guard-cli enji-guard health --ready
 ```
 
@@ -327,15 +368,16 @@ docker exec -i enji-guard-cli enji-guard repo move j2h4u/enji-guard-cli --to-pro
 docker exec -i enji-guard-cli enji-guard status j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard audit start j2h4u/enji-guard-cli --all
 docker exec -i enji-guard-cli enji-guard wait j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard report summary j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard report summary j2h4u/enji-guard-cli --json
-docker exec -i enji-guard-cli enji-guard report read j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard report read j2h4u/enji-guard-cli --json
+docker exec -i enji-guard-cli enji-guard audit summary j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard audit summary j2h4u/enji-guard-cli --json
+docker exec -i enji-guard-cli enji-guard audit read j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard audit read j2h4u/enji-guard-cli --json
 docker exec -i enji-guard-cli enji-guard --project Pets schedule list
 docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos --enabled on --frequency workdays --timezone Asia/Almaty
 docker exec -i enji-guard-cli enji-guard --project Pets schedule auto-time --all-repos
+docker exec -i enji-guard-cli enji-guard improvement-jobs list j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard improvement-jobs set j2h4u/enji-guard-cli security vuln-fix --enabled on
 docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --scheduled off
-docker exec -i enji-guard-cli enji-guard auth refresh
 ```
 
 Pass `--json` when a command output is consumed by automation.
@@ -345,7 +387,7 @@ one Enji project.
 `repo move` uses global `--project` as source project or selector
 disambiguation when needed. `--to-project` selects the destination project.
 
-`schedule` controls automatic report-audit runs, one row per repository and
+`schedule` controls automatic audit runs, one row per repository and
 catalog action key. Its cadence and per-subscription IANA timezone are stored
 with each schedule; Enji assigns the run time by default. The service/container
 should run with the host timezone. Batch writes are explicit client-side loops:
@@ -359,7 +401,7 @@ not create or replace an audit schedule. Audit schedules remain under
 `audit-auto-runs/{actionKey}`.
 
 `language show` reports the account preference. `language set en|ru` is
-idempotent and changes the account-wide report language; Enji does not expose
+idempotent and changes the account-wide audit language; Enji does not expose
 an independent per-project language setter.
 
 ## MCP
@@ -370,7 +412,7 @@ Local HTTP MCP service:
 docker compose up -d --force-recreate --remove-orphans --wait
 ```
 
-Endpoint:
+The current FastMCP streamable-HTTP default endpoint is:
 
 ```text
 http://127.0.0.1:8001/mcp
@@ -387,7 +429,11 @@ just verify
 
 The completion gate includes Ruff, basedpyright, import-linter, Vulture,
 deptry, OpenAPI contract validation, CRAP <= 30 per function, tests, and Docker
-build.
+build. Keep CLI and MCP thin, keep product logic behind Application, and treat
+import-linter failures as architectural regressions rather than style nits.
+`just verify` also builds the image; release workflows additionally execute the
+credentialless runtime contract, while authenticated live smoke remains an
+operator gate because CI receives no Enji credentials.
 
 Use `CONTRIBUTING.md` for change intake, acceptance criteria, and handoff rules.
 
@@ -402,7 +448,7 @@ dependency/Docker/CI references.
 
 ## Documentation
 
-- [ROADMAP.md](ROADMAP.md): product status, remaining MCP scope, and modular
+- [ROADMAP.md](ROADMAP.md): product status, remaining hardening work, and modular
   install notes.
 - [CONTRIBUTING.md](CONTRIBUTING.md): change intake, acceptance, and handoff
   rules.

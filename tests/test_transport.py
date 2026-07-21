@@ -6,8 +6,8 @@ from typing import cast
 import httpx
 import pytest
 
+from enji_guard_cli.runtime_observability.telemetry import configure_logging
 from enji_guard_cli.settings import TelemetrySettings
-from enji_guard_cli.telemetry import configure_logging
 from enji_guard_cli.transport import (
     EnjiHttpRequest,
     EnjiHttpResponse,

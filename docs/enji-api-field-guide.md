@@ -1,8 +1,9 @@
 # Enji API Field Guide
 
-Observed on 2026-06-28 against the Enji Guard SPA and Fleet backend. This is a
-sanitized engineering reference for behavior that is useful when maintaining
-the reconstructed contract. The canonical machine-readable API boundary is
+Observed on 2026-06-28 against the Enji Guard SPA and Fleet backend, then
+re-checked against this branch on 2026-07-20. This is a sanitized engineering
+reference for behavior that is useful when maintaining the reconstructed
+contract. The canonical machine-readable API boundary is
 [`contracts/enji-openapi.json`](../contracts/enji-openapi.json); when this guide
 and the contract disagree, verify the live service and update the contract.
 
@@ -27,10 +28,11 @@ deduplicate concurrent refresh attempts, and retry the failed request once. It
 must never recursively refresh a failed refresh request. Expiry of the refresh
 cookie requires a new OAuth login.
 
-The browser and CLI can invalidate each other's session when both rotate the
-same cookie state. The service therefore keeps one writable cookie jar and owns
-refresh centrally. Bearer/API-token support remains the preferred long-term
-authentication path.
+The service keeps one writable cookie jar and owns refresh centrally. The
+documented operator surface is `auth import-cookie`, `auth import-bearer`, and
+`auth status`; there is no manual `auth refresh` CLI command. Bearer/API-token
+support remains the preferred long-term authentication path when Enji exposes
+it.
 
 ## Audit Discovery
 
@@ -50,6 +52,12 @@ CLI report selectors are action-key suffixes without the `audit.` prefix. For
 example, selector `security` identifies action key `audit.security`; the exact
 action key from the catalog is used for API requests. Recon is the separate
 `audit.recon` action and is not part of the report-audit selector set.
+
+Catalog parsing is intentionally strict. The current guard requires exactly one
+`audit.recon` action, treats published report audits as non-recon
+`category == "audit"` entries with `status == "published"`, requires a
+`metricGroup` for each published report audit, and rejects duplicate action
+keys or duplicate CLI selectors.
 
 ## Repository Lifecycle
 
@@ -91,6 +99,12 @@ Progress can be reconciled from three projections:
 - repository `audit-rerun-state` for current SHA, last audited SHA, rerun
   eligibility, and the last Fleet task ID.
 
+Freshness is SHA-based only. The current implementation compares the current
+repository head SHA with the last audited SHA and classifies reports as
+`fresh`, `stale`, or `unknown`; branch names are not part of the freshness
+decision. Aggregate audit status also surfaces `partial` and `mixed` states, so
+stale but still readable reports remain available while new audits run.
+
 The report body is returned by
 `GET /api/ux/repos/{repoId}/snapshots/upfront.audit.summary?group=<report-group>`
 as Markdown in `snapshot.content.report`. Copy and download in the SPA are
@@ -124,7 +138,10 @@ The current typed relationship registry supports `security` -> `vuln-fix`,
 Pentest is separate. Batch operations are explicit client-side loops over a
 single `REPO`, `--all-repos` within `--project`, or `--all-projects`; no wider
 scope is inferred. MCP remains read-only. Remove the temporary relationship
-registry when Enji exposes relationships directly.
+registry when Enji exposes relationships directly. The current CLI only exposes
+published autofix entries that are not part of the separate pentest action set;
+unsupported autofix selectors remain blocked until a typed relationship is
+defined.
 
 ## Scheduling
 
@@ -154,6 +171,11 @@ use `scheduleTime: "00:00"` with `scheduleTimeSource: "auto"`. `schedule
 auto-time` restores those values without changing cadence or timezone. The
 container runs in the host timezone, but each subscription's stored IANA
 timezone controls that subscription's schedule.
+
+When an audit schedule does not exist yet, the current client-side defaults are
+`cadence: "workdays"`, `scheduleTime: "00:00"`,
+`scheduleTimeSource: "auto"`, and `timezone: "UTC"` unless the operator
+supplies another IANA timezone such as `Asia/Almaty`.
 
 The schedule-load endpoint requires `from`, `to`, and `timezone` and returns
 30-minute load buckets plus candidate slots. The SPA selects a low-load

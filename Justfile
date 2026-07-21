@@ -105,14 +105,9 @@ docker-up:
 dev-up:
     docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate --remove-orphans --wait --wait-timeout 90
 
-# Force-refresh the mounted auth file from inside the running dev container.
-dev-refresh:
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T enji-guard-cli enji-guard auth refresh
-
-# Reload bind-mounted source without rebuilding; refresh auth first.
-dev-reload: dev-refresh
+# Reload bind-mounted source after local code changes.
+dev-reload:
     docker compose -f docker-compose.yml -f docker-compose.dev.yml restart enji-guard-cli
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T enji-guard-cli enji-guard auth status
 
 # Full local gate for agents before claiming completion.
 verify: check crap-check unit docker-build
@@ -120,3 +115,26 @@ verify: check crap-check unit docker-build
 # Show release, release PR, workflow, and published image status.
 release-status:
     scripts/release_status.py
+
+# Read-only smoke against a running Docker service.  The empty project value
+# intentionally means account-wide selection; no mutating operation is used.
+release-smoke repo project="" container="enji-guard-cli" mcp_url="http://127.0.0.1:8001/mcp":
+    uv run python -m scripts.release_smoke --repo "{{repo}}" --project "{{project}}" --container "{{container}}" --mcp-url "{{mcp_url}}"
+
+# Recreate the service and verify auth status survives the restart.
+release-smoke-recreate repo project="" container="enji-guard-cli" compose_file="docker-compose.yml":
+    uv run python -m scripts.release_smoke --repo "{{repo}}" --project "{{project}}" --container "{{container}}" --compose-file "{{compose_file}}" --recreate --auth-persistence
+
+# Explicitly opt into the reversible project mutation smoke.  The script
+# generates a unique reserved project name and cleans up only an exact create.
+release-smoke-mutations container="enji-guard-cli":
+    uv run python -m scripts.release_smoke_mutations --enable --container "{{container}}"
+
+# Bounded repeated health/status/MCP probes with a failure budget.
+release-smoke-soak repo duration="300" interval="30" max_failures="0" project="" container="enji-guard-cli":
+    uv run python -m scripts.release_smoke_soak --repo "{{repo}}" --project "{{project}}" --container "{{container}}" --duration "{{duration}}" --interval "{{interval}}" --max-failures "{{max_failures}}"
+
+# Credentialless contract against a caller-supplied local image.  The target
+# creates a unique hardened container and always removes it on exit.
+release-contract image="enji-guard-cli:local" timeout="20":
+    uv run python -m scripts.release_contract --image "{{image}}" --timeout "{{timeout}}"

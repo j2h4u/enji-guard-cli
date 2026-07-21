@@ -1,3 +1,4 @@
+import ast
 import json
 import os
 import subprocess
@@ -20,6 +21,22 @@ COMMON_SERVICE_FIELDS = (
     "tmpfs",
     "healthcheck",
     "volumes",
+)
+
+RAW_GATEWAY_MODULES = frozenset(
+    {
+        "enji_guard_cli.enji_gateway.wire",
+        "enji_guard_cli.enji_gateway.http",
+        "enji_guard_cli.enji_gateway.contract",
+        "enji_guard_cli.enji_gateway.client",
+        "enji_guard_cli.transport",
+    }
+)
+PRODUCT_SOURCE_ROOTS = (
+    ROOT / "src" / "enji_guard_cli" / "audit",
+    ROOT / "src" / "enji_guard_cli" / "portfolio",
+    ROOT / "src" / "enji_guard_cli" / "application.py",
+    ROOT / "src" / "enji_guard_cli" / "delivery",
 )
 
 
@@ -70,14 +87,41 @@ def test_container_publish_workflow_run_requires_trusted_source() -> None:
 
 
 def test_audit_schedule_domain_has_no_improvement_job_fallback() -> None:
-    schedules = (ROOT / "src" / "enji_guard_cli" / "core_impl" / "schedules.py").read_text(encoding="utf-8")
-    write_settings = (ROOT / "src" / "enji_guard_cli" / "core_impl" / "write_settings.py").read_text(encoding="utf-8")
-    core = (ROOT / "src" / "enji_guard_cli" / "core.py").read_text(encoding="utf-8")
+    schedules = (ROOT / "src" / "enji_guard_cli" / "audit" / "schedules.py").read_text(encoding="utf-8")
 
-    assert "subscriptions" in schedules
-    assert "schedule_subscription_by_action_key" in write_settings
-    assert "audit_auto_runs" in core
-    for source in (schedules, write_settings):
-        assert "improvement" not in source
-        assert "runbook" not in source
-        assert "autofix" not in source.lower()
+    assert "audit_auto_run_key" in schedules
+    assert "improvement" not in schedules
+    assert "runbook" not in schedules
+
+
+def test_product_source_does_not_import_raw_gateway_implementations() -> None:
+    violations: list[str] = []
+    for path in _product_python_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            for imported in _imported_modules(node):
+                if any(imported == module or imported.startswith(f"{module}.") for module in RAW_GATEWAY_MODULES):
+                    violations.append(f"{path.relative_to(ROOT)}:{getattr(node, 'lineno', 0)}: {imported}")
+    assert violations == [], "raw gateway imports leaked into product code:\n" + "\n".join(violations)
+
+
+def _product_python_files() -> tuple[Path, ...]:
+    paths: list[Path] = []
+    for root in PRODUCT_SOURCE_ROOTS:
+        if root.is_file():
+            paths.append(root)
+        else:
+            paths.extend(root.rglob("*.py"))
+    return tuple(sorted(paths))
+
+
+def _imported_modules(node: ast.AST) -> tuple[str, ...]:
+    if isinstance(node, ast.Import):
+        return tuple(alias.name for alias in node.names)
+    if isinstance(node, ast.ImportFrom):
+        if node.module is None:
+            return ()
+        if node.module == "enji_guard_cli.enji_gateway":
+            return tuple(f"{node.module}.{alias.name}" for alias in node.names)
+        return (node.module,)
+    return ()
