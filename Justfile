@@ -95,7 +95,12 @@ docker-check:
 
 # Build the Docker image.
 docker-build: docker-check
-    docker build -t enji-guard-cli:local .
+    package_version="$(uv run python -c 'from importlib.metadata import version; print(version("enji-guard-cli"))')"; \
+    source_commit="$(git rev-parse HEAD)"; \
+    docker build \
+        --build-arg "PACKAGE_VERSION=${package_version}" \
+        --build-arg "SOURCE_COMMIT=${source_commit}" \
+        -t enji-guard-cli:local .
 
 # Recreate the local Docker service.
 docker-up:

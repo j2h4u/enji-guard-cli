@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -29,6 +30,7 @@ CONTAINER_PORT = 8000
 MIN_PORT = 1
 MAX_PORT = 65535
 AUTH_MARKERS = ("auth", "credential", "token", "cookie", "login", "unauthenticated")
+VERSION_LINE = re.compile(r"^enji-guard-cli \S+ \(commit [0-9a-f]{12}\)\n$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,6 +282,11 @@ def run_contract(
         if help_result.returncode != 0:
             raise ContractError(f"CLI help failed: {_safe_error(help_result.stderr)}")
         print("PASS CLI help")
+
+        version_result = runner(_container_exec(settings, "--version"), timeout=settings.timeout_seconds)
+        if version_result.returncode != 0 or VERSION_LINE.fullmatch(version_result.stdout) is None:
+            raise ContractError("CLI version provenance is missing or malformed")
+        print("PASS CLI version provenance")
 
         health_result = runner(_container_exec(settings, "health"), timeout=settings.timeout_seconds)
         if health_result.returncode != 0:
