@@ -95,6 +95,7 @@ docker-check:
 
 # Build the Docker image.
 docker-build: docker-check
+    uv sync --frozen --reinstall-package enji-guard-cli
     package_version="$(uv run python -c 'from importlib.metadata import version; print(version("enji-guard-cli"))')"; \
     source_commit="$(git rev-parse HEAD)"; \
     docker build \
