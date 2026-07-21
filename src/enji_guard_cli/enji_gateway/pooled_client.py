@@ -59,21 +59,23 @@ class PooledEnjiHttpClient:
         self.close()
 
     async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+        future: Future[EnjiHttpResponse] | None = None
         with self._state_lock:
             if self._closed:
                 raise RuntimeError("pooled Enji HTTP client is closed")
             loop = self._owner_loop
             executor = self._executor
-        if loop is None or executor is None or loop.is_closed():
-            raise RuntimeError("pooled Enji HTTP client is unavailable")
-        if threading.current_thread() is self._thread:
+            if loop is None or executor is None or loop.is_closed():
+                raise RuntimeError("pooled Enji HTTP client is unavailable")
+            on_owner_thread = threading.current_thread() is self._thread
+            if not on_owner_thread:
+                future = asyncio.run_coroutine_threadsafe(executor.request(request), loop)
+                # Register atomically with the open-state check so close() cannot
+                # miss a request that has already been submitted to the owner loop.
+                self._inflight.add(future)
+        if on_owner_thread:
             return await executor.request(request)
-        future = asyncio.run_coroutine_threadsafe(executor.request(request), loop)
-        with self._state_lock:
-            if self._closed:
-                future.cancel()
-                raise RuntimeError("pooled Enji HTTP client is closed")
-            self._inflight.add(future)
+        assert future is not None
         try:
             return await asyncio.wrap_future(future)
         except asyncio.CancelledError:
