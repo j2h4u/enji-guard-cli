@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.0.0](https://github.com/j2h4u/enji-guard-cli/compare/v0.6.2...v1.0.0) (2026-07-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** The public CLI and JSON contract now follow the audit-first model. Human and agent workflows should use the current README scenarios; this release intentionally does not preserve the legacy report-shaped surface.
+
+### Features
+
+* add audit catalog and session resilience ([50c8e6e](https://github.com/j2h4u/enji-guard-cli/commit/50c8e6e0e4abd30b3c681d6d4446f9e06375e663))
+* **auth:** make credential recovery automatic and immediate ([e4de712](https://github.com/j2h4u/enji-guard-cli/commit/e4de7127f6ffe2f743475d7141f448254baa17c3))
+* **cli:** adopt an audit-first operator model ([e4de712](https://github.com/j2h4u/enji-guard-cli/commit/e4de7127f6ffe2f743475d7141f448254baa17c3))
+
+
+### Fixes
+
+* **runtime:** harden readiness and release smoke verification ([e4de712](https://github.com/j2h4u/enji-guard-cli/commit/e4de7127f6ffe2f743475d7141f448254baa17c3))
+
+
+### Performance
+
+* **cli:** pool transport and bound portfolio fanout ([e4de712](https://github.com/j2h4u/enji-guard-cli/commit/e4de7127f6ffe2f743475d7141f448254baa17c3))
+
 ## [0.6.2](https://github.com/j2h4u/enji-guard-cli/compare/v0.6.1...v0.6.2) (2026-07-12)
 
 
