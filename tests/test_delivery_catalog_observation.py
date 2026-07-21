@@ -1,6 +1,7 @@
 # pyright: basic
 
 import importlib
+import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, cast
@@ -47,7 +48,9 @@ def test_run_emits_catalog_changes_from_the_command_application(
     cli_module._run(lambda: cli_module._application().catalog(), True)
 
     assert constructions == 1
-    assert '"action_key": "audit.security"' in capsys.readouterr().out
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert payload["audit_catalog"]["changes"][0]["action_key"] == "audit.security"
 
 
 def test_application_keeps_catalog_observation_isolated_per_execution() -> None:

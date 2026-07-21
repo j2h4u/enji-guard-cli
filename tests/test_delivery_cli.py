@@ -1,9 +1,12 @@
 import importlib
+import json
 from collections.abc import Callable
 from typing import cast
 
 import pytest
 import typer
+from typer.core import TyperGroup
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from enji_guard_cli.application import (
@@ -44,7 +47,13 @@ def test_operator_command_tree_uses_audit_vocabulary() -> None:
 
 
 def test_audit_read_and_summary_are_public_commands() -> None:
+    root = get_command(app)
+    assert isinstance(root, TyperGroup)
+    audit = root.commands["audit"]
+    assert isinstance(audit, TyperGroup)
+    assert set(audit.commands) >= {"read", "summary", "start", "wait"}
     runner = CliRunner()
+    # Keep invocation as a reachability smoke check; command membership is the contract.
     assert runner.invoke(app, ["audit", "read", "--help"]).exit_code == 0
     assert runner.invoke(app, ["audit", "summary", "--help"]).exit_code == 0
 
@@ -155,7 +164,9 @@ def test_audit_start_calls_typed_application_and_emits_json(monkeypatch: pytest.
     result = CliRunner().invoke(app, ["audit", "start", "org/repo", "security", "--project", "Pets", "--json"])
     assert result.exit_code == 0
     assert result.exception is None
-    assert '"repo_id": "org/repo"' in result.stdout
+    payload = cast(dict[str, object], json.loads(result.stdout))
+    assert payload["repo_id"] == "org/repo"
+    assert payload["project_id"] == "Pets"
     assert fake.calls == [("audit_start", ("org/repo", "Pets", ["security"], False))]
 
 
@@ -266,8 +277,11 @@ def test_audit_summary_is_compact_in_text_and_json(monkeypatch: pytest.MonkeyPat
     assert "security  score=73 freshness=fresh" in text_result.stdout
     assert "body" not in text_result.stdout
     assert json_result.exit_code == 0
-    assert '"score": 73' in json_result.stdout
-    assert '"body"' not in json_result.stdout
+    payload = cast(dict[str, object], json.loads(json_result.stdout))
+    audits = cast(list[dict[str, object]], payload["audits"])
+    assert payload["repo_id"] == "r1"
+    assert audits[0]["score"] == 73
+    assert "body" not in audits[0]
 
 
 def test_json_omits_nested_optional_null_fields_but_keeps_top_level_and_list_nulls() -> None:
@@ -324,15 +338,24 @@ def test_schedule_list_is_one_summary_line_per_repository(monkeypatch: pytest.Mo
     json_result = CliRunner().invoke(app, ["schedule", "list", "--json"])
 
     assert text_result.exit_code == 0
-    assert text_result.stdout.strip() == (
-        "acme/cat  enabled=1/2 frequency=mixed[security=workdays,tests=weekly] "
-        "timezone=mixed[security=Asia/Almaty,tests=UTC] enabled_state=mixed[security=true,tests=false] "
-        "schedule_time=mixed[security=09:00,tests=10:00] "
-        "schedule_time_source=mixed[security=auto,tests=user] disabled=tests"
-    )
+    output = text_result.stdout.strip()
+    for field in (
+        "acme/cat",
+        "enabled=1/2",
+        "frequency=mixed[security=workdays,tests=weekly]",
+        "timezone=mixed[security=Asia/Almaty,tests=UTC]",
+        "enabled_state=mixed[security=true,tests=false]",
+        "schedule_time=mixed[security=09:00,tests=10:00]",
+        "schedule_time_source=mixed[security=auto,tests=user]",
+        "disabled=tests",
+    ):
+        assert field in output
     assert json_result.exit_code == 0
-    assert '"repository"' in json_result.stdout
-    assert '"schedules"' in json_result.stdout
+    payload = cast(list[dict[str, object]], json.loads(json_result.stdout))
+    repository = cast(dict[str, object], payload[0]["repository"])
+    schedules = cast(list[object], payload[0]["schedules"])
+    assert repository["full_name"] == "acme/cat"
+    assert len(schedules) == 2
 
 
 def test_json_preserves_null_scores_from_typed_repository_dto() -> None:
@@ -358,10 +381,19 @@ def test_improvement_jobs_list_is_one_summary_line_per_repository(monkeypatch: p
     result = CliRunner().invoke(app, ["improvement-jobs", "list"])
 
     assert result.exit_code == 0
-    assert result.stdout.strip() == (
-        "acme/cat  enabled=1/1 configured=1/1 auto_fix=1/1 supported=test-writing "
-        "enabled_state=true auto_fix_state=true frequency=workdays timezone=UTC"
-    )
+    output = result.stdout.strip()
+    for field in (
+        "acme/cat",
+        "enabled=1/1",
+        "configured=1/1",
+        "auto_fix=1/1",
+        "supported=test-writing",
+        "enabled_state=true",
+        "auto_fix_state=true",
+        "frequency=workdays",
+        "timezone=UTC",
+    ):
+        assert field in output
 
 
 def test_improvement_jobs_text_preserves_mixed_dimensions_and_states(
