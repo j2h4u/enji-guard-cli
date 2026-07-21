@@ -2,6 +2,7 @@
 
 from typing import Literal, cast
 
+from enji_guard_cli.audit.errors import AuditMalformedError, AuditNotFoundError, AuditUpstreamError
 from enji_guard_cli.audit.ports import (
     AuditArtifact,
     AuditAutofixJob,
@@ -70,7 +71,10 @@ from enji_guard_cli.enji_gateway.http import (
 )
 from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayAuthPort, GatewayClient
 from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot
+from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonValue
+
+HTTP_NOT_FOUND = 404
 
 
 class AuditGateway(AuditGatewayPort):
@@ -140,10 +144,23 @@ class AuditGateway(AuditGatewayPort):
         )
 
     def task_detail(self, task_id: str) -> AuditTaskDetail:
-        payload = _task_detail(task_id, self._auth_file, self._client, auth_port=self._auth_port)
-        task = _object(payload.get("task"))
+        try:
+            payload = _task_detail(task_id, self._auth_file, self._client, auth_port=self._auth_port)
+        except EnjiApiError as exc:
+            if exc.status_code == HTTP_NOT_FOUND:
+                raise AuditNotFoundError(task_id) from exc
+            if exc.response_malformed:
+                raise AuditMalformedError(f"task detail payload for {task_id} is malformed") from exc
+            raise AuditUpstreamError(f"task detail lookup failed for {task_id}: {exc.message}") from exc
+        task_payload = payload.get("task")
+        if not isinstance(task_payload, dict):
+            raise AuditMalformedError(f"task detail payload for {task_id} is malformed")
+        task = task_payload
+        returned_task_id = _optional_str(task.get("id"))
+        if returned_task_id is not None and returned_task_id != task_id:
+            raise AuditMalformedError(f"task detail payload for {task_id} has mismatched task id")
         return AuditTaskDetail(
-            task_id=_optional_str(task.get("id")) or task_id,
+            task_id=returned_task_id or task_id,
             status=_optional_str(task.get("status")),
             created_at=_optional_str(task.get("createdAt")),
             started_at=_optional_str(task.get("startedAt")),

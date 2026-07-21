@@ -4,6 +4,7 @@ from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.ports import (
     AuditProject,
     AuditRepository,
+    AuditRerunState,
     AuditRun,
     AuditRunbookMetadata,
     AuditTaskBody,
@@ -11,6 +12,10 @@ from enji_guard_cli.audit.ports import (
 )
 from enji_guard_cli.audit.runs import (
     AuditRunTaskContext,
+    StartAuditDependencies,
+    StartAuditsContext,
+    _start_one_audit,
+    _StartOneState,
     active_runs_for_action,
     audit_run_task_body,
     skipped_audit_payload,
@@ -90,6 +95,34 @@ def test_active_runs_for_action_keeps_current_matching_run() -> None:
     other = AuditRun("task-2", "audit.tests", "running", None, "started", None)
 
     assert active_runs_for_action((current, other), "audit.security") == (current,)
+
+
+def test_batch_start_protection_considers_all_matching_runs() -> None:
+    audit = AuditDefinition("audit.security", "Security", "vulns", "audit")
+    project = _context().project
+    context = StartAuditsContext("repo_1", "project_1", [audit], AuditCatalog((audit,), audit))
+    state = _StartOneState(
+        AuditRerunState("new", "old", None, None, {"audit.security": "old"}),
+        (
+            AuditRun("task-queued", "audit.security", "queued", None, None, None),
+            AuditRun("task-running", "audit.security", "running", None, None, None),
+        ),
+        project,
+    )
+    dependencies = StartAuditDependencies(
+        make_audit_run_create=lambda *_: None,
+        start_audit_run=lambda _: None,
+        project_detail=lambda _: project,
+        runbook=lambda _: AuditRunbookMetadata("runbook", None, None),
+        current_repo_active_runs=lambda _: (),
+        record_started_run=lambda _: None,
+        task_identity=lambda _: (None, None),
+    )
+
+    result = _start_one_audit(audit, context=context, state=state, dependencies=dependencies)
+
+    assert result["state"] == "already_running"
+    assert result["task_id"] == "task-running"
 
 
 @pytest.mark.parametrize(

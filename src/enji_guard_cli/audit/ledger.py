@@ -2,13 +2,28 @@
 
 import json
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
 from enji_guard_cli.atomic_json import write_atomic_json
-from enji_guard_cli.audit.lifecycle import is_terminal_status
+from enji_guard_cli.audit.errors import AuditMalformedError, AuditNotFoundError, AuditUpstreamError
+from enji_guard_cli.audit.lifecycle import is_active_run, is_terminal_status, representative_projection
 from enji_guard_cli.audit.ports import AuditLedgerEntry, AuditLedgerPort, AuditRun, AuditTaskDetail
+
+
+@dataclass(frozen=True, slots=True)
+class _EntryReconciliation:
+    retained: bool
+    suppress_task_id: str | None = None
+    projected: AuditRun | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _TaskLookupResult:
+    detail: AuditTaskDetail | None = None
+    error: BaseException | None = None
 
 
 class FileAuditLedger(AuditLedgerPort):
@@ -20,9 +35,7 @@ class FileAuditLedger(AuditLedgerPort):
         self.lookup_grace_seconds = lookup_grace_seconds
 
     def record_started(self, entry: AuditLedgerEntry) -> None:
-        entries = [
-            item for item in self._read() if not (item.repo_id == entry.repo_id and item.audit_key == entry.audit_key)
-        ]
+        entries = [item for item in self._read() if not _same_identity(item, entry)]
         self._write((*entries, entry))
 
     def active_for(
@@ -54,10 +67,15 @@ class FileAuditLedger(AuditLedgerPort):
     ) -> tuple[AuditRun, ...]:
         point = _utc(now)
         entries = list(self._read())
-        upstream_by_key = {run.action_key for run in upstream if run.action_key is not None}
-        projected: list[AuditRun] = list(upstream)
+        projected: list[AuditRun] = []
+        suppress_task_ids: set[str] = set()
+        upstream_by_action: dict[str, list[AuditRun]] = {}
+        for run in upstream:
+            if run.action_key is not None:
+                upstream_by_action.setdefault(run.action_key, []).append(run)
         retained: list[AuditLedgerEntry] = []
         changed = False
+        lookup_cache: dict[str, _TaskLookupResult] = {}
         for entry in entries:
             if entry.repo_id != repo_id:
                 retained.append(entry)
@@ -65,18 +83,65 @@ class FileAuditLedger(AuditLedgerPort):
             if _expired(entry, point) or is_terminal_status(entry.task_status):
                 changed = True
                 continue
-            if entry.audit_key in upstream_by_key:
-                retained.append(entry)
-                continue
-            run = _lookup(entry, task_lookup, point, self.lookup_grace_seconds)
-            if run is None:
+
+            outcome = self._reconcile_entry(
+                entry,
+                task_lookup,
+                lookup_cache,
+                point,
+                has_upstream=any(is_active_run(run) for run in upstream_by_action.get(entry.audit_key, [])),
+            )
+            if outcome.suppress_task_id is not None:
+                suppress_task_ids.add(outcome.suppress_task_id)
+            if not outcome.retained:
                 changed = True
                 continue
             retained.append(entry)
-            projected.append(run)
+            if outcome.projected is not None:
+                projected.append(outcome.projected)
+
+        projected.extend(run for run in upstream if run.task_id is None or run.task_id not in suppress_task_ids)
         if changed:
             self._write(tuple(retained))
-        return tuple(projected)
+        return _dedupe_runs(projected)
+
+    def _reconcile_entry(
+        self,
+        entry: AuditLedgerEntry,
+        task_lookup: Callable[[str], AuditTaskDetail],
+        lookup_cache: dict[str, _TaskLookupResult],
+        now: datetime,
+        *,
+        has_upstream: bool,
+    ) -> _EntryReconciliation:
+        if entry.task_id is None:
+            # Older start responses may not contain a task id. Preserve the
+            # conservative action-level guard for that one legacy shape.
+            return _EntryReconciliation(True, projected=None if has_upstream else _project(entry, None))
+
+        # task_id is the identity boundary. Always refresh it, even when
+        # active-runs already contains a row for the same action.
+        result = lookup_cache.get(entry.task_id)
+        if result is None:
+            try:
+                result = _TaskLookupResult(detail=task_lookup(entry.task_id))
+            except (
+                AuditNotFoundError,
+                AuditUpstreamError,
+                AuditMalformedError,
+            ) as exc:
+                result = _TaskLookupResult(error=exc)
+            lookup_cache[entry.task_id] = result
+        if result.error is not None:
+            age = (now - entry.observed_at).total_seconds()
+            if isinstance(result.error, AuditNotFoundError) and age > self.lookup_grace_seconds:
+                return _EntryReconciliation(False)
+            return _EntryReconciliation(True, entry.task_id, _project(entry, None))
+
+        detail_run = _project(entry, result.detail)
+        if not is_active_run(detail_run):
+            return _EntryReconciliation(False, entry.task_id)
+        return _EntryReconciliation(True, entry.task_id, detail_run)
 
     def prune(
         self,
@@ -145,23 +210,6 @@ def new_entry(  # noqa: PLR0913
     )
 
 
-def _lookup(
-    entry: AuditLedgerEntry,
-    task_lookup: Callable[[str], AuditTaskDetail],
-    now: datetime,
-    grace_seconds: int,
-) -> AuditRun | None:
-    if entry.task_id is None:
-        return _project(entry, None)
-    try:
-        detail = task_lookup(entry.task_id)
-    except LookupError, OSError, RuntimeError, ValueError:
-        age = (now - entry.observed_at).total_seconds()
-        return _project(entry, None) if age <= grace_seconds else None
-    run = _project(entry, detail)
-    return run if run is not None and not is_terminal_status(run.status) and run.completed_at is None else None
-
-
 def _project(entry: AuditLedgerEntry, detail: AuditTaskDetail | None) -> AuditRun:
     return AuditRun(
         task_id=(detail.task_id if detail else None) or entry.task_id,
@@ -176,6 +224,26 @@ def _project(entry: AuditLedgerEntry, detail: AuditTaskDetail | None) -> AuditRu
         current_head_sha=entry.current_head_sha,
         last_audited_head_sha=entry.audited_head_sha,
     )
+
+
+def _same_identity(left: AuditLedgerEntry, right: AuditLedgerEntry) -> bool:
+    if left.repo_id != right.repo_id:
+        return False
+    if left.audit_key != right.audit_key:
+        return False
+    # Task ids are the durable identity.  Entries without an id are the only
+    # legacy case where action-level replacement is safe.
+    if left.task_id is None or right.task_id is None:
+        return left.task_id is None and right.task_id is None
+    return left.task_id == right.task_id
+
+
+def _dedupe_runs(runs: Sequence[AuditRun]) -> tuple[AuditRun, ...]:
+    grouped: dict[tuple[str | None, str | None], list[AuditRun]] = {}
+    for run in runs:
+        identity = (run.task_id, None) if run.task_id is not None else (None, run.action_key)
+        grouped.setdefault(identity, []).append(run)
+    return tuple(representative_projection(group) for group in grouped.values())
 
 
 def _expired(entry: AuditLedgerEntry, now: datetime) -> bool:

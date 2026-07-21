@@ -1,8 +1,11 @@
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
+import httpx
 import pytest
 
+from enji_guard_cli.audit.errors import AuditMalformedError, AuditNotFoundError, AuditUpstreamError
 from enji_guard_cli.audit.ports import (
     AuditArtifact,
     AuditCatalogResult,
@@ -17,11 +20,19 @@ from enji_guard_cli.audit.ports import (
     MalformedAuditSnapshotError,
 )
 from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
+from enji_guard_cli.auth_session.api import import_bearer_token
 from enji_guard_cli.enji_gateway import AuditGateway
 from enji_guard_cli.enji_gateway.http import AuditRunCreate
 from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot
+from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload
-from enji_guard_cli.transport import EnjiHttpClient
+from enji_guard_cli.transport import (
+    EnjiHttpClient,
+    EnjiHttpError,
+    EnjiHttpRequest,
+    EnjiHttpResponse,
+    EnjiTransportError,
+)
 
 
 def test_audit_artifact_translates_only_explicit_application_fields() -> None:
@@ -257,6 +268,82 @@ def test_audit_gateway_reads_task_detail(gateway_harness: _GatewayHarness) -> No
     assert task_detail.status == "running"
     assert task_detail.started_at == "2026-07-15T08:01:00Z"
     assert gateway_harness.calls == [("task_detail", ("task-1", gateway_harness.auth_file, gateway_harness.client))]
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected"),
+    [(404, AuditNotFoundError), (503, AuditUpstreamError), (None, AuditUpstreamError)],
+)
+def test_audit_gateway_translates_task_detail_failures(
+    gateway_harness: _GatewayHarness,
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int | None,
+    expected: type[Exception],
+) -> None:
+    import enji_guard_cli.enji_gateway.audit_gateway as gateway_module
+
+    def fail(*args: object, **kwargs: object) -> JsonObjectPayload:
+        raise EnjiApiError("UPSTREAM", "temporary failure", status_code=status_code)
+
+    monkeypatch.setattr(gateway_module, "_task_detail", fail)
+    with pytest.raises(expected):
+        gateway_harness.gateway.task_detail("task-1")
+
+
+def test_audit_gateway_rejects_malformed_task_detail(gateway_harness: _GatewayHarness) -> None:
+    gateway_harness.task_payload = {"task": []}
+    with pytest.raises(AuditMalformedError):
+        gateway_harness.gateway.task_detail("task-1")
+
+
+@dataclass
+class _TaskDetailHttpFake:
+    response: EnjiHttpResponse | EnjiHttpError
+    requests: list[EnjiHttpRequest] = field(default_factory=list)
+
+    async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+        self.requests.append(request)
+        if isinstance(self.response, EnjiHttpError):
+            raise self.response
+        return self.response
+
+
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        (EnjiHttpResponse(status_code=404, headers={}, content=b"{}"), AuditNotFoundError),
+        (EnjiHttpResponse(status_code=503, headers={}, content=b"{}"), AuditUpstreamError),
+        (EnjiTransportError("task detail", httpx.ConnectError("offline")), AuditUpstreamError),
+        (EnjiHttpResponse(status_code=200, headers={}, content=b"not-json"), AuditMalformedError),
+        (EnjiHttpResponse(status_code=200, headers={}, content=b"[]"), AuditMalformedError),
+    ],
+)
+def test_audit_gateway_task_detail_maps_real_http_helper_failures(
+    tmp_path: Path,
+    response: EnjiHttpResponse | EnjiHttpError,
+    expected: type[Exception],
+) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_bearer_token("token-123", auth_file)
+    client = _TaskDetailHttpFake(response)
+    gateway = AuditGateway(auth_file=auth_file, client=client, auth_port=AuthSessionAdapter())
+
+    with pytest.raises(expected):
+        gateway.task_detail("task-1")
+
+    assert [(request.method, request.url) for request in client.requests] == [
+        ("GET", "https://fleet.enji.ai/api/v1/tasks/task-1"),
+    ]
+
+
+def test_audit_gateway_rejects_task_detail_identity_mismatch_from_real_http_helper(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_bearer_token("token-123", auth_file)
+    client = _TaskDetailHttpFake(EnjiHttpResponse(status_code=200, headers={}, content=b'{"task":{"id":"task-2"}}'))
+    gateway = AuditGateway(auth_file=auth_file, client=client, auth_port=AuthSessionAdapter())
+
+    with pytest.raises(AuditMalformedError, match="mismatched task id"):
+        gateway.task_detail("task-1")
 
 
 def test_audit_gateway_reads_runbook_metadata(gateway_harness: _GatewayHarness) -> None:

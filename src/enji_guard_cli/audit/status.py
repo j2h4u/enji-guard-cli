@@ -1,7 +1,7 @@
 """Build typed Audit status from gateway projections."""
 
 from enji_guard_cli.audit.freshness import compare_heads
-from enji_guard_cli.audit.lifecycle import is_terminal_status
+from enji_guard_cli.audit.lifecycle import active_runs_for_action, projection_sort_key, task_lifecycle
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.ports import (
     AuditItemStatus,
@@ -21,8 +21,8 @@ def build_status(
     active_runs: tuple[AuditRun, ...],
     rerun_state: AuditRerunState | None,
 ) -> AuditStatus:
-    links_by_key = {link.action_key: link for link in links if link.action_key is not None}
-    runs_by_key = {run.action_key: run for run in active_runs if run.action_key is not None}
+    links_by_key = _links_by_action(links)
+    runs_by_key = _runs_by_action(active_runs)
     current_sha = rerun_state.current_head_sha if rerun_state else None
     items = tuple(
         _status_item(
@@ -68,35 +68,39 @@ def _status_item(
     rerun_state: AuditRerunState | None,
 ) -> AuditStatusItem:
     audited_sha = rerun_state.audited_head_shas.get(audit.action_key) if rerun_state else None
-    run_status = (link.status if link and link.status is not None else None) or (
-        active_run.status if active_run else None
+    run_lifecycle = (
+        task_lifecycle(active_run.status, started_at=active_run.started_at, completed_at=active_run.completed_at)
+        if active_run
+        else "none"
     )
-    lifecycle = _lifecycle(active_run, active_run.status if active_run else run_status)
+    link_lifecycle = (
+        task_lifecycle(link.status, started_at=link.started_at, completed_at=link.completed_at) if link else "none"
+    )
+    # Active-run projections own task identity and fields whenever present.
+    # Links without a run expose only terminal history; partial live links do
+    # not invent activity when the active-runs endpoint is empty.
+    if active_run is not None:
+        source = active_run
+        lifecycle = run_lifecycle
+    elif link is not None and link_lifecycle in {"failed", "completed"}:
+        source = link
+        lifecycle = link_lifecycle
+    else:
+        source = None
+        lifecycle = "none"
+    run_status = source.status if source is not None else None
     return AuditStatusItem(
         audit_key=audit.action_key,
         title=audit.title,
         freshness=compare_heads(current_sha, audited_sha),
         can_read=_link_readable(link, active_run, lifecycle),
         task_lifecycle=lifecycle,
-        task_id=(link.task_id if link else None) or (active_run.task_id if active_run else None),
+        task_id=source.task_id if source is not None else None,
         task_status=run_status,
-        created_at=(link.created_at if link else None) or (active_run.created_at if active_run else None),
-        started_at=(link.started_at if link else None) or (active_run.started_at if active_run else None),
-        completed_at=(link.completed_at if link else None) or (active_run.completed_at if active_run else None),
+        created_at=source.created_at if source is not None else None,
+        started_at=source.started_at if source is not None else None,
+        completed_at=source.completed_at if source is not None else None,
     )
-
-
-def _lifecycle(active_run: AuditRun | None, status: str | None) -> AuditTaskLifecycle:
-    normalized = (status or "").strip().lower()
-    if normalized == "failed" or (active_run is not None and normalized in {"error", "failure"}):
-        return "failed"
-    if is_terminal_status(normalized):
-        return "completed"
-    if active_run is None:
-        return "none"
-    if active_run.completed_at is not None:
-        return "completed"
-    return "running" if active_run.started_at is not None else "queued"
 
 
 def _link_readable(
@@ -108,17 +112,49 @@ def _link_readable(
         return False
     # A task projection can lag the active-runs projection and omit its own
     # status.  An active queued/running task still makes the artifact unreadable.
-    if active_run is not None and lifecycle in {"queued", "running"}:
+    if active_run is not None and task_lifecycle(
+        active_run.status,
+        started_at=active_run.started_at,
+        completed_at=active_run.completed_at,
+    ) in {"queued", "running"}:
         return False
-    status = (link.status or "").strip().lower()
-    return status not in {
-        "queued",
-        "running",
-        "started",
-        "failed",
-        "error",
-        "failure",
-        "canceled",
-        "cancelled",
-        "skipped",
+    return lifecycle == "completed"
+
+
+def _runs_by_action(runs: tuple[AuditRun, ...]) -> dict[str, AuditRun]:
+    actions = {run.action_key for run in runs if run.action_key is not None}
+    result: dict[str, AuditRun] = {}
+    for action in actions:
+        matching = active_runs_for_action(runs, action)
+        if matching:
+            result[action] = max(matching, key=projection_sort_key)
+    return result
+
+
+def _links_by_action(links: tuple[AuditTaskLink, ...]) -> dict[str, AuditTaskLink]:
+    grouped: dict[str, list[AuditTaskLink]] = {}
+    for link in links:
+        if link.action_key is not None:
+            grouped.setdefault(link.action_key, []).append(link)
+    return {
+        action: representative_link
+        for action, items in grouped.items()
+        if (representative_link := _representative_link(items)) is not None
     }
+
+
+def _representative_link(links: list[AuditTaskLink]) -> AuditTaskLink | None:
+    terminal = [
+        link
+        for link in links
+        if task_lifecycle(link.status, started_at=link.started_at, completed_at=link.completed_at)
+        in {"completed", "failed"}
+    ]
+    if not terminal:
+        return None
+    readable = [
+        link
+        for link in terminal
+        if task_lifecycle(link.status, started_at=link.started_at, completed_at=link.completed_at) == "completed"
+    ]
+    return max(readable or terminal, key=projection_sort_key)
