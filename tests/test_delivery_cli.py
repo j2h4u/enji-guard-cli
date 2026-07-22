@@ -19,8 +19,9 @@ from enji_guard_cli.application import (
     AutofixWriteScope,
     ScheduleListing,
 )
-from enji_guard_cli.audit.artifacts import AuditSummary, AuditSummaryItem
+from enji_guard_cli.audit.artifacts import ArtifactReadItem, AuditRead, AuditSummary, AuditSummaryItem
 from enji_guard_cli.audit.ports import (
+    AuditArtifact,
     AuditAutofixDefinition,
     AuditAutofixJob,
     AuditFreshness,
@@ -31,6 +32,8 @@ from enji_guard_cli.audit.ports import (
 )
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.delivery.cli.app import _command_exit_code, _json, _run, app
+from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION, render_fields
+from enji_guard_cli.delivery.cli.presenters import operation_text
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.portfolio.models import ProjectRef, RepositoryIdentity, RepositoryProvider, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioAuditStatus, PortfolioGatewayPort
@@ -151,6 +154,10 @@ class _FakeApplication:
     def audit_summary(self, repo: str, selectors: list[str], *, project: str | None) -> object:
         self.calls.append(("audit_summary", (repo, selectors, project)))
         return AuditSummary(repo, ())
+
+    def audit_read(self, repo: str, selectors: list[str], *, project: str | None, all_audits: bool) -> object:
+        self.calls.append(("audit_read", (repo, selectors, project, all_audits)))
+        return AuditRead(repo, ())
 
     def audit_start(self, repo: str, project: str | None, selectors: list[str], *, all_audits: bool) -> object:
         self.calls.append(("audit_start", (repo, project, selectors, all_audits)))
@@ -308,6 +315,43 @@ def test_audit_summary_is_compact_in_text_and_json(monkeypatch: pytest.MonkeyPat
     assert payload["repo_id"] == "r1"
     assert audits[0]["score"] == 73
     assert "body" not in audits[0]
+
+
+def test_audit_read_renders_markdown_for_humans_and_equivalent_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    report = "# Security report\n\n- Fix the vulnerable dependency."
+    payload = AuditRead(
+        "r1",
+        (
+            ArtifactReadItem(
+                "audit.security",
+                True,
+                AuditArtifact("audit.security", report, 73, "2026-07-20T00:00:00Z"),
+                None,
+                AuditFreshness("h", "h", "fresh"),
+            ),
+        ),
+    )
+    monkeypatch.setattr(fake, "audit_read", lambda repo, selectors, project=None, all_audits=False: payload)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    text_result = CliRunner().invoke(app, ["audit", "read", "github@github.com:acme/cat", "security"])
+    json_result = CliRunner().invoke(app, ["audit", "read", "github@github.com:acme/cat", "security", "--json"])
+
+    assert text_result.exit_code == 0
+    assert "repository: r1" in text_result.stdout
+    assert "## security\nfreshness: fresh\nscore: 73" in text_result.stdout
+    assert report in text_result.stdout
+    assert "\\n" not in text_result.stdout
+    assert '"audits"' not in text_result.stdout
+    assert json_result.exit_code == 0
+    rendered = cast(dict[str, object], json.loads(json_result.stdout))
+    audits = cast(list[dict[str, object]], rendered["audits"])
+    artifact = cast(dict[str, object], audits[0]["artifact"])
+    assert rendered["repo_id"] == "r1"
+    assert audits[0]["audit_key"] == "audit.security"
+    assert artifact["body"] == report
+    assert artifact["score"] == 73
 
 
 def test_json_omits_nested_optional_null_fields_but_keeps_top_level_and_list_nulls() -> None:
@@ -622,7 +666,7 @@ def test_run_maps_current_application_errors_to_cli_contract(
         raise error
 
     with pytest.raises(typer.Exit) as caught:
-        _run(fail, False)
+        _run(fail, False, FIELDS_PRESENTATION)
 
     assert caught.value.exit_code == exit_code
     assert rendered in capsys.readouterr().err
@@ -631,3 +675,39 @@ def test_run_maps_current_application_errors_to_cli_contract(
 def test_journey_telemetry_uses_application_command_exit_code() -> None:
     assert _command_exit_code(ApplicationCommandError("AUTH_EXPIRED", "expired", 3)) == 3
     assert _command_exit_code(ValueError("invalid")) == 1
+
+
+def test_render_fields_preserves_semantic_shapes() -> None:
+    assert render_fields({"status": "ready", "counts": {"ready": 2}, "items": ["a", "b"]}) == (
+        'status: ready\ncounts: {"ready": 2}\nitems: ["a", "b"]'
+    )
+    assert render_fields([{"selector": "security", "enabled": True}, "pending"]) == (
+        '{"enabled": true, "selector": "security"}\n"pending"'
+    )
+    assert render_fields("unchanged") == "unchanged"
+
+
+def test_operation_text_renders_mapping_results_and_sequences() -> None:
+    mapping = operation_text(
+        {
+            "status": "updated",
+            "metadata": {"count": 2},
+            "results": [
+                {"audit_key": "audit.security", "status": "already_present"},
+                {"action_key": "audit.tests", "status": "updated"},
+                {"selector": "dependency-hygiene", "status": "unchanged"},
+                "pending",
+            ],
+        }
+    )
+    assert "status: updated" in mapping
+    assert 'metadata: {"count": 2}' in mapping
+    assert "results:" in mapping
+    assert "audit.security  status=already_present" in mapping
+    assert "audit.tests  status=updated" in mapping
+    assert "dependency-hygiene  status=unchanged" in mapping
+    assert "  pending" in mapping
+
+    sequence = operation_text([{"selector": "security", "status": "ready"}, "done"])
+    assert sequence == "security  status=ready\ndone"
+    assert operation_text(3) == "3"

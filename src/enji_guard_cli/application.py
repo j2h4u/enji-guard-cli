@@ -15,7 +15,12 @@ from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from enji_guard_cli.audit import parse_catalog_result
-from enji_guard_cli.audit.artifacts import AuditArtifactUnavailableError, AuditSummary, summarize_artifacts
+from enji_guard_cli.audit.artifacts import (
+    AuditArtifactUnavailableError,
+    AuditRead,
+    AuditSummary,
+    summarize_artifacts,
+)
 from enji_guard_cli.audit.autofixes import definitions as autofix_definitions
 from enji_guard_cli.audit.autofixes import select as select_autofixes
 from enji_guard_cli.audit.autofixes import set_one
@@ -25,6 +30,7 @@ from enji_guard_cli.audit.email import list_for_targets as list_email_for_target
 from enji_guard_cli.audit.email import set_for_targets as set_email_for_targets
 from enji_guard_cli.audit.errors import AuditMalformedError, AuditNotFoundError, AuditUpstreamError
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit.observation import AuditRepositoryObserver
 from enji_guard_cli.audit.ports import (
     AuditAutofixDefinition,
     AuditAutofixJob,
@@ -260,13 +266,14 @@ class Application:
         self, repo_id: str, *, catalog: AuditCatalog | None = None
     ) -> tuple[AuditStatus, tuple[AuditRun, ...]]:
         definitions = catalog if catalog is not None else self.audit_catalog()
-        active_runs = self._active_runs(repo_id)
+        observation = self._audit_repository_observer().observe(repo_id)
+        active_runs = observation.active_runs
         return build_status(
             repo_id,
             definitions,
-            self.audit_gateway.task_links(repo_id).links,
+            observation.task_links,
             active_runs,
-            self.audit_gateway.rerun_state(repo_id),
+            observation.rerun_state,
         ), active_runs
 
     def audit_start(
@@ -285,7 +292,7 @@ class Application:
 
     def audit_read(
         self, repo: str, selectors: list[str] | None = None, *, project: str | None = None, all_audits: bool = False
-    ) -> object:
+    ) -> AuditRead:
         target = self._resolve_repository(repo, project)
         catalog = self.audit_catalog()
         items = read_for_repo(
@@ -297,9 +304,10 @@ class Application:
                 gateway=self.audit_gateway,
                 project=self._audit_project,
                 frozen_catalog=catalog,
+                repository_observation=self._audit_repository_observer().observe,
             ),
         )
-        return {"repo_id": target.repo_id, "audits": items}
+        return AuditRead(target.repo_id, items)
 
     def audit_preflight(self, repo: str, *, project: str | None = None) -> AuditPreflight:
         target = self._resolve_repository(repo, project)
@@ -319,6 +327,7 @@ class Application:
                 gateway=self.audit_gateway,
                 project=self._audit_project,
                 frozen_catalog=catalog,
+                repository_observation=self._audit_repository_observer().observe,
             ),
         )
         return summarize_artifacts(target.repo_id, items)
@@ -642,6 +651,9 @@ class Application:
 
     def _active_runs(self, repo_id: str):
         return self._audit_start_service().active_runs(repo_id)
+
+    def _audit_repository_observer(self) -> AuditRepositoryObserver:
+        return AuditRepositoryObserver(self.audit_gateway, self.ledger, self.fanout)
 
     def _audit_start_service(self) -> AuditStartService:
         return AuditStartService(self.audit_gateway, self.ledger, self._audit_project)

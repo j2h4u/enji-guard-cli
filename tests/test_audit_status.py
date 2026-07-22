@@ -75,12 +75,26 @@ def test_terminal_link_remains_readable_without_active_run() -> None:
         catalog,
         (AuditTaskLink("done", "audit.security", "completed", completed_at="2026-01-01T00:00:00+00:00"),),
         (),
-        AuditRerunState(None, None, None, None),
+        AuditRerunState(None, None, None, None, {"audit.security": "audited-sha"}),
     )
 
     assert status.items[0].task_lifecycle == "completed"
     assert status.items[0].task_id == "done"
     assert status.items[0].can_read is True
+
+
+def test_audited_result_remains_readable_when_task_link_history_is_empty() -> None:
+    status = build_status(
+        "repo-1",
+        _catalog(),
+        (),
+        (),
+        AuditRerunState("current-sha", None, None, None, {"audit.security": "current-sha"}),
+    )
+
+    assert status.items[0].task_lifecycle == "none"
+    assert status.items[0].can_read is True
+    assert status.items[0].freshness.state == "fresh"
 
 
 @pytest.mark.parametrize(
