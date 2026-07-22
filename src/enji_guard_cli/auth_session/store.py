@@ -8,6 +8,7 @@ the safe way to replace malformed or unsupported local state.
 import contextlib
 import fcntl
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -299,19 +300,11 @@ def _parse_auth(loaded: object) -> AuthLoadResult:
     version = loaded.get("version")
     if version != AUTH_SCHEMA_VERSION:
         return AuthUnsupported(version)
-    revision = loaded.get("revision")
-    base_url = loaded.get("base_url")
-    imported_at = loaded.get("imported_at")
-    raw_credential = loaded.get("credential")
-    if (
-        not isinstance(revision, str)
-        or not revision
-        or not isinstance(base_url, str)
-        or not base_url
-        or not isinstance(imported_at, str)
-        or not imported_at
-    ):
+    metadata = _credential_metadata(loaded)
+    if metadata is None:
         return AuthCorrupt("credential revision, base_url, and imported_at must be non-empty strings")
+    revision, base_url, imported_at = metadata
+    raw_credential = loaded.get("credential")
     credential = _parse_credential(raw_credential)
     if credential is None:
         return AuthCorrupt("credential is invalid")
@@ -324,6 +317,16 @@ def _parse_auth(loaded: object) -> AuthLoadResult:
             "imported_at": imported_at,
         }
     )
+
+
+def _credential_metadata(payload: Mapping[object, object]) -> tuple[str, str, str] | None:
+    """Return the required non-empty identity fields in storage order."""
+
+    match payload.get("revision"), payload.get("base_url"), payload.get("imported_at"):
+        case str() as revision, str() as base_url, str() as imported_at if revision and base_url and imported_at:
+            return revision, base_url, imported_at
+        case _:
+            return None
 
 
 def _parse_credential(raw: object) -> Credential | None:
