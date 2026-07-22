@@ -25,7 +25,9 @@ chmod 700 ~/.config/enji-guard
 
 Copy `deploy/docker-compose.ghcr.yml` to the host deployment directory, for
 example `/opt/docker/enji-guard-cli/docker-compose.yml`, choose an immutable
-image reference, then run:
+image reference, then run. The compose file declares the stable project name
+`enji-guard-cli`, so the commands do not depend on the directory name or a
+remembered `-p` flag:
 
 ```bash
 export ENJI_GUARD_IMAGE_REF=ghcr.io/j2h4u/enji-guard-cli:sha-<git-commit>
