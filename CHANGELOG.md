@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.2.0](https://github.com/j2h4u/enji-guard-cli/compare/v2.1.0...v2.2.0) (2026-07-22)
+
+
+### Features
+
+* read previous audit reports during active runs ([#146](https://github.com/j2h4u/enji-guard-cli/issues/146)) ([1d9b70c](https://github.com/j2h4u/enji-guard-cli/commit/1d9b70cb80d525526f22414d8d3711781fd44709))
+
+
+### Fixes
+
+* **audit:** derive readability from audited results ([#144](https://github.com/j2h4u/enji-guard-cli/issues/144)) ([ffe5375](https://github.com/j2h4u/enji-guard-cli/commit/ffe53756b572b6a71793e84bc179763807bfbd3a))
+* warn when stale report has active replacement ([#147](https://github.com/j2h4u/enji-guard-cli/issues/147)) ([cfc5acb](https://github.com/j2h4u/enji-guard-cli/commit/cfc5acbe1bded20f57b3643f3913ea82a385e2c2))
+
 ## [2.1.0](https://github.com/j2h4u/enji-guard-cli/compare/v2.0.0...v2.1.0) (2026-07-21)
 
 
