@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -180,12 +181,13 @@ def test_rotation_telemetry_is_terminal_once_and_redacts_sentinels(tmp_path: Pat
     assert isinstance(loaded, AuthLoaded)
     events: list[tuple[str, dict[str, object]]] = []
 
-    def sink(_logger: logging.Logger, _level: int, event: str, fields: object) -> None:
-        assert isinstance(fields, dict)
-        events.append((event, fields))
+    def sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> None:
+        _ = logger, level
+        events.append((event, dict(fields)))
 
     class Exchange:
-        async def exchange_once(self, _source: object) -> EnjiHttpResponse:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
             return EnjiHttpResponse(
                 status_code=200,
                 headers={},
@@ -208,12 +210,13 @@ def test_terminal_journal_emits_reimport_without_replaying_or_leaking(tmp_path: 
     write_journal(auth_file, OutcomeUnknown(loaded.auth["revision"], "SENTINEL_ERROR_MESSAGE"))
     events: list[tuple[str, dict[str, object]]] = []
 
-    def sink(_logger: logging.Logger, _level: int, event: str, fields: object) -> None:
-        assert isinstance(fields, dict)
-        events.append((event, fields))
+    def sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> None:
+        _ = logger, level
+        events.append((event, dict(fields)))
 
     class Exchange:
-        async def exchange_once(self, _source: object) -> EnjiHttpResponse:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
             raise AssertionError("terminal journal must not dispatch")
 
     coordinator = RefreshCoordinator(auth_file, Exchange(), terminal_wait_seconds=0, event_sink=sink)
