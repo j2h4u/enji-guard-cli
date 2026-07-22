@@ -61,7 +61,7 @@ from enji_guard_cli.auth_session.models import (
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.fanout import BoundedFanout
-from enji_guard_cli.gitlab.models import GitLabCredentialsResult, GitLabProjectsResult
+from enji_guard_cli.gitlab.models import GitLabCredentialsResult, GitLabProjectsQuery, GitLabProjectsResult
 from enji_guard_cli.gitlab.ports import GitLabDiscoveryPort
 from enji_guard_cli.portfolio.errors import PortfolioMalformedError, PortfolioNotFoundError, PortfolioUpstreamError
 from enji_guard_cli.portfolio.models import (
@@ -367,28 +367,10 @@ class Application:
             offset=offset,
         )
 
-    def gitlab_projects(  # noqa: PLR0913
-        self,
-        *,
-        credential_id: str | None = None,
-        search: str | None = None,
-        page: int = 1,
-        per_page: int = 50,
-        all_pages: bool = False,
-        scope_type: str | None = None,
-        scope_owner: str | None = None,
-    ) -> GitLabProjectsResult:
+    def gitlab_projects(self, query: GitLabProjectsQuery) -> GitLabProjectsResult:
         if self.gitlab_gateway is None:
             raise RuntimeError("GitLab discovery is not configured")
-        return self.gitlab_gateway.discover_projects(
-            credential_id=credential_id,
-            search=search,
-            page=page,
-            per_page=per_page,
-            all_pages=all_pages,
-            scope_type=scope_type,
-            scope_owner=scope_owner,
-        )
+        return self.gitlab_gateway.discover_projects(query)
 
     def create_project(self, name: str) -> OperationResult:
         return create_project_use_case(name, gateway=self.portfolio_gateway)

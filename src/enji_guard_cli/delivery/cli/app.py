@@ -46,10 +46,11 @@ from enji_guard_cli.delivery.cli.presenters import (
     SCHEDULE,
 )
 from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
+from enji_guard_cli.gitlab.models import GitLabProjectsQuery
 from enji_guard_cli.mcp_facade import McpQueryFacade
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.readiness import readiness_verdict
-from enji_guard_cli.runtime_observability.supervisor import run_service
+from enji_guard_cli.runtime_observability.supervisor import RuntimeServiceOptions, run_service
 from enji_guard_cli.runtime_observability.telemetry import configure_logging
 from enji_guard_cli.settings import (
     DEFAULT_HTTP_HOST,
@@ -418,13 +419,15 @@ def gitlab_projects(  # noqa: PLR0913
 ) -> None:
     _run(
         lambda: _application().gitlab_projects(
-            credential_id=credential_id,
-            search=search,
-            page=page,
-            per_page=per_page,
-            all_pages=all_pages,
-            scope_type=scope_type,
-            scope_owner=scope_owner,
+            GitLabProjectsQuery(
+                credential_id=credential_id,
+                search=search,
+                page=page,
+                per_page=per_page,
+                all_pages=all_pages,
+                scope_type=scope_type,
+                scope_owner=scope_owner,
+            )
         ),
         _json_output(json_output),
         GITLAB_PROJECTS,
@@ -712,10 +715,7 @@ def run(
     _validate_http_bind(host, transport, allow_external_host=allow_external_host)
     application = _application()
     run_service(
-        transport=transport,
-        host=host,
-        port=port,
-        mount_path=mount_path,
+        options=RuntimeServiceOptions(transport=transport, host=host, port=port, mount_path=mount_path),
         runtime_auth=application.runtime_auth_port(),
         mcp_server_factory=lambda host, port: create_mcp_server(host, port, queries=McpQueryFacade(application)),
         mcp_server_runner=run_mcp_server_async,
