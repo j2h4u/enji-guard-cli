@@ -9,7 +9,6 @@ from http.cookies import Morsel, SimpleCookie
 from typing import cast
 
 AUTH_COOKIE_NAMES = frozenset({"access_token", "refresh_token"})
-REFRESH_TOKEN_COOKIE_NAME = "refresh_token"
 JWT_MIN_PART_COUNT = 2
 
 
@@ -54,23 +53,6 @@ def set_cookie_names(set_cookie_headers: Iterable[str]) -> tuple[str, ...]:
     for set_cookie_header in set_cookie_headers:
         cookie.load(set_cookie_header)
     return tuple(sorted(cookie))
-
-
-def should_persist_transient_refresh_cookies(
-    status_code: int, transient_status_codes: frozenset[int], set_cookie_headers: Iterable[str]
-) -> bool:
-    if status_code not in transient_status_codes:
-        return False
-    updated_cookie = SimpleCookie()
-    for set_cookie_header in set_cookie_headers:
-        updated_cookie.load(set_cookie_header)
-    if REFRESH_TOKEN_COOKIE_NAME not in updated_cookie:
-        return False
-    return all(
-        is_persistable_auth_cookie_update(name, morsel)
-        for name, morsel in updated_cookie.items()
-        if name in AUTH_COOKIE_NAMES
-    )
 
 
 def cookie_value(cookie_header: str, name: str) -> str | None:
