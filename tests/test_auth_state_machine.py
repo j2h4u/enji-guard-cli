@@ -185,6 +185,66 @@ def test_storage_classifies_future_imported_at_stably(tmp_path: Path) -> None:
     assert result == AuthClockAnomaly("imported_at")
 
 
+@pytest.mark.parametrize(
+    "case",
+    [
+        ("absent", "AUTH_REQUIRED", "auth file does not exist", 0),
+        ("corrupt", "AUTH_REQUIRED", "auth file is corrupt: invalid JSON: Expecting value", 0),
+        ("unsupported", "AUTH_REQUIRED", "auth file version is unsupported: 3", 0),
+        ("io_failure", "STORAGE", "read credential failed: injected read failure", 0),
+        ("clock_anomaly", "AUTH_CLOCK_ANOMALY", "auth file imported_at is in the future", 0),
+        (
+            "loaded",
+            "AUTH_IMPORT_REQUIRED",
+            "refresh outcome is unknown; import a fresh browser credential",
+            1,
+        ),
+    ],
+)
+def test_coordinator_maps_typed_credential_loads_without_invalid_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    case: tuple[str, str, str, int],
+) -> None:
+    """Only a loaded cookie credential may cross the durable POST boundary."""
+
+    stored_state, expected_code, expected_message, expected_calls = case
+    auth_file = tmp_path / "auth.json"
+    if stored_state == "corrupt":
+        auth_file.write_text("not-json", encoding="utf-8")
+    elif stored_state == "unsupported":
+        auth_file.write_text(json.dumps({"version": 3}), encoding="utf-8")
+    elif stored_state == "clock_anomaly":
+        auth = stored_auth("https://fleet.enji.ai", {"type": "cookie", "cookie_header": "access=a; refresh=b"})
+        auth["imported_at"] = "9999-12-31T23:59:59+00:00"
+        auth_file.write_text(json.dumps(auth), encoding="utf-8")
+    elif stored_state == "loaded":
+        import_cookie("access_token=old; refresh_token=old", auth_file)
+    elif stored_state == "io_failure":
+
+        def fail_read(path: Path, *, encoding: str) -> str:
+            _ = path, encoding
+            raise OSError("injected read failure")
+
+        monkeypatch.setattr(Path, "read_text", fail_read)
+
+    class Exchange:
+        calls = 0
+
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            _ = source
+            self.calls += 1
+            return EnjiHttpResponse(status_code=502, headers={}, content=b"gateway unavailable")
+
+    exchange = Exchange()
+    with pytest.raises(EnjiHttpError) as exc_info:
+        asyncio.run(RefreshCoordinator(auth_file, exchange).refresh())
+
+    assert exc_info.value.code == expected_code
+    assert exc_info.value.message == expected_message
+    assert exchange.calls == expected_calls
+
+
 def test_storage_accepts_imported_at_at_future_tolerance_boundary(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     now = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)
