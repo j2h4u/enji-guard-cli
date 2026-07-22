@@ -124,6 +124,19 @@ class AuditRun:
 
 
 @dataclass(frozen=True, slots=True)
+class AuditRunStart:
+    """Cohesive value describing an audit run immediately after it starts."""
+
+    repo_id: str
+    project_id: str
+    action_key: str
+    task_id: str | None
+    task_status: str | None
+    current_head_sha: str | None
+    last_audited_head_sha: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class AuditItemStatus:
     """Neutral audit/task status used by Audit run orchestration."""
 

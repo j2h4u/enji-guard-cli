@@ -12,9 +12,9 @@ from enji_guard_cli.audit.ports import (
     AuditProject,
     AuditRunRequest,
     AuditRunResult,
+    AuditRunStart,
 )
 from enji_guard_cli.audit.runs import (
-    RecordStartedRunContext,
     StartAuditDependencies,
     StartAuditsContext,
     start_audits_for_target,
@@ -63,18 +63,12 @@ class AuditStartService:
             get_repo_rerun_state=self.gateway.rerun_state,
         )
 
-    def _record_started(self, context: RecordStartedRunContext) -> None:
+    def _record_started(self, context: AuditRunStart) -> None:
         if self.ledger is None:
             return
         self.ledger.record_started(
             new_entry(
-                repo_id=context.repo_id,
-                project_id=context.project_id,
-                audit_key=context.action_key,
-                task_id=context.task_id,
-                task_status=context.task_status,
-                current_head_sha=context.current_head_sha,
-                audited_head_sha=context.last_audited_head_sha,
+                context,
                 observed_at=datetime.now(UTC),
                 ttl_seconds=getattr(self.ledger, "ttl_seconds", 21_600),
             )

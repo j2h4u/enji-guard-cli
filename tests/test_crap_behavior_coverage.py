@@ -1,14 +1,32 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 from enji_guard_cli.audit.ledger import FileAuditLedger, new_entry
-from enji_guard_cli.audit.ports import AuditFreshness, AuditStatus, AuditStatusItem
+from enji_guard_cli.audit.ports import AuditFreshness, AuditRunStart, AuditStatus, AuditStatusItem
 from enji_guard_cli.delivery.mcp.server import _json
 from enji_guard_cli.enji_gateway.audit_gateway import _schedule
 from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvider, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioAuditStatus
 from enji_guard_cli.portfolio.status import RepositoryStatus
+
+
+def _entry(**kwargs: object):
+    return new_entry(
+        AuditRunStart(
+            cast(str, kwargs["repo_id"]),
+            cast(str, kwargs["project_id"]),
+            cast(str, kwargs["audit_key"]),
+            cast(str | None, kwargs["task_id"]),
+            cast(str | None, kwargs["task_status"]),
+            cast(str | None, kwargs["current_head_sha"]),
+            cast(str | None, kwargs["audited_head_sha"]),
+        ),
+        observed_at=cast(datetime, kwargs["observed_at"]),
+        started_at=cast(str | None, kwargs.get("started_at")),
+        ttl_seconds=cast(int, kwargs.get("ttl_seconds", 21600)),
+    )
 
 
 def test_schedule_maps_fields_and_rejects_missing_action() -> None:
@@ -61,7 +79,7 @@ def test_ledger_active_for_filters_repo_action_expiry_and_terminal(tmp_path: Pat
         ("a", "running", now, 100),
     ]:
         ledger.record_started(
-            new_entry(
+            _entry(
                 repo_id="r" if key != "a" or observed == now else "other",
                 project_id="p",
                 audit_key=key,
