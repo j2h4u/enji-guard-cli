@@ -18,7 +18,6 @@ from enji_guard_cli.audit.ports import (
     AuditCatalogPort,
     AuditGatewayPort,
     AuditProject,
-    AuditStatus,
     AuditStatusItem,
 )
 from enji_guard_cli.audit.status import build_status
@@ -34,13 +33,6 @@ class AuditWorkflowDependencies:
     frozen_catalog: AuditCatalog | None = None
     repository_observation: Callable[[str], AuditRepositoryObservation] | None = None
     fanout: BoundedFanout | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class AuditStartPlan:
-    catalog: AuditCatalog
-    status: AuditStatus
-    selected: tuple[AuditDefinition, ...]
 
 
 def choose_audits(catalog: AuditCatalog, selectors: list[str], *, all_audits: bool) -> tuple[AuditDefinition, ...]:
@@ -59,29 +51,6 @@ def _required_audit(by_selector: dict[str, AuditDefinition], selector: str) -> A
     if audit is None:
         raise ValueError(f"unknown audit selector: {selector}")
     return audit
-
-
-def prepare_start(
-    repo_id: str,
-    selectors: list[str],
-    *,
-    all_audits: bool,
-    dependencies: AuditWorkflowDependencies,
-) -> AuditStartPlan:
-    catalog = _catalog(dependencies)
-    observation = _observation(repo_id, dependencies)
-    status = build_status(
-        repo_id,
-        catalog,
-        observation.task_links,
-        observation.active_runs,
-        observation.rerun_state,
-    )
-    return AuditStartPlan(
-        catalog=catalog,
-        status=status,
-        selected=choose_audits(catalog, selectors, all_audits=all_audits),
-    )
 
 
 def read_for_repo(

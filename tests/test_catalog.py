@@ -2,7 +2,6 @@ import pytest
 
 from enji_guard_cli.audit.catalog import parse_catalog_result
 from enji_guard_cli.audit.ports import AuditCatalogAction, AuditCatalogResult
-from enji_guard_cli.audit.runs import selected_audits
 
 
 def _action(
@@ -96,21 +95,3 @@ def test_catalog_rejects_duplicate_action_keys() -> None:
                 ),
             )
         )
-
-
-def test_audit_selector_resolution_uses_catalog_suffixes() -> None:
-    catalog = parse_catalog_result(
-        _catalog(
-            _action("audit.recon", title="Recon", category="workflow", status="draft", runbook_kind="recon"),
-            _action(
-                "audit.security",
-                title="Security",
-                category="audit",
-                status="published",
-                metric_group="vulns",
-                runbook_kind="vuln-audit",
-            ),
-        )
-    )
-
-    assert selected_audits(["security"], all_audits=False, catalog=catalog) == list(catalog.published_audits)

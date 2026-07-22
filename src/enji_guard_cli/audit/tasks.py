@@ -20,12 +20,6 @@ class AuditTaskContext:
     repo_id: str | None = None
 
 
-def build_task_body(context: AuditTaskContext) -> AuditTaskBody:
-    if context.repo_id is None:
-        raise ValueError("audit task requires a repository id")
-    return task_for_repo(context, context.repo_id)
-
-
 def task_for_repo(context: AuditTaskContext, repo_id: str) -> AuditTaskBody:
     repository = next((repo for repo in context.project.repositories if repo.repo_id == repo_id), None)
     if repository is None:

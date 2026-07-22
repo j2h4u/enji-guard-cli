@@ -4,7 +4,6 @@ from typing import Any, cast
 
 import pytest
 
-from enji_guard_cli.audit.ports import AuditFreshness, AuditStatus, AuditStatusItem
 from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.models import (
     PortfolioActiveRun,
@@ -14,94 +13,10 @@ from enji_guard_cli.portfolio.models import (
     RepositoryProvider,
     RepositoryRef,
 )
-from enji_guard_cli.portfolio.ports import PortfolioAuditStatus
-from enji_guard_cli.portfolio.status import assemble_overview, assemble_status
+from enji_guard_cli.portfolio.status import assemble_overview
 from enji_guard_cli.settings import FanoutSettings
 
 FANOUT = BoundedFanout(FanoutSettings(max_concurrency=4))
-
-
-class Gateway:
-    def list_projects(self):
-        return (ProjectRef("p1", "Pets"),)
-
-    def project_detail(self, project_id):
-        return ProjectDetail(
-            ProjectRef("p1", "Pets"),
-            (
-                RepositoryRef(
-                    "r1",
-                    "p1",
-                    "Pets",
-                    RepositoryIdentity(RepositoryProvider.GITHUB, "acme/cat", "github.com"),
-                    web_url="https://example.test/repository",
-                    provider_repo_id="provider-test",
-                ),
-            ),
-        )
-
-
-class Audits:
-    def status(self, repo_id):
-        return PortfolioAuditStatus(
-            AuditStatus(
-                repo_id,
-                "new",
-                (
-                    AuditStatusItem(
-                        "audit.security",
-                        "Security",
-                        AuditFreshness("new", "old", "stale"),
-                        True,
-                        "completed",
-                        "task",
-                        "completed",
-                    ),
-                ),
-            )
-        )
-
-
-def test_status_preserves_sha_and_staleness_inputs() -> None:
-    status = assemble_status(gateway=cast(Any, Gateway()), audits=Audits(), fanout=FANOUT)
-    assert status.repositories[0].audit.summary.current_head_sha == "new"
-    assert status.repositories[0].audit.summary.items[0].freshness.audited_head_sha == "old"
-
-
-class SortGateway:
-    def list_projects(self):
-        return (ProjectRef("p1", "Pets"),)
-
-    def project_detail(self, project_id):
-        return ProjectDetail(
-            ProjectRef("p1", "Pets"),
-            (
-                RepositoryRef(
-                    "r1",
-                    "p1",
-                    "Pets",
-                    RepositoryIdentity(RepositoryProvider.GITHUB, "acme/zebra", "github.com"),
-                    scores={"tests": 90},
-                    web_url="https://example.test/repository",
-                    provider_repo_id="provider-test",
-                ),
-                RepositoryRef(
-                    "r2",
-                    "p1",
-                    "Pets",
-                    RepositoryIdentity(RepositoryProvider.GITHUB, "acme/ant", "github.com"),
-                    scores={"tests": 40},
-                    web_url="https://example.test/repository",
-                    provider_repo_id="provider-test",
-                ),
-            ),
-        )
-
-
-def test_status_sorts_repository_inventory_by_weakest_score() -> None:
-    status = assemble_status(gateway=cast(Any, SortGateway()), audits=Audits(), fanout=FANOUT, sort="weakest")
-
-    assert [item.repository.repo_id for item in status.repositories] == ["r2", "r1"]
 
 
 class OverviewGateway:

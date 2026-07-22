@@ -49,10 +49,6 @@ def json_projection(value: object, *, preserve_mapping_nulls: bool = False) -> o
     return str(value)
 
 
-def render_json(value: object) -> str:
-    return json.dumps(json_projection(value), indent=2, sort_keys=True)
-
-
 def _field_value_text(value: object) -> str:
     if isinstance(value, (dict, list)):
         return json.dumps(value, sort_keys=True)

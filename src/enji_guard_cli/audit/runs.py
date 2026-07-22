@@ -11,7 +11,6 @@ from enji_guard_cli.audit.lifecycle import (
     task_lifecycle,
 )
 from enji_guard_cli.audit.ports import (
-    AuditItemStatus,
     AuditProject,
     AuditRerunState,
     AuditRun,
@@ -184,61 +183,6 @@ def _start_one_audit[TCreateRequest](
         )
     )
     return _batch_result_item(action_key, action_key, "started", (current_sha, last_sha), (task_id, task_status))
-
-
-def selected_audits(audits: list[str], *, all_audits: bool, catalog: AuditCatalog) -> list[AuditDefinition]:
-    if all_audits:
-        if audits:
-            raise ValueError("pass audit selectors or --all, not both")
-        return list(catalog.published_audits)
-    if not audits:
-        raise ValueError("pass at least one audit selector or --all")
-    by_selector = {audit.selector: audit for audit in catalog.published_audits}
-    selected = [by_selector.get(selector) for selector in audits]
-    if missing := [selector for selector, audit in zip(audits, selected, strict=True) if audit is None]:
-        raise ValueError(f"unknown audit selector: {missing[0]}")
-    return [audit for audit in selected if audit is not None]
-
-
-def linked_running_audit_results(
-    status: tuple[AuditItemStatus, ...], audits: list[AuditDefinition]
-) -> dict[str, AuditRunBatchResultItem]:
-    items = {item.action_key: item for item in status}
-    results: dict[str, AuditRunBatchResultItem] = {}
-    for audit in audits:
-        item = items.get(audit.action_key)
-        if item is None or not has_running_audit_link(item):
-            continue
-        results[audit.action_key] = {
-            "audit": audit.action_key,
-            "action_key": audit.action_key,
-            "state": "already_running",
-            "current_head_sha": item.current_head_sha,
-            "last_audited_head_sha": item.audited_head_sha,
-            "task_id": item.task_id,
-            "task_status": item.task_status,
-        }
-    return results
-
-
-def has_running_audit_link(item: AuditItemStatus) -> bool:
-    return (
-        item.task_active is False
-        and item.can_read
-        and item.task_id is not None
-        and item.audited_head_sha is None
-        and item.completed_at is None
-    )
-
-
-def ordered_audit_results(
-    audits: list[AuditDefinition],
-    linked_results: dict[str, AuditRunBatchResultItem],
-    started_results: list[AuditRunBatchResultItem],
-) -> list[AuditRunBatchResultItem]:
-    by_action = {result["action_key"]: result for result in started_results}
-    by_action.update(linked_results)
-    return [by_action[audit.action_key] for audit in audits]
 
 
 def out_of_date(current: str | None, audited: str | None) -> bool | None:
