@@ -464,21 +464,19 @@ class Application:
         by_repo_id = {result.repo_id: result.schedules for result in results}
         return tuple(ScheduleListing(target, by_repo_id[target.repo_id]) for target in targets)
 
-    def set_schedules(  # noqa: PLR0913
+    def set_schedules(
         self,
         repo: str | None,
         project: str | None,
+        update: AuditScheduleUpdate,
         *,
-        enabled: bool | None = None,
-        cadence: str | None = None,
-        timezone: str | None = None,
         scope: AutofixWriteScope | None = None,
     ) -> tuple[object, ...]:
         catalog = self.audit_catalog()
         return set_for_targets(
             self._write_targets(repo, project, scope),
             tuple(audit.action_key for audit in catalog.published_audits),
-            AuditScheduleUpdate(enabled=enabled, cadence=cadence, timezone=timezone),
+            update,
             self.audit_gateway,
         )
 
@@ -510,15 +508,13 @@ class Application:
 
         return self.fanout.map(targets, read_target)
 
-    def set_autofixes(  # noqa: PLR0913
+    def set_autofixes(
         self,
         repo: str | None,
         project: str | None,
         selectors: list[str],
+        update: AuditAutofixUpdate,
         *,
-        enabled: bool | None = None,
-        cadence: str | None = None,
-        timezone: str | None = None,
         scope: AutofixWriteScope | None = None,
     ) -> tuple[object, ...]:
         catalog = self.catalog()
@@ -531,7 +527,7 @@ class Application:
                 outcome = set_one(
                     definition,
                     existing,
-                    AuditAutofixUpdate(enabled, cadence, timezone),
+                    update,
                     lambda kind, job, repo_id=target.repo_id: self.audit_gateway.set_autofix_job(repo_id, kind, job),
                 )
                 result.append(outcome)

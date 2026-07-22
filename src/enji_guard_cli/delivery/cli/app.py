@@ -26,6 +26,7 @@ from enji_guard_cli.application import (
     AutofixWriteScope,
     EmailPreferencesUpdate,
 )
+from enji_guard_cli.audit.ports import AuditAutofixUpdate, AuditScheduleUpdate
 from enji_guard_cli.composition import create_application
 from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION, CliPresentation, emit_text, json_projection
 from enji_guard_cli.delivery.cli.presenters import (
@@ -778,13 +779,12 @@ def schedule_set(  # noqa: PLR0913
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     scope = _scope(all_repos, all_projects)
+    update = AuditScheduleUpdate(enabled=_switch(enabled), cadence=frequency, timezone=timezone)
     _run(
         lambda: _application().set_schedules(
             repo,
             _selected_project(project),
-            enabled=_switch(enabled),
-            cadence=frequency,
-            timezone=timezone,
+            update,
             scope=scope,
         ),
         _json_output(json_output),
@@ -819,8 +819,9 @@ def schedule_timezone(  # noqa: PLR0913
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     scope = _scope(all_repos, all_projects)
+    update = AuditScheduleUpdate(timezone=timezone)
     _run(
-        lambda: _application().set_schedules(repo, _selected_project(project), timezone=timezone, scope=scope),
+        lambda: _application().set_schedules(repo, _selected_project(project), update, scope=scope),
         _json_output(json_output),
         OPERATION,
     )
@@ -855,14 +856,13 @@ def autofix_set(  # noqa: PLR0913
 ) -> None:
     selectors = ["__all__"] if all_autofixes else (autofixes or [])
     scope = _scope(all_repos, all_projects)
+    update = AuditAutofixUpdate(enabled=_switch(enabled), frequency=frequency, timezone=timezone)
     _run(
         lambda: _application().set_autofixes(
             repo,
             _selected_project(project),
             selectors,
-            enabled=_switch(enabled),
-            cadence=frequency,
-            timezone=timezone,
+            update,
             scope=scope,
         ),
         _json_output(json_output),
