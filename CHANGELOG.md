@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.0...v2.2.1) (2026-07-22)
+
+
+### Fixes
+
+* **audit:** parse authoritative task detail contract ([#148](https://github.com/j2h4u/enji-guard-cli/issues/148)) ([7665c35](https://github.com/j2h4u/enji-guard-cli/commit/7665c35d24db9a9f84f18578987e69d47fd2e494))
+
 ## [2.2.0](https://github.com/j2h4u/enji-guard-cli/compare/v2.1.0...v2.2.0) (2026-07-22)
 
 
