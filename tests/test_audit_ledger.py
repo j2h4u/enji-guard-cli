@@ -1,18 +1,53 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from enji_guard_cli.audit.errors import AuditNotFoundError, AuditUpstreamError
 from enji_guard_cli.audit.ledger import FileAuditLedger, new_entry
-from enji_guard_cli.audit.ports import AuditRun, AuditTaskDetail
+from enji_guard_cli.audit.ports import AuditRun, AuditRunStart, AuditTaskDetail
+
+
+def _entry(**kwargs: object):
+    return new_entry(
+        AuditRunStart(
+            cast(str, kwargs["repo_id"]),
+            cast(str, kwargs["project_id"]),
+            cast(str, kwargs["audit_key"]),
+            cast(str | None, kwargs["task_id"]),
+            cast(str | None, kwargs["task_status"]),
+            cast(str | None, kwargs["current_head_sha"]),
+            cast(str | None, kwargs["audited_head_sha"]),
+        ),
+        observed_at=cast(datetime, kwargs["observed_at"]),
+        started_at=cast(str | None, kwargs.get("started_at")),
+        ttl_seconds=cast(int, kwargs.get("ttl_seconds", 21600)),
+    )
+
+
+def test_new_entry_maps_started_value_and_normalizes_ttl() -> None:
+    observed = datetime(2026, 1, 1, 3, tzinfo=UTC)
+    entry = new_entry(
+        AuditRunStart("repo", "project", "audit.security", "task", "queued", "new", "old"),
+        observed_at=observed,
+        started_at="2026-01-01T03:00:01Z",
+        ttl_seconds=60,
+    )
+    assert entry.repo_id == "repo"
+    assert entry.project_id == "project"
+    assert entry.audit_key == "audit.security"
+    assert entry.audited_head_sha == "old"
+    assert entry.observed_at == observed
+    assert entry.expires_at == observed + timedelta(seconds=60)
+    assert entry.started_at == "2026-01-01T03:00:01Z"
 
 
 def test_ledger_reconciles_task_by_id_and_prunes_terminal(tmp_path: Path) -> None:
     now = datetime(2026, 1, 1, tzinfo=UTC)
     ledger = FileAuditLedger(tmp_path / "ledger.json")
     ledger.record_started(
-        new_entry(
+        _entry(
             repo_id="repo",
             project_id="project",
             audit_key="audit.security",
@@ -26,7 +61,7 @@ def test_ledger_reconciles_task_by_id_and_prunes_terminal(tmp_path: Path) -> Non
     runs = ledger.reconcile("repo", (), lambda task: AuditTaskDetail(task, "running", started_at="now"), now=now)
     assert runs[0].projection_status_source == "task_by_id"
     ledger.record_started(
-        new_entry(
+        _entry(
             repo_id="repo",
             project_id="project",
             audit_key="audit.tests",
@@ -44,7 +79,7 @@ def test_ledger_prunes_fresh_started_entry(tmp_path: Path) -> None:
     now = datetime(2026, 1, 1, tzinfo=UTC)
     ledger = FileAuditLedger(tmp_path / "ledger.json")
     ledger.record_started(
-        new_entry(
+        _entry(
             repo_id="r",
             project_id="p",
             audit_key="audit.x",
@@ -63,7 +98,7 @@ def test_reconcile_refreshes_each_task_id_even_when_action_is_upstream(tmp_path:
     ledger = FileAuditLedger(tmp_path / "ledger.json")
     for task_id in ("task-1", "task-2"):
         ledger.record_started(
-            new_entry(
+            _entry(
                 repo_id="repo",
                 project_id="project",
                 audit_key="audit.security",
@@ -95,7 +130,7 @@ def test_reconcile_terminal_detail_suppresses_only_same_task_id(tmp_path: Path) 
     now = datetime(2026, 1, 1, tzinfo=UTC)
     ledger = FileAuditLedger(tmp_path / "ledger.json")
     ledger.record_started(
-        new_entry(
+        _entry(
             repo_id="repo",
             project_id="project",
             audit_key="audit.security",
@@ -126,7 +161,7 @@ def test_reconcile_keeps_transient_lookup_guard_then_expires_it(tmp_path: Path) 
     observed = datetime(2026, 1, 1, tzinfo=UTC)
     ledger = FileAuditLedger(tmp_path / "ledger.json", lookup_grace_seconds=60)
     ledger.record_started(
-        new_entry(
+        _entry(
             repo_id="repo",
             project_id="project",
             audit_key="audit.security",
@@ -154,7 +189,7 @@ def test_reconcile_transient_lookup_failure_keeps_guard_until_ttl(tmp_path: Path
     observed = datetime(2026, 1, 1, tzinfo=UTC)
     ledger = FileAuditLedger(tmp_path / "ledger.json", ttl_seconds=120, lookup_grace_seconds=1)
     ledger.record_started(
-        new_entry(
+        _entry(
             repo_id="repo",
             project_id="project",
             audit_key="audit.security",
@@ -182,7 +217,7 @@ def test_idless_guard_survives_terminal_history(tmp_path: Path) -> None:
     observed = datetime(2026, 1, 1, tzinfo=UTC)
     ledger = FileAuditLedger(tmp_path / "ledger.json")
     ledger.record_started(
-        new_entry(
+        _entry(
             repo_id="repo",
             project_id="project",
             audit_key="audit.security",
@@ -212,7 +247,7 @@ def test_reconcile_expired_entry_does_not_lookup(tmp_path: Path) -> None:
     observed = datetime(2026, 1, 1, tzinfo=UTC)
     ledger = FileAuditLedger(tmp_path / "ledger.json")
     ledger.record_started(
-        new_entry(
+        _entry(
             repo_id="repo",
             project_id="project",
             audit_key="audit.security",
@@ -237,7 +272,7 @@ def test_reconcile_expired_entry_does_not_lookup(tmp_path: Path) -> None:
 def test_reconcile_looks_up_duplicate_task_id_once(tmp_path: Path) -> None:
     observed = datetime(2026, 1, 1, tzinfo=UTC)
     ledger = FileAuditLedger(tmp_path / "ledger.json")
-    first = new_entry(
+    first = _entry(
         repo_id="repo",
         project_id="project",
         audit_key="audit.security",
@@ -247,7 +282,7 @@ def test_reconcile_looks_up_duplicate_task_id_once(tmp_path: Path) -> None:
         audited_head_sha=None,
         observed_at=observed,
     )
-    second = new_entry(
+    second = _entry(
         repo_id="repo",
         project_id="project",
         audit_key="audit.security",
@@ -275,7 +310,7 @@ def test_reconcile_caches_duplicate_task_id_failures(tmp_path: Path, failure: Ex
     observed = datetime(2026, 1, 1, tzinfo=UTC)
     ledger = FileAuditLedger(tmp_path / "ledger.json", lookup_grace_seconds=60)
     entries = tuple(
-        new_entry(
+        _entry(
             repo_id="repo",
             project_id="project",
             audit_key=action,

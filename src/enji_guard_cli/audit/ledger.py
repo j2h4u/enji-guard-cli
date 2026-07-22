@@ -10,7 +10,7 @@ from typing import cast
 from enji_guard_cli.atomic_json import write_atomic_json
 from enji_guard_cli.audit.errors import AuditMalformedError, AuditNotFoundError, AuditUpstreamError
 from enji_guard_cli.audit.lifecycle import is_active_run, is_terminal_status, representative_projection
-from enji_guard_cli.audit.ports import AuditLedgerEntry, AuditLedgerPort, AuditRun, AuditTaskDetail
+from enji_guard_cli.audit.ports import AuditLedgerEntry, AuditLedgerPort, AuditRun, AuditRunStart, AuditTaskDetail
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,28 +182,22 @@ class FileAuditLedger(AuditLedgerPort):
         write_atomic_json(self.path, {"entries": [_encode(entry) for entry in entries]})
 
 
-def new_entry(  # noqa: PLR0913
+def new_entry(
+    started: AuditRunStart,
     *,
-    repo_id: str,
-    project_id: str,
-    audit_key: str,
-    task_id: str | None,
-    task_status: str | None,
-    current_head_sha: str | None,
-    audited_head_sha: str | None,
     observed_at: datetime,
     started_at: str | None = None,
-    ttl_seconds: int = 21_600,
+    ttl_seconds: int = 21600,
 ) -> AuditLedgerEntry:
     observed = _utc(observed_at)
     return AuditLedgerEntry(
-        repo_id=repo_id,
-        project_id=project_id,
-        audit_key=audit_key,
-        task_id=task_id,
-        task_status=task_status,
-        current_head_sha=current_head_sha,
-        audited_head_sha=audited_head_sha,
+        repo_id=started.repo_id,
+        project_id=started.project_id,
+        audit_key=started.action_key,
+        task_id=started.task_id,
+        task_status=started.task_status,
+        current_head_sha=started.current_head_sha,
+        audited_head_sha=started.last_audited_head_sha,
         observed_at=observed,
         started_at=started_at,
         expires_at=observed + timedelta(seconds=ttl_seconds),

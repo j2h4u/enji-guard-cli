@@ -15,6 +15,7 @@ from enji_guard_cli.audit.ports import (
     AuditRerunState,
     AuditRun,
     AuditRunbookMetadata,
+    AuditRunStart,
     AuditTaskBody,
 )
 from enji_guard_cli.audit.tasks import AuditTaskContext, task_for_repo
@@ -31,18 +32,7 @@ type CurrentRepoActiveRuns = Callable[[str], tuple[AuditRun, ...]]
 type TaskIdentity = Callable[[object], tuple[str | None, str | None]]
 
 
-@dataclass(frozen=True, slots=True)
-class RecordStartedRunContext:
-    repo_id: str
-    project_id: str
-    action_key: str
-    task_id: str | None
-    task_status: str | None
-    current_head_sha: str | None
-    last_audited_head_sha: str | None
-
-
-type RecordStartedRun = Callable[[RecordStartedRunContext], None]
+type RecordAuditRunStart = Callable[[AuditRunStart], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +42,7 @@ class StartAuditDependencies[TCreateRequest]:
     project_detail: ProjectDetail
     runbook: Runbook
     current_repo_active_runs: CurrentRepoActiveRuns
-    record_started_run: RecordStartedRun
+    record_started_run: RecordAuditRunStart
     task_identity: TaskIdentity
     start_error: type[Exception] = Exception
 
@@ -107,7 +97,7 @@ def start_audit[TCreateRequest](
     )
     task_id, task_status = dependencies.task_identity(response)
     dependencies.record_started_run(
-        RecordStartedRunContext(repo_id, project_id, audit.action_key, task_id, task_status, None, None)
+        AuditRunStart(repo_id, project_id, audit.action_key, task_id, task_status, None, None)
     )
     return response
 
@@ -178,9 +168,7 @@ def _start_one_audit[TCreateRequest](
         return _batch_result_item(action_key, action_key, "failed", (current_sha, last_sha))
     task_id, task_status = dependencies.task_identity(response)
     dependencies.record_started_run(
-        RecordStartedRunContext(
-            context.repo_id, context.project_id, action_key, task_id, task_status, current_sha, last_sha
-        )
+        AuditRunStart(context.repo_id, context.project_id, action_key, task_id, task_status, current_sha, last_sha)
     )
     return _batch_result_item(action_key, action_key, "started", (current_sha, last_sha), (task_id, task_status))
 

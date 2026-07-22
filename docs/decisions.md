@@ -6,6 +6,17 @@ agents can orient quickly before making changes.
 
 ## Decisions
 
+- **Cohesive application inputs**: inline `PLR0913` exceptions are reserved
+  for framework-reflected CLI handlers, endpoint-shaped HTTP adapters,
+  exact-signature test doubles, and private orchestration seams. A private
+  seam is allowed only when its parameters split per-item data from
+  per-operation collaborators, no cohesive invariant or value exists, and
+  the operation scope is already bound by a closure. Every exception keeps a
+  narrowly localized inline `# noqa: PLR0913` that fits one documented
+  category; this central rationale avoids repetitive per-site comments.
+  Application and domain functions require cohesive typed inputs rather than
+  repeated scalar argument lists.
+
 - **Provider-neutral repository identity**: Portfolio identifies a repository
   with `(provider, host, locator)` rather than provider-specific upstream field names.
   Selectors always use `provider@host:locator`; GitLab preserves nested group
