@@ -1,6 +1,7 @@
 import ast
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import cast
@@ -38,6 +39,9 @@ PRODUCT_SOURCE_ROOTS = (
     ROOT / "src" / "enji_guard_cli" / "application.py",
     ROOT / "src" / "enji_guard_cli" / "delivery",
 )
+SETUP_UV_ACTION = "astral-sh/setup-uv@"
+TRIVY_ACTION = "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25"
+UV_VERSION = "0.11.17"
 
 
 def _compose_common_service_fields(path: Path) -> dict[str, object]:
@@ -86,6 +90,35 @@ def test_container_publish_workflow_run_requires_trusted_source() -> None:
     assert "github.event.workflow_run.conclusion == 'success'" in workflow
 
 
+def test_setup_uv_installs_the_dockerfile_version() -> None:
+    workflows = tuple(sorted((ROOT / ".github" / "workflows").glob("*.yml")))
+    setup_uv_steps = [
+        step for workflow in workflows for step in _action_steps(workflow.read_text(encoding="utf-8"), SETUP_UV_ACTION)
+    ]
+
+    assert setup_uv_steps
+    assert all(f'version: "{UV_VERSION}"' in step for step in setup_uv_steps)
+    assert f"ghcr.io/astral-sh/uv:{UV_VERSION}@sha256:" in (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+
+def test_container_publish_scans_loaded_candidate_before_push() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "container.yml").read_text(encoding="utf-8")
+    build = workflow.index("- name: Build candidate image")
+    scan = workflow.index("- name: Scan candidate image")
+    publish = workflow.index("- name: Publish tested image")
+    scan_step = _action_steps(workflow, TRIVY_ACTION)
+    candidate_build = workflow[build:scan]
+
+    assert build < scan < publish
+    assert "load: true" in candidate_build
+    assert "tags: ${{ steps.image-tags.outputs.tags }}" in candidate_build
+    assert len(scan_step) == 1
+    assert "scan-type: image" in scan_step[0]
+    assert "image-ref: ${{ env.IMAGE_NAME }}:latest" in scan_step[0]
+    assert 'exit-code: "1"' in scan_step[0]
+    assert "ignore-unfixed: true" in scan_step[0]
+
+
 def test_audit_schedule_domain_has_no_improvement_job_fallback() -> None:
     schedules = (ROOT / "src" / "enji_guard_cli" / "audit" / "schedules.py").read_text(encoding="utf-8")
 
@@ -113,6 +146,11 @@ def _product_python_files() -> tuple[Path, ...]:
         else:
             paths.extend(root.rglob("*.py"))
     return tuple(sorted(paths))
+
+
+def _action_steps(workflow: str, action: str) -> tuple[str, ...]:
+    pattern = re.compile(rf"(?m)^ +(?:- +)?uses: {re.escape(action)}[^\n]*\n(?:^ {{8,}}\S[^\n]*\n?)*")
+    return tuple(match.group(0) for match in pattern.finditer(workflow))
 
 
 def _imported_modules(node: ast.AST) -> tuple[str, ...]:
