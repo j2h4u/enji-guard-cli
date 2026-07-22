@@ -23,10 +23,11 @@ from enji_guard_cli.application import (
     ApplicationCatalogChange,
     ApplicationCommandError,
     ApplicationResult,
+    AuditAutofixUpdate,
+    AuditScheduleUpdate,
     AutofixWriteScope,
     EmailPreferencesUpdate,
 )
-from enji_guard_cli.audit.ports import AuditAutofixUpdate, AuditScheduleUpdate
 from enji_guard_cli.composition import create_application
 from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION, CliPresentation, emit_text, json_projection
 from enji_guard_cli.delivery.cli.presenters import (

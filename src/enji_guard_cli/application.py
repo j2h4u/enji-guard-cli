@@ -683,6 +683,8 @@ __all__ = [
     "ApplicationCatalogChange",
     "ApplicationCommandError",
     "ApplicationResult",
+    "AuditAutofixUpdate",
+    "AuditScheduleUpdate",
     "AutofixListing",
     "AutofixListingItem",
     "AutofixWriteScope",
