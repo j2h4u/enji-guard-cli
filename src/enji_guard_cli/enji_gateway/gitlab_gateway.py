@@ -14,6 +14,7 @@ from enji_guard_cli.gitlab.models import (
     GitLabCredentialsResult,
     GitLabProject,
     GitLabProjectPage,
+    GitLabProjectsQuery,
     GitLabProjectsResult,
     GitLabScope,
 )
@@ -59,30 +60,20 @@ class GitLabGateway:
         )
         return _parse_credentials(payload, scope=GitLabScope(scope_type, scope_owner), limit=limit, offset=offset)
 
-    def discover_projects(  # noqa: PLR0913
-        self,
-        *,
-        credential_id: str | None = None,
-        search: str | None = None,
-        page: int = 1,
-        per_page: int = 50,
-        all_pages: bool = False,
-        scope_type: str | None = None,
-        scope_owner: str | None = None,
-    ) -> GitLabProjectsResult:
-        if page <= 0 or per_page <= 0:
+    def discover_projects(self, query: GitLabProjectsQuery) -> GitLabProjectsResult:
+        if query.page <= 0 or query.per_page <= 0:
             raise ValueError("project page and per-page values must be positive")
-        scope_type, scope_owner = _normalize_scope(scope_type, scope_owner)
+        scope_type, scope_owner = _normalize_scope(query.scope_type, query.scope_owner)
         credential = self._resolve_credential(
-            credential_id=credential_id,
+            credential_id=query.credential_id,
             scope_type=scope_type,
             scope_owner=scope_owner,
         )
         projects: list[GitLabProject] = []
         seen_project_ids: set[str] = set()
         seen_pages: set[int] = set()
-        current_page = page
-        next_page: int | None = page
+        current_page = query.page
+        next_page: int | None = query.page
 
         while next_page is not None:
             if next_page in seen_pages:
@@ -94,9 +85,9 @@ class GitLabGateway:
                 credential_id=credential.id,
                 host=credential.git_host,
                 api_base_url=credential.api_base_url,
-                search=search,
+                search=query.search,
                 page=next_page,
-                per_page=per_page,
+                per_page=query.per_page,
                 scope_type=scope_type,
                 scope_owner=scope_owner,
                 auth_port=self._auth_port(),
@@ -107,7 +98,7 @@ class GitLabGateway:
                 seen_project_ids=seen_project_ids,
             )
             projects.extend(parsed_projects)
-            if not all_pages:
+            if not query.all_pages:
                 next_page = returned_next
                 break
             if returned_next is not None and returned_next in seen_pages:
@@ -118,7 +109,7 @@ class GitLabGateway:
             if next_page is not None:
                 current_page = next_page
 
-        pagination = GitLabProjectPage(page=page, per_page=per_page, next_page=next_page)
+        pagination = GitLabProjectPage(page=query.page, per_page=query.per_page, next_page=next_page)
         return GitLabProjectsResult(
             scope=GitLabScope(scope_type, scope_owner),
             credential=credential,

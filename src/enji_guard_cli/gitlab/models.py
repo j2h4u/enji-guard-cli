@@ -59,6 +59,19 @@ class GitLabProjectPage:
 
 
 @dataclass(frozen=True, slots=True)
+class GitLabProjectsQuery:
+    """Application query for discovering projects through a GitLab credential."""
+
+    credential_id: str | None = None
+    search: str | None = None
+    page: int = 1
+    per_page: int = 50
+    all_pages: bool = False
+    scope_type: str | None = None
+    scope_owner: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class GitLabProjectsResult:
     scope: GitLabScope
     credential: GitLabCredential

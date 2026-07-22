@@ -6,6 +6,7 @@ from enji_guard_cli.gitlab.models import (
     GitLabCredentialsResult,
     GitLabProject,
     GitLabProjectPage,
+    GitLabProjectsQuery,
     GitLabProjectsResult,
     GitLabScope,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "GitLabDiscoveryPort",
     "GitLabProject",
     "GitLabProjectPage",
+    "GitLabProjectsQuery",
     "GitLabProjectsResult",
     "GitLabScope",
 ]

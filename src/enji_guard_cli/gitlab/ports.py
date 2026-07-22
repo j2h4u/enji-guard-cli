@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from enji_guard_cli.gitlab.models import GitLabCredentialsResult, GitLabProjectsResult
+from enji_guard_cli.gitlab.models import GitLabCredentialsResult, GitLabProjectsQuery, GitLabProjectsResult
 
 
 class GitLabDiscoveryPort(Protocol):
@@ -15,14 +15,4 @@ class GitLabDiscoveryPort(Protocol):
         offset: int = 0,
     ) -> GitLabCredentialsResult: ...
 
-    def discover_projects(  # noqa: PLR0913
-        self,
-        *,
-        credential_id: str | None = None,
-        search: str | None = None,
-        page: int = 1,
-        per_page: int = 50,
-        all_pages: bool = False,
-        scope_type: str | None = None,
-        scope_owner: str | None = None,
-    ) -> GitLabProjectsResult: ...
+    def discover_projects(self, query: GitLabProjectsQuery) -> GitLabProjectsResult: ...

@@ -21,6 +21,7 @@ def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypat
     served_while_refresh_was_running = False
     refresh_tasks: list[asyncio.Task[None]] = []
     readiness_tasks: list[asyncio.Task[None]] = []
+    sentinel_settings = runtime.default_settings()
 
     async def fake_refresh_loop() -> None:
         nonlocal refresh_cancelled, refresh_started
@@ -45,8 +46,9 @@ def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypat
         refresh_tasks.append(refresh_task)
         return refresh_task
 
-    def fake_start_backend_readiness_task(*, observer: object) -> asyncio.Task[None]:
+    def fake_start_backend_readiness_task(*, observer: object, settings: object) -> asyncio.Task[None]:
         assert observer is auth
+        assert settings is sentinel_settings
         readiness_task = asyncio.create_task(fake_readiness_loop())
         readiness_tasks.append(readiness_task)
         return readiness_task
@@ -89,10 +91,9 @@ def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypat
 
     asyncio.run(
         runtime.run_service_async(
-            transport="streamable-http",
-            host="0.0.0.0",
-            port=8000,
+            options=runtime.RuntimeServiceOptions(transport="streamable-http", host="0.0.0.0", port=8000),
             runtime_auth=auth,
+            settings=sentinel_settings,
             mcp_server_factory=lambda host, port: "server",
             mcp_server_runner=fake_run_mcp_server_async,
         )
@@ -120,14 +121,11 @@ def test_run_service_async_runs_without_refresh_when_disabled(monkeypatch: pytes
         captured["transport"] = transport
         captured["mount_path"] = mount_path
 
-    monkeypatch.setattr(runtime, "start_backend_readiness_task", lambda *, observer: None)
+    monkeypatch.setattr(runtime, "start_backend_readiness_task", lambda *, observer, settings: None)
 
     asyncio.run(
         runtime.run_service_async(
-            transport="sse",
-            host="127.0.0.1",
-            port=9000,
-            mount_path="/events",
+            options=runtime.RuntimeServiceOptions(transport="sse", host="127.0.0.1", port=9000, mount_path="/events"),
             mcp_server_factory=lambda host, port: {"host": host, "port": port},
             mcp_server_runner=fake_run_mcp_server_async,
         )

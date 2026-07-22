@@ -10,6 +10,7 @@ from enji_guard_cli.delivery.cli.app import _emit, _json
 from enji_guard_cli.enji_gateway import GitLabGateway
 from enji_guard_cli.enji_gateway import gitlab_gateway as gateway_module
 from enji_guard_cli.enji_gateway.http import gitlab_credentials, gitlab_projects
+from enji_guard_cli.gitlab.models import GitLabProjectsQuery
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvider
 from enji_guard_cli.portfolio.selectors import parse_repository_selector
@@ -69,7 +70,7 @@ def test_gitlab_gateway_discovers_all_pages_and_returns_safe_selector(monkeypatc
     monkeypatch.setattr(gateway_module.http, "gitlab_credentials", credentials)
     monkeypatch.setattr(gateway_module.http, "gitlab_projects", projects)
 
-    result = _gateway().discover_projects(all_pages=True)
+    result = _gateway().discover_projects(GitLabProjectsQuery(all_pages=True))
 
     assert [project.provider_project_id for project in result.projects] == ["101", "202"]
     assert result.projects[0].selector.canonical_key == ("gitlab", "gitlab.example.com", "team/service")
@@ -84,7 +85,7 @@ def test_gitlab_gateway_requires_explicit_credential_when_scope_has_many(monkeyp
     }
     monkeypatch.setattr(gateway_module.http, "gitlab_credentials", lambda *args, **kwargs: payload)
     with pytest.raises(ValueError, match="ambiguous"):
-        _gateway().discover_projects()
+        _gateway().discover_projects(GitLabProjectsQuery())
 
 
 def test_gitlab_gateway_rejects_pagination_cycle_and_duplicate_projects(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -92,12 +93,12 @@ def test_gitlab_gateway_rejects_pagination_cycle_and_duplicate_projects(monkeypa
     monkeypatch.setattr(gateway_module.http, "gitlab_credentials", lambda *args, **kwargs: credentials)
     monkeypatch.setattr(gateway_module.http, "gitlab_projects", lambda *args, **kwargs: _project(next_page=1))
     with pytest.raises(ValueError, match="cycle"):
-        _gateway().discover_projects(all_pages=True)
+        _gateway().discover_projects(GitLabProjectsQuery(all_pages=True))
 
     responses = iter([_project(next_page=2), _project(next_page=None)])
     monkeypatch.setattr(gateway_module.http, "gitlab_projects", lambda *args, **kwargs: next(responses))
     with pytest.raises(ValueError, match="duplicated"):
-        _gateway().discover_projects(all_pages=True)
+        _gateway().discover_projects(GitLabProjectsQuery(all_pages=True))
 
 
 @pytest.mark.parametrize(
@@ -259,13 +260,13 @@ def test_gitlab_gateway_paginates_credentials_for_explicit_and_implicit_selectio
 
     monkeypatch.setattr(gateway_module.http, "gitlab_credentials", credentials)
     monkeypatch.setattr(gateway_module.http, "gitlab_projects", lambda *args, **kwargs: _project())
-    result = _gateway().discover_projects(credential_id="cred-51")
+    result = _gateway().discover_projects(GitLabProjectsQuery(credential_id="cred-51"))
     assert result.credential.id == "cred-51"
     assert calls == [0, 50]
 
     calls.clear()
     with pytest.raises(ValueError, match="ambiguous"):
-        _gateway().discover_projects()
+        _gateway().discover_projects(GitLabProjectsQuery())
     assert calls == [0, 50]
 
 
@@ -282,7 +283,7 @@ def test_gitlab_gateway_rejects_duplicate_credential_across_pages(monkeypatch: p
 
     monkeypatch.setattr(gateway_module.http, "gitlab_credentials", credentials)
     with pytest.raises(ValueError, match="duplicated"):
-        _gateway().discover_projects(credential_id="cred-1")
+        _gateway().discover_projects(GitLabProjectsQuery(credential_id="cred-1"))
 
 
 def test_gitlab_gateway_normalizes_default_scope_and_rejects_personal_owner(

@@ -37,6 +37,16 @@ class McpServerRunner(Protocol):
     ) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeServiceOptions:
+    """Transport and listener values selected by the delivery boundary."""
+
+    transport: McpTransport
+    host: str
+    port: int
+    mount_path: str | None = None
+
+
 @dataclass(slots=True)
 class RuntimeSupervisor:
     """Injectable supervisor facade used by service composition and tests."""
@@ -44,21 +54,15 @@ class RuntimeSupervisor:
     runtime_auth: RuntimeAuthPort | None = None
     settings: EnjiGuardSettings | None = None
 
-    async def run_async(  # noqa: PLR0913
+    async def run_async(
         self,
         *,
-        transport: McpTransport,
-        host: str,
-        port: int,
-        mount_path: str | None = None,
+        options: RuntimeServiceOptions,
         mcp_server_factory: McpServerFactory,
         mcp_server_runner: McpServerRunner,
     ) -> None:
         await run_service_async(
-            transport=transport,
-            host=host,
-            port=port,
-            mount_path=mount_path,
+            options=options,
             runtime_auth=self.runtime_auth,
             settings=self.settings,
             mcp_server_factory=mcp_server_factory,
@@ -66,12 +70,9 @@ class RuntimeSupervisor:
         )
 
 
-async def run_service_async(  # noqa: PLR0913
+async def run_service_async(
     *,
-    transport: McpTransport,
-    host: str,
-    port: int,
-    mount_path: str | None = None,
+    options: RuntimeServiceOptions,
     runtime_auth: RuntimeAuthPort | None = None,
     settings: EnjiGuardSettings | None = None,
     mcp_server_factory: McpServerFactory | None = None,
@@ -81,17 +82,16 @@ async def run_service_async(  # noqa: PLR0913
     if mcp_server_factory is None or mcp_server_runner is None:
         raise ValueError("MCP server factory and runner must be provided by delivery composition")
     mcp_task = asyncio.create_task(
-        mcp_server_runner(mcp_server_factory(host, port), transport=transport, mount_path=mount_path),
+        mcp_server_runner(
+            mcp_server_factory(options.host, options.port),
+            transport=options.transport,
+            mount_path=options.mount_path,
+        ),
         name="enji-guard-mcp-server",
     )
     refresh_task = runtime_auth.start_auto_refresh_task() if runtime_auth is not None else None
     resolved_settings = settings if settings is not None else default_settings()
-    if settings is None:
-        # Keep the small test/delivery seam compatible with injected factories
-        # that predate the explicit settings port.
-        readiness_task = start_backend_readiness_task(observer=runtime_auth)
-    else:
-        readiness_task = start_backend_readiness_task(observer=runtime_auth, settings=resolved_settings)
+    readiness_task = start_backend_readiness_task(observer=runtime_auth, settings=resolved_settings)
     shutdown_event = asyncio.Event()
     installed_signals = _install_signal_handlers(shutdown_event)
     try:
@@ -106,12 +106,9 @@ async def run_service_async(  # noqa: PLR0913
         _remove_signal_handlers(installed_signals)
 
 
-def run_service(  # noqa: PLR0913
+def run_service(
     *,
-    transport: McpTransport,
-    host: str,
-    port: int,
-    mount_path: str | None = None,
+    options: RuntimeServiceOptions,
     runtime_auth: RuntimeAuthPort | None = None,
     settings: EnjiGuardSettings | None = None,
     mcp_server_factory: McpServerFactory | None = None,
@@ -121,10 +118,7 @@ def run_service(  # noqa: PLR0913
     configure_logging(resolved_settings.telemetry, provenance="supervisor")
     asyncio.run(
         run_service_async(
-            transport=transport,
-            host=host,
-            port=port,
-            mount_path=mount_path,
+            options=options,
             runtime_auth=runtime_auth,
             settings=resolved_settings,
             mcp_server_factory=mcp_server_factory,
@@ -355,6 +349,7 @@ async def _cancel_tasks(tasks: set[asyncio.Task[None]]) -> None:
 
 
 __all__ = [
+    "RuntimeServiceOptions",
     "RuntimeSupervisor",
     "run_service",
     "run_service_async",

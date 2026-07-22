@@ -38,9 +38,17 @@ from enji_guard_cli.delivery.cli.app import _command_exit_code, _json, _run, app
 from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION, render_fields
 from enji_guard_cli.delivery.cli.presenters import operation_text
 from enji_guard_cli.errors import EnjiApiError
+from enji_guard_cli.gitlab.models import (
+    GitLabCredential,
+    GitLabProjectPage,
+    GitLabProjectsQuery,
+    GitLabProjectsResult,
+    GitLabScope,
+)
 from enji_guard_cli.portfolio.models import ProjectRef, RepositoryIdentity, RepositoryProvider, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioAuditStatus, PortfolioGatewayPort
 from enji_guard_cli.portfolio.status import PortfolioOverview, ProjectOverview, RepositoryOverview, RepositoryStatus
+from enji_guard_cli.runtime_observability.supervisor import RuntimeServiceOptions
 
 
 def _repo(locator: str, *, scores: Mapping[str, float | int | None] | None = None) -> RepositoryRef:
@@ -88,9 +96,10 @@ def test_run_defaults_to_long_lived_http_transport(monkeypatch: pytest.MonkeyPat
     result = CliRunner().invoke(app, ["run", "--port", "18080"])
 
     assert result.exit_code == 0
-    assert captured["transport"] == "streamable-http"
-    assert captured["host"] == "127.0.0.1"
-    assert captured["port"] == 18080
+    options = cast(RuntimeServiceOptions, captured["options"])
+    assert options.transport == "streamable-http"
+    assert options.host == "127.0.0.1"
+    assert options.port == 18080
 
 
 def test_run_keeps_stdio_as_an_explicit_interactive_transport(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -104,7 +113,7 @@ def test_run_keeps_stdio_as_an_explicit_interactive_transport(monkeypatch: pytes
     result = CliRunner().invoke(app, ["run", "--transport", "stdio"])
 
     assert result.exit_code == 0
-    assert captured["transport"] == "stdio"
+    assert cast(RuntimeServiceOptions, captured["options"]).transport == "stdio"
 
 
 class _FakeAuth:
@@ -212,6 +221,79 @@ def test_audit_start_calls_typed_application_and_emits_json(monkeypatch: pytest.
     assert payload["repo_id"] == "org/repo"
     assert payload["project_id"] == "Pets"
     assert fake.calls == [("audit_start", ("org/repo", "Pets", ["security"], False))]
+
+
+def test_gitlab_projects_maps_all_query_options_and_emits_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    expected_query = GitLabProjectsQuery(
+        credential_id="cred-42",
+        search="backend",
+        page=3,
+        per_page=17,
+        all_pages=True,
+        scope_type="group",
+        scope_owner="acme",
+    )
+    payload = GitLabProjectsResult(
+        scope=GitLabScope(scope_type="group", scope_owner="acme"),
+        credential=GitLabCredential(
+            id="cred-42",
+            name="automation",
+            credential_type="cookie",
+            provider="gitlab",
+            scope_type="group",
+            scope_owner="acme",
+            status="ready",
+            last_error=None,
+            expires_at=None,
+            git_host="gitlab.com",
+            api_base_url="https://gitlab.com/api/v4",
+            gitlab_health_reason=None,
+        ),
+        projects=(),
+        pagination=GitLabProjectPage(page=3, per_page=17, next_page=None),
+    )
+
+    class FakeGitLabApplication:
+        query: GitLabProjectsQuery | None = None
+
+        def execute(self, action: Callable[[], object]) -> ApplicationResult:
+            return ApplicationResult(action())
+
+        def gitlab_projects(self, query: GitLabProjectsQuery) -> GitLabProjectsResult:
+            self.query = query
+            return payload
+
+    fake = FakeGitLabApplication()
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "gitlab",
+            "projects",
+            "--credential-id",
+            "cred-42",
+            "--search",
+            "backend",
+            "--page",
+            "3",
+            "--per-page",
+            "17",
+            "--all-pages",
+            "--scope-type",
+            "group",
+            "--scope-owner",
+            "acme",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.exception is None
+    assert fake.query == expected_query
+    rendered = cast(dict[str, object], json.loads(result.stdout))
+    assert cast(dict[str, object], rendered["credential"])["id"] == "cred-42"
+    assert "\x1b" not in result.stdout
 
 
 def test_project_settings_and_access_use_typed_application_methods(monkeypatch: pytest.MonkeyPatch) -> None:
