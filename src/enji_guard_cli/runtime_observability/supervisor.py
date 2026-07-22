@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import signal
+from collections.abc import AsyncGenerator
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -249,8 +250,7 @@ async def _backend_readiness_loop(
     observer: BackendReadinessPort,
 ) -> None:
     state = initial_state
-    credential_changes = observer.credential_changes()
-    change_task = asyncio.ensure_future(anext(credential_changes))
+    credential_changes, change_task = _start_credential_watcher(observer)
     try:
         while True:
             try:
@@ -262,21 +262,69 @@ async def _backend_readiness_loop(
                 _log_probe(state, readiness_probe)
             except (OSError, RuntimeError, ValueError) as exc:
                 state = _state_after_crash(settings, state, exc)
-            if await _wait_for_readiness_trigger(change_task, settings.heartbeat_interval_seconds):
-                change_task = asyncio.ensure_future(anext(credential_changes))
+            try:
+                credential_changed = await _wait_for_readiness_trigger(
+                    change_task, settings.heartbeat_interval_seconds
+                )
+            except Exception as exc:  # noqa: BLE001 - the watcher must not stop service siblings.
+                _log_credential_watcher_failure(exc)
+                await _close_credential_watcher(change_task, credential_changes)
+                credential_changes = None
+                change_task = None
+                continue
+            if credential_changed:
+                assert credential_changes is not None
+                change_task = asyncio.create_task(anext(credential_changes))
     finally:
-        change_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await change_task
-        await credential_changes.aclose()
+        await _close_credential_watcher(change_task, credential_changes)
 
 
-async def _wait_for_readiness_trigger(change_task: asyncio.Future[None], interval_seconds: int) -> bool:
+def _start_credential_watcher(
+    observer: BackendReadinessPort,
+) -> tuple[AsyncGenerator[None] | None, asyncio.Task[None] | None]:
+    try:
+        credential_changes = observer.credential_changes()
+        return credential_changes, asyncio.create_task(anext(credential_changes))
+    except Exception as exc:  # noqa: BLE001 - the watcher must not stop service siblings.
+        _log_credential_watcher_failure(exc)
+        return None, None
+
+
+async def _wait_for_readiness_trigger(
+    change_task: asyncio.Task[None] | None, interval_seconds: int
+) -> bool:
+    if change_task is None:
+        await asyncio.sleep(interval_seconds)
+        return False
     done, _ = await asyncio.wait({change_task}, timeout=interval_seconds)
     if not done:
         return False
     change_task.result()
     return True
+
+
+async def _close_credential_watcher(
+    change_task: asyncio.Task[None] | None, credential_changes: AsyncGenerator[None] | None
+) -> None:
+    if change_task is not None:
+        if not change_task.done():
+            change_task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await change_task
+    if credential_changes is not None:
+        try:
+            await credential_changes.aclose()
+        except Exception as exc:  # noqa: BLE001 - watcher cleanup must not mask cancellation.
+            _log_credential_watcher_failure(exc)
+
+
+def _log_credential_watcher_failure(exc: Exception) -> None:
+    log_event(
+        _LOGGER,
+        logging.ERROR,
+        "enji_backend_readiness_credential_watcher_failed",
+        {"error_type": type(exc).__name__},
+    )
 
 
 def _readiness_probe(observation: BackendReadinessObservation) -> BackendReadinessProbe:
