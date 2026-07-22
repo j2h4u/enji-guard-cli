@@ -79,10 +79,10 @@ def test_health_ready_surfaces_cached_backend_auth_failure(monkeypatch: pytest.M
 
 
 def test_health_ready_success_emits_ready_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
+    calls: list[object] = []
 
     def connect(*_args: object, **_kwargs: object) -> _Connection:
-        calls.append("socket")
+        calls.append((_args, _kwargs))
         return _Connection()
 
     def verdict() -> ReadinessVerdict:
@@ -97,7 +97,24 @@ def test_health_ready_success_emits_ready_json(monkeypatch: pytest.MonkeyPatch) 
     assert result.exit_code == 0
     assert json.loads(result.stdout) == {"status": "ready"}
     assert result.stderr == ""
-    assert calls == ["socket", "backend"]
+    assert calls == [((("127.0.0.1", 8000),), {"timeout": 2.0}), "backend"]
+
+
+def test_health_ready_probes_explicit_listener_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[object] = []
+
+    def connect(*_args: object, **_kwargs: object) -> _Connection:
+        calls.append((_args, _kwargs))
+        return _Connection()
+
+    monkeypatch.setattr(socket, "create_connection", connect)
+    monkeypatch.setattr(cli_module, "readiness_verdict", lambda: ReadinessVerdict(True, None, _state()))
+
+    result = CliRunner().invoke(app, ["health", "--ready", "--host", "0.0.0.0", "--port", "9123"])
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert calls == [((("0.0.0.0", 9123),), {"timeout": 2.0})]
 
 
 @pytest.mark.parametrize("error", [ValueError("malformed readiness state"), OSError("read failed")])

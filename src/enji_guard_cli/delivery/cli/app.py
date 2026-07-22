@@ -23,6 +23,8 @@ from enji_guard_cli.application import (
     ApplicationCatalogChange,
     ApplicationCommandError,
     ApplicationResult,
+    AuditAutofixUpdate,
+    AuditScheduleUpdate,
     AutofixWriteScope,
     EmailPreferencesUpdate,
 )
@@ -669,15 +671,15 @@ def portfolio_status(
 @app.command("health")
 def health(
     ready: Annotated[bool, typer.Option("--ready", help="Check MCP listener and cached backend readiness.")] = False,
+    host: Annotated[str, typer.Option("--host")] = DEFAULT_HTTP_HOST,
+    port: Annotated[int, typer.Option("--port", min=1, max=65535)] = DEFAULT_HTTP_PORT,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     if not ready:
         _emit({"status": "ok"}, _json_output(json_output))
         return
     try:
-        with socket.create_connection(
-            (DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT), timeout=default_settings().service.local_readiness_timeout_seconds
-        ):
+        with socket.create_connection((host, port), timeout=default_settings().service.local_readiness_timeout_seconds):
             pass
     except OSError as exc:
         typer.echo(f"UNREADY: MCP listener is not ready: {exc}", err=True)
@@ -778,13 +780,12 @@ def schedule_set(  # noqa: PLR0913
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     scope = _scope(all_repos, all_projects)
+    update = AuditScheduleUpdate(enabled=_switch(enabled), cadence=frequency, timezone=timezone)
     _run(
         lambda: _application().set_schedules(
             repo,
             _selected_project(project),
-            enabled=_switch(enabled),
-            cadence=frequency,
-            timezone=timezone,
+            update,
             scope=scope,
         ),
         _json_output(json_output),
@@ -819,8 +820,9 @@ def schedule_timezone(  # noqa: PLR0913
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     scope = _scope(all_repos, all_projects)
+    update = AuditScheduleUpdate(timezone=timezone)
     _run(
-        lambda: _application().set_schedules(repo, _selected_project(project), timezone=timezone, scope=scope),
+        lambda: _application().set_schedules(repo, _selected_project(project), update, scope=scope),
         _json_output(json_output),
         OPERATION,
     )
@@ -855,14 +857,13 @@ def autofix_set(  # noqa: PLR0913
 ) -> None:
     selectors = ["__all__"] if all_autofixes else (autofixes or [])
     scope = _scope(all_repos, all_projects)
+    update = AuditAutofixUpdate(enabled=_switch(enabled), frequency=frequency, timezone=timezone)
     _run(
         lambda: _application().set_autofixes(
             repo,
             _selected_project(project),
             selectors,
-            enabled=_switch(enabled),
-            cadence=frequency,
-            timezone=timezone,
+            update,
             scope=scope,
         ),
         _json_output(json_output),
