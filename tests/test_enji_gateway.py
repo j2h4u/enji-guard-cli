@@ -23,7 +23,7 @@ from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
 from enji_guard_cli.auth_session.api import import_bearer_token
 from enji_guard_cli.enji_gateway import AuditGateway
 from enji_guard_cli.enji_gateway.http import AuditRunCreate
-from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot
+from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot, audit_report_refs_from_payload
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload
 from enji_guard_cli.transport import (
@@ -56,6 +56,45 @@ def test_audit_artifact_translates_only_explicit_application_fields() -> None:
     assert artifact.score == 98
     assert artifact.generated_at == "2026-07-15T08:00:00Z"
     assert not hasattr(artifact, "metadata")
+
+
+def test_audit_report_refs_validate_requested_identity() -> None:
+    refs = audit_report_refs_from_payload(
+        {
+            "repoId": "repo-1",
+            "group": "security",
+            "reports": [
+                {
+                    "repoId": "repo-1",
+                    "group": "security",
+                    "fleetTaskId": "task-1",
+                    "completedAt": "2026-07-15T08:00:00Z",
+                    "collectedAt": "2026-07-15T08:00:01Z",
+                    "hasReport": True,
+                }
+            ],
+        },
+        expected_repo_id="repo-1",
+        expected_metric_group="security",
+    )
+    assert refs[0].task_id == "task-1"
+
+
+@pytest.mark.parametrize("completed_at", ["not-a-time", "2026-13-99T99:99:99Z"])
+def test_audit_report_refs_reject_malformed_completion(completed_at: str) -> None:
+    with pytest.raises(MalformedAuditSnapshotError, match="completedAt must be valid ISO datetime"):
+        audit_report_refs_from_payload(
+            {
+                "reports": [
+                    {
+                        "fleetTaskId": "task-1",
+                        "completedAt": completed_at,
+                        "collectedAt": "2026-07-15T08:00:01Z",
+                        "hasReport": True,
+                    }
+                ]
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -182,10 +221,10 @@ class _GatewayHarness:
         self.calls.append(("start_audit_run", (request, auth_file, client)))
         return self.start_payload
 
-    def fake_snapshot(
-        self, repo_id: str, audit_key: str, auth_file: object, client: object, *, auth_port: object
+    def fake_snapshot(  # noqa: PLR0913
+        self, repo_id: str, audit_key: str, auth_file: object, client: object, *, task_id: str, auth_port: object
     ) -> JsonObjectPayload:
-        self.calls.append(("snapshot", (repo_id, audit_key, auth_file, client)))
+        self.calls.append(("snapshot", (repo_id, audit_key, auth_file, client, task_id)))
         return self.snapshot_payload
 
 
@@ -416,12 +455,12 @@ def test_audit_gateway_resolves_external_schema_placeholder_at_wire_boundary(
 
 
 def test_audit_gateway_reads_snapshot(gateway_harness: _GatewayHarness) -> None:
-    artifact = gateway_harness.gateway.read_audit_snapshot("repo-1", "audit.security")
+    artifact = gateway_harness.gateway.read_audit_snapshot("repo-1", "audit.security", task_id="task-1")
     assert isinstance(artifact, AuditArtifact)
     assert artifact.audit_key == "audit.security"
     assert artifact.body == "findings"
     assert artifact.score == 80
     assert artifact.generated_at is None
     assert gateway_harness.calls == [
-        ("snapshot", ("repo-1", "audit.security", gateway_harness.auth_file, gateway_harness.client))
+        ("snapshot", ("repo-1", "audit.security", gateway_harness.auth_file, gateway_harness.client, "task-1"))
     ]

@@ -240,6 +240,13 @@ REPO_AUDIT_SUMMARY_ENDPOINT_SPEC = EnjiEndpointSpec(
     operation="report show",
     retry_profile=RetryProfile.READ,
 )
+REPO_AUDIT_REPORTS_ENDPOINT_SPEC = EnjiEndpointSpec(
+    method="GET",
+    path_template="/api/ux/repos/{repoId}/audit-reports",
+    operation_id="listRepoAuditReports",
+    operation="audit report history",
+    retry_profile=RetryProfile.READ,
+)
 AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="GET",
     path_template="/api/ux/repos/{repoId}/audits/{actionKey}/email-preferences",
@@ -312,6 +319,7 @@ IMPLEMENTED_ENJI_ENDPOINTS = (
     TASK_DETAIL_ENDPOINT_SPEC,
     REPO_AUDIT_RUNS_ENDPOINT_SPEC,
     REPO_AUDIT_SUMMARY_ENDPOINT_SPEC,
+    REPO_AUDIT_REPORTS_ENDPOINT_SPEC,
     AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT_SPEC,
     AUDIT_EMAIL_PREFERENCES_PUT_ENDPOINT_SPEC,
     AUDIT_AUTO_RUNS_ENDPOINT_SPEC,

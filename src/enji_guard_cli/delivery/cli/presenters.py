@@ -79,12 +79,23 @@ def audit_summary_text(payload: AuditSummary) -> str:
     lines = [f"repository: {payload.repo_id}"]
     for item in payload.audits:
         selector = item.audit_key.removeprefix("audit.")
+        warning = "Report is stale; a newer audit is in progress." if item.newer_run else None
         if item.available:
             score = "-" if item.score is None else f"{item.score:g}"
+            if warning:
+                lines.append(f"  {selector}  {warning}")
+            if item.task_id is not None:
+                lines.append(f"  {selector}  task_id={item.task_id}")
+            if item.completed_at is not None:
+                lines.append(f"  {selector}  completed_at={item.completed_at}")
+            if item.collected_at is not None:
+                lines.append(f"  {selector}  collected_at={item.collected_at}")
             lines.append(
                 f"  {selector}  score={score} freshness={item.freshness.state} generated_at={item.generated_at or '-'}"
             )
         else:
+            if warning:
+                lines.append(f"  {selector}  {warning}")
             lines.append(f"  {selector}  unavailable={item.reason or 'unknown'} freshness={item.freshness.state}")
     return "\n".join(lines)
 

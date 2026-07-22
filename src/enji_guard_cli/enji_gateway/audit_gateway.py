@@ -12,6 +12,7 @@ from enji_guard_cli.audit.ports import (
     AuditEmailPreference,
     AuditEmailPreferenceUpdate,
     AuditGatewayPort,
+    AuditReportRef,
     AuditRerunState,
     AuditRun,
     AuditRunbookMetadata,
@@ -32,6 +33,9 @@ from enji_guard_cli.enji_gateway.http import (
 )
 from enji_guard_cli.enji_gateway.http import (
     audit_email_preferences as _audit_email_preferences,
+)
+from enji_guard_cli.enji_gateway.http import (
+    audit_reports as _audit_reports,
 )
 from enji_guard_cli.enji_gateway.http import (
     audit_summary_snapshot as _audit_summary_snapshot,
@@ -70,7 +74,7 @@ from enji_guard_cli.enji_gateway.http import (
     task_detail as _task_detail,
 )
 from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayAuthPort, GatewayClient
-from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot
+from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot, audit_report_refs_from_payload
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonValue
 
@@ -195,11 +199,42 @@ class AuditGateway(AuditGatewayPort):
             status=_optional_str(task.get("status")),
         )
 
-    def read_audit_snapshot(self, repo_id: str, audit_key: str, metric_group: str | None = None) -> AuditArtifact:
+    def list_audit_reports(self, repo_id: str, metric_group: str) -> tuple[AuditReportRef, ...]:
+        payload = _audit_reports(repo_id, metric_group, self._auth_file, self._client, auth_port=self._auth_port)
+        return audit_report_refs_from_payload(
+            payload,
+            expected_repo_id=repo_id,
+            expected_metric_group=metric_group,
+        )
+
+    def read_audit_snapshot(
+        self,
+        repo_id: str,
+        audit_key: str,
+        metric_group: str | None = None,
+        *,
+        task_id: str,
+    ) -> AuditArtifact:
         route_group = metric_group if isinstance(metric_group, str) and metric_group.strip() else audit_key
-        return audit_artifact_from_snapshot(
-            _audit_summary_snapshot(repo_id, route_group, self._auth_file, self._client, auth_port=self._auth_port),
+        artifact = audit_artifact_from_snapshot(
+            _audit_summary_snapshot(
+                repo_id,
+                route_group,
+                self._auth_file,
+                self._client,
+                task_id=task_id,
+                auth_port=self._auth_port,
+            ),
             audit_key,
+        )
+        return AuditArtifact(
+            audit_key=artifact.audit_key,
+            body=artifact.body,
+            score=artifact.score,
+            generated_at=artifact.generated_at,
+            task_id=task_id,
+            completed_at=artifact.completed_at,
+            collected_at=artifact.collected_at,
         )
 
     def list_schedules(self, repo_id: str) -> tuple[AuditSchedule, ...]:
