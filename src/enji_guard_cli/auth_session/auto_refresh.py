@@ -5,7 +5,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, TypeGuard
+from typing import Protocol
 
 from enji_guard_cli.auth_session.store import StoredAuth
 from enji_guard_cli.transport import EnjiHttpError
@@ -21,35 +21,12 @@ class AutoRefreshSettingsLike(Protocol):
     @property
     def fallback_seconds(self) -> int: ...
 
-    @property
-    def retry_seconds(self) -> int: ...
-
-    @property
-    def retry_initial_seconds(self) -> float: ...
-
-    @property
-    def retry_max_seconds(self) -> float: ...
-
-    @property
-    def retry_jitter_seconds(self) -> float: ...
-
-    @property
-    def auth_required_retry_seconds(self) -> int: ...
-
-
-class RefreshErrorLike(Protocol):
-    code: str
-    status_code: int | None
-
-
 @dataclass(frozen=True)
 class AutoRefreshLoopDependencies:
     sleep_seconds_fn: Callable[..., int]
     load_sleep_seconds_stored_auth_fn: Callable[[Path], StoredAuth | None]
     cookie_refresh_sleep_seconds_fn: Callable[..., int]
     refresh_stored_cookie_auth_fn: Callable[[Path, object], Awaitable[StoredAuth]]
-    cookie_access_expires_at_fn: Callable[[StoredAuth], datetime | None]
-    is_refresh_error_fn: Callable[[Exception], TypeGuard[RefreshErrorLike]]
     log_event_fn: Callable[..., None]
     logger: logging.Logger
     client_factory: Callable[[], AbstractAsyncContextManager[object]]
@@ -87,10 +64,10 @@ async def _auto_refresh_loop(
                         dependencies.logger,
                         logging.ERROR,
                         "enji_auth_auto_refresh_schedule_failed",
-                        {"error_type": type(exc).__name__, "retry_seconds": refresh_settings.retry_seconds},
+                        {"error_type": type(exc).__name__},
                     )
                     if await _wait_for_credential_change(
-                        change_task, refresh_settings.retry_seconds, dependencies.sleep_fn
+                        change_task, refresh_settings.fallback_seconds, dependencies.sleep_fn
                     ):
                         change_task = asyncio.ensure_future(anext(changes))
                     continue
@@ -104,30 +81,13 @@ async def _auto_refresh_loop(
                     change_task = asyncio.ensure_future(anext(changes))
                     continue
                 try:
-                    refreshed_auth = await dependencies.refresh_stored_cookie_auth_fn(auth_file, client)
-                except EnjiHttpError as exc:
-                    dependencies.log_event_fn(
-                        dependencies.logger,
-                        logging.WARNING,
-                        "enji_auth_auto_refresh_blocked",
-                        {
-                            "code": exc.code,
-                            "status_code": exc.status_code,
-                            "retry_seconds": refresh_settings.retry_seconds,
-                        },
-                    )
-                    if await _wait_for_credential_change(
-                        change_task, refresh_settings.retry_seconds, dependencies.sleep_fn
-                    ):
-                        change_task = asyncio.ensure_future(anext(changes))
+                    await dependencies.refresh_stored_cookie_auth_fn(auth_file, client)
+                except EnjiHttpError:
+                    # Coordinator terminal states are resolved only by an import;
+                    # scheduling another refresh attempt would violate one-shot dispatch.
+                    await change_task
+                    change_task = asyncio.ensure_future(anext(changes))
                     continue
-                expires_at = dependencies.cookie_access_expires_at_fn(refreshed_auth)
-                dependencies.log_event_fn(
-                    dependencies.logger,
-                    logging.INFO,
-                    "enji_auth_auto_refresh_succeeded",
-                    {"access_expires_at": expires_at.isoformat() if expires_at is not None else None},
-                )
         finally:
             change_task.cancel()
             await asyncio.gather(change_task, return_exceptions=True)

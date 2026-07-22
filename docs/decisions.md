@@ -101,23 +101,17 @@ agents can orient quickly before making changes.
   storage; its secret fields are intentionally not described here.
   HTTP retry profiles allow retries only for reads, safe probes, and idempotent
   mutations; unsafe mutations and auth refresh are not retried by transport.
-  Transport delay is exponential with jitter and a 30-second cap. Supervisor
-  recovery retries indefinitely with exponential jitter capped by the frozen
-  `auto_refresh.retry_max_seconds` setting, and uses the configured re-auth
-  interval for `AUTH_REQUIRED` failures.
+  Transport delay is exponential with jitter and a 30-second cap. Once cookie
+  refresh has reached durable `REQUESTED` or a terminal journal state, the
+  supervisor never retries it; a credential import is required instead.
   Credential-file changes wake the refresh scheduler and backend-readiness loop
   immediately instead of waiting for the next heartbeat. There is no manual
   operator-facing `auth refresh` command; `auth status`, readiness, and
   telemetry are the validation surfaces.
 - **Auth resilience observability**: runtime diagnosis uses telemetry events
-  `enji_http_retry`, `enji_auth_auto_refresh_scheduled`,
-  `enji_auth_auto_refresh_retry`, `enji_auth_auto_refresh_succeeded`,
-  `enji_auth_auto_refresh_schedule_failed`,
-  `enji_auth_refresh_cookie_rejected`,
-  `enji_auth_refresh_rotation_deferred`,
-  `enji_auth_refresh_rotation_recovered`, and
-  `enji_auth_refresh_rotation_superseded`; event payloads contain classification
-  and timing, not secret details.
+  `enji_http_retry` plus one `enji_auth_rotation_*` terminal outcome event;
+  outcome payloads contain only stable classification, never credential data,
+  paths, or error messages.
 - **Supply-chain conservatism**: new Python packages stay quarantined for
   7 to 14 days unless an owner approves earlier adoption; lifecycle and
   install scripts are disabled by default or explicitly allowlisted;

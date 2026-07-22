@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -169,6 +170,61 @@ def test_ambiguous_response_is_dispatched_once_per_source_revision(tmp_path: Pat
     journal = load_journal(auth_file)
     assert isinstance(journal, JournalLoaded)
     assert journal.state == OutcomeUnknown(loaded.auth["revision"], "ambiguous refresh response HTTP 502")
+
+
+def test_rotation_telemetry_is_terminal_once_and_redacts_sentinels(tmp_path: Path) -> None:
+    auth_file = tmp_path / "SENTINEL_AUTH_PATH.json"
+    secret = "SENTINEL_SECRET_COOKIE"
+    import_cookie(f"access_token={secret}; refresh_token={secret}", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    events: list[tuple[str, dict[str, object]]] = []
+
+    def sink(_logger: logging.Logger, _level: int, event: str, fields: object) -> None:
+        assert isinstance(fields, dict)
+        events.append((event, fields))
+
+    class Exchange:
+        async def exchange_once(self, _source: object) -> EnjiHttpResponse:
+            return EnjiHttpResponse(
+                status_code=200,
+                headers={},
+                content=b"{}",
+                set_cookie_headers=("access_token=new", "refresh_token=new"),
+            )
+
+    asyncio.run(RefreshCoordinator(auth_file, Exchange(), event_sink=sink).refresh(loaded.auth))
+
+    assert events == [("enji_auth_rotation_rotated", {})]
+    assert secret not in repr(events)
+    assert "SENTINEL_AUTH_PATH" not in repr(events)
+
+
+def test_terminal_journal_emits_reimport_without_replaying_or_leaking(tmp_path: Path) -> None:
+    auth_file = tmp_path / "SENTINEL_AUTH_PATH.json"
+    import_cookie("access_token=SENTINEL_SECRET; refresh_token=SENTINEL_SECRET", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    write_journal(auth_file, OutcomeUnknown(loaded.auth["revision"], "SENTINEL_ERROR_MESSAGE"))
+    events: list[tuple[str, dict[str, object]]] = []
+
+    def sink(_logger: logging.Logger, _level: int, event: str, fields: object) -> None:
+        assert isinstance(fields, dict)
+        events.append((event, fields))
+
+    class Exchange:
+        async def exchange_once(self, _source: object) -> EnjiHttpResponse:
+            raise AssertionError("terminal journal must not dispatch")
+
+    coordinator = RefreshCoordinator(auth_file, Exchange(), terminal_wait_seconds=0, event_sink=sink)
+    with pytest.raises(EnjiHttpError, match="import a fresh browser credential"):
+        asyncio.run(coordinator.refresh(loaded.auth))
+
+    assert events == [("enji_auth_rotation_reimport_required", {})]
+    rendered = repr(events)
+    assert "SENTINEL_SECRET" not in rendered
+    assert "SENTINEL_AUTH_PATH" not in rendered
+    assert "SENTINEL_ERROR_MESSAGE" not in rendered
 
 
 def test_explicit_import_supersedes_terminal_journal(tmp_path: Path) -> None:

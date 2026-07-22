@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import NotRequired, TypedDict, TypeGuard, cast
+from typing import NotRequired, TypedDict, cast
 
 import httpx
 import pytest
@@ -113,12 +113,6 @@ def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch
     async def fail_refresh(*_args: object, **_kwargs: object) -> RuntimeStoredAuth:
         raise AssertionError("refresh should not be called")
 
-    def is_refresh_error(exc: Exception) -> TypeGuard[auto_refresh_module.RefreshErrorLike]:
-        return False
-
-    def cookie_expires(*_args: object, **_kwargs: object) -> datetime | None:
-        return None
-
     monkeypatch.setattr(auto_refresh_module.asyncio, "sleep", fake_sleep)
 
     with pytest.raises(asyncio.CancelledError):
@@ -129,15 +123,12 @@ def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch
                     enabled=True,
                     lead_seconds=300,
                     fallback_seconds=900,
-                    retry_seconds=60,
                 ),
                 dependencies=auto_refresh_module.AutoRefreshLoopDependencies(
                     sleep_seconds_fn=fake_sleep_seconds,
                     load_sleep_seconds_stored_auth_fn=lambda _path: None,
                     cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
                     refresh_stored_cookie_auth_fn=fail_refresh,
-                    cookie_access_expires_at_fn=cookie_expires,
-                    is_refresh_error_fn=is_refresh_error,
                     log_event_fn=fake_log_event,
                     logger=auto_refresh_module.logging.getLogger("test"),
                     sleep_fn=fake_sleep,
@@ -147,7 +138,7 @@ def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch
             )
         )
 
-    assert slept_with == [60]
+    assert slept_with == [900]
 
 
 def test_credential_change_wait_survives_timeout() -> None:
@@ -648,14 +639,12 @@ def test_auth_adapter_passes_isolated_event_sink_to_auto_refresh(
     dependencies = captured_dependencies[0].loop_dependencies
     for event in (
         "enji_auth_auto_refresh_scheduled",
-        "enji_auth_auto_refresh_succeeded",
         "enji_auth_auto_refresh_schedule_failed",
     ):
         dependencies.log_event_fn(logging.getLogger("test"), logging.INFO, event, {"safe": True})
 
     assert [event for event, _fields in events] == [
         "enji_auth_auto_refresh_scheduled",
-        "enji_auth_auto_refresh_succeeded",
         "enji_auth_auto_refresh_schedule_failed",
     ]
     assert all(fields == {"safe": True} for _event, fields in events)
@@ -666,7 +655,6 @@ def test_auth_adapter_passes_isolated_event_sink_to_auto_refresh(
     isolated_dependencies.log_event_fn(logging.getLogger("test"), logging.INFO, "leak-check", {})
     assert [event for event, _fields in events] == [
         "enji_auth_auto_refresh_scheduled",
-        "enji_auth_auto_refresh_succeeded",
         "enji_auth_auto_refresh_schedule_failed",
     ]
 
@@ -700,7 +688,7 @@ def run_auth_status(task_factory: Callable[[], Awaitable[AuthStatusPayload]]) ->
 
 
 def auto_refresh_settings() -> AutoRefreshSettings:
-    return AutoRefreshSettings(enabled=True, lead_seconds=300, fallback_seconds=900, retry_seconds=60)
+    return AutoRefreshSettings(enabled=True, lead_seconds=300, fallback_seconds=900)
 
 
 def unsigned_jwt(payload: dict[str, object]) -> str:

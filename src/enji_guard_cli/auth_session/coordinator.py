@@ -1,11 +1,13 @@
 """Single-owner, one-shot coordination for cookie refresh rotation."""
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn, Protocol
+from typing import Protocol
 
 from enji_guard_cli.auth_session.cookies import merge_set_cookie_headers, set_cookie_names
+from enji_guard_cli.auth_session.ports import AuthEventSink
 from enji_guard_cli.auth_session.state_machine import (
     Begin,
     DispatchBegun,
@@ -44,6 +46,8 @@ from enji_guard_cli.auth_session.store import (
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpResponse
 
 HTTP_OK = 200
+TERMINAL_POLL_SECONDS = 0.05
+_LOGGER = logging.getLogger(__name__)
 
 
 class RefreshExchange(Protocol):
@@ -83,22 +87,29 @@ class RefreshCoordinator:
         auth_path: Path,
         exchange: RefreshExchange,
         *,
-        poll_seconds: float = 0.05,
         terminal_wait_seconds: float = 1.0,
         storage_failpoint: StorageFailpoint | None = None,
+        event_sink: AuthEventSink | None = None,
     ) -> None:
         self._auth_path = auth_path
         self._exchange = exchange
-        self._poll_seconds = poll_seconds
         self._terminal_wait_seconds = terminal_wait_seconds
         self._storage_failpoint = storage_failpoint
+        self._event_sink = event_sink
         self._lock = asyncio.Lock()
 
     async def refresh(self, expected: StoredAuth | None = None) -> StoredAuth:
         """Refresh once, never retrying a request after dispatch begins."""
 
         async with self._lock:
-            prepared = await asyncio.to_thread(self._prepare, expected)
+            try:
+                prepared = await asyncio.to_thread(self._prepare, expected)
+            except (OSError, TimeoutError) as exc:
+                self._emit("retryable_pre_dispatch_failure", error_type=type(exc).__name__)
+                raise
+            except EnjiHttpError as exc:
+                self._emit("invariant_failure", code=exc.code)
+                raise
             if isinstance(prepared, _ReturnAuth):
                 return prepared.auth
             if isinstance(prepared, _WaitForRevision):
@@ -132,11 +143,12 @@ class RefreshCoordinator:
             if isinstance(loaded, AuthLoaded) and loaded.auth["revision"] != source_revision:
                 return loaded.auth
             if asyncio.get_running_loop().time() >= deadline:
+                self._emit("reimport_required")
                 raise EnjiHttpError(
                     "AUTH_IMPORT_REQUIRED",
                     "refresh outcome is terminal; import a fresh browser credential",
                 )
-            await asyncio.sleep(self._poll_seconds)
+            await asyncio.sleep(TERMINAL_POLL_SECONDS)
 
     async def recover_startup(self) -> StoredAuth | None:
         """Mark abandoned dispatched work unknown without issuing a request."""
@@ -180,7 +192,7 @@ class RefreshCoordinator:
         if isinstance(state, Rotated):
             return self._recover_rotated(state)
         if isinstance(state, Reserved):
-            delete_journal(self._auth_path)
+            delete_journal(self._auth_path, failpoint=self._storage_failpoint)
             return None
         if isinstance(state, (Requested, Rejected, OutcomeUnknown)):
             return _WaitForRevision(state.source_revision)
@@ -195,8 +207,10 @@ class RefreshCoordinator:
         )
         if isinstance(recovered, CasWritten):
             delete_journal(self._auth_path, failpoint=self._storage_failpoint)
+            self._emit("recovered")
             return _ReturnAuth(recovered.auth)
         assert isinstance(recovered, CasSuperseded)
+        self._emit("superseded")
         return _ReturnAuth(_loaded_or_raise(load_auth(self._auth_path)))
 
     def _commit_response(self, source: StoredAuth, response: EnjiHttpResponse) -> StoredAuth:
@@ -210,6 +224,7 @@ class RefreshCoordinator:
     def _commit_success(self, source_revision: str, cookie_header: str) -> StoredAuth:
         with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
             if _is_superseded(self._auth_path, source_revision):
+                self._emit("superseded")
                 return _loaded_or_raise(load_auth(self._auth_path))
             state = Requested(source_revision)
             rotated_transition = transition(state, ExchangeSucceeded(cookie_header))
@@ -220,23 +235,33 @@ class RefreshCoordinator:
             )
             if isinstance(result, CasWritten):
                 delete_journal(self._auth_path, failpoint=self._storage_failpoint)
+                self._emit("rotated")
                 return result.auth
+            self._emit("superseded")
             return _loaded_or_raise(load_auth(self._auth_path))
 
-    def _commit_rejected(self, source_revision: str, reason: str) -> NoReturn:
+    def _commit_rejected(self, source_revision: str, reason: str) -> StoredAuth:
         with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
             if not _is_superseded(self._auth_path, source_revision):
                 state = transition(Requested(source_revision), ExchangeRejected(reason)).state
                 assert isinstance(state, Rejected)
                 write_journal(self._auth_path, state, failpoint=self._storage_failpoint)
+                self._emit("rejected")
+            else:
+                self._emit("superseded")
+                return _loaded_or_raise(load_auth(self._auth_path))
         raise EnjiHttpError("AUTH_REQUIRED", "stored refresh cookie is not authenticated")
 
-    def _commit_unknown(self, source_revision: str, reason: str) -> NoReturn:
+    def _commit_unknown(self, source_revision: str, reason: str) -> StoredAuth:
         with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
             if not _is_superseded(self._auth_path, source_revision):
                 state = transition(Requested(source_revision), ExchangeOutcomeUnknown(reason)).state
                 assert isinstance(state, OutcomeUnknown)
                 write_journal(self._auth_path, state, failpoint=self._storage_failpoint)
+                self._emit("outcome_unknown")
+            else:
+                self._emit("superseded")
+                return _loaded_or_raise(load_auth(self._auth_path))
         raise EnjiHttpError("AUTH_IMPORT_REQUIRED", "refresh outcome is unknown; import a fresh browser credential")
 
     def _recover_startup(self) -> StoredAuth | None:
@@ -257,6 +282,7 @@ class RefreshCoordinator:
                     )
                     if isinstance(result, CasWritten):
                         delete_journal(self._auth_path, failpoint=self._storage_failpoint)
+                        self._emit("recovered")
                         return result.auth
                 elif isinstance(state, Reserved):
                     delete_journal(self._auth_path, failpoint=self._storage_failpoint)
@@ -264,7 +290,13 @@ class RefreshCoordinator:
                     unknown = transition(state, ExchangeOutcomeUnknown("process exited after refresh dispatch")).state
                     assert isinstance(unknown, OutcomeUnknown)
                     write_journal(self._auth_path, unknown, failpoint=self._storage_failpoint)
+                    self._emit("outcome_unknown")
             return loaded.auth
+
+    def _emit(self, outcome: str, **fields: object) -> None:
+        """Report only stable classifications; never credentials, paths, or messages."""
+        if self._event_sink is not None:
+            self._event_sink(_LOGGER, logging.INFO, f"enji_auth_rotation_{outcome}", fields)
 
 
 def import_credential(auth_path: Path, auth: StoredAuth) -> StoredAuth:

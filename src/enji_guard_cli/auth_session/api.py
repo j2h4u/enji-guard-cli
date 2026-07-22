@@ -4,7 +4,7 @@ import time
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import NotRequired, TypedDict, TypeGuard, cast
+from typing import NotRequired, TypedDict, cast
 
 from enji_guard_cli.auth_session import auto_refresh as auto_refresh_impl
 from enji_guard_cli.auth_session.cookies import (
@@ -249,8 +249,6 @@ def start_auto_refresh_task(
                 refresh_stored_cookie_auth_fn=lambda path, client: _refresh_stored_cookie_auth_for_auto_refresh(
                     path, client, resolved_event_sink
                 ),
-                cookie_access_expires_at_fn=cookie_access_expires_at,
-                is_refresh_error_fn=_is_auto_refresh_error,
                 log_event_fn=resolved_event_sink,
                 logger=_LOGGER,
                 sleep_fn=asyncio.sleep,
@@ -265,10 +263,6 @@ async def _refresh_stored_cookie_auth_for_auto_refresh(
     path: Path, client: object, event_sink: AuthEventSink | None = None
 ) -> StoredAuth:
     return await _refresh_stored_cookie_auth(path, cast(EnjiHttpClient, client), event_sink=event_sink)
-
-
-def _is_auto_refresh_error(exc: Exception) -> TypeGuard[auto_refresh_impl.RefreshErrorLike]:
-    return isinstance(exc, EnjiHttpError)
 
 
 async def _auth_status_with_client(
@@ -412,7 +406,7 @@ async def _refresh_cookie_auth(
                 )
             )
 
-    return await RefreshCoordinator(path, _HttpxRefreshExchange()).refresh(stored_auth)
+    return await RefreshCoordinator(path, _HttpxRefreshExchange(), event_sink=event_sink).refresh(stored_auth)
 
 
 async def _refresh_stored_cookie_auth(

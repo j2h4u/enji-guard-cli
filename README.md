@@ -353,24 +353,15 @@ Transport retries are profile-aware. Reads, safe probes, and idempotent
 mutations may retry transient transport or 429/5xx failures; unsafe mutations
 and cookie refresh are not retried by the transport layer. Transport backoff
 uses exponential delay with jitter and a 30-second cap (including a bounded
-`Retry-After`). Supervisor cookie-refresh recovery uses exponential jitter,
-continues until it succeeds, and caps any individual delay at one hour. An
-`AUTH_REQUIRED` failure uses the configured re-auth retry interval instead of
-exponential growth.
+`Retry-After`). Once cookie refresh is durably dispatched, or reaches a
+terminal outcome, it is never replayed automatically; import fresh browser
+credentials to continue.
 
 Useful telemetry events are written to
-`~/.config/enji-guard/logs/telemetry.jsonl`: `enji_http_retry`,
-`enji_auth_auto_refresh_scheduled`, `enji_auth_auto_refresh_retry`,
-`enji_auth_auto_refresh_succeeded`, `enji_auth_auto_refresh_schedule_failed`,
-`enji_auth_refresh_cookie_rejected`,
-`enji_auth_refresh_rotation_deferred`,
-`enji_auth_refresh_rotation_recovered`, and
-`enji_auth_refresh_rotation_superseded`. Records contain retry classification
-and timing fields; credentials are not an operator-facing log output.
-`enji_auth_refresh_cookie_rejected` means Enji rejected the refresh cookie with
-HTTP 401 or 403; its `classification` is `upstream_refresh_cookie_rejected`.
-The upstream response does not distinguish an expired cookie from a revoked
-one, so telemetry intentionally does not claim either diagnosis.
+`~/.config/enji-guard/logs/telemetry.jsonl`: `enji_http_retry` and exactly one
+`enji_auth_rotation_*` terminal event for each rotation outcome. Rotation event
+fields are stable classifications only: they never contain credentials, auth
+paths, or upstream error messages.
 
 After a real cookie re-authentication, refresh the session in the browser,
 request `/api/v1/auth/me`, and import the current `Cookie` request header using

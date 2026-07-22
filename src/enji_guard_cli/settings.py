@@ -23,10 +23,6 @@ DEFAULT_GUARD_REFERER = "https://guard.enji.ai/"
 DEFAULT_AUTO_REFRESH_ENABLED = True
 DEFAULT_AUTO_REFRESH_LEAD_SECONDS = 300
 DEFAULT_AUTO_REFRESH_FALLBACK_SECONDS = 900
-DEFAULT_AUTO_REFRESH_RETRY_SECONDS = 900
-DEFAULT_AUTO_REFRESH_RETRY_INITIAL_SECONDS = 30.0
-DEFAULT_AUTO_REFRESH_RETRY_MAX_SECONDS = 3600.0
-DEFAULT_AUTO_REFRESH_RETRY_JITTER_SECONDS = 30.0
 DEFAULT_TRANSPORT_TIMEOUT_SECONDS = 20.0
 DEFAULT_TRANSPORT_RETRY_TOTAL = 3
 DEFAULT_TRANSPORT_RETRY_BACKOFF_FACTOR = 0.5
@@ -78,11 +74,6 @@ class AutoRefreshSettings:
     enabled: bool
     lead_seconds: int
     fallback_seconds: int
-    retry_seconds: int
-    retry_initial_seconds: float = DEFAULT_AUTO_REFRESH_RETRY_INITIAL_SECONDS
-    retry_max_seconds: float = DEFAULT_AUTO_REFRESH_RETRY_MAX_SECONDS
-    retry_jitter_seconds: float = DEFAULT_AUTO_REFRESH_RETRY_JITTER_SECONDS
-    auth_required_retry_seconds: int = DEFAULT_AUTO_REFRESH_RETRY_SECONDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,7 +187,6 @@ def default_settings() -> EnjiGuardSettings:
             enabled=DEFAULT_AUTO_REFRESH_ENABLED,
             lead_seconds=DEFAULT_AUTO_REFRESH_LEAD_SECONDS,
             fallback_seconds=DEFAULT_AUTO_REFRESH_FALLBACK_SECONDS,
-            retry_seconds=DEFAULT_AUTO_REFRESH_RETRY_SECONDS,
         ),
         transport=TransportSettings(
             timeout_seconds=DEFAULT_TRANSPORT_TIMEOUT_SECONDS,
