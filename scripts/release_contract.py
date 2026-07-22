@@ -30,7 +30,7 @@ CONTAINER_PORT = 8000
 MIN_PORT = 1
 MAX_PORT = 65535
 AUTH_MARKERS = ("auth", "credential", "token", "cookie", "login", "unauthenticated")
-VERSION_LINE = re.compile(r"^enji-guard-cli \S+ \(commit [0-9a-f]{12}\)\n$")
+VERSION_LINE = re.compile(r"^enji-guard-cli (?P<version>\S+) \(commit (?P<sha>[0-9a-f]{12})\)\n$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +42,8 @@ class ContractSettings:
     host_port: int
     timeout_seconds: float = 20.0
     health_retries: int = 10
+    expected_version: str = ""
+    expected_sha: str = ""
 
 
 class CommandRunner(Protocol):
@@ -239,6 +241,20 @@ def _wait_for_auth_failure(settings: ContractSettings, runner: CommandRunner) ->
     raise ContractError(f"health --ready did not produce an authentication failure: {_safe_error(last)}")
 
 
+def _validate_version_provenance(settings: ContractSettings, result: CommandResult) -> None:
+    version_match = VERSION_LINE.fullmatch(result.stdout)
+    if result.returncode != 0 or version_match is None:
+        raise ContractError("CLI version provenance is missing or malformed")
+    actual_version = version_match.group("version")
+    actual_sha = version_match.group("sha")
+    if actual_version.startswith("0.0.0"):
+        raise ContractError("CLI package version is zero and is not publishable")
+    if settings.expected_version and actual_version != settings.expected_version:
+        raise ContractError(f"CLI package version mismatch: expected {settings.expected_version}, got {actual_version}")
+    if settings.expected_sha and not settings.expected_sha.lower().startswith(actual_sha):
+        raise ContractError(f"CLI source commit mismatch: expected {settings.expected_sha}, got {actual_sha}")
+
+
 def _cleanup_contract(settings: ContractSettings, runner: CommandRunner, started: bool) -> bool:
     if not started:
         print("PASS cleanup skipped; container was not created")
@@ -284,8 +300,7 @@ def run_contract(
         print("PASS CLI help")
 
         version_result = runner(_container_exec(settings, "--version"), timeout=settings.timeout_seconds)
-        if version_result.returncode != 0 or VERSION_LINE.fullmatch(version_result.stdout) is None:
-            raise ContractError("CLI version provenance is missing or malformed")
+        _validate_version_provenance(settings, version_result)
         print("PASS CLI version provenance")
 
         health_result = runner(_container_exec(settings, "health"), timeout=settings.timeout_seconds)
@@ -322,6 +337,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--container", default="")
     parser.add_argument("--port", type=int, default=0)
+    parser.add_argument("--expected-version", default="")
+    parser.add_argument("--expected-sha", default="")
     return parser
 
 
@@ -336,7 +353,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_CONFIG
     supplied = cast(str, args.container)
     container = supplied or f"enji-guard-release-contract-{os.getpid()}-{uuid.uuid4().hex[:10]}"
-    return run_contract(ContractSettings(image=image, container=container, host_port=port, timeout_seconds=timeout))
+    return run_contract(
+        ContractSettings(
+            image=image,
+            container=container,
+            host_port=port,
+            timeout_seconds=timeout,
+            expected_version=cast(str, args.expected_version),
+            expected_sha=cast(str, args.expected_sha),
+        )
+    )
 
 
 if __name__ == "__main__":

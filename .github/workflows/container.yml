@@ -131,11 +131,11 @@ jobs:
           RELEASE_TAG: ${{ steps.release-metadata.outputs.release-tag }}
           SOURCE_SHA: ${{ steps.release-metadata.outputs.source-sha }}
         run: |
-          if [[ "${RELEASE_TAG}" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
-            version="${RELEASE_TAG#v}"
-          else
-            version="0.0.0+sha.${SOURCE_SHA:0:12}"
-          fi
+          mapfile -t base_tags < <(git tag --merged "${SOURCE_SHA}" --list 'v*' | sort -V)
+          args=(--source-sha "${SOURCE_SHA}")
+          [ -n "${RELEASE_TAG}" ] && args+=(--release-tag "${RELEASE_TAG}")
+          for base_tag in "${base_tags[@]}"; do args+=(--base-tag "${base_tag}"); done
+          version="$(uv run --locked python scripts/release_version.py "${args[@]}")"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
       - name: Build candidate image
@@ -153,9 +153,14 @@ jobs:
       - name: Verify candidate runtime contract
         env:
           IMAGE_TAGS: ${{ steps.image-tags.outputs.tags }}
+          EXPECTED_VERSION: ${{ steps.package-version.outputs.version }}
+          EXPECTED_SHA: ${{ steps.release-metadata.outputs.source-sha }}
         run: |
           candidate="$(printf '%s\n' "${IMAGE_TAGS}" | head -n 1)"
-          uv run --locked python -m scripts.release_contract --image "${candidate}"
+          uv run --locked python -m scripts.release_contract \
+            --image "${candidate}" \
+            --expected-version "${EXPECTED_VERSION}" \
+            --expected-sha "${EXPECTED_SHA}"
 
       - name: Scan candidate image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0

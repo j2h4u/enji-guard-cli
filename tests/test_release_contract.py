@@ -78,6 +78,34 @@ def test_credentialless_contract_checks_hardened_container_and_cleanup() -> None
     assert runner.calls[-1] == ["docker", "rm", "--force", "release-contract-test"]
 
 
+def test_contract_rejects_zero_version() -> None:
+    class ZeroVersionRunner(FakeRunner):
+        def __call__(
+            self, args: Sequence[str], *, input: str | None = None, timeout: float
+        ) -> release_contract.CommandResult:
+            result = super().__call__(args, input=input, timeout=timeout)
+            if list(args)[-1] == "--version":
+                return release_contract.CommandResult(
+                    0, "enji-guard-cli 0.0.0+sha.deadbeef (commit 13920645c8c7)\n", ""
+                )
+            return result
+
+    settings = release_contract.ContractSettings(image="test", container="zero", host_port=18084)
+    assert release_contract.run_contract(settings, runner=ZeroVersionRunner(), transport_factory=fake_mcp) == 1
+
+
+def test_contract_matches_expected_version_and_source_sha() -> None:
+    runner = FakeRunner()
+    settings = release_contract.ContractSettings(
+        image="test",
+        container="expected",
+        host_port=18085,
+        expected_version="1.0.0",
+        expected_sha="13920645c8c7abcdef",
+    )
+    assert release_contract.run_contract(settings, runner=runner, transport_factory=fake_mcp) == 0
+
+
 def test_contract_reports_cleanup_failure() -> None:
     runner = FakeRunner()
 

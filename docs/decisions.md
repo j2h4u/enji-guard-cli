@@ -6,6 +6,16 @@ agents can orient quickly before making changes.
 
 ## Decisions
 
+- **Non-zero published image versions**: container publishing resolves a tagged
+  release as `X.Y.Z`; untagged main builds use the latest reachable SemVer tag
+  plus `+sha.<12>`. There is no `0.0.0` publish fallback. Resolution fails
+  clearly when no valid base tag exists, and the loaded candidate image must
+  report the exact resolved package version and source commit before scanning
+  or publication.
+  Local Dockerfile defaults and missing-install source fallbacks may remain
+  zero/unknown for development diagnostics, but CI candidate images use a
+  non-zero synthetic version and the release contract rejects zero versions.
+
 - **Cohesive application inputs**: inline `PLR0913` exceptions are reserved
   for framework-reflected CLI handlers, endpoint-shaped HTTP adapters,
   exact-signature test doubles, and private orchestration seams. A private
