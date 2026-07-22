@@ -12,7 +12,7 @@ from enji_guard_cli.auth_session.cookies import (
     jwt_expires_at,
     normalize_cookie_header,
 )
-from enji_guard_cli.auth_session.coordinator import RefreshCoordinator, import_credential
+from enji_guard_cli.auth_session.coordinator import CoordinatorDependencies, RefreshCoordinator, import_credential
 from enji_guard_cli.auth_session.credential_changes import credential_changes
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
 from enji_guard_cli.auth_session.payloads import (
@@ -426,7 +426,7 @@ async def _refresh_cookie_auth(
     return await RefreshCoordinator(
         path,
         _HttpxRefreshExchange(),
-        outcome_sink=_outcome_sink_from_event_sink(event_sink),
+        dependencies=CoordinatorDependencies(outcome_sink=_outcome_sink_from_event_sink(event_sink)),
     ).refresh(stored_auth)
 
 

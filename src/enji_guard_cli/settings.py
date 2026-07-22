@@ -23,6 +23,14 @@ DEFAULT_GUARD_REFERER = "https://guard.enji.ai/"
 DEFAULT_AUTO_REFRESH_ENABLED = True
 DEFAULT_AUTO_REFRESH_LEAD_SECONDS = 300
 DEFAULT_AUTO_REFRESH_FALLBACK_SECONDS = 900
+# Bind-mounted filesystems do not reliably deliver inotify events into the
+# container.  Polling this revision is therefore the correctness mechanism;
+# the watcher only shortens normal wake-up latency.
+DEFAULT_AUTO_REFRESH_REVISION_POLL_SECONDS = 5.0
+DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_LIMIT = 3
+DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_INITIAL_SECONDS = 1.0
+DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_MAX_SECONDS = 10.0
+DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_JITTER_SECONDS = 0.25
 DEFAULT_TRANSPORT_TIMEOUT_SECONDS = 20.0
 DEFAULT_TRANSPORT_RETRY_TOTAL = 3
 DEFAULT_TRANSPORT_RETRY_BACKOFF_FACTOR = 0.5
@@ -74,6 +82,11 @@ class AutoRefreshSettings:
     enabled: bool
     lead_seconds: int
     fallback_seconds: int
+    revision_poll_seconds: float = DEFAULT_AUTO_REFRESH_REVISION_POLL_SECONDS
+    pre_dispatch_retry_limit: int = DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_LIMIT
+    pre_dispatch_retry_initial_seconds: float = DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_INITIAL_SECONDS
+    pre_dispatch_retry_max_seconds: float = DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_MAX_SECONDS
+    pre_dispatch_retry_jitter_seconds: float = DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_JITTER_SECONDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +200,11 @@ def default_settings() -> EnjiGuardSettings:
             enabled=DEFAULT_AUTO_REFRESH_ENABLED,
             lead_seconds=DEFAULT_AUTO_REFRESH_LEAD_SECONDS,
             fallback_seconds=DEFAULT_AUTO_REFRESH_FALLBACK_SECONDS,
+            revision_poll_seconds=DEFAULT_AUTO_REFRESH_REVISION_POLL_SECONDS,
+            pre_dispatch_retry_limit=DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_LIMIT,
+            pre_dispatch_retry_initial_seconds=DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_INITIAL_SECONDS,
+            pre_dispatch_retry_max_seconds=DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_MAX_SECONDS,
+            pre_dispatch_retry_jitter_seconds=DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_JITTER_SECONDS,
         ),
         transport=TransportSettings(
             timeout_seconds=DEFAULT_TRANSPORT_TIMEOUT_SECONDS,

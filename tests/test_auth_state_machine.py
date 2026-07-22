@@ -10,7 +10,12 @@ import pytest
 
 import enji_guard_cli.auth_session.cookies as cookies_module
 from enji_guard_cli.auth_session.api import import_cookie
-from enji_guard_cli.auth_session.coordinator import RefreshCoordinator, import_credential
+from enji_guard_cli.auth_session.coordinator import (
+    CoordinatorDependencies,
+    RefreshCoordinator,
+    TerminalRevisionRequiredError,
+    import_credential,
+)
 from enji_guard_cli.auth_session.models import StoredAuth
 from enji_guard_cli.auth_session.state_machine import (
     Begin,
@@ -342,7 +347,11 @@ def test_rotation_telemetry_is_terminal_once_and_redacts_sentinels(tmp_path: Pat
                 set_cookie_headers=("access_token=new", "refresh_token=new"),
             )
 
-    asyncio.run(RefreshCoordinator(auth_file, Exchange(), outcome_sink=sink).refresh(loaded.auth))
+    asyncio.run(
+        RefreshCoordinator(auth_file, Exchange(), dependencies=CoordinatorDependencies(outcome_sink=sink)).refresh(
+            loaded.auth
+        )
+    )
 
     assert events == [("enji_auth_rotation_rotated", {"event_key": f"auth-rotation:{loaded.auth['revision']}:rotated"})]
     assert secret not in repr(events)
@@ -367,7 +376,9 @@ def test_terminal_journal_redelivers_outcome_without_replaying_or_leaking(tmp_pa
             del source
             raise AssertionError("terminal journal must not dispatch")
 
-    coordinator = RefreshCoordinator(auth_file, Exchange(), terminal_wait_seconds=0, outcome_sink=sink)
+    coordinator = RefreshCoordinator(
+        auth_file, Exchange(), terminal_wait_seconds=0, dependencies=CoordinatorDependencies(outcome_sink=sink)
+    )
     with pytest.raises(EnjiHttpError, match="import a fresh browser credential"):
         asyncio.run(coordinator.refresh(loaded.auth))
 
@@ -454,7 +465,9 @@ def test_failure_before_durable_requested_sends_zero_posts(tmp_path: Path, targe
         if operation == target_operation:
             raise OSError(f"injected {target_operation}")
 
-    coordinator = RefreshCoordinator(auth_file, Exchange(), storage_failpoint=failpoint)
+    coordinator = RefreshCoordinator(
+        auth_file, Exchange(), dependencies=CoordinatorDependencies(storage_failpoint=failpoint)
+    )
 
     with pytest.raises(OSError, match=f"injected {target_operation}"):
         asyncio.run(coordinator.refresh())
@@ -487,9 +500,11 @@ def test_post_dispatch_persistence_failure_is_terminal_and_never_replayed(tmp_pa
                 raise OSError("injected post-dispatch journal failure")
 
     exchange = Exchange()
-    coordinator = RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0, storage_failpoint=failpoint)
+    coordinator = RefreshCoordinator(
+        auth_file, exchange, terminal_wait_seconds=0, dependencies=CoordinatorDependencies(storage_failpoint=failpoint)
+    )
 
-    with pytest.raises(OSError, match="injected post-dispatch journal failure"):
+    with pytest.raises(TerminalRevisionRequiredError, match="import a fresh browser credential"):
         asyncio.run(coordinator.refresh())
     with pytest.raises(EnjiHttpError, match="outcome is terminal"):
         asyncio.run(RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0).refresh())
@@ -517,7 +532,9 @@ def test_rotated_successor_recovery_is_idempotent(tmp_path: Path) -> None:
         _ = logger, level, event, fields
         return True
 
-    coordinator = RefreshCoordinator(auth_file, Exchange(), outcome_sink=accepting_sink)
+    coordinator = RefreshCoordinator(
+        auth_file, Exchange(), dependencies=CoordinatorDependencies(outcome_sink=accepting_sink)
+    )
     first = asyncio.run(coordinator.recover_startup())
     second = asyncio.run(coordinator.recover_startup())
 
@@ -555,7 +572,11 @@ def test_rotated_outbox_retries_same_key_after_sink_failure_without_another_post
             )
 
     exchange = Exchange()
-    rotated = asyncio.run(RefreshCoordinator(auth_file, exchange, outcome_sink=rejecting_sink).refresh(loaded.auth))
+    rotated = asyncio.run(
+        RefreshCoordinator(
+            auth_file, exchange, dependencies=CoordinatorDependencies(outcome_sink=rejecting_sink)
+        ).refresh(loaded.auth)
+    )
 
     assert exchange.calls == 1
     journal = load_journal(auth_file)
@@ -568,7 +589,11 @@ def test_rotated_outbox_retries_same_key_after_sink_failure_without_another_post
         delivery_keys.append(str(fields["event_key"]))
         return True
 
-    recovered = asyncio.run(RefreshCoordinator(auth_file, exchange, outcome_sink=accepting_sink).recover_startup())
+    recovered = asyncio.run(
+        RefreshCoordinator(
+            auth_file, exchange, dependencies=CoordinatorDependencies(outcome_sink=accepting_sink)
+        ).recover_startup()
+    )
 
     assert recovered == rotated
     assert exchange.calls == 1
@@ -595,7 +620,11 @@ def test_terminal_outbox_survives_sink_failure_and_replays_after_restart(tmp_pat
             raise AssertionError("terminal outcome must not be replayed")
 
     assert (
-        asyncio.run(RefreshCoordinator(auth_file, Exchange(), outcome_sink=failing_sink).recover_startup())
+        asyncio.run(
+            RefreshCoordinator(
+                auth_file, Exchange(), dependencies=CoordinatorDependencies(outcome_sink=failing_sink)
+            ).recover_startup()
+        )
         == loaded.auth
     )
     assert pending_rotation_path(auth_file).exists()
@@ -606,7 +635,12 @@ def test_terminal_outbox_survives_sink_failure_and_replays_after_restart(tmp_pat
         delivery_keys.append(str(fields["event_key"]))
         return True
 
-    coordinator = RefreshCoordinator(auth_file, Exchange(), terminal_wait_seconds=0, outcome_sink=accepting_sink)
+    coordinator = RefreshCoordinator(
+        auth_file,
+        Exchange(),
+        terminal_wait_seconds=0,
+        dependencies=CoordinatorDependencies(outcome_sink=accepting_sink),
+    )
     with pytest.raises(EnjiHttpError, match="outcome is terminal"):
         asyncio.run(coordinator.refresh(loaded.auth))
 

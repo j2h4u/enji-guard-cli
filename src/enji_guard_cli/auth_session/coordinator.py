@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from http.cookies import CookieError
 from pathlib import Path
@@ -59,6 +61,41 @@ class RefreshExchange(Protocol):
     async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse: ...
 
 
+class PreDispatchLocalError(OSError):
+    """A local durable-state failure before ``REQUESTED`` is committed.
+
+    The supervisor may retry this narrowly typed failure.  It deliberately
+    excludes request, response, and post-dispatch persistence failures.
+    """
+
+    def __init__(self, cause: OSError | TimeoutError) -> None:
+        super().__init__(str(cause))
+
+
+class TerminalRevisionRequiredError(EnjiHttpError):
+    """A dispatched or terminal generation can advance only by import."""
+
+    def __init__(self, source_revision: str, *, message: str) -> None:
+        super().__init__("AUTH_IMPORT_REQUIRED", message)
+        self.source_revision = source_revision
+
+
+def _stored_auth_revision(auth_path: Path) -> str | None:
+    loaded = load_auth(auth_path)
+    if isinstance(loaded, AuthLoaded):
+        return loaded.auth["revision"]
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class CoordinatorDependencies:
+    storage_failpoint: StorageFailpoint | None = None
+    outcome_sink: AuthOutcomeSink | None = None
+    monotonic_fn: Callable[[], float] = time.monotonic
+    sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep
+    revision_reader: Callable[[Path], str | None] = _stored_auth_revision
+
+
 @dataclass(frozen=True, slots=True)
 class _Dispatch:
     auth: StoredAuth
@@ -92,14 +129,17 @@ class RefreshCoordinator:
         exchange: RefreshExchange,
         *,
         terminal_wait_seconds: float = 1.0,
-        storage_failpoint: StorageFailpoint | None = None,
-        outcome_sink: AuthOutcomeSink | None = None,
+        dependencies: CoordinatorDependencies | None = None,
     ) -> None:
         self._auth_path = auth_path
         self._exchange = exchange
         self._terminal_wait_seconds = terminal_wait_seconds
-        self._storage_failpoint = storage_failpoint
-        self._outcome_sink = outcome_sink
+        resolved_dependencies = dependencies or CoordinatorDependencies()
+        self._storage_failpoint = resolved_dependencies.storage_failpoint
+        self._outcome_sink = resolved_dependencies.outcome_sink
+        self._monotonic_fn = resolved_dependencies.monotonic_fn
+        self._sleep_fn = resolved_dependencies.sleep_fn
+        self._revision_reader = resolved_dependencies.revision_reader
         self._lock = asyncio.Lock()
 
     async def refresh(self, expected: StoredAuth | None = None) -> StoredAuth:
@@ -108,10 +148,8 @@ class RefreshCoordinator:
         async with self._lock:
             try:
                 prepared = await asyncio.to_thread(self._prepare, expected)
-            except OSError, TimeoutError:
-                raise
-            except EnjiHttpError:
-                raise
+            except (OSError, TimeoutError) as exc:
+                raise PreDispatchLocalError(exc) from exc
             if isinstance(prepared, _ReturnAuth):
                 return prepared.auth
             if isinstance(prepared, _WaitForRevision):
@@ -138,22 +176,30 @@ class RefreshCoordinator:
                     prepared.auth["revision"],
                     f"transport failure: {type(exc).__name__}",
                 )
-            return await asyncio.to_thread(self._commit_response, prepared.auth, response)
+            try:
+                return await asyncio.to_thread(self._commit_response, prepared.auth, response)
+            except (OSError, TimeoutError) as exc:
+                raise TerminalRevisionRequiredError(
+                    prepared.auth["revision"], message="refresh dispatch completed; import a fresh browser credential"
+                ) from exc
 
     async def wait_for_terminal_revision(self, source_revision: str) -> StoredAuth:
         """Wait for import/success to change a revision; never dispatch here."""
 
-        deadline = asyncio.get_running_loop().time() + self._terminal_wait_seconds
+        deadline = self._monotonic_fn() + self._terminal_wait_seconds
         while True:
-            loaded = await asyncio.to_thread(load_auth, self._auth_path)
-            if isinstance(loaded, AuthLoaded) and loaded.auth["revision"] != source_revision:
-                return loaded.auth
-            if asyncio.get_running_loop().time() >= deadline:
-                raise EnjiHttpError(
-                    "AUTH_IMPORT_REQUIRED",
-                    "refresh outcome is terminal; import a fresh browser credential",
+            revision = await asyncio.to_thread(self._revision_reader, self._auth_path)
+            if revision is not None and revision != source_revision:
+                loaded = await asyncio.to_thread(load_auth, self._auth_path)
+                if isinstance(loaded, AuthLoaded):
+                    return loaded.auth
+            remaining_seconds = deadline - self._monotonic_fn()
+            if remaining_seconds <= 0:
+                raise TerminalRevisionRequiredError(
+                    source_revision,
+                    message="refresh outcome is terminal; import a fresh browser credential",
                 )
-            await asyncio.sleep(TERMINAL_POLL_SECONDS)
+            await self._sleep_fn(min(TERMINAL_POLL_SECONDS, remaining_seconds))
 
     async def recover_startup(self) -> StoredAuth | None:
         """Mark abandoned dispatched work unknown without issuing a request."""
@@ -262,7 +308,7 @@ class RefreshCoordinator:
                 self._deliver_terminal(state)
             else:
                 return _loaded_or_raise(load_auth(self._auth_path))
-        raise EnjiHttpError("AUTH_REQUIRED", "stored refresh cookie is not authenticated")
+        raise TerminalRevisionRequiredError(source_revision, message="stored refresh cookie is not authenticated")
 
     def _commit_unknown(self, source_revision: str, reason: str) -> StoredAuth:
         with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
@@ -273,7 +319,9 @@ class RefreshCoordinator:
                 self._deliver_terminal(state)
             else:
                 return _loaded_or_raise(load_auth(self._auth_path))
-        raise EnjiHttpError("AUTH_IMPORT_REQUIRED", "refresh outcome is unknown; import a fresh browser credential")
+        raise TerminalRevisionRequiredError(
+            source_revision, message="refresh outcome is unknown; import a fresh browser credential"
+        )
 
     def _recover_startup(self) -> StoredAuth | None:
         with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):

@@ -3,6 +3,7 @@ import base64
 import json
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
@@ -29,6 +30,7 @@ from enji_guard_cli.auth_session.api import (
 )
 from enji_guard_cli.auth_session.api import StoredAuth as RuntimeStoredAuth
 from enji_guard_cli.auth_session.cookies import merge_set_cookie_headers, set_cookie_names
+from enji_guard_cli.auth_session.coordinator import PreDispatchLocalError, TerminalRevisionRequiredError
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
 from enji_guard_cli.delivery.cli.app import app
 from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER, AutoRefreshSettings
@@ -154,7 +156,7 @@ def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch
             )
         )
 
-    assert slept_with == [900]
+    assert slept_with == [5.0]
 
 
 def test_auto_refresh_loop_survives_terminal_cookie_response_error() -> None:
@@ -169,7 +171,7 @@ def test_auto_refresh_loop_survives_terminal_cookie_response_error() -> None:
 
         async def terminal_refresh(*_args: object) -> RuntimeStoredAuth:
             refresh_attempted.set()
-            raise EnjiHttpError("AUTH_IMPORT_REQUIRED", "refresh outcome is unknown")
+            raise TerminalRevisionRequiredError("r1", message="refresh outcome is unknown")
 
         class Client:
             async def __aenter__(self) -> Client:
@@ -208,18 +210,283 @@ def test_auto_refresh_loop_survives_terminal_cookie_response_error() -> None:
 
 def test_credential_change_wait_survives_timeout() -> None:
     async def exercise() -> None:
-        async def wait_for_change() -> None:
+        async def changes(_auth_file: Path) -> AsyncGenerator[None]:
+            await asyncio.Event().wait()
+            yield
+
+        async def unused_refresh(_path: Path, _client: object) -> RuntimeStoredAuth:
+            return cast(RuntimeStoredAuth, {})
+
+        dependencies = auto_refresh_module.AutoRefreshLoopDependencies(
+            sleep_seconds_fn=lambda **_kwargs: 0,
+            load_sleep_seconds_stored_auth_fn=lambda _path: None,
+            cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
+            refresh_stored_cookie_auth_fn=unused_refresh,
+            log_event_fn=lambda *_args, **_kwargs: None,
+            logger=auto_refresh_module.logging.getLogger("test"),
+            client_factory=_TestClient,
+            credential_changes_fn=changes,
+            revision_reader=lambda _path: "r1",
+        )
+        changed = await auto_refresh_module._wait_for_credential_change(
+            auth_file=Path("auth.json"),
+            expected_revision="r1",
+            timeout_seconds=0,
+            poll_seconds=1,
+            dependencies=dependencies,
+        )
+
+        assert changed is False
+
+    asyncio.run(exercise())
+
+
+def test_revision_polling_detects_import_when_watcher_misses_bind_mount_event() -> None:
+    async def exercise() -> None:
+        revision = "old"
+        clock = 0.0
+        sleeps: list[float] = []
+
+        async def changes(_auth_file: Path) -> AsyncGenerator[None]:
+            await asyncio.Event().wait()
+            yield
+
+        async def sleep(seconds: float) -> None:
+            nonlocal clock, revision
+            sleeps.append(seconds)
+            clock += seconds
+            revision = "imported"
+
+        dependencies = _loop_dependencies(
+            changes=changes,
+            overrides=_LoopOverrides(
+                revision_reader=lambda _path: revision, monotonic_fn=lambda: clock, sleep_fn=sleep
+            ),
+        )
+
+        assert await auto_refresh_module._wait_for_credential_change(
+            auth_file=Path("auth.json"),
+            expected_revision="old",
+            timeout_seconds=60,
+            poll_seconds=5,
+            dependencies=dependencies,
+        )
+        assert sleeps == [5]
+
+    asyncio.run(exercise())
+
+
+def test_watcher_exception_degrades_to_bounded_revision_polling() -> None:
+    async def exercise() -> None:
+        clock = 0.0
+        events: list[str] = []
+
+        async def broken_watcher(_auth_file: Path) -> AsyncGenerator[None]:
+            raise RuntimeError("watcher unavailable")
+            yield
+
+        async def sleep(seconds: float) -> None:
+            nonlocal clock
+            clock += seconds
+
+        dependencies = _loop_dependencies(
+            changes=broken_watcher,
+            overrides=_LoopOverrides(
+                monotonic_fn=lambda: clock,
+                sleep_fn=sleep,
+                log_event_fn=lambda _logger, _level, event, _fields: events.append(event),
+            ),
+        )
+
+        assert not await auto_refresh_module._wait_for_credential_change(
+            auth_file=Path("auth.json"),
+            expected_revision="old",
+            timeout_seconds=2,
+            poll_seconds=1,
+            dependencies=dependencies,
+        )
+        assert events == ["enji_auth_credential_watcher_failed"]
+
+    asyncio.run(exercise())
+
+
+def test_long_schedule_is_interrupted_by_revision_polling_before_refresh() -> None:
+    async def exercise() -> None:
+        revision = "old"
+        clock = 0.0
+        scheduled = 0
+        refreshes = 0
+
+        async def changes(_auth_file: Path) -> AsyncGenerator[None]:
+            await asyncio.Event().wait()
+            yield
+
+        async def sleep(seconds: float) -> None:
+            nonlocal clock, revision
+            clock += seconds
+            if revision == "old":
+                revision = "imported"
+            else:
+                raise asyncio.CancelledError
+
+        def sleep_seconds(**_kwargs: object) -> int:
+            nonlocal scheduled
+            scheduled += 1
+            return 3600
+
+        async def refresh(*_args: object) -> RuntimeStoredAuth:
+            nonlocal refreshes
+            refreshes += 1
+            raise AssertionError("import should interrupt a long schedule")
+
+        dependencies = _loop_dependencies(
+            changes=changes,
+            overrides=_LoopOverrides(
+                revision_reader=lambda _path: revision,
+                monotonic_fn=lambda: clock,
+                sleep_fn=sleep,
+                refresh_fn=refresh,
+                sleep_seconds_fn=sleep_seconds,
+            ),
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await auto_refresh_module._auto_refresh_loop(
+                auth_file=Path("auth.json"),
+                refresh_settings=_scheduler_settings(),
+                dependencies=dependencies,
+            )
+
+        assert scheduled == 2
+        assert refreshes == 0
+
+    asyncio.run(exercise())
+
+
+def test_pre_dispatch_retry_is_bounded_and_never_posts_before_reservation() -> None:
+    async def exercise() -> None:
+        clock = 0.0
+        refreshes = 0
+        sleeps: list[float] = []
+
+        async def changes(_auth_file: Path) -> AsyncGenerator[None]:
+            await asyncio.Event().wait()
+            yield
+
+        async def sleep(seconds: float) -> None:
+            nonlocal clock
+            sleeps.append(seconds)
+            clock += seconds
+            if clock >= 13:
+                raise asyncio.CancelledError
+
+        async def no_post_before_reservation(*_args: object) -> RuntimeStoredAuth:
+            nonlocal refreshes
+            refreshes += 1
+            raise PreDispatchLocalError(OSError("reservation fsync failed"))
+
+        dependencies = _loop_dependencies(
+            changes=changes,
+            overrides=_LoopOverrides(
+                monotonic_fn=lambda: clock,
+                sleep_fn=sleep,
+                refresh_fn=no_post_before_reservation,
+                sleep_seconds_fn=lambda **_kwargs: 0,
+            ),
+        )
+        settings = _scheduler_settings(pre_dispatch_retry_limit=2, fallback_seconds=100)
+        with pytest.raises(asyncio.CancelledError):
+            await auto_refresh_module._auto_refresh_loop(
+                auth_file=Path("auth.json"), refresh_settings=settings, dependencies=dependencies
+            )
+
+        assert refreshes == 3
+        assert sleeps == [1, 2, 10]
+
+    asyncio.run(exercise())
+
+
+def test_requested_outcome_waits_for_import_without_retrying_dispatch() -> None:
+    async def exercise() -> None:
+        revision = "r1"
+        clock = 0.0
+        schedules = 0
+        dispatches = 0
+
+        async def changes(_auth_file: Path) -> AsyncGenerator[None]:
+            await asyncio.Event().wait()
+            yield
+
+        async def sleep(seconds: float) -> None:
+            nonlocal clock, revision
+            clock += seconds
+            if revision == "r1":
+                revision = "imported"
+            else:
+                raise asyncio.CancelledError
+
+        def sleep_seconds(**_kwargs: object) -> int:
+            nonlocal schedules
+            schedules += 1
+            return 0 if schedules == 1 else 3600
+
+        async def requested(*_args: object) -> RuntimeStoredAuth:
+            nonlocal dispatches
+            dispatches += 1
+            raise TerminalRevisionRequiredError("r1", message="already requested")
+
+        dependencies = _loop_dependencies(
+            changes=changes,
+            overrides=_LoopOverrides(
+                revision_reader=lambda _path: revision,
+                monotonic_fn=lambda: clock,
+                sleep_fn=sleep,
+                refresh_fn=requested,
+                sleep_seconds_fn=sleep_seconds,
+            ),
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await auto_refresh_module._auto_refresh_loop(
+                auth_file=Path("auth.json"),
+                refresh_settings=_scheduler_settings(),
+                dependencies=dependencies,
+            )
+
+        assert dispatches == 1
+
+    asyncio.run(exercise())
+
+
+def test_wait_cancellation_closes_watcher_generator() -> None:
+    async def exercise() -> None:
+        closed = asyncio.Event()
+        sleeping = asyncio.Event()
+
+        async def changes(_auth_file: Path) -> AsyncGenerator[None]:
+            try:
+                await asyncio.Event().wait()
+                yield
+            finally:
+                closed.set()
+
+        async def sleep(_seconds: float) -> None:
+            sleeping.set()
             await asyncio.Event().wait()
 
-        change_task = asyncio.create_task(wait_for_change())
-        try:
-            changed = await auto_refresh_module._wait_for_credential_change(change_task, 0, asyncio.sleep)
-
-            assert changed is False
-            assert not change_task.done()
-        finally:
-            change_task.cancel()
-            await asyncio.gather(change_task, return_exceptions=True)
+        dependencies = _loop_dependencies(changes=changes, overrides=_LoopOverrides(sleep_fn=sleep))
+        task = asyncio.create_task(
+            auto_refresh_module._wait_for_credential_change(
+                auth_file=Path("auth.json"),
+                expected_revision="old",
+                timeout_seconds=60,
+                poll_seconds=1,
+                dependencies=dependencies,
+            )
+        )
+        await sleeping.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.wait_for(closed.wait(), timeout=1)
 
     asyncio.run(exercise())
 
@@ -751,6 +1018,71 @@ def run_auth_status(task_factory: Callable[[], Awaitable[AuthStatusPayload]]) ->
 
 def auto_refresh_settings() -> AutoRefreshSettings:
     return AutoRefreshSettings(enabled=True, lead_seconds=300, fallback_seconds=900)
+
+
+def _scheduler_settings(
+    *,
+    fallback_seconds: int = 100,
+    pre_dispatch_retry_limit: int = 3,
+) -> AutoRefreshSettings:
+    return AutoRefreshSettings(
+        enabled=True,
+        lead_seconds=300,
+        fallback_seconds=fallback_seconds,
+        revision_poll_seconds=10,
+        pre_dispatch_retry_limit=pre_dispatch_retry_limit,
+        pre_dispatch_retry_initial_seconds=1,
+        pre_dispatch_retry_max_seconds=10,
+        pre_dispatch_retry_jitter_seconds=0,
+    )
+
+
+@dataclass(frozen=True)
+class _LoopOverrides:
+    revision_reader: Callable[[Path], str | None] = lambda _path: "old"
+    monotonic_fn: Callable[[], float] = lambda: 0
+    sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep
+    refresh_fn: Callable[[Path, object], Awaitable[RuntimeStoredAuth]] | None = None
+    sleep_seconds_fn: Callable[..., int] | None = None
+    log_event_fn: Callable[..., None] = lambda *_args, **_kwargs: None
+
+
+def _loop_dependencies(
+    *, changes: Callable[[Path], AsyncGenerator[None]], overrides: _LoopOverrides | None = None
+) -> auto_refresh_module.AutoRefreshLoopDependencies:
+    resolved_overrides = overrides if overrides is not None else _LoopOverrides()
+
+    async def refresh(_path: Path, _client: object) -> RuntimeStoredAuth:
+        return cast(RuntimeStoredAuth, {})
+
+    return auto_refresh_module.AutoRefreshLoopDependencies(
+        sleep_seconds_fn=(
+            resolved_overrides.sleep_seconds_fn
+            if resolved_overrides.sleep_seconds_fn is not None
+            else lambda **_kwargs: 0
+        ),
+        load_sleep_seconds_stored_auth_fn=lambda _path: None,
+        cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
+        refresh_stored_cookie_auth_fn=resolved_overrides.refresh_fn
+        if resolved_overrides.refresh_fn is not None
+        else refresh,
+        log_event_fn=resolved_overrides.log_event_fn,
+        logger=auto_refresh_module.logging.getLogger("test"),
+        client_factory=_TestClient,
+        credential_changes_fn=changes,
+        revision_reader=resolved_overrides.revision_reader,
+        monotonic_fn=resolved_overrides.monotonic_fn,
+        random_fn=lambda: 0,
+        sleep_fn=resolved_overrides.sleep_fn,
+    )
+
+
+class _TestClient:
+    async def __aenter__(self) -> _TestClient:
+        return self
+
+    async def __aexit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
+        return None
 
 
 def unsigned_jwt(payload: dict[str, object]) -> str:
