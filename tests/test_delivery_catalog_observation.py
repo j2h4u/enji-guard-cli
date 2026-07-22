@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from enji_guard_cli.application import Application
 from enji_guard_cli.audit.ports import AuditCatalogChange, AuditCatalogResult
+from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION
 
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
 
@@ -45,7 +46,7 @@ def test_run_emits_catalog_changes_from_the_command_application(
     monkeypatch.setitem(cli_module._state, "application", None)
     monkeypatch.setitem(cli_module._state, "application_auth_file", None)
 
-    cli_module._run(lambda: cli_module._application().catalog(), True)
+    cli_module._run(lambda: cli_module._application().catalog(), True, FIELDS_PRESENTATION)
 
     assert constructions == 1
     output = capsys.readouterr().out

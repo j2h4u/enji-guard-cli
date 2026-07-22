@@ -32,6 +32,8 @@ from enji_guard_cli.audit.ports import (
 )
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.delivery.cli.app import _command_exit_code, _json, _run, app
+from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION, render_fields
+from enji_guard_cli.delivery.cli.presenters import operation_text
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.portfolio.models import ProjectRef, RepositoryIdentity, RepositoryProvider, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioAuditStatus, PortfolioGatewayPort
@@ -664,7 +666,7 @@ def test_run_maps_current_application_errors_to_cli_contract(
         raise error
 
     with pytest.raises(typer.Exit) as caught:
-        _run(fail, False)
+        _run(fail, False, FIELDS_PRESENTATION)
 
     assert caught.value.exit_code == exit_code
     assert rendered in capsys.readouterr().err
@@ -673,3 +675,39 @@ def test_run_maps_current_application_errors_to_cli_contract(
 def test_journey_telemetry_uses_application_command_exit_code() -> None:
     assert _command_exit_code(ApplicationCommandError("AUTH_EXPIRED", "expired", 3)) == 3
     assert _command_exit_code(ValueError("invalid")) == 1
+
+
+def test_render_fields_preserves_semantic_shapes() -> None:
+    assert render_fields({"status": "ready", "counts": {"ready": 2}, "items": ["a", "b"]}) == (
+        'status: ready\ncounts: {"ready": 2}\nitems: ["a", "b"]'
+    )
+    assert render_fields([{"selector": "security", "enabled": True}, "pending"]) == (
+        '{"enabled": true, "selector": "security"}\n"pending"'
+    )
+    assert render_fields("unchanged") == "unchanged"
+
+
+def test_operation_text_renders_mapping_results_and_sequences() -> None:
+    mapping = operation_text(
+        {
+            "status": "updated",
+            "metadata": {"count": 2},
+            "results": [
+                {"audit_key": "audit.security", "status": "already_present"},
+                {"action_key": "audit.tests", "status": "updated"},
+                {"selector": "dependency-hygiene", "status": "unchanged"},
+                "pending",
+            ],
+        }
+    )
+    assert "status: updated" in mapping
+    assert 'metadata: {"count": 2}' in mapping
+    assert "results:" in mapping
+    assert "audit.security  status=already_present" in mapping
+    assert "audit.tests  status=updated" in mapping
+    assert "dependency-hygiene  status=unchanged" in mapping
+    assert "  pending" in mapping
+
+    sequence = operation_text([{"selector": "security", "status": "ready"}, "done"])
+    assert sequence == "security  status=ready\ndone"
+    assert operation_text(3) == "3"
