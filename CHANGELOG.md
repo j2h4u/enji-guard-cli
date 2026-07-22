@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.2](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.1...v2.2.2) (2026-07-22)
+
+
+### Fixes
+
+* **container:** refresh trixie base for liblzma security update ([#151](https://github.com/j2h4u/enji-guard-cli/issues/151)) ([880350d](https://github.com/j2h4u/enji-guard-cli/commit/880350d3dc7729ef21024dc09d6f9203ed4329a0))
+
 ## [2.2.1](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.0...v2.2.1) (2026-07-22)
 
 
