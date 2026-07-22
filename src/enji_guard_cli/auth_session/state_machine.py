@@ -5,8 +5,9 @@ only already-validated domain values, so malformed files can never become a
 state-machine input by accident.
 """
 
-from dataclasses import dataclass
-from typing import Never, assert_never
+from dataclasses import dataclass, field
+from typing import Literal, Never, assert_never
+from uuid import uuid4
 
 
 class InvalidTransitionError(ValueError):
@@ -32,6 +33,7 @@ class Requested:
 class Rotated:
     source_revision: str
     replacement_cookie_header: str
+    successor_revision: str = field(default_factory=lambda: uuid4().hex)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +64,7 @@ class DispatchBegun:
 @dataclass(frozen=True, slots=True)
 class ExchangeSucceeded:
     replacement_cookie_header: str
+    successor_revision: str = field(default_factory=lambda: uuid4().hex)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +106,7 @@ class DispatchExchange:
 class PersistReplacement:
     source_revision: str
     replacement_cookie_header: str
+    successor_revision: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,10 +177,11 @@ def _reserved_transition(state: Reserved, event: RotationEvent) -> Transition:
 
 def _requested_transition(state: Requested, event: RotationEvent) -> Transition:
     match event:
-        case ExchangeSucceeded(replacement_cookie_header=replacement):
-            rotated = Rotated(state.source_revision, replacement)
+        case ExchangeSucceeded(replacement_cookie_header=replacement, successor_revision=successor_revision):
+            rotated = Rotated(state.source_revision, replacement, successor_revision)
             return Transition(
-                rotated, (PersistJournal(rotated), PersistReplacement(state.source_revision, replacement))
+                rotated,
+                (PersistJournal(rotated), PersistReplacement(state.source_revision, replacement, successor_revision)),
             )
         case ExchangeRejected(reason=reason):
             rejected = Rejected(state.source_revision, reason)
@@ -196,7 +201,10 @@ def _requested_transition(state: Requested, event: RotationEvent) -> Transition:
 def _rotated_transition(state: Rotated, event: RotationEvent) -> Transition:
     match event:
         case Recover():
-            return Transition(state, (PersistReplacement(state.source_revision, state.replacement_cookie_header),))
+            return Transition(
+                state,
+                (PersistReplacement(state.source_revision, state.replacement_cookie_header, state.successor_revision),),
+            )
         case Imported(revision=revision):
             return Transition(Ready(revision), (DeleteJournal(),))
         case _:
@@ -217,3 +225,35 @@ def _invalid_transition(state: RotationState, event: RotationEvent) -> Never:
     # The pattern matches above provide exhaustive handling for the closed
     # unions.  Reaching here is a programmer error, not an external-input path.
     raise InvalidTransitionError(f"{type(event).__name__} is invalid for {type(state).__name__}")
+
+
+RotationOutcome = Literal["rotated", "rejected", "outcome_unknown"]
+
+
+@dataclass(frozen=True, slots=True)
+class RotationEventMetadata:
+    """Non-secret durable outbox identity for a terminal rotation outcome."""
+
+    outcome: RotationOutcome
+    event_key: str
+
+
+def rotation_event_metadata(state: Rotated | Rejected | OutcomeUnknown) -> RotationEventMetadata:
+    """Return the deterministic event identity stored with a terminal journal."""
+
+    match state:
+        case Rotated(source_revision=source_revision):
+            outcome: RotationOutcome = "rotated"
+        case Rejected(source_revision=source_revision):
+            outcome = "rejected"
+        case OutcomeUnknown(source_revision=source_revision):
+            outcome = "outcome_unknown"
+        case _ as impossible:
+            assert_never(impossible)
+    return RotationEventMetadata(outcome, rotation_event_key(source_revision, outcome))
+
+
+def rotation_event_key(source_revision: str, outcome: RotationOutcome) -> str:
+    """Build a stable outbox key without credential or diagnostic material."""
+
+    return f"auth-rotation:{source_revision}:{outcome}"

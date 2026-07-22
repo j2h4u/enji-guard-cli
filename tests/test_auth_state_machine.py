@@ -21,6 +21,7 @@ from enji_guard_cli.auth_session.state_machine import (
     ExchangeOutcomeUnknown,
     ExchangeRejected,
     ExchangeSucceeded,
+    Imported,
     InvalidTransitionError,
     OutcomeUnknown,
     PersistJournal,
@@ -58,6 +59,7 @@ from enji_guard_cli.transport import EnjiHttpError, EnjiHttpResponse
     ("state", "event", "expected_state", "expected_effects"),
     [
         (Ready("r1"), Begin("r1"), Reserved("r1"), (PersistJournal(Reserved("r1")),)),
+        (Ready("r1"), Imported("r2"), Ready("r2"), ()),
         (
             Reserved("r1"),
             DispatchBegun(),
@@ -66,11 +68,11 @@ from enji_guard_cli.transport import EnjiHttpError, EnjiHttpResponse
         ),
         (
             Requested("r1"),
-            ExchangeSucceeded("access_token=new; refresh_token=new"),
-            Rotated("r1", "access_token=new; refresh_token=new"),
+            ExchangeSucceeded("access_token=new; refresh_token=new", "r2"),
+            Rotated("r1", "access_token=new; refresh_token=new", "r2"),
             (
-                PersistJournal(Rotated("r1", "access_token=new; refresh_token=new")),
-                PersistReplacement("r1", "access_token=new; refresh_token=new"),
+                PersistJournal(Rotated("r1", "access_token=new; refresh_token=new", "r2")),
+                PersistReplacement("r1", "access_token=new; refresh_token=new", "r2"),
             ),
         ),
         (
@@ -86,24 +88,28 @@ from enji_guard_cli.transport import EnjiHttpError, EnjiHttpResponse
             (PersistJournal(OutcomeUnknown("r1", "timeout")),),
         ),
         (Reserved("r1"), Recover(), Ready("r1"), (DeleteJournal(),)),
+        (Reserved("r1"), Imported("r2"), Ready("r2"), (DeleteJournal(),)),
         (
             Requested("r1"),
             Recover(),
             OutcomeUnknown("r1", "interrupted after refresh dispatch"),
             (PersistJournal(OutcomeUnknown("r1", "interrupted after refresh dispatch")),),
         ),
+        (Requested("r1"), Imported("r2"), Ready("r2"), (DeleteJournal(),)),
         (
-            Rotated("r1", "access_token=new; refresh_token=new"),
+            Rotated("r1", "access_token=new; refresh_token=new", "r2"),
             Recover(),
-            Rotated("r1", "access_token=new; refresh_token=new"),
-            (PersistReplacement("r1", "access_token=new; refresh_token=new"),),
+            Rotated("r1", "access_token=new; refresh_token=new", "r2"),
+            (PersistReplacement("r1", "access_token=new; refresh_token=new", "r2"),),
         ),
+        (Rotated("r1", "access_token=new; refresh_token=new", "r2"), Imported("r3"), Ready("r3"), (DeleteJournal(),)),
         (
             OutcomeUnknown("r1", "timeout"),
             Recover(),
             OutcomeUnknown("r1", "timeout"),
             (WaitForTerminalRevision("r1"),),
         ),
+        (Rejected("r1", "invalid"), Imported("r2"), Ready("r2"), (DeleteJournal(),)),
     ],
 )
 def test_transition_matrix(

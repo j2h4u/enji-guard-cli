@@ -25,7 +25,9 @@ def write_atomic_json(
 ) -> None:
     """Replace *path* atomically after syncing file content and directory metadata."""
     serialized = json.dumps(payload, indent=indent, sort_keys=True) + "\n"
+    _trigger(failpoint, "parent_directory_mkdir")
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _trigger(failpoint, "parent_directory_chmod")
     path.parent.chmod(0o700)
     temporary_path: Path | None = None
     try:
@@ -44,9 +46,11 @@ def write_atomic_json(
             temporary.flush()
             _trigger(failpoint, "file_fsync")
             fsync(temporary.fileno())
+        _trigger(failpoint, "temporary_chmod")
         temporary_path.chmod(0o600)
         _trigger(failpoint, "rename")
         temporary_path.replace(path)
+        _trigger(failpoint, "destination_chmod")
         path.chmod(0o600)
         # A failure here means the rename is visible but not proven durable.
         _fsync_directory(path.parent, failpoint=failpoint)
@@ -78,6 +82,7 @@ def _fsync_directory(path: Path, *, failpoint: AtomicJsonFailpoint | None) -> No
         fsync(directory_fd)
     finally:
         close(directory_fd)
+        _trigger(failpoint, "parent_directory_close")
 
 
 def _trigger(failpoint: AtomicJsonFailpoint | None, operation: str) -> None:

@@ -45,7 +45,19 @@ def test_atomic_json_rejects_unserializable_payload_before_creating_files(tmp_pa
 
 @pytest.mark.parametrize(
     "target_operation",
-    ["temporary_file", "write", "file_fsync", "rename", "parent_directory_open", "parent_directory_fsync"],
+    [
+        "parent_directory_mkdir",
+        "parent_directory_chmod",
+        "temporary_file",
+        "write",
+        "file_fsync",
+        "temporary_chmod",
+        "rename",
+        "destination_chmod",
+        "parent_directory_open",
+        "parent_directory_fsync",
+        "parent_directory_close",
+    ],
 )
 def test_atomic_json_exposes_each_durable_write_boundary(tmp_path: Path, target_operation: str) -> None:
     destination = tmp_path / "state" / "value.json"

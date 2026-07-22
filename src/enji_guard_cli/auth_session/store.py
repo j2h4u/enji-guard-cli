@@ -19,11 +19,14 @@ from uuid import uuid4
 from enji_guard_cli.atomic_json import fsync_directory, write_atomic_json
 from enji_guard_cli.auth_session.state_machine import (
     OutcomeUnknown,
+    Ready,
     Rejected,
     Requested,
     Reserved,
     Rotated,
+    RotationOutcome,
     RotationState,
+    rotation_event_metadata,
 )
 
 AUTH_SCHEMA_VERSION = 2
@@ -62,9 +65,34 @@ class RotationJournalPayload(TypedDict):
     state: Literal["RESERVED", "REQUESTED", "ROTATED", "REJECTED", "OUTCOME_UNKNOWN"]
     replacement_cookie_header: str | None
     reason: str | None
+    successor_revision: str | None
+    outcome: RotationOutcome | None
+    event_key: str | None
 
 
 JournalStateName = Literal["RESERVED", "REQUESTED", "ROTATED", "REJECTED", "OUTCOME_UNKNOWN"]
+
+
+@dataclass(frozen=True, slots=True)
+class _JournalFields:
+    source_revision: str
+    raw_state: object
+    replacement_cookie_header: str | None
+    reason: str | None
+    successor_revision: str | None
+    outcome: RotationOutcome | None
+    event_key: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _JournalPayloadFields:
+    source_revision: str
+    state: JournalStateName
+    replacement_cookie_header: str | None
+    reason: str | None
+    successor_revision: str | None
+    outcome: RotationOutcome | None
+    event_key: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,12 +172,12 @@ class StorageFailpoint(Protocol):
     def __call__(self, operation: str) -> None: ...
 
 
-def stored_auth(base_url: str, credential: Credential) -> StoredAuth:
+def stored_auth(base_url: str, credential: Credential, *, revision: str | None = None) -> StoredAuth:
     """Create a fresh credential revision, including for identical imports."""
 
     return {
         "version": AUTH_SCHEMA_VERSION,
-        "revision": uuid4().hex,
+        "revision": revision if revision is not None else uuid4().hex,
         "base_url": base_url,
         "credential": credential,
         "imported_at": datetime.now(UTC).isoformat(),
@@ -197,7 +225,7 @@ def load_auth(path: Path, *, now: datetime | None = None) -> AuthLoadResult:
 
 
 def load_auth_file(path: Path) -> StoredAuth | None:
-    """Return an observer projection; mutation code uses ``load_auth``."""
+    """Temporary legacy adapter while runtime readers migrate to typed projections."""
 
     result = load_auth(path)
     return result.auth if isinstance(result, AuthLoaded) else None
@@ -225,40 +253,7 @@ def write_auth_file(path: Path, payload: StoredAuth, *, failpoint: StorageFailpo
 
 
 def write_journal(auth_path: Path, state: RotationState, *, failpoint: StorageFailpoint | None = None) -> None:
-    if isinstance(state, Rotated):
-        replacement_cookie_header: str | None = state.replacement_cookie_header
-        reason: str | None = None
-        persisted_state: JournalStateName = "ROTATED"
-        source_revision = state.source_revision
-    elif isinstance(state, Reserved):
-        replacement_cookie_header = None
-        reason = None
-        persisted_state = "RESERVED"
-        source_revision = state.source_revision
-    elif isinstance(state, Requested):
-        replacement_cookie_header = None
-        reason = None
-        persisted_state = "REQUESTED"
-        source_revision = state.source_revision
-    elif isinstance(state, Rejected):
-        replacement_cookie_header = None
-        reason = state.reason
-        persisted_state = "REJECTED"
-        source_revision = state.source_revision
-    elif isinstance(state, OutcomeUnknown):
-        replacement_cookie_header = None
-        reason = state.reason
-        persisted_state = "OUTCOME_UNKNOWN"
-        source_revision = state.source_revision
-    else:
-        raise TypeError(f"journal state must be a rotation state, got {type(state).__name__}")
-    payload: RotationJournalPayload = {
-        "version": AUTH_SCHEMA_VERSION,
-        "source_revision": source_revision,
-        "state": persisted_state,
-        "replacement_cookie_header": replacement_cookie_header,
-        "reason": reason,
-    }
+    payload = _journal_payload(state)
     _trigger(failpoint, "before_write_journal")
     write_atomic_json(pending_rotation_path(auth_path), payload, indent=2, failpoint=failpoint)
     _trigger(failpoint, "after_write_journal")
@@ -281,6 +276,7 @@ def cas_replace_cookie(
     source_revision: str,
     replacement_cookie_header: str,
     *,
+    successor_revision: str | None = None,
     failpoint: StorageFailpoint | None = None,
 ) -> CasResult:
     """CAS-write a rotated cookie while the caller holds ``auth_file_lock``."""
@@ -297,6 +293,7 @@ def cas_replace_cookie(
     replacement = stored_auth(
         current["base_url"],
         {"type": CredentialType.COOKIE.value, "cookie_header": replacement_cookie_header},
+        revision=successor_revision,
     )
     write_auth_file(auth_path, replacement, failpoint=failpoint)
     return CasWritten(replacement)
@@ -374,36 +371,110 @@ def _parse_credential(raw: object) -> Credential | None:
 def _parse_journal(loaded: object) -> JournalLoadResult:
     if not isinstance(loaded, dict) or loaded.get("version") != AUTH_SCHEMA_VERSION:
         return JournalCorrupt("journal version must be 2")
-    source_revision = loaded.get("source_revision")
-    raw_state = loaded.get("state")
-    replacement = loaded.get("replacement_cookie_header")
-    reason = loaded.get("reason")
-    if not isinstance(source_revision, str) or not source_revision:
-        return JournalCorrupt("journal source_revision must be a non-empty string")
-    if replacement is not None and not isinstance(replacement, str):
-        return JournalCorrupt("journal replacement_cookie_header must be a string or null")
-    if reason is not None and not isinstance(reason, str):
-        return JournalCorrupt("journal reason must be a string or null")
-    state = _journal_state(source_revision, raw_state, replacement, reason)
+    fields = _journal_fields(loaded)
+    if isinstance(fields, JournalCorrupt):
+        return fields
+    state = _journal_state(fields)
     return JournalLoaded(state) if state is not None else JournalCorrupt("journal state payload is inconsistent")
 
 
-def _journal_state(
-    source_revision: str, raw_state: object, replacement: object, reason: object
-) -> RotationState | None:
-    match raw_state, replacement, reason:
-        case "RESERVED", None, None:
-            return Reserved(source_revision)
-        case "REQUESTED", None, None:
-            return Requested(source_revision)
-        case "ROTATED", str() as cookie_header, None:
-            return Rotated(source_revision, cookie_header)
-        case "REJECTED", None, str() as rejection_reason:
-            return Rejected(source_revision, rejection_reason)
-        case "OUTCOME_UNKNOWN", None, str() as unknown_reason:
-            return OutcomeUnknown(source_revision, unknown_reason)
+def _journal_fields(payload: dict[object, object]) -> _JournalFields | JournalCorrupt:
+    source_revision = payload.get("source_revision")
+    replacement = payload.get("replacement_cookie_header")
+    reason = payload.get("reason")
+    successor_revision = payload.get("successor_revision")
+    outcome = payload.get("outcome")
+    event_key = payload.get("event_key")
+    if not isinstance(source_revision, str) or not source_revision:
+        return JournalCorrupt("journal source_revision must be a non-empty string")
+    if not isinstance(replacement, str | type(None)) or not isinstance(reason, str | type(None)):
+        return JournalCorrupt("journal replacement_cookie_header and reason must be strings or null")
+    if not isinstance(successor_revision, str | type(None)) or not isinstance(event_key, str | type(None)):
+        return JournalCorrupt("journal successor_revision and event_key must be strings or null")
+    match outcome:
+        case "rotated":
+            parsed_outcome: RotationOutcome | None = "rotated"
+        case "rejected":
+            parsed_outcome = "rejected"
+        case "outcome_unknown":
+            parsed_outcome = "outcome_unknown"
+        case None:
+            parsed_outcome = None
         case _:
-            return None
+            return JournalCorrupt("journal outcome must be a known terminal outcome or null")
+    return _JournalFields(
+        source_revision, payload.get("state"), replacement, reason, successor_revision, parsed_outcome, event_key
+    )
+
+
+def _journal_state(fields: _JournalFields) -> RotationState | None:
+    match (
+        fields.raw_state,
+        fields.replacement_cookie_header,
+        fields.reason,
+        fields.successor_revision,
+        fields.outcome,
+        fields.event_key,
+    ):
+        case "RESERVED", None, None, None, None, None:
+            return Reserved(fields.source_revision)
+        case "REQUESTED", None, None, None, None, None:
+            return Requested(fields.source_revision)
+        case "ROTATED", str() as cookie_header, None, str() as successor, "rotated", str() as key:
+            state = Rotated(fields.source_revision, cookie_header, successor)
+            return state if key == rotation_event_metadata(state).event_key else None
+        case "REJECTED", None, str() as rejection_reason, None, "rejected", str() as key:
+            state = Rejected(fields.source_revision, rejection_reason)
+            return state if key == rotation_event_metadata(state).event_key else None
+        case "OUTCOME_UNKNOWN", None, str() as unknown_reason, None, "outcome_unknown", str() as key:
+            state = OutcomeUnknown(fields.source_revision, unknown_reason)
+            return state if key == rotation_event_metadata(state).event_key else None
+    return None
+
+
+def _journal_payload(state: RotationState) -> RotationJournalPayload:
+    """Serialize only combinations which represent a valid v2 durable state."""
+
+    match state:
+        case Reserved(source_revision=source_revision):
+            fields = _JournalPayloadFields(source_revision, "RESERVED", None, None, None, None, None)
+        case Requested(source_revision=source_revision):
+            fields = _JournalPayloadFields(source_revision, "REQUESTED", None, None, None, None, None)
+        case Rotated(
+            source_revision=source_revision, replacement_cookie_header=replacement, successor_revision=successor
+        ):
+            metadata = rotation_event_metadata(state)
+            fields = _JournalPayloadFields(
+                source_revision, "ROTATED", replacement, None, successor, metadata.outcome, metadata.event_key
+            )
+        case Rejected(source_revision=source_revision, reason=reason):
+            metadata = rotation_event_metadata(state)
+            fields = _JournalPayloadFields(
+                source_revision, "REJECTED", None, reason, None, metadata.outcome, metadata.event_key
+            )
+        case OutcomeUnknown(source_revision=source_revision, reason=reason):
+            metadata = rotation_event_metadata(state)
+            fields = _JournalPayloadFields(
+                source_revision, "OUTCOME_UNKNOWN", None, reason, None, metadata.outcome, metadata.event_key
+            )
+        case Ready():
+            raise TypeError("READY is implicit and cannot be persisted in a rotation journal")
+        case _:
+            raise TypeError(f"unexpected rotation state: {type(state).__name__}")
+    return _journal_payload_base(fields)
+
+
+def _journal_payload_base(fields: _JournalPayloadFields) -> RotationJournalPayload:
+    return {
+        "version": AUTH_SCHEMA_VERSION,
+        "source_revision": fields.source_revision,
+        "state": fields.state,
+        "replacement_cookie_header": fields.replacement_cookie_header,
+        "reason": fields.reason,
+        "successor_revision": fields.successor_revision,
+        "outcome": fields.outcome,
+        "event_key": fields.event_key,
+    }
 
 
 def _trigger(failpoint: StorageFailpoint | None, operation: str) -> None:
