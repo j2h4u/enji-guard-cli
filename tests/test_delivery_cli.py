@@ -19,8 +19,9 @@ from enji_guard_cli.application import (
     AutofixWriteScope,
     ScheduleListing,
 )
-from enji_guard_cli.audit.artifacts import AuditSummary, AuditSummaryItem
+from enji_guard_cli.audit.artifacts import ArtifactReadItem, AuditRead, AuditSummary, AuditSummaryItem
 from enji_guard_cli.audit.ports import (
+    AuditArtifact,
     AuditAutofixDefinition,
     AuditAutofixJob,
     AuditFreshness,
@@ -151,6 +152,10 @@ class _FakeApplication:
     def audit_summary(self, repo: str, selectors: list[str], *, project: str | None) -> object:
         self.calls.append(("audit_summary", (repo, selectors, project)))
         return AuditSummary(repo, ())
+
+    def audit_read(self, repo: str, selectors: list[str], *, project: str | None, all_audits: bool) -> object:
+        self.calls.append(("audit_read", (repo, selectors, project, all_audits)))
+        return AuditRead(repo, ())
 
     def audit_start(self, repo: str, project: str | None, selectors: list[str], *, all_audits: bool) -> object:
         self.calls.append(("audit_start", (repo, project, selectors, all_audits)))
@@ -308,6 +313,43 @@ def test_audit_summary_is_compact_in_text_and_json(monkeypatch: pytest.MonkeyPat
     assert payload["repo_id"] == "r1"
     assert audits[0]["score"] == 73
     assert "body" not in audits[0]
+
+
+def test_audit_read_renders_markdown_for_humans_and_equivalent_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeApplication()
+    report = "# Security report\n\n- Fix the vulnerable dependency."
+    payload = AuditRead(
+        "r1",
+        (
+            ArtifactReadItem(
+                "audit.security",
+                True,
+                AuditArtifact("audit.security", report, 73, "2026-07-20T00:00:00Z"),
+                None,
+                AuditFreshness("h", "h", "fresh"),
+            ),
+        ),
+    )
+    monkeypatch.setattr(fake, "audit_read", lambda repo, selectors, project=None, all_audits=False: payload)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+
+    text_result = CliRunner().invoke(app, ["audit", "read", "github@github.com:acme/cat", "security"])
+    json_result = CliRunner().invoke(app, ["audit", "read", "github@github.com:acme/cat", "security", "--json"])
+
+    assert text_result.exit_code == 0
+    assert "repository: r1" in text_result.stdout
+    assert "## security\nfreshness: fresh\nscore: 73" in text_result.stdout
+    assert report in text_result.stdout
+    assert "\\n" not in text_result.stdout
+    assert '"audits"' not in text_result.stdout
+    assert json_result.exit_code == 0
+    rendered = cast(dict[str, object], json.loads(json_result.stdout))
+    audits = cast(list[dict[str, object]], rendered["audits"])
+    artifact = cast(dict[str, object], audits[0]["artifact"])
+    assert rendered["repo_id"] == "r1"
+    assert audits[0]["audit_key"] == "audit.security"
+    assert artifact["body"] == report
+    assert artifact["score"] == 73
 
 
 def test_json_omits_nested_optional_null_fields_but_keeps_top_level_and_list_nulls() -> None:

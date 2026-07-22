@@ -25,6 +25,7 @@ from enji_guard_cli.application import (
     ApplicationCatalogChange,
     ApplicationCommandError,
     ApplicationResult,
+    AuditRead,
     AuditSummary,
     AutofixListing,
     AutofixListingItem,
@@ -36,6 +37,7 @@ from enji_guard_cli.application import (
     ScheduleListing,
 )
 from enji_guard_cli.composition import create_application
+from enji_guard_cli.delivery.cli.audit_presenter import render_audit_read
 from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
 from enji_guard_cli.mcp_facade import McpQueryFacade
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
@@ -365,6 +367,10 @@ def _emit_audit_summary(payload: object) -> None:
             typer.echo(f"  {selector}  score={score} freshness={item.freshness.state} generated_at={generated}")
         else:
             typer.echo(f"  {selector}  unavailable={item.reason or 'unknown'} freshness={item.freshness.state}")
+
+
+def _emit_audit_read(payload: object) -> None:
+    typer.echo(render_audit_read(cast(AuditRead, payload)))
 
 
 def _dimension(label: str, values: list[str], selectors: list[str]) -> str | None:
@@ -804,6 +810,7 @@ def audit_read(
             all_audits=all_audits,
         ),
         _json_output(json_output),
+        _emit_audit_read,
     )
 
 

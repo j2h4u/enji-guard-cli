@@ -15,7 +15,12 @@ from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from enji_guard_cli.audit import parse_catalog_result
-from enji_guard_cli.audit.artifacts import AuditArtifactUnavailableError, AuditSummary, summarize_artifacts
+from enji_guard_cli.audit.artifacts import (
+    AuditArtifactUnavailableError,
+    AuditRead,
+    AuditSummary,
+    summarize_artifacts,
+)
 from enji_guard_cli.audit.autofixes import definitions as autofix_definitions
 from enji_guard_cli.audit.autofixes import select as select_autofixes
 from enji_guard_cli.audit.autofixes import set_one
@@ -285,7 +290,7 @@ class Application:
 
     def audit_read(
         self, repo: str, selectors: list[str] | None = None, *, project: str | None = None, all_audits: bool = False
-    ) -> object:
+    ) -> AuditRead:
         target = self._resolve_repository(repo, project)
         catalog = self.audit_catalog()
         items = read_for_repo(
@@ -299,7 +304,7 @@ class Application:
                 frozen_catalog=catalog,
             ),
         )
-        return {"repo_id": target.repo_id, "audits": items}
+        return AuditRead(target.repo_id, items)
 
     def audit_preflight(self, repo: str, *, project: str | None = None) -> AuditPreflight:
         target = self._resolve_repository(repo, project)

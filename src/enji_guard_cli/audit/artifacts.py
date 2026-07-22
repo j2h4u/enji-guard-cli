@@ -27,6 +27,14 @@ class ArtifactReadItem:
 
 
 @dataclass(frozen=True, slots=True)
+class AuditRead:
+    """Full report-content projection returned to delivery adapters."""
+
+    repo_id: str
+    audits: tuple[ArtifactReadItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class AuditSummaryItem:
     """Compact audit metadata projection; report content intentionally excluded."""
 
