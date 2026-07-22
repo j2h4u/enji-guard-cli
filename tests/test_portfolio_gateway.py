@@ -108,9 +108,9 @@ def test_project_active_runs_are_project_owned_neutral_models(monkeypatch: pytes
 
     monkeypatch.setattr(module, "_project_active_runs", lambda *_args, **_kwargs: payload)
 
-    runs = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=GatewayCredentialReader()).project_active_runs(
-        "project-1"
-    )
+    runs = PortfolioGateway(
+        client=cast(GatewayClient, object()), auth_port=GatewayCredentialReader()
+    ).project_active_runs("project-1")
 
     assert runs[0].repo_id == "repo-1"
     assert runs[0].task_id == "task-1"

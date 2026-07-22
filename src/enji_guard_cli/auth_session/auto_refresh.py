@@ -21,6 +21,7 @@ class AutoRefreshSettingsLike(Protocol):
     @property
     def fallback_seconds(self) -> int: ...
 
+
 @dataclass(frozen=True)
 class AutoRefreshLoopDependencies:
     sleep_seconds_fn: Callable[..., int]

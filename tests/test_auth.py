@@ -264,7 +264,6 @@ def test_auth_status_returns_rate_limit_payload(tmp_path: Path) -> None:
     assert status["message"] == "auth status was rate limited; retry after 7s"
 
 
-
 def test_auth_status_does_not_refresh_or_replay_on_invalid_cookie(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=long", auth_file)
@@ -308,8 +307,6 @@ def test_backend_readiness_probe_does_not_refresh_on_auth_invalid(tmp_path: Path
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access=old; refresh=long"}
-
-
 
 
 def test_refresh_auth_updates_rotated_access_and_refresh_cookies(tmp_path: Path) -> None:

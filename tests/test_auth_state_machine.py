@@ -272,7 +272,15 @@ def test_journal_delete_exposes_each_durable_removal_boundary(tmp_path: Path, ta
 
 @pytest.mark.parametrize(
     "target_operation",
-    ["before_write_journal", "temporary_file", "write", "file_fsync", "rename", "parent_directory_open", "parent_directory_fsync"],
+    [
+        "before_write_journal",
+        "temporary_file",
+        "write",
+        "file_fsync",
+        "rename",
+        "parent_directory_open",
+        "parent_directory_fsync",
+    ],
 )
 def test_failure_before_durable_requested_sends_zero_posts(tmp_path: Path, target_operation: str) -> None:
     auth_file = tmp_path / "auth.json"

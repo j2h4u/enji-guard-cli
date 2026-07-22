@@ -58,7 +58,9 @@ def write_atomic_json(
             except FileNotFoundError:
                 pass
             except OSError as cleanup_error:
-                raise ExceptionGroup("atomic JSON persistence and cleanup failed", [original_error, cleanup_error]) from None
+                raise ExceptionGroup(
+                    "atomic JSON persistence and cleanup failed", [original_error, cleanup_error]
+                ) from None
         raise
 
 

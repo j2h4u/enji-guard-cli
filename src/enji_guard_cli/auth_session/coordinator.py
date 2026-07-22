@@ -278,7 +278,10 @@ class RefreshCoordinator:
                     delete_journal(self._auth_path, failpoint=self._storage_failpoint)
                 elif isinstance(state, Rotated):
                     result = cas_replace_cookie(
-                        self._auth_path, state.source_revision, state.replacement_cookie_header, failpoint=self._storage_failpoint
+                        self._auth_path,
+                        state.source_revision,
+                        state.replacement_cookie_header,
+                        failpoint=self._storage_failpoint,
                     )
                     if isinstance(result, CasWritten):
                         delete_journal(self._auth_path, failpoint=self._storage_failpoint)
