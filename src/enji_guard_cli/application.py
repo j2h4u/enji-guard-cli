@@ -48,7 +48,6 @@ from enji_guard_cli.audit.ports import (
     AuditWaitResult,
     MalformedAuditSnapshotError,
 )
-from enji_guard_cli.audit.preflight import AuditPreflight, build_preflight
 from enji_guard_cli.audit.schedules import auto_time_for_targets, list_for_targets, set_for_targets
 from enji_guard_cli.audit.start import AuditStartService
 from enji_guard_cli.audit.status import build_status
@@ -308,10 +307,6 @@ class Application:
             ),
         )
         return AuditRead(target.repo_id, items)
-
-    def audit_preflight(self, repo: str, *, project: str | None = None) -> AuditPreflight:
-        target = self._resolve_repository(repo, project)
-        return build_preflight(self.audit_status(target.repo_id))
 
     def audit_summary(
         self, repo: str, selectors: list[str] | None = None, *, project: str | None = None

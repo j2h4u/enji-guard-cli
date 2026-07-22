@@ -114,7 +114,7 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
         client,
         auth_port=AUTH_PORT,
     )
-    audit_summary_snapshot("repo_1", "vulns", auth_file, client, auth_port=AUTH_PORT)
+    audit_summary_snapshot("repo_1", "vulns", auth_file, client, task_id="task_1", auth_port=AUTH_PORT)
     improvement_jobs("repo_1", auth_file, client, auth_port=AUTH_PORT)
     put_improvement_job("repo_1", "vuln-audit", {"enabled": True}, auth_file, client, auth_port=AUTH_PORT)
 

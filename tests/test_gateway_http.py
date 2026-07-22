@@ -442,7 +442,7 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
         client,
         auth_port=AUTH_PORT,
     )
-    audit_summary_snapshot("repo_1", "vulns", auth_file, client, auth_port=AUTH_PORT)
+    audit_summary_snapshot("repo_1", "vulns", auth_file, client, task_id="task_1", auth_port=AUTH_PORT)
     audit_auto_runs("repo_1", auth_file, client, auth_port=AUTH_PORT)
     put_audit_auto_run(
         "repo_1",
@@ -477,7 +477,7 @@ def test_repo_audit_report_and_schedule_operations_use_expected_requests(tmp_pat
         ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/task-links"),
         ("GET", "https://fleet.enji.ai/api/v1/tasks/task_1"),
         ("POST", "https://fleet.enji.ai/api/ux/repos/repo_1/audit-runs"),
-        ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/snapshots/upfront.audit.summary?group=vulns"),
+        ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/snapshots/upfront.audit.summary?group=vulns&run=task_1"),
         ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/audit-auto-runs"),
         ("PUT", "https://fleet.enji.ai/api/ux/repos/repo_1/audit-auto-runs/audit.security"),
     ]

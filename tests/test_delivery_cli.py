@@ -26,6 +26,7 @@ from enji_guard_cli.audit.ports import (
     AuditAutofixJob,
     AuditFreshness,
     AuditGatewayPort,
+    AuditNewerRun,
     AuditSchedule,
     AuditStatus,
     AuditStatusItem,
@@ -329,6 +330,7 @@ def test_audit_read_renders_markdown_for_humans_and_equivalent_json(monkeypatch:
                 AuditArtifact("audit.security", report, 73, "2026-07-20T00:00:00Z"),
                 None,
                 AuditFreshness("h", "h", "fresh"),
+                AuditNewerRun("task-new", "running", started_at="2026-07-21T00:00:00Z"),
             ),
         ),
     )
@@ -340,7 +342,10 @@ def test_audit_read_renders_markdown_for_humans_and_equivalent_json(monkeypatch:
 
     assert text_result.exit_code == 0
     assert "repository: r1" in text_result.stdout
-    assert "## security\nfreshness: fresh\nscore: 73" in text_result.stdout
+    assert "## security" in text_result.stdout
+    assert "freshness: fresh" in text_result.stdout
+    assert "score: 73" in text_result.stdout
+    assert "Report is stale; a newer audit is in progress." in text_result.stdout
     assert report in text_result.stdout
     assert "\\n" not in text_result.stdout
     assert '"audits"' not in text_result.stdout
@@ -352,6 +357,8 @@ def test_audit_read_renders_markdown_for_humans_and_equivalent_json(monkeypatch:
     assert audits[0]["audit_key"] == "audit.security"
     assert artifact["body"] == report
     assert artifact["score"] == 73
+    assert isinstance(audits[0]["newer_run"], dict)
+    assert "Report is stale; a newer audit is in progress." not in json_result.stdout
 
 
 def test_json_omits_nested_optional_null_fields_but_keeps_top_level_and_list_nulls() -> None:

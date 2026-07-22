@@ -213,6 +213,30 @@ class AuditArtifact:
     body: str
     score: int | float | None = None
     generated_at: str | None = None
+    task_id: str | None = None
+    completed_at: str | None = None
+    collected_at: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AuditReportRef:
+    """A report-history entry, normalized at the gateway boundary."""
+
+    task_id: str | None
+    completed_at: str | None
+    collected_at: str | None
+    has_report: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AuditNewerRun:
+    """An active task newer than the report being presented."""
+
+    task_id: str
+    status: str | None
+    created_at: str | None = None
+    started_at: str | None = None
+    state: Literal["queued", "running"] = "running"
 
 
 AuditFreshnessState = Literal["fresh", "stale", "unknown"]
@@ -473,7 +497,16 @@ class AuditGatewayPort(Protocol):
 
     def start_audit_run(self, request: AuditRunRequest) -> AuditRunResult: ...
 
-    def read_audit_snapshot(self, repo_id: str, audit_key: str, metric_group: str | None = None) -> AuditArtifact: ...
+    def list_audit_reports(self, repo_id: str, metric_group: str) -> tuple[AuditReportRef, ...]: ...
+
+    def read_audit_snapshot(
+        self,
+        repo_id: str,
+        audit_key: str,
+        metric_group: str | None = None,
+        *,
+        task_id: str,
+    ) -> AuditArtifact: ...
 
     def list_schedules(self, repo_id: str) -> tuple[AuditSchedule, ...]: ...
 

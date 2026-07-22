@@ -1389,6 +1389,9 @@
           },
           {
             "$ref": "#/components/parameters/SnapshotGroup"
+          },
+          {
+            "$ref": "#/components/parameters/SnapshotRun"
           }
         ],
         "responses": {
@@ -1401,6 +1404,22 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/ux/repos/{repoId}/audit-reports": {
+      "get": {
+        "operationId": "listRepoAuditReports",
+        "summary": "Return repository audit report history.",
+        "x-enji-observed": true,
+        "parameters": [
+          { "$ref": "#/components/parameters/RepoId" },
+          { "$ref": "#/components/parameters/SnapshotGroup" }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/GenericObject"
           }
         }
       }
@@ -2084,6 +2103,15 @@
         "required": true,
         "schema": {
           "$ref": "#/components/schemas/AuditRouteSlug"
+        }
+      },
+      "SnapshotRun": {
+        "name": "run",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "ConsentId": {

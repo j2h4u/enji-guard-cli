@@ -37,6 +37,7 @@ from enji_guard_cli.enji_gateway.contract import (
     PROJECT_RUN_LANGUAGE_ENDPOINT_SPEC,
     PROJECTS_ENDPOINT_SPEC,
     REPO_ACTIVE_RUNS_ENDPOINT_SPEC,
+    REPO_AUDIT_REPORTS_ENDPOINT_SPEC,
     REPO_AUDIT_RERUN_STATE_ENDPOINT_SPEC,
     REPO_AUDIT_RUNS_ENDPOINT_SPEC,
     REPO_AUDIT_SUMMARY_ENDPOINT_SPEC,
@@ -723,7 +724,27 @@ def start_audit_run(
     )
 
 
-def audit_summary_snapshot(
+def audit_summary_snapshot(  # noqa: PLR0913
+    repo_id: str,
+    route_slug: str,
+    auth_file: Path | None = None,
+    client: EnjiHttpClient | None = None,
+    *,
+    task_id: str,
+    auth_port: GatewayAuthPort,
+) -> JsonObjectPayload:
+    return run_api_request(
+        auth_file,
+        client,
+        REPO_AUDIT_SUMMARY_ENDPOINT.request(
+            path_params={"repoId": repo_id},
+            query_params={"group": route_slug, "run": task_id},
+        ),
+        auth_port=auth_port,
+    )
+
+
+def audit_reports(
     repo_id: str,
     route_slug: str,
     auth_file: Path | None = None,
@@ -734,7 +755,7 @@ def audit_summary_snapshot(
     return run_api_request(
         auth_file,
         client,
-        REPO_AUDIT_SUMMARY_ENDPOINT.request(
+        REPO_AUDIT_REPORTS_ENDPOINT.request(
             path_params={"repoId": repo_id},
             query_params={"group": route_slug},
         ),
@@ -1032,6 +1053,10 @@ REPO_AUDIT_RUNS_ENDPOINT = ApiEndpoint(
 )
 REPO_AUDIT_SUMMARY_ENDPOINT = ApiEndpoint(
     spec=REPO_AUDIT_SUMMARY_ENDPOINT_SPEC,
+    parser=_parse_json_object_payload,
+)
+REPO_AUDIT_REPORTS_ENDPOINT = ApiEndpoint(
+    spec=REPO_AUDIT_REPORTS_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 AUDIT_EMAIL_PREFERENCES_GET_ENDPOINT = ApiEndpoint(

@@ -1,10 +1,17 @@
 """High-level Audit orchestration over application ports."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from enji_guard_cli.audit.artifacts import ArtifactReadItem, read_artifacts, select_artifacts
+from enji_guard_cli.audit.artifacts import (
+    ArtifactReadItem,
+    AuditArtifactUnavailableError,
+    choose_report_ref,
+    newer_run_for_report,
+    select_artifacts,
+)
 from enji_guard_cli.audit.catalog import parse_catalog_result
+from enji_guard_cli.audit.errors import AuditNotFoundError
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.observation import AuditRepositoryObservation
 from enji_guard_cli.audit.ports import (
@@ -12,9 +19,11 @@ from enji_guard_cli.audit.ports import (
     AuditGatewayPort,
     AuditProject,
     AuditStatus,
+    AuditStatusItem,
 )
-from enji_guard_cli.audit.preflight import AuditPreflight, build_preflight, snapshots_to_preserve
 from enji_guard_cli.audit.status import build_status
+from enji_guard_cli.fanout import BoundedFanout
+from enji_guard_cli.settings import default_settings
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,14 +33,13 @@ class AuditWorkflowDependencies:
     project: Callable[[str], AuditProject]
     frozen_catalog: AuditCatalog | None = None
     repository_observation: Callable[[str], AuditRepositoryObservation] | None = None
+    fanout: BoundedFanout | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class AuditStartPlan:
     catalog: AuditCatalog
     status: AuditStatus
-    preflight: AuditPreflight
-    snapshots_to_preserve: tuple[str, ...]
     selected: tuple[AuditDefinition, ...]
 
 
@@ -72,8 +80,6 @@ def prepare_start(
     return AuditStartPlan(
         catalog=catalog,
         status=status,
-        preflight=build_preflight(status),
-        snapshots_to_preserve=snapshots_to_preserve(status),
         selected=choose_audits(catalog, selectors, all_audits=all_audits),
     )
 
@@ -96,13 +102,68 @@ def read_for_repo(
         observation.rerun_state,
     )
     selected = select_artifacts(status.items, selectors, all_artifacts=all_audits, catalog=catalog)
-    groups = {audit.action_key: audit.metric_group for audit in catalog.published_audits}
-    return read_artifacts(
-        repo_id,
-        selected,
-        reader=lambda target, key: dependencies.gateway.read_audit_snapshot(target, key, groups.get(key)),
-        tolerate_unavailable=(not selectors) if tolerate_unavailable is None else tolerate_unavailable,
+    definitions = {audit.action_key: audit for audit in catalog.published_audits}
+    tolerate = (not selectors) if tolerate_unavailable is None else tolerate_unavailable
+
+    def read_item(item: AuditStatusItem) -> ArtifactReadItem:
+        return _read_history_item(
+            repo_id,
+            item,
+            definitions.get(item.audit_key),
+            observation,
+            dependencies.gateway,
+            tolerate_unavailable=tolerate,
+        )
+
+    fanout = dependencies.fanout or BoundedFanout(default_settings().fanout)
+    results = fanout.map(selected, read_item)
+    if not selectors and not all_audits and tolerate_unavailable is None:
+        return tuple(item for item in results if item.available)
+    return results
+
+
+def _read_history_item(  # noqa: PLR0913
+    repo_id: str,
+    item: AuditStatusItem,
+    audit: AuditDefinition | None,
+    observation: AuditRepositoryObservation,
+    gateway: AuditGatewayPort,
+    *,
+    tolerate_unavailable: bool,
+) -> ArtifactReadItem:
+    if audit is None:
+        return _unavailable(item, "status not found", tolerate_unavailable)
+    metric_group = audit.metric_group or audit.action_key
+    try:
+        refs = gateway.list_audit_reports(repo_id, metric_group)
+    except AuditNotFoundError:
+        return _unavailable(item, "artifact_not_found", tolerate_unavailable)
+    ref = choose_report_ref(refs)
+    if ref is None or ref.task_id is None:
+        return _unavailable(item, "artifact_not_found", tolerate_unavailable)
+    try:
+        artifact = gateway.read_audit_snapshot(
+            repo_id,
+            item.audit_key,
+            metric_group,
+            task_id=ref.task_id,
+        )
+    except AuditNotFoundError:
+        return _unavailable(item, "artifact_not_found", tolerate_unavailable)
+    artifact = replace(
+        artifact,
+        task_id=ref.task_id,
+        completed_at=ref.completed_at,
+        collected_at=ref.collected_at,
     )
+    newer_run = newer_run_for_report(ref, observation.active_runs, action_key=item.audit_key)
+    return ArtifactReadItem(item.audit_key, True, artifact, None, item.freshness, newer_run)
+
+
+def _unavailable(item: AuditStatusItem, reason: str, tolerate: bool) -> ArtifactReadItem:
+    if tolerate:
+        return ArtifactReadItem(item.audit_key, False, None, reason, item.freshness)
+    raise AuditArtifactUnavailableError(item.audit_key, reason)
 
 
 def _catalog(dependencies: AuditWorkflowDependencies) -> AuditCatalog:

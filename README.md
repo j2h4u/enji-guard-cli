@@ -45,9 +45,9 @@ current audit task lifecycle, so a stale readable audit and a newly queued or
 running task can both be true. Scores are triage hints: use them to sort and
 prioritize repositories, then read the audits before changing code. When an
 audit exposes commit hashes, compare them with the current checkout before
-treating the audit as fresh. Starting a new audit can temporarily hide older
-snapshots behind running work, so read any needed snapshots before you start a
-fresh audit. CLI `status` and `audit start` do not trust Enji active-runs
+treating the audit as fresh. Audit reads use report history and the selected
+Fleet task id, so prior usable reports remain readable while newer audits run.
+CLI `status` and `audit start` do not trust Enji active-runs
 alone; the service keeps a short local started-task ledger and reconciles it
 with `task-by-id` so incomplete active-runs projections do not trigger duplicate
 starts.

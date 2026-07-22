@@ -1,7 +1,5 @@
 from enji_guard_cli.audit.artifacts import (
     ArtifactReadItem,
-    AuditArtifactUnavailableError,
-    read_artifacts,
     select_artifacts,
     summarize_artifacts,
 )
@@ -29,18 +27,6 @@ def test_select_uses_suffix_and_tolerates_unselected_missing() -> None:
     )
 
 
-def test_read_artifacts_returns_ready_artifact_and_tolerated_missing() -> None:
-    result = read_artifacts(
-        "repo",
-        (_item(),),
-        reader=lambda _repo, _key: AuditArtifact("audit.security", "body"),
-        tolerate_unavailable=False,
-    )
-    assert result == (
-        ArtifactReadItem("audit.security", True, AuditArtifact("audit.security", "body"), None, _item().freshness),
-    )
-
-
 def test_summary_discards_report_body_at_audit_boundary() -> None:
     items = (
         ArtifactReadItem(
@@ -59,10 +45,6 @@ def test_summary_discards_report_body_at_audit_boundary() -> None:
     assert not hasattr(summary.audits[0], "body")
 
 
-def test_explicit_unreadable_selection_is_rejected() -> None:
-    try:
-        select_artifacts((_item(False),), ["security"], all_artifacts=False, catalog=_catalog())
-    except AuditArtifactUnavailableError as exc:
-        assert exc.audit_key == "audit.security"
-    else:
-        raise AssertionError("expected unreadable selection to fail")
+def test_explicit_selection_can_read_history_for_currently_unreadable_status() -> None:
+    selected = select_artifacts((_item(False),), ["security"], all_artifacts=False, catalog=_catalog())
+    assert selected[0].audit_key == "audit.security"

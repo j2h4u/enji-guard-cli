@@ -149,9 +149,11 @@ repository head SHA with the last audited SHA and classifies reports as
 decision. Aggregate audit status also surfaces `partial` and `mixed` states, so
 stale but still readable reports remain available while new audits run.
 
-The current report body is returned by
-`GET /api/ux/repos/{repoId}/snapshots/upfront.audit.summary?group=<report-group>`
-as Markdown in `snapshot.content.report`. The SPA still copies this payload
+Audit reads first list report history, choose the newest usable completed report,
+and fetch its body by Fleet task id with
+`GET /api/ux/repos/{repoId}/snapshots/upfront.audit.summary?group=<report-group>&run=<fleetTaskId>`.
+The body is Markdown in `snapshot.content.report`; a newer queued or running task
+is surfaced as stale in human output. The SPA still copies this payload
 client-side. It now also calls two endpoints from
 `audit-report-archive-DgvcmYa7.js` that are missing from OpenAPI:
 

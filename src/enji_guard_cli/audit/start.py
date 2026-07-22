@@ -1,4 +1,4 @@
-"""Audit start workflow: snapshot preservation, duplicate guards, and ledger."""
+"""Audit start workflow: duplicate guards and ledger recording."""
 
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -19,7 +19,6 @@ from enji_guard_cli.audit.runs import (
     StartAuditsContext,
     start_audits_for_target,
 )
-from enji_guard_cli.audit.status import build_status
 
 
 class AuditStartService:
@@ -44,7 +43,6 @@ class AuditStartService:
     def start(
         self, repo_id: str, project_id: str, audits: tuple[AuditDefinition, ...], catalog: AuditCatalog
     ) -> dict[str, object]:
-        self._preserve_snapshots(repo_id, catalog)
         dependencies = StartAuditDependencies(
             make_audit_run_create=lambda target_repo, target_project, action_key, body: AuditRunRequest(
                 target_repo, target_project, action_key, body
@@ -64,18 +62,6 @@ class AuditStartService:
             dependencies=dependencies,
             get_repo_rerun_state=self.gateway.rerun_state,
         )
-
-    def _preserve_snapshots(self, repo_id: str, catalog: AuditCatalog) -> None:
-        status = build_status(
-            repo_id,
-            catalog,
-            self.gateway.task_links(repo_id).links,
-            self.active_runs(repo_id),
-            self.gateway.rerun_state(repo_id),
-        )
-        groups = {audit.action_key: audit.metric_group for audit in catalog.published_audits}
-        for action_key in status.readable:
-            self.gateway.read_audit_snapshot(repo_id, action_key, groups.get(action_key))
 
     def _record_started(self, context: RecordStartedRunContext) -> None:
         if self.ledger is None:

@@ -2,10 +2,19 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal, cast
 
 from enji_guard_cli.audit.errors import AuditNotFoundError
+from enji_guard_cli.audit.lifecycle import _timestamp, lifecycle_priority, task_lifecycle
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
-from enji_guard_cli.audit.ports import AuditArtifact, AuditFreshness, AuditStatusItem
+from enji_guard_cli.audit.ports import (
+    AuditArtifact,
+    AuditFreshness,
+    AuditNewerRun,
+    AuditReportRef,
+    AuditRun,
+    AuditStatusItem,
+)
 
 
 class AuditArtifactUnavailableError(AuditNotFoundError, ValueError):
@@ -24,6 +33,7 @@ class ArtifactReadItem:
     artifact: AuditArtifact | None
     reason: str | None
     freshness: AuditFreshness
+    newer_run: AuditNewerRun | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +54,10 @@ class AuditSummaryItem:
     generated_at: str | None
     reason: str | None
     freshness: AuditFreshness
+    task_id: str | None = None
+    completed_at: str | None = None
+    collected_at: str | None = None
+    newer_run: AuditNewerRun | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +79,10 @@ def summarize_artifacts(repo_id: str, items: tuple[ArtifactReadItem, ...]) -> Au
                 generated_at=item.artifact.generated_at if item.artifact is not None else None,
                 reason=item.reason,
                 freshness=item.freshness,
+                task_id=item.artifact.task_id if item.artifact is not None else None,
+                completed_at=item.artifact.completed_at if item.artifact is not None else None,
+                collected_at=item.artifact.collected_at if item.artifact is not None else None,
+                newer_run=item.newer_run,
             )
             for item in items
         ),
@@ -78,14 +96,14 @@ def select_artifacts(
     all_artifacts: bool,
     catalog: AuditCatalog,
 ) -> tuple[AuditStatusItem, ...]:
-    """Resolve suffix selectors and enforce readability for explicit reads."""
+    """Resolve suffix selectors without using status as report-history authority."""
 
     if all_artifacts and selectors:
         raise ValueError("pass audit selectors or --all, not both")
     if all_artifacts:
         return tuple(status)
     if not selectors:
-        return tuple(item for item in status if item.can_read)
+        return tuple(status)
     by_selector = {audit.selector: audit.action_key for audit in catalog.published_audits}
     by_key = {item.audit_key: item for item in status}
     selected: list[AuditStatusItem] = []
@@ -94,35 +112,67 @@ def select_artifacts(
         item = by_key.get(audit_key) if audit_key else None
         if item is None:
             raise AuditArtifactUnavailableError(selector, "status not found")
-        if not item.can_read:
-            raise AuditArtifactUnavailableError(item.audit_key, _unreadable_reason(item))
         selected.append(item)
     return tuple(selected)
 
 
-def read_artifacts(
-    repo_id: str,
-    items: tuple[AuditStatusItem, ...],
+def choose_report_ref(refs: tuple[AuditReportRef, ...]) -> AuditReportRef | None:
+    """Choose the first usable report, retaining upstream newest-first order."""
+
+    return next(
+        (ref for ref in refs if ref.has_report and _nonblank(ref.task_id) and _nonblank(ref.completed_at)),
+        None,
+    )
+
+
+def newer_run_for_report(
+    ref: AuditReportRef,
+    runs: tuple[AuditRun, ...],
     *,
-    reader: Callable[[str, str], AuditArtifact],
-    tolerate_unavailable: bool,
-) -> tuple[ArtifactReadItem, ...]:
-    result: list[ArtifactReadItem] = []
-    for item in items:
-        if not item.can_read:
-            if tolerate_unavailable:
-                result.append(ArtifactReadItem(item.audit_key, False, None, _unreadable_reason(item), item.freshness))
-                continue
-            raise AuditArtifactUnavailableError(item.audit_key, _unreadable_reason(item))
-        try:
-            artifact = reader(repo_id, item.audit_key)
-        except AuditArtifactUnavailableError:
-            if not tolerate_unavailable:
-                raise
-            result.append(ArtifactReadItem(item.audit_key, False, None, "artifact_not_found", item.freshness))
+    action_key: str | None = None,
+) -> AuditNewerRun | None:
+    """Return a matching active task that is newer than the selected report."""
+
+    if not ref.task_id:
+        return None
+    completed = _parse_time(ref.completed_at)
+    # Without a parseable report completion there is no trustworthy baseline
+    # against which to prove that an active run is newer.
+    if completed is None:
+        return None
+    candidates: list[tuple[tuple[float, int, str, str], AuditRun, str]] = []
+    for run in runs:
+        state = task_lifecycle(run.status, started_at=run.started_at, completed_at=run.completed_at)
+        if run.task_id is None or run.task_id == ref.task_id or state not in {"queued", "running"}:
             continue
-        result.append(ArtifactReadItem(item.audit_key, True, artifact, None, item.freshness))
-    return tuple(result)
+        if action_key is not None and run.action_key != action_key:
+            continue
+        started = run.started_at or run.created_at
+        started_epoch = _parse_time(started)
+        if completed is not None and (started_epoch is None or started_epoch <= completed):
+            continue
+        candidates.append(
+            (
+                (
+                    started_epoch if started_epoch is not None else float("-inf"),
+                    lifecycle_priority(state),
+                    run.task_id,
+                    run.status or "",
+                ),
+                run,
+                state,
+            )
+        )
+    if not candidates:
+        return None
+    _, run, state = max(candidates, key=lambda candidate: candidate[0])
+    return AuditNewerRun(
+        run.task_id or "",
+        run.status,
+        run.created_at,
+        run.started_at,
+        cast(Literal["queued", "running"], state),
+    )
 
 
 def artifact_for_definition(
@@ -142,3 +192,17 @@ def _unreadable_reason(item: AuditStatusItem) -> str:
         "running": "running",
         "failed": "failed",
     }.get(item.task_lifecycle, "missing")
+
+
+def _nonblank(value: str | None) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _parse_time(value: str | None) -> float | None:
+    if not _nonblank(value):
+        return None
+    assert isinstance(value, str)
+    try:
+        return _timestamp(value.strip())
+    except OSError, OverflowError, TypeError, ValueError:
+        return None

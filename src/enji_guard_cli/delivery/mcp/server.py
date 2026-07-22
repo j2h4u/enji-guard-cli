@@ -92,7 +92,7 @@ def create_mcp_server(
 
     @server.tool(
         name=MCP_TOOL_NAMES[1],
-        description="Read currently available audit artifacts and typed freshness for one repository.",
+        description="Read the newest completed historical audit artifacts, typed freshness, and newer-run context for one repository.",
         structured_output=True,
     )
     async def repository_audits(repo: str, project: str = "") -> dict[str, object]:

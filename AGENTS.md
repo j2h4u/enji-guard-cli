@@ -44,8 +44,8 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 - Surface stale/mixed report freshness explicitly; never hide it behind aggregate status.
 - Treat report language as account-wide; do not present redundant per-project
   resolved values as independent settings.
-- Before starting fresh audits, save/read every currently available report you
-  may need. Starting audits can temporarily hide old snapshots behind running state.
+- Audit reads use report history and the selected Fleet task id, so prior usable
+  reports remain readable while newer audits run.
 - When reports are stale, compare audited and current git SHAs before judging
   relevance. Use relevant stale or partial-ready reports immediately while fresh
   audits run in parallel.

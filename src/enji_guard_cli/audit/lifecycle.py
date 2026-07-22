@@ -6,7 +6,7 @@ reconciliation cannot disagree about whether a task is active.
 """
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Protocol
 
 from enji_guard_cli.audit.ports import AuditRun, AuditTaskLifecycle
@@ -126,7 +126,10 @@ def _timestamp(value: str | None) -> float | None:
     if value is None:
         return None
     try:
-        return datetime.fromisoformat(value).timestamp()
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC).timestamp()
     except OSError, OverflowError, TypeError, ValueError:
         return None
 
