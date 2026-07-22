@@ -35,8 +35,8 @@ class StoredAuth(TypedDict):
 
 
 class PendingRefreshRotation(TypedDict):
-    version: Literal[1]
-    state: Literal["reserved", "rotated"]
+    version: Literal[2]
+    state: Literal["reserved", "requested", "rotated"]
     previous_auth: StoredAuth
     replacement_cookie_header: str | None
     error_type: str | None
@@ -95,7 +95,7 @@ def reserve_pending_rotation(auth_path: Path, previous_auth: StoredAuth) -> Pend
     if journal_path.exists():
         raise FileExistsError(journal_path)
     pending: PendingRefreshRotation = {
-        "version": 1,
+        "version": 2,
         "state": "reserved",
         "previous_auth": previous_auth,
         "replacement_cookie_header": None,
@@ -116,21 +116,28 @@ def load_pending_rotation(auth_path: Path) -> PendingRefreshRotation | None:
 
 
 def _pending_rotation_from_loaded(loaded: object) -> PendingRefreshRotation | None:
-    if not isinstance(loaded, dict) or loaded.get("version") != 1:
+    if not isinstance(loaded, dict) or loaded.get("version") not in {1, 2}:
         return None
+    version = loaded["version"]
     state = loaded.get("state")
     previous_auth = loaded.get("previous_auth")
     replacement = loaded.get("replacement_cookie_header")
-    if state not in {"reserved", "rotated"} or not isinstance(previous_auth, dict):
+    if state not in {"reserved", "requested", "rotated"} or not isinstance(previous_auth, dict):
         return None
     validated_auth = _load_stored_auth(previous_auth)
     if validated_auth is None or (replacement is not None and not isinstance(replacement, str)):
         return None
     if state == "rotated" and not isinstance(replacement, str):
         return None
+    # Version 1 only recorded the reservation before the request.  A process
+    # crash could therefore leave an ambiguous journal after the one-time
+    # refresh token had already been consumed.  Recover old reservations
+    # conservatively as an outcome-unknown request; new version 2 journals
+    # have a separate pre-request state for safe cleanup and retry.
+    normalized_state = "requested" if version == 1 and state == "reserved" else state
     return {
-        "version": 1,
-        "state": cast(Literal["reserved", "rotated"], state),
+        "version": 2,
+        "state": cast(Literal["reserved", "requested", "rotated"], normalized_state),
         "previous_auth": validated_auth,
         "replacement_cookie_header": replacement,
         "error_type": loaded.get("error_type") if isinstance(loaded.get("error_type"), str) else None,
@@ -148,6 +155,15 @@ def mark_pending_rotation_rotated(
         "error_type": None,
         "errno": None,
     }
+    _write_json_file(pending_rotation_path(auth_path), updated)
+    return updated
+
+
+def mark_pending_rotation_requested(auth_path: Path, pending: PendingRefreshRotation) -> PendingRefreshRotation:
+    """Durably mark that the non-replayable refresh request is being sent."""
+    if pending["state"] != "reserved":
+        raise ValueError("pending refresh rotation is not reserved")
+    updated: PendingRefreshRotation = {**pending, "state": "requested"}
     _write_json_file(pending_rotation_path(auth_path), updated)
     return updated
 

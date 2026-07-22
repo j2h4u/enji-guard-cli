@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -71,6 +72,7 @@ def test_auth_request_paths_assign_auth_refresh_and_read_profiles(tmp_path: Path
 
     asyncio.run(run())
     assert captured == [RetryProfile.AUTH_REFRESH, RetryProfile.READ]
+    assert not pending_rotation_path(auth_file).exists()
 
 
 @pytest.mark.parametrize("profile", [RetryProfile.READ, RetryProfile.IDEMPOTENT_MUTATION])
@@ -229,6 +231,106 @@ def test_refresh_reserve_storage_failure_avoids_refresh_request(
     with pytest.raises(auth_module.EnjiHttpError, match="failed to reserve refreshed cookie"):
         asyncio.run(refresh_cookie_auth(auth_file, stored_auth, Client()))
     assert calls == 0
+
+
+def test_requested_rotation_never_replays_after_request_crash(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access=old; refresh=one-time", auth_file)
+    stored_auth = load_stored_auth(auth_file)
+    assert stored_auth is not None
+
+    first_calls = 0
+
+    class CrashedClient:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            nonlocal first_calls
+            first_calls += 1
+            raise OSError("process crashed after sending refresh request")
+
+    with pytest.raises(OSError, match="process crashed"):
+        asyncio.run(refresh_cookie_auth(auth_file, stored_auth, CrashedClient()))
+    pending = load_pending_rotation(auth_file)
+    assert pending is not None
+    assert pending["state"] == "requested"
+    assert first_calls == 1
+
+    second_calls = 0
+
+    class MustNotReplayClient:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            nonlocal second_calls
+            second_calls += 1
+            raise AssertionError("a requested one-time refresh must not be replayed")
+
+    with pytest.raises(auth_module.EnjiHttpError, match="outcome is unknown") as exc_info:
+        asyncio.run(refresh_cookie_auth(auth_file, stored_auth, MustNotReplayClient()))
+    assert exc_info.value.code == "STORAGE"
+    assert second_calls == 0
+    assert load_pending_rotation(auth_file) is not None
+
+
+def test_legacy_reserved_rotation_is_treated_as_unknown(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access=old; refresh=one-time", auth_file)
+    stored_auth = load_stored_auth(auth_file)
+    assert stored_auth is not None
+    pending_rotation_path(auth_file).write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "state": "reserved",
+                "previous_auth": stored_auth,
+                "replacement_cookie_header": None,
+                "error_type": None,
+                "errno": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class MustNotReplayClient:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            raise AssertionError("an ambiguous legacy reservation must not be replayed")
+
+    with pytest.raises(auth_module.EnjiHttpError, match="outcome is unknown"):
+        asyncio.run(refresh_cookie_auth(auth_file, stored_auth, MustNotReplayClient()))
+    pending = load_pending_rotation(auth_file)
+    assert pending is not None
+    assert pending["state"] == "requested"
+
+
+def test_invalid_rotation_journal_fails_closed_without_refresh_request(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access=old; refresh=one-time", auth_file)
+    stored_auth = load_stored_auth(auth_file)
+    assert stored_auth is not None
+    pending_rotation_path(auth_file).write_text("not-json", encoding="utf-8")
+
+    class MustNotReplayClient:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            raise AssertionError("an invalid journal must block refresh")
+
+    with pytest.raises(auth_module.EnjiHttpError, match="journal is invalid") as exc_info:
+        asyncio.run(refresh_cookie_auth(auth_file, stored_auth, MustNotReplayClient()))
+    assert exc_info.value.code == "STORAGE"
+
+
+def test_rejected_refresh_keeps_no_replay_fence(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access=old; refresh=one-time", auth_file)
+    stored_auth = load_stored_auth(auth_file)
+    assert stored_auth is not None
+
+    class Client:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            return EnjiHttpResponse(status_code=401, headers={}, content=b"{}")
+
+    with pytest.raises(auth_module.EnjiHttpError) as exc_info:
+        asyncio.run(refresh_cookie_auth(auth_file, stored_auth, Client()))
+    assert exc_info.value.code == "AUTH_REQUIRED"
+    pending = load_pending_rotation(auth_file)
+    assert pending is not None
+    assert pending["state"] == "requested"
 
 
 def test_auto_refresh_backoff_grows_caps_and_auth_required_is_calmer(

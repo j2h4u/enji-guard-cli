@@ -40,7 +40,9 @@ from enji_guard_cli.auth_session.store import (
     consume_pending_rotation,
     load_auth_file,
     load_pending_rotation,
+    mark_pending_rotation_requested,
     mark_pending_rotation_rotated,
+    pending_rotation_path,
     record_pending_rotation_error,
     reserve_pending_rotation,
     stored_auth,
@@ -481,8 +483,14 @@ async def refresh_cookie_auth(
             if latest_auth["credential"]["type"] != CredentialType.COOKIE.value:
                 raise EnjiHttpError("AUTH_REQUIRED", "stored credential is not cookie based")
             pending_rotation = load_pending_rotation(path)
+            if pending_rotation is None and pending_rotation_path(path).exists():
+                raise EnjiHttpError("STORAGE", "pending auth refresh rotation journal is invalid")
             if pending_rotation is not None and pending_rotation["state"] == "rotated":
                 return _recover_pending_refresh_rotation(path, latest_auth, pending_rotation, resolved_event_sink)
+            if pending_rotation is not None and pending_rotation["state"] == "requested":
+                return _recover_unknown_pending_refresh_rotation(
+                    path, latest_auth, pending_rotation, resolved_event_sink
+                )
             if pending_rotation is not None:
                 consume_pending_rotation(path)
             if latest_auth is not stored_auth:
@@ -507,7 +515,11 @@ async def _refresh_cookie_auth_unlocked(
         raise EnjiHttpError("AUTH_REQUIRED", "stored credential is not cookie based")
     try:
         reserve_pending_rotation(path, stored_auth)
-    except OSError as exc:
+        pending_rotation = load_pending_rotation(path)
+        if pending_rotation is None:
+            raise OSError("pending refresh rotation journal is missing")
+        mark_pending_rotation_requested(path, pending_rotation)
+    except (OSError, ValueError) as exc:
         raise EnjiHttpError("STORAGE", f"failed to reserve refreshed cookie: {exc}") from exc
     response = await client.request(
         EnjiHttpRequest(
@@ -535,6 +547,8 @@ async def _refresh_cookie_auth_unlocked(
     _validate_successful_refresh_cookie_rotation(response)
     refreshed_auth = _persist_refresh_response_cookies(path, stored_auth, response, event_sink)
     raise_for_response_status(response, operation="auth refresh", expected_statuses={HTTP_OK})
+    if response.status_code == HTTP_OK:
+        consume_pending_rotation(path)
     return refreshed_auth
 
 
@@ -638,6 +652,29 @@ def _recover_pending_refresh_rotation(
         event_sink, "enji_auth_refresh_rotation_superseded", logging.WARNING, pending_rotation
     )
     return latest_auth
+
+
+def _recover_unknown_pending_refresh_rotation(
+    path: Path,
+    latest_auth: StoredAuth,
+    pending_rotation: PendingRefreshRotation,
+    event_sink: AuthEventSink,
+) -> StoredAuth:
+    # A requested journal means the one-time refresh request may have reached
+    # Enji, but no response was durably observed. Never replay that token.
+    if not _cookie_auth_matches(latest_auth, pending_rotation["previous_auth"]):
+        consume_pending_rotation(path)
+        _log_pending_refresh_rotation(
+            event_sink, "enji_auth_refresh_rotation_superseded", logging.WARNING, pending_rotation
+        )
+        return latest_auth
+    _log_pending_refresh_rotation(
+        event_sink, "enji_auth_refresh_rotation_outcome_unknown", logging.ERROR, pending_rotation
+    )
+    raise EnjiHttpError(
+        "STORAGE",
+        "auth refresh outcome is unknown; re-import the current cookie credentials before retrying",
+    )
 
 
 def _cookie_auth_matches(left: StoredAuth, right: StoredAuth) -> bool:
