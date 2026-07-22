@@ -11,7 +11,6 @@ from enji_guard_cli.auth_session.models import (
     ImportCredentialPayload,
     StoredAuth,
 )
-from enji_guard_cli.auth_session.ports import AuthEventSink
 from enji_guard_cli.settings import EnjiGuardSettings, default_settings
 from enji_guard_cli.transport import EnjiHttpClient
 
@@ -25,13 +24,11 @@ class AuthSessionService:
         client: EnjiHttpClient | None = None,
         *,
         settings: EnjiGuardSettings | None = None,
-        event_sink: AuthEventSink | None = None,
     ) -> None:
         resolved_settings = settings if settings is not None else default_settings()
         self.auth_file = auth_file if auth_file is not None else resolved_settings.auth.auth_file
         self.client = client
         self.settings = resolved_settings
-        self.event_sink = event_sink
 
     def import_cookie(self, raw_cookie: str) -> ImportCredentialPayload:
         return _api.import_cookie(raw_cookie, self.auth_file)
@@ -50,7 +47,7 @@ class AuthSessionService:
         return _api.auth_headers(current)
 
     async def status_async(self) -> AuthStatusPayload:
-        return await _api.auth_status_async(self.auth_file, self.client, event_sink=self.event_sink)
+        return await _api.auth_status_async(self.auth_file, self.client)
 
     def status(self) -> AuthSessionStatus:
         return AuthSessionStatus.from_payload(asyncio.run(self.status_async()))
@@ -61,14 +58,6 @@ class AuthSessionService:
     async def backend_readiness_probe_async(self) -> AuthBackendReadinessResult:
         """Observe backend auth state without triggering cookie refresh."""
         return await _api.backend_readiness_probe_async(self.auth_file, self.client)
-
-    def start_auto_refresh_task(self):
-        """Start the single supervisor-owned cookie refresh task."""
-        return _api.start_auto_refresh_task(
-            self.auth_file,
-            settings=self.settings,
-            event_sink=self.event_sink,
-        )
 
 
 def default_auth_file() -> Path:

@@ -32,6 +32,8 @@ from enji_guard_cli.auth_session.api import StoredAuth as RuntimeStoredAuth
 from enji_guard_cli.auth_session.cookies import merge_set_cookie_headers, set_cookie_names
 from enji_guard_cli.auth_session.coordinator import PreDispatchLocalError, TerminalRevisionRequiredError
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
+from enji_guard_cli.auth_session.state_machine import OutcomeUnknown, Rejected, RotationState
+from enji_guard_cli.auth_session.store import AuthLoaded, load_auth, write_journal
 from enji_guard_cli.delivery.cli.app import app
 from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER, AutoRefreshSettings
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient
@@ -103,6 +105,46 @@ def test_future_credential_import_timestamp_has_stable_clock_anomaly_classificat
     assert status["message"] == "auth file imported_at is in the future"
     assert readiness.failure_code == "AUTH_CLOCK_ANOMALY"
     assert readiness.failure_message == "auth file imported_at is in the future"
+    assert readiness.bypass_grace is True
+
+
+@pytest.mark.parametrize(
+    ("state_factory", "expected_code"),
+    [
+        (lambda revision: Rejected(revision, "rejected"), "AUTH_REFRESH_REJECTED"),
+        (lambda revision: OutcomeUnknown(revision, "timeout"), "AUTH_REFRESH_OUTCOME_UNKNOWN"),
+    ],
+)
+def test_terminal_auth_projection_bypasses_status_and_readiness_network(
+    tmp_path: Path,
+    state_factory: Callable[[str], RotationState],
+    expected_code: str,
+) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    write_journal(auth_file, state_factory(loaded.auth["revision"]))
+    requests: list[EnjiHttpRequest] = []
+
+    class Client:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            requests.append(request)
+            raise AssertionError("terminal auth projection must not perform HTTP")
+
+    async def observe() -> tuple[AuthStatusPayload, AuthBackendReadinessResult]:
+        return (
+            await auth_status_async(auth_file, Client()),
+            await backend_readiness_probe_async(auth_file, Client()),
+        )
+
+    status, readiness = asyncio.run(observe())
+
+    assert status["code"] == expected_code
+    assert "import a fresh browser credential" in cast(str, status["message"])
+    assert readiness.failure_code == expected_code
+    assert readiness.bypass_grace is True
+    assert requests == []
 
 
 def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -832,7 +874,7 @@ def test_refresh_auth_does_not_persist_cookies_from_auth_failure(tmp_path: Path,
             return await _refresh_stored_cookie_auth(
                 auth_file,
                 HttpxEnjiHttpClient(client),
-                event_sink=lambda logger, level, event, fields: events.append((event, fields)),
+                outcome_sink=lambda logger, level, event, fields: events.append((event, fields)) or True,
             )
 
     with pytest.raises(EnjiHttpError) as exc_info:
@@ -938,7 +980,7 @@ def test_start_auto_refresh_task_uses_explicit_auth_file_without_default_fallbac
     assert loaded_paths == [custom_auth_file]
 
 
-def test_auth_adapter_passes_isolated_event_sink_to_auto_refresh(
+def test_runtime_auth_adapter_wires_telemetry_and_durable_outcome_sinks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     captured_dependencies: list[auto_refresh_module.AutoRefreshTaskDependencies] = []
@@ -962,8 +1004,16 @@ def test_auth_adapter_passes_isolated_event_sink_to_auto_refresh(
 
     monkeypatch.setattr(auto_refresh_module, "start_auto_refresh_task", fake_start_auto_refresh_task)
 
-    adapter = RuntimeAuthCoordinator(tmp_path / "custom-auth.json", event_sink=event_sink)
-    assert adapter.start_auto_refresh_task() is None
+    monkeypatch.setattr("enji_guard_cli.auth_session.adapters.log_event", event_sink)
+    outcome_events: list[tuple[str, dict[str, object]]] = []
+
+    def outcome_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
+        _ = logger, level
+        outcome_events.append((event, dict(fields)))
+        return True
+
+    adapter = RuntimeAuthCoordinator(tmp_path / "custom-auth.json", outcome_sink=outcome_sink)
+    assert adapter.start_background_refresh_task() is None
 
     dependencies = captured_dependencies[0].loop_dependencies
     for event in (
@@ -979,13 +1029,15 @@ def test_auth_adapter_passes_isolated_event_sink_to_auto_refresh(
     assert all(fields == {"safe": True} for _event, fields in events)
 
     isolated_adapter = RuntimeAuthCoordinator(tmp_path / "isolated-auth.json")
-    assert isolated_adapter.start_auto_refresh_task() is None
+    assert isolated_adapter.start_background_refresh_task() is None
     isolated_dependencies = captured_dependencies[1].loop_dependencies
     isolated_dependencies.log_event_fn(logging.getLogger("test"), logging.INFO, "leak-check", {})
     assert [event for event, _fields in events] == [
         "enji_auth_auto_refresh_scheduled",
         "enji_auth_auto_refresh_schedule_failed",
+        "leak-check",
     ]
+    assert outcome_events == []
 
 
 def test_cli_import_bearer_reads_from_stdin(tmp_path: Path) -> None:

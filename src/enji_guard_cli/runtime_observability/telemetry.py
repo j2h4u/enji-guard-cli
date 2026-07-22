@@ -53,20 +53,40 @@ def log_event(
     event: str,
     fields: Mapping[str, object],
 ) -> None:
+    persist_event(logger, level, event, fields)
+
+
+def persist_event(
+    logger: logging.Logger,
+    level: int,
+    event: str,
+    fields: Mapping[str, object],
+) -> bool:
+    """Persist one telemetry event and report durable sink acceptance.
+
+    Rotation journals use this result as their outbox acknowledgement.  An
+    unavailable sink, filtered logger, or sink exception intentionally leaves
+    that journal in place for a later supervisor reconciliation.
+    """
     if logger.isEnabledFor(level):
         sink = _ACTIVE_SINK
         if sink is None:
-            return
-        sink.emit(
-            TelemetryEvent(
-                timestamp=datetime.now(UTC),
-                level=logging.getLevelName(level).lower(),
-                logger=logger.name,
-                message=event,
-                provenance=_event_provenance(),
-                fields=dict(_safe_log_fields(fields)),
+            return False
+        try:
+            sink.emit(
+                TelemetryEvent(
+                    timestamp=datetime.now(UTC),
+                    level=logging.getLevelName(level).lower(),
+                    logger=logger.name,
+                    message=event,
+                    provenance=_event_provenance(),
+                    fields=dict(_safe_log_fields(fields)),
+                )
             )
-        )
+        except OSError, RuntimeError:
+            return False
+        return True
+    return False
 
 
 @contextmanager

@@ -10,10 +10,19 @@ type GatewayAuthFile = Path | None
 type GatewayClient = EnjiHttpClient | None
 
 
+class GatewayCredentialError(Exception):
+    """Typed read-only credential failure translated at the gateway boundary."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
 class GatewayCredentialReader(Protocol):
     """Read-only credential capabilities required by the HTTP gateway client."""
 
-    def load(self, auth_file: Path | None = None) -> StoredAuth | None: ...
+    def load(self, auth_file: Path | None = None) -> StoredAuth: ...
 
     def headers(self, stored_auth: StoredAuth) -> dict[str, str]: ...
 
@@ -21,5 +30,6 @@ class GatewayCredentialReader(Protocol):
 __all__ = [
     "GatewayAuthFile",
     "GatewayClient",
+    "GatewayCredentialError",
     "GatewayCredentialReader",
 ]

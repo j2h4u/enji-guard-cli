@@ -86,6 +86,33 @@ def test_readiness_verdict_tolerates_failures_below_threshold_after_success(tmp_
     assert verdict.state.ready is True
 
 
+def test_readiness_terminal_auth_failure_bypasses_grace_after_success(tmp_path: Path) -> None:
+    settings = readiness_settings(tmp_path)
+    now = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)
+    success = backend_readiness_state_after_probe(
+        INITIAL_BACKEND_READINESS_STATE,
+        BackendReadinessProbe(ready=True, credential_type="cookie"),
+        checked_at=now - timedelta(seconds=1),
+    )
+    terminal = backend_readiness_state_after_probe(
+        success,
+        BackendReadinessProbe(
+            ready=False,
+            failure_kind="storage",
+            failure_code="AUTH_REFRESH_OUTCOME_UNKNOWN",
+            failure_message="refresh outcome is unknown; import a fresh browser credential",
+            bypass_grace=True,
+        ),
+        checked_at=now,
+    )
+    write_backend_readiness_state(settings.state_file, terminal)
+
+    verdict = readiness_verdict(settings, now=now)
+
+    assert verdict.ready is False
+    assert verdict.reason == "backend readiness has a terminal auth failure"
+
+
 def test_readiness_verdict_fails_at_threshold(tmp_path: Path) -> None:
     settings = readiness_settings(tmp_path)
     now = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)

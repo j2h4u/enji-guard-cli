@@ -40,6 +40,7 @@ class AuthBackendReadinessResult:
     failure_status_code: int | None = None
     credential_type: str | None = None
     elapsed_ms: int | None = None
+    bypass_grace: bool = False
 
 
 @dataclass(frozen=True, slots=True)

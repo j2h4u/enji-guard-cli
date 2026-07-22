@@ -5,11 +5,7 @@ from logging import Logger
 from pathlib import Path
 from typing import Protocol
 
-from enji_guard_cli.auth_session.models import (
-    AuthBackendReadinessResult,
-    AuthSessionStatus,
-    StoredAuth,
-)
+from enji_guard_cli.auth_session.models import AuthSessionStatus, StoredAuth
 
 
 class AuthEventSink(Protocol):
@@ -29,18 +25,6 @@ class AuthOutcomeSink(Protocol):
     def __call__(self, logger: Logger, level: int, event: str, fields: Mapping[str, object]) -> bool: ...
 
 
-class AuthReadinessPort(Protocol):
-    """Backend observation capability consumed by runtime composition."""
-
-    async def backend_readiness_probe_async(self) -> AuthBackendReadinessResult: ...
-
-
-class AuthRefreshTaskPort(Protocol):
-    """Background refresh task capability consumed by runtime composition."""
-
-    def start_auto_refresh_task(self): ...
-
-
 class AuthSessionPort(Protocol):
     """Credential lifecycle operations; no delivery or endpoint controls."""
 
@@ -58,8 +42,6 @@ class AuthStorePort(Protocol):
 __all__ = [
     "AuthEventSink",
     "AuthOutcomeSink",
-    "AuthReadinessPort",
-    "AuthRefreshTaskPort",
     "AuthSessionPort",
     "AuthStorePort",
 ]

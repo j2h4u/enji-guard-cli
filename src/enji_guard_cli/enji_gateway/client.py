@@ -7,7 +7,7 @@ from urllib.parse import quote, urlencode
 
 from enji_guard_cli.auth_session.models import StoredAuth
 from enji_guard_cli.enji_gateway.contract import EnjiEndpointSpec, HttpMethod
-from enji_guard_cli.enji_gateway.ports import GatewayCredentialReader
+from enji_guard_cli.enji_gateway.ports import GatewayCredentialError, GatewayCredentialReader
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.settings import default_settings
@@ -88,11 +88,10 @@ def load_api_session(
 ) -> EnjiApiSession:
     port = auth_port
     target = auth_file if auth_file is not None else default_settings().auth.auth_file
-    stored_auth = port.load(target)
-    if not target.exists():
-        raise EnjiApiError("AUTH_REQUIRED", "auth file does not exist")
-    if stored_auth is None:
-        raise EnjiApiError("AUTH_REQUIRED", "auth file is invalid")
+    try:
+        stored_auth = port.load(target)
+    except GatewayCredentialError as exc:
+        raise EnjiApiError(exc.code, exc.message) from exc
 
     return EnjiApiSession(
         auth_file=target,

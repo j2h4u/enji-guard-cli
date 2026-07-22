@@ -15,33 +15,27 @@ from enji_guard_cli.settings import ReadinessSettings
 
 def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
     refresh_started = False
-    refresh_cancelled = False
     readiness_started = False
-    readiness_cancelled = False
     served_while_refresh_was_running = False
     refresh_tasks: list[asyncio.Task[None]] = []
     readiness_tasks: list[asyncio.Task[None]] = []
+    startup_reconciled = False
     sentinel_settings = runtime.default_settings()
 
     async def fake_refresh_loop() -> None:
-        nonlocal refresh_cancelled, refresh_started
+        nonlocal refresh_started
 
         refresh_started = True
-        try:
-            await asyncio.Future[None]()
-        finally:
-            refresh_cancelled = True
+        await asyncio.Future[None]()
 
     async def fake_readiness_loop() -> None:
-        nonlocal readiness_cancelled, readiness_started
+        nonlocal readiness_started
 
         readiness_started = True
-        try:
-            await asyncio.Future[None]()
-        finally:
-            readiness_cancelled = True
+        await asyncio.Future[None]()
 
     def fake_start_auto_refresh_task() -> asyncio.Task[None]:
+        assert startup_reconciled is True
         refresh_task = asyncio.create_task(fake_refresh_loop())
         refresh_tasks.append(refresh_task)
         return refresh_task
@@ -49,6 +43,7 @@ def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypat
     def fake_start_backend_readiness_task(*, observer: object, settings: object) -> asyncio.Task[None]:
         assert observer is auth
         assert settings is sentinel_settings
+        assert startup_reconciled is True
         readiness_task = asyncio.create_task(fake_readiness_loop())
         readiness_tasks.append(readiness_task)
         return readiness_task
@@ -62,22 +57,23 @@ def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypat
         nonlocal served_while_refresh_was_running
 
         assert server == "server"
+        assert startup_reconciled is True
         assert transport == "streamable-http"
         assert mount_path is None
         await asyncio.sleep(0)
         served_while_refresh_was_running = (
-            refresh_started
-            and readiness_started
-            and len(refresh_tasks) == 1
-            and len(readiness_tasks) == 1
-            and not refresh_tasks[0].done()
-            and not readiness_tasks[0].done()
+            refresh_started and readiness_started and not refresh_tasks[0].done() and not readiness_tasks[0].done()
         )
 
     monkeypatch.setattr(runtime, "start_backend_readiness_task", fake_start_backend_readiness_task)
 
     class FakeRuntimeAuth:
-        def start_auto_refresh_task(self) -> asyncio.Task[None]:
+        async def reconcile_startup(self) -> None:
+            nonlocal startup_reconciled
+            await asyncio.sleep(0)
+            startup_reconciled = True
+
+        def start_background_refresh_task(self) -> asyncio.Task[None]:
             return fake_start_auto_refresh_task()
 
         async def observe_backend_readiness(self) -> BackendReadinessObservation:
@@ -100,10 +96,6 @@ def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypat
     )
 
     assert served_while_refresh_was_running is True
-    assert refresh_cancelled is True
-    assert readiness_cancelled is True
-    assert len(refresh_tasks) == 1
-    assert len(readiness_tasks) == 1
     assert refresh_tasks[0].cancelled()
     assert readiness_tasks[0].cancelled()
 

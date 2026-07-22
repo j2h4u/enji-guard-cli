@@ -81,6 +81,8 @@ async def run_service_async(
     """Start all sibling tasks and cancel them together on service exit."""
     if mcp_server_factory is None or mcp_server_runner is None:
         raise ValueError("MCP server factory and runner must be provided by delivery composition")
+    if runtime_auth is not None:
+        await runtime_auth.reconcile_startup()
     mcp_task = asyncio.create_task(
         mcp_server_runner(
             mcp_server_factory(options.host, options.port),
@@ -89,7 +91,7 @@ async def run_service_async(
         ),
         name="enji-guard-mcp-server",
     )
-    refresh_task = runtime_auth.start_auto_refresh_task() if runtime_auth is not None else None
+    refresh_task = runtime_auth.start_background_refresh_task() if runtime_auth is not None else None
     resolved_settings = settings if settings is not None else default_settings()
     readiness_task = start_backend_readiness_task(observer=runtime_auth, settings=resolved_settings)
     shutdown_event = asyncio.Event()
@@ -286,6 +288,7 @@ def _readiness_probe(observation: BackendReadinessObservation) -> BackendReadine
         failure_status_code=observation.failure_status_code,
         credential_type=observation.credential_type,
         elapsed_ms=observation.elapsed_ms,
+        bypass_grace=observation.bypass_grace,
     )
 
 

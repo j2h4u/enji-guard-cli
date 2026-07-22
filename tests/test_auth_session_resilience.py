@@ -184,7 +184,9 @@ def test_rotated_cookie_journal_recovers_from_disk_without_replaying_post(tmp_pa
 
     assert calls == 0
     assert recovered["credential"] == {"type": "cookie", "cookie_header": "access=new; refresh=rotated"}
-    assert not journal_path.exists()
+    # An unacknowledged durable outcome remains in the outbox for the runtime
+    # telemetry sink to drain on a later reconciliation.
+    assert journal_path.exists()
 
 
 def test_corrupt_refresh_journal_avoids_refresh_request(tmp_path: Path) -> None:

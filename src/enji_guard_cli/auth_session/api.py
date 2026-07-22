@@ -22,13 +22,13 @@ from enji_guard_cli.auth_session.payloads import (
     _unauthenticated_payload,
 )
 from enji_guard_cli.auth_session.ports import AuthEventSink, AuthOutcomeSink
+from enji_guard_cli.auth_session.projection import AuthProjectionError, network_credential, project_auth
 from enji_guard_cli.auth_session.store import (
-    AuthClockAnomaly,
-    AuthLoaded,
     CredentialType,
     StoredAuth,
     load_auth,
     load_auth_file,
+    load_journal,
     stored_auth,
 )
 from enji_guard_cli.settings import DEFAULT_BASE_URL, AutoRefreshSettings, EnjiGuardSettings, default_settings
@@ -159,29 +159,19 @@ def cookie_refresh_sleep_seconds(
 def auth_status(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
-    *,
-    event_sink: AuthEventSink | None = None,
 ) -> AuthStatusPayload:
-    return asyncio.run(auth_status_async(auth_file, client, event_sink=event_sink))
+    return asyncio.run(auth_status_async(auth_file, client))
 
 
 async def auth_status_async(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
-    *,
-    event_sink: AuthEventSink | None = None,
 ) -> AuthStatusPayload:
-    _ = event_sink
     target = auth_file if auth_file is not None else default_auth_file()
-    if not target.exists():
-        return _unauthenticated_payload(target, None, "AUTH_REQUIRED", "auth file does not exist")
-
-    loaded = load_auth(target)
-    if isinstance(loaded, AuthClockAnomaly):
-        return _unauthenticated_payload(target, None, "AUTH_CLOCK_ANOMALY", "auth file imported_at is in the future")
-    if not isinstance(loaded, AuthLoaded):
-        return _unauthenticated_payload(target, None, "AUTH_REQUIRED", "auth file is invalid")
-    stored_auth = loaded.auth
+    try:
+        stored_auth = network_credential(_auth_projection(target))
+    except AuthProjectionError as exc:
+        return _unauthenticated_payload(target, None, exc.code, exc.message)
 
     if client is not None:
         return await _auth_status_with_client(target, stored_auth, client)
@@ -196,39 +186,19 @@ async def backend_readiness_probe_async(
 ) -> AuthBackendReadinessResult:
     started_at = time.monotonic()
     target = auth_file if auth_file is not None else default_auth_file()
-    if not target.exists():
+    try:
+        stored_auth = network_credential(_auth_projection(target))
+    except AuthProjectionError as exc:
         return _backend_readiness_failure(
             started_at,
             AuthBackendReadinessResult(
                 ready=False,
                 failure_kind="storage",
-                failure_code="AUTH_REQUIRED",
-                failure_message="auth file does not exist",
+                failure_code=exc.code,
+                failure_message=exc.message,
+                bypass_grace=True,
             ),
         )
-
-    loaded = load_auth(target)
-    if isinstance(loaded, AuthClockAnomaly):
-        return _backend_readiness_failure(
-            started_at,
-            AuthBackendReadinessResult(
-                ready=False,
-                failure_kind="storage",
-                failure_code="AUTH_CLOCK_ANOMALY",
-                failure_message="auth file imported_at is in the future",
-            ),
-        )
-    if not isinstance(loaded, AuthLoaded):
-        return _backend_readiness_failure(
-            started_at,
-            AuthBackendReadinessResult(
-                ready=False,
-                failure_kind="storage",
-                failure_code="AUTH_REQUIRED",
-                failure_message="auth file is invalid",
-            ),
-        )
-    stored_auth = loaded.auth
 
     if client is not None:
         return await _backend_readiness_probe_with_client(stored_auth, client, started_at=started_at)
@@ -248,6 +218,7 @@ def start_auto_refresh_task(
     *,
     settings: EnjiGuardSettings | None = None,
     event_sink: AuthEventSink | None = None,
+    outcome_sink: AuthOutcomeSink | None = None,
 ) -> asyncio.Task[None] | None:
     resolved_settings = settings if settings is not None else default_settings()
     resolved_auth_file = auth_file if auth_file is not None else resolved_settings.auth.auth_file
@@ -264,7 +235,7 @@ def start_auto_refresh_task(
                 load_sleep_seconds_stored_auth_fn=load_stored_auth,
                 cookie_refresh_sleep_seconds_fn=cookie_refresh_sleep_seconds,
                 refresh_stored_cookie_auth_fn=lambda path, client: _refresh_stored_cookie_auth_for_auto_refresh(
-                    path, client, resolved_event_sink
+                    path, client, outcome_sink
                 ),
                 log_event_fn=resolved_event_sink,
                 logger=_LOGGER,
@@ -276,10 +247,31 @@ def start_auto_refresh_task(
     )
 
 
+async def reconcile_auth_startup(
+    auth_file: Path | None = None,
+    *,
+    outcome_sink: AuthOutcomeSink | None = None,
+) -> None:
+    """Durably reconcile abandoned rotations before runtime observers start."""
+
+    target = auth_file if auth_file is not None else default_auth_file()
+
+    class _StartupOnlyExchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            raise AssertionError("startup reconciliation must not dispatch refresh")
+
+    await RefreshCoordinator(
+        target,
+        _StartupOnlyExchange(),
+        dependencies=CoordinatorDependencies(outcome_sink=outcome_sink),
+    ).recover_startup()
+
+
 async def _refresh_stored_cookie_auth_for_auto_refresh(
-    path: Path, client: object, event_sink: AuthEventSink | None = None
+    path: Path, client: object, outcome_sink: AuthOutcomeSink | None = None
 ) -> StoredAuth:
-    return await _refresh_stored_cookie_auth(path, cast(EnjiHttpClient, client), event_sink=event_sink)
+    return await _refresh_stored_cookie_auth(path, cast(EnjiHttpClient, client), outcome_sink=outcome_sink)
 
 
 async def _auth_status_with_client(
@@ -407,9 +399,8 @@ async def _refresh_cookie_auth(
     stored_auth: StoredAuth,
     client: EnjiHttpClient,
     *,
-    event_sink: AuthEventSink | None = None,
+    outcome_sink: AuthOutcomeSink | None = None,
 ) -> StoredAuth:
-    _ = event_sink
 
     class _HttpxRefreshExchange:
         async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
@@ -426,33 +417,21 @@ async def _refresh_cookie_auth(
     return await RefreshCoordinator(
         path,
         _HttpxRefreshExchange(),
-        dependencies=CoordinatorDependencies(outcome_sink=_outcome_sink_from_event_sink(event_sink)),
+        dependencies=CoordinatorDependencies(outcome_sink=outcome_sink),
     ).refresh(stored_auth)
 
 
-def _outcome_sink_from_event_sink(event_sink: AuthEventSink | None) -> AuthOutcomeSink:
-    """Temporary runtime-boundary adapter for the established telemetry callback.
-
-    The telemetry callback is synchronous, so returning normally is its durable
-    acceptance signal.  The coordinator itself has only the explicit outcome
-    sink contract and never knows about the broad callback.
-    """
-
-    def deliver(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
-        if event_sink is not None:
-            event_sink(logger, level, event, fields)
-        return True
-
-    return deliver
-
-
 async def _refresh_stored_cookie_auth(
-    path: Path, client: EnjiHttpClient, *, event_sink: AuthEventSink | None = None
+    path: Path, client: EnjiHttpClient, *, outcome_sink: AuthOutcomeSink | None = None
 ) -> StoredAuth:
     stored_auth = load_stored_auth(path)
     if stored_auth is None:
         raise EnjiHttpError("AUTH_REQUIRED", "auth file is invalid")
-    return await _refresh_cookie_auth(path, stored_auth, client, event_sink=event_sink)
+    return await _refresh_cookie_auth(path, stored_auth, client, outcome_sink=outcome_sink)
+
+
+def _auth_projection(path: Path):
+    return project_auth(load_auth(path), load_journal(path))
 
 
 def is_auth_invalid_response(response: EnjiHttpResponse) -> bool:
@@ -511,6 +490,7 @@ def _backend_readiness_failure(started_at: float, probe: AuthBackendReadinessRes
         failure_status_code=probe.failure_status_code,
         credential_type=probe.credential_type,
         elapsed_ms=_elapsed_ms(started_at),
+        bypass_grace=probe.bypass_grace,
     )
 
 
