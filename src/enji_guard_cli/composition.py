@@ -5,7 +5,7 @@ from pathlib import Path
 from enji_guard_cli.application import Application
 from enji_guard_cli.audit.catalog_observation import AuditCatalogObserver
 from enji_guard_cli.audit.ledger import FileAuditLedger
-from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
+from enji_guard_cli.auth_session.adapters import GatewayCredentialReader, RuntimeAuthCoordinator
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.enji_gateway import AuditGateway, GitLabGateway, PortfolioGateway
 from enji_guard_cli.enji_gateway.pooled_client import PooledEnjiHttpClient
@@ -24,21 +24,22 @@ def create_application(auth_file: Path | None = None) -> Application:
         ttl_seconds=settings.active_run_ledger.ttl_seconds,
         lookup_grace_seconds=settings.active_run_ledger.lookup_grace_seconds,
     )
-    auth_adapter = AuthSessionAdapter(auth_file, settings=settings, event_sink=log_event)
+    credential_reader = GatewayCredentialReader(auth_file, settings=settings)
+    runtime_auth = RuntimeAuthCoordinator(auth_file, settings=settings, event_sink=log_event)
     auth_service = AuthSessionService(auth_file, settings=settings, event_sink=log_event)
     fanout = BoundedFanout(settings.fanout)
     pooled_client = PooledEnjiHttpClient(settings)
     try:
-        portfolio_gateway = PortfolioGateway(auth_file, pooled_client, auth_port=auth_adapter)
+        portfolio_gateway = PortfolioGateway(auth_file, pooled_client, auth_port=credential_reader)
         return Application(
-            audit_gateway=AuditGateway(auth_file, pooled_client, auth_port=auth_adapter),
+            audit_gateway=AuditGateway(auth_file, pooled_client, auth_port=credential_reader),
             portfolio_gateway=portfolio_gateway,
-            gitlab_gateway=GitLabGateway(auth_file, pooled_client, auth_port=auth_adapter),
+            gitlab_gateway=GitLabGateway(auth_file, pooled_client, auth_port=credential_reader),
             auth=auth_service,
             ledger=ledger,
             catalog_observer=AuditCatalogObserver(settings.audit_catalog.state_file),
             target_service=GatewayPortfolioTargetService(portfolio_gateway, fanout),
-            runtime_auth=auth_adapter,
+            runtime_auth=runtime_auth,
             fanout=fanout,
             lifecycle=pooled_client,
         )

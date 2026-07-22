@@ -92,7 +92,7 @@ from enji_guard_cli.portfolio.status import (
     assemble_overview,
     status_for_repo,
 )
-from enji_guard_cli.runtime_observability.ports import RuntimeAuthPort
+from enji_guard_cli.runtime_observability.ports import RuntimeAuthCoordinator
 from enji_guard_cli.settings import RepositorySortName, default_settings
 
 
@@ -172,7 +172,7 @@ class Application:
     ledger: AuditLedgerPort | None = None
     catalog_observer: AuditCatalogObserver | None = None
     target_service: PortfolioTargetService | None = None
-    runtime_auth: RuntimeAuthPort | None = None
+    runtime_auth: RuntimeAuthCoordinator | None = None
     fanout: BoundedFanout = field(default_factory=lambda: BoundedFanout(default_settings().fanout))
     lifecycle: ApplicationLifecyclePort | None = None
     gitlab_gateway: GitLabDiscoveryPort | None = None
@@ -239,7 +239,7 @@ class Application:
         except AuthError as exc:
             raise ApplicationAuthError(exc.code, exc.message) from exc
 
-    def runtime_auth_port(self) -> RuntimeAuthPort:
+    def runtime_auth_port(self) -> RuntimeAuthCoordinator:
         if self.runtime_auth is None:
             raise RuntimeError("runtime auth is not configured")
         return self.runtime_auth

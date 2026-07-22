@@ -19,7 +19,7 @@ from enji_guard_cli.audit.ports import (
     AuditTaskLinksResult,
     MalformedAuditSnapshotError,
 )
-from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
+from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
 from enji_guard_cli.auth_session.api import import_bearer_token
 from enji_guard_cli.enji_gateway import AuditGateway
 from enji_guard_cli.enji_gateway.http import AuditRunCreate
@@ -169,7 +169,7 @@ class _GatewayHarness:
         self.snapshot_payload: JsonObjectPayload = {"snapshot": {"content": {"report": "findings", "score": 80}}}
         self.auth_file = Path("auth.json")
         self.client = cast(EnjiHttpClient, object())
-        self.gateway = AuditGateway(auth_file=self.auth_file, client=self.client, auth_port=AuthSessionAdapter())
+        self.gateway = AuditGateway(auth_file=self.auth_file, client=self.client, auth_port=GatewayCredentialReader())
         self.request = AuditRunRequest(
             "repo-1",
             "project-1",
@@ -363,7 +363,7 @@ def test_audit_gateway_task_detail_maps_real_http_helper_failures(
     auth_file = tmp_path / "auth.json"
     import_bearer_token("token-123", auth_file)
     client = _TaskDetailHttpFake(response)
-    gateway = AuditGateway(auth_file=auth_file, client=client, auth_port=AuthSessionAdapter())
+    gateway = AuditGateway(auth_file=auth_file, client=client, auth_port=GatewayCredentialReader())
 
     with pytest.raises(expected):
         gateway.task_detail("task-1")
@@ -379,7 +379,7 @@ def test_audit_gateway_rejects_task_detail_identity_mismatch_from_real_http_help
     client = _TaskDetailHttpFake(
         EnjiHttpResponse(status_code=200, headers={}, content=b'{"id":"task-2","status":"completed"}')
     )
-    gateway = AuditGateway(auth_file=auth_file, client=client, auth_port=AuthSessionAdapter())
+    gateway = AuditGateway(auth_file=auth_file, client=client, auth_port=GatewayCredentialReader())
 
     with pytest.raises(AuditMalformedError, match="mismatched task id"):
         gateway.task_detail("task-1")

@@ -10,20 +10,16 @@ type GatewayAuthFile = Path | None
 type GatewayClient = EnjiHttpClient | None
 
 
-class GatewayAuthPort(Protocol):
-    """Auth capabilities required by the HTTP gateway client."""
+class GatewayCredentialReader(Protocol):
+    """Read-only credential capabilities required by the HTTP gateway client."""
 
     def load(self, auth_file: Path | None = None) -> StoredAuth | None: ...
 
     def headers(self, stored_auth: StoredAuth) -> dict[str, str]: ...
 
-    def is_cookie_session(self, stored_auth: StoredAuth) -> bool: ...
-
-    async def refresh(self, auth_file: Path, stored_auth: StoredAuth, client: EnjiHttpClient) -> StoredAuth: ...
-
 
 __all__ = [
     "GatewayAuthFile",
-    "GatewayAuthPort",
     "GatewayClient",
+    "GatewayCredentialReader",
 ]

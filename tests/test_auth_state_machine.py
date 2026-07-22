@@ -6,6 +6,7 @@ import pytest
 
 from enji_guard_cli.auth_session.api import import_cookie
 from enji_guard_cli.auth_session.coordinator import RefreshCoordinator, import_credential
+from enji_guard_cli.auth_session.models import StoredAuth
 from enji_guard_cli.auth_session.state_machine import (
     Begin,
     DeleteJournal,
@@ -149,7 +150,8 @@ def test_ambiguous_response_is_dispatched_once_per_source_revision(tmp_path: Pat
     class Exchange:
         calls = 0
 
-        async def exchange_once(self, _source: object) -> EnjiHttpResponse:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            _ = source
             self.calls += 1
             return EnjiHttpResponse(status_code=502, headers={}, content=b"gateway unavailable")
 

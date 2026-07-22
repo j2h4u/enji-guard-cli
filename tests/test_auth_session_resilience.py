@@ -5,12 +5,12 @@ import httpx
 import pytest
 
 import enji_guard_cli.enji_gateway.client as api_client_module
-from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
+from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
 from enji_guard_cli.auth_session.api import (
+    _refresh_cookie_auth,
     backend_readiness_probe_async,
     import_cookie,
     load_stored_auth,
-    refresh_cookie_auth,
 )
 from enji_guard_cli.auth_session.state_machine import Rotated
 from enji_guard_cli.auth_session.store import (
@@ -20,7 +20,6 @@ from enji_guard_cli.auth_session.store import (
 from enji_guard_cli.enji_gateway.client import (
     ApiEndpoint,
     ApiRequestSpec,
-    EnjiApiSession,
     request_json_object,
 )
 from enji_guard_cli.enji_gateway.contract import (
@@ -60,7 +59,7 @@ def test_auth_request_paths_assign_auth_refresh_and_read_profiles(tmp_path: Path
     async def run() -> None:
         stored_auth = load_stored_auth(auth_file)
         assert stored_auth is not None
-        await refresh_cookie_auth(auth_file, stored_auth, Client())
+        await _refresh_cookie_auth(auth_file, stored_auth, Client())
         await backend_readiness_probe_async(auth_file, Client())
 
     asyncio.run(run())
@@ -132,10 +131,10 @@ def test_non_replayable_profiles_do_not_auto_retry_status_responses(profile: Ret
     assert calls == 1
 
 
-def test_unsafe_request_is_not_replayed_after_cookie_refresh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_gateway_unsafe_request_is_not_replayed_or_refreshed(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access=old; refresh=long", auth_file)
-    session = api_client_module.load_api_session(auth_file, auth_port=AuthSessionAdapter())
+    session = api_client_module.load_api_session(auth_file, auth_port=GatewayCredentialReader())
     calls: list[EnjiHttpRequest] = []
 
     class Client:
@@ -146,11 +145,6 @@ def test_unsafe_request_is_not_replayed_after_cookie_refresh(monkeypatch: pytest
                 headers={},
                 content=b'{"error":{"code":"AUTH_INVALID"}}',
             )
-
-    async def fake_refresh(current: EnjiApiSession, _client: object) -> None:
-        current.update_stored_auth(current.stored_auth)
-
-    monkeypatch.setattr(api_client_module, "refresh_session", fake_refresh)
 
     spec = ApiRequestSpec(
         method="POST",
@@ -186,7 +180,7 @@ def test_rotated_cookie_journal_recovers_from_disk_without_replaying_post(tmp_pa
             calls += 1
             raise AssertionError("durable rotated journal should avoid refresh request")
 
-    recovered = asyncio.run(refresh_cookie_auth(auth_file, stored_auth, Client()))
+    recovered = asyncio.run(_refresh_cookie_auth(auth_file, stored_auth, Client()))
 
     assert calls == 0
     assert recovered["credential"] == {"type": "cookie", "cookie_header": "access=new; refresh=rotated"}
@@ -209,5 +203,5 @@ def test_corrupt_refresh_journal_avoids_refresh_request(tmp_path: Path) -> None:
             raise AssertionError("refresh request must not run without a journal")
 
     with pytest.raises(EnjiHttpError, match="refresh journal is corrupt"):
-        asyncio.run(refresh_cookie_auth(auth_file, stored_auth, Client()))
+        asyncio.run(_refresh_cookie_auth(auth_file, stored_auth, Client()))
     assert calls == 0

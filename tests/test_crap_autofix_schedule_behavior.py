@@ -5,7 +5,7 @@ import pytest
 import enji_guard_cli.enji_gateway.audit_gateway as gateway_module
 from enji_guard_cli.audit.ports import AuditSchedule, AuditScheduleUpdate
 from enji_guard_cli.audit.schedules import set_for_targets
-from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
+from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
 from enji_guard_cli.enji_gateway.audit_gateway import AuditGateway
 
 
@@ -35,7 +35,7 @@ def test_list_autofix_jobs_maps_variants_and_preserves_extensions(monkeypatch: p
             ]
         },
     )
-    jobs = AuditGateway(auth_port=AuthSessionAdapter()).list_autofix_jobs("repo-1")
+    jobs = AuditGateway(auth_port=GatewayCredentialReader()).list_autofix_jobs("repo-1")
     assert len(jobs) == 2
     first, second = jobs
     assert first.action_key == "improvement.security"

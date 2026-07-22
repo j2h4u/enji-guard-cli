@@ -11,7 +11,7 @@ from typing import Literal, Protocol
 from enji_guard_cli.runtime_observability.ports import (
     BackendReadinessObservation,
     BackendReadinessPort,
-    RuntimeAuthPort,
+    RuntimeAuthCoordinator,
 )
 from enji_guard_cli.runtime_observability.readiness import (
     BackendReadinessProbe,
@@ -51,7 +51,7 @@ class RuntimeServiceOptions:
 class RuntimeSupervisor:
     """Injectable supervisor facade used by service composition and tests."""
 
-    runtime_auth: RuntimeAuthPort | None = None
+    runtime_auth: RuntimeAuthCoordinator | None = None
     settings: EnjiGuardSettings | None = None
 
     async def run_async(
@@ -73,7 +73,7 @@ class RuntimeSupervisor:
 async def run_service_async(
     *,
     options: RuntimeServiceOptions,
-    runtime_auth: RuntimeAuthPort | None = None,
+    runtime_auth: RuntimeAuthCoordinator | None = None,
     settings: EnjiGuardSettings | None = None,
     mcp_server_factory: McpServerFactory | None = None,
     mcp_server_runner: McpServerRunner | None = None,
@@ -109,7 +109,7 @@ async def run_service_async(
 def run_service(
     *,
     options: RuntimeServiceOptions,
-    runtime_auth: RuntimeAuthPort | None = None,
+    runtime_auth: RuntimeAuthCoordinator | None = None,
     settings: EnjiGuardSettings | None = None,
     mcp_server_factory: McpServerFactory | None = None,
     mcp_server_runner: McpServerRunner | None = None,

@@ -50,7 +50,7 @@ from enji_guard_cli.enji_gateway.contract import (
     UX_PROJECT_CREATE_ENDPOINT_SPEC,
     UX_PROJECT_DELETE_ENDPOINT_SPEC,
 )
-from enji_guard_cli.enji_gateway.ports import GatewayAuthPort
+from enji_guard_cli.enji_gateway.ports import GatewayCredentialReader
 from enji_guard_cli.errors import EnjiApiError, EnjiPartialStateError, PartialStateDetails
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.transport import EnjiHttpClient, EnjiHttpError, EnjiJsonValue
@@ -160,7 +160,7 @@ class AuditEmailPreferenceRequest(TypedDict, total=False):
 
 
 def access(
-    auth_file: Path | None = None, client: EnjiHttpClient | None = None, *, auth_port: GatewayAuthPort
+    auth_file: Path | None = None, client: EnjiHttpClient | None = None, *, auth_port: GatewayCredentialReader
 ) -> AccessPayload:
     return run_api_request(
         auth_file,
@@ -192,7 +192,7 @@ def _parse_access_payload(payload: dict[str, object]) -> AccessPayload:
 
 
 def projects(
-    auth_file: Path | None = None, client: EnjiHttpClient | None = None, *, auth_port: GatewayAuthPort
+    auth_file: Path | None = None, client: EnjiHttpClient | None = None, *, auth_port: GatewayCredentialReader
 ) -> JsonObjectPayload:
     return run_api_request(auth_file, client, PROJECTS_ENDPOINT.request(), auth_port=auth_port)
 
@@ -205,7 +205,7 @@ def gitlab_credentials(  # noqa: PLR0913
     scope_owner: str | None = None,
     limit: int = 50,
     offset: int = 0,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     query: dict[str, str] = {
         "credential_type": "git",
@@ -240,7 +240,7 @@ def gitlab_projects(  # noqa: PLR0913
     per_page: int = 50,
     scope_type: str | None = None,
     scope_owner: str | None = None,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     query: dict[str, str] = {
         "credential_id": credential_id,
@@ -277,7 +277,7 @@ def project_detail(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -291,7 +291,7 @@ def user_preferences(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(auth_file, client, USER_PREFERENCES_GET_ENDPOINT.request(), auth_port=auth_port)
 
@@ -301,7 +301,7 @@ def put_user_language(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     request: UserLanguageUpdateRequest = {"language": language}
     return run_api_request(
@@ -317,7 +317,7 @@ def project_run_language(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -332,7 +332,7 @@ def create_project(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     fleet_request: FleetProjectCreateRequest = {"name": name}
     fleet_project = run_api_request(
@@ -373,7 +373,7 @@ def rename_project(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     patch: ProjectPatchRequest = {"name": name}
     return run_api_request(
@@ -389,7 +389,7 @@ def delete_project(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> None:
     run_api_no_content(
         auth_file,
@@ -424,7 +424,7 @@ def preflight_repo_move(  # noqa: PLR0913
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     request: RepoTransferPreflightRequest = {"targetProjectId": target_project_id}
     return run_api_no_content(
@@ -443,7 +443,7 @@ def move_repo(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     json_request: RepoTransferRequest = {"targetProjectId": request.target_project_id}
     if request.schedule_replacements is not None:
@@ -460,7 +460,7 @@ def move_repo(
 
 
 def catalog(
-    auth_file: Path | None = None, client: EnjiHttpClient | None = None, *, auth_port: GatewayAuthPort
+    auth_file: Path | None = None, client: EnjiHttpClient | None = None, *, auth_port: GatewayCredentialReader
 ) -> JsonObjectPayload:
     return run_api_request(auth_file, client, CATALOG_ENDPOINT.request(), auth_port=auth_port)
 
@@ -470,7 +470,7 @@ def runbook(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -484,7 +484,7 @@ def add_project_repo(  # noqa: PLR0913
     project_id: str,
     provider: str,
     locator: str,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
     *,
     host: str | None = None,
     repo_access_credential_id: str | None = None,
@@ -525,7 +525,7 @@ def delete_project_repo(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> None:
     run_api_no_content(
         auth_file,
@@ -541,7 +541,7 @@ def connect_project_repo(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     request: RepoConnectionRequest = {
         "connected": True,
@@ -563,7 +563,7 @@ def repo_active_runs(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -578,7 +578,7 @@ def project_active_runs(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -593,7 +593,7 @@ def repo_audit_rerun_state(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -608,7 +608,7 @@ def repo_task_links(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -623,7 +623,7 @@ def task_detail(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -641,7 +641,7 @@ def start_audit_run(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     json_request: AuditRunCreateRequest = {
         "projectId": request.project_id,
@@ -667,7 +667,7 @@ def audit_summary_snapshot(  # noqa: PLR0913
     client: EnjiHttpClient | None = None,
     *,
     task_id: str,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -686,7 +686,7 @@ def audit_reports(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -705,7 +705,7 @@ def audit_email_preferences(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -722,7 +722,7 @@ def put_audit_email_preferences(  # noqa: PLR0913
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     request = _audit_email_preference_request(patch)
     return run_api_request(
@@ -741,7 +741,7 @@ def audit_auto_runs(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -758,7 +758,7 @@ def put_audit_auto_run(  # noqa: PLR0913
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     request = _audit_auto_run_request(subscription)
     return run_api_request(
@@ -777,7 +777,7 @@ def improvement_jobs(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -794,7 +794,7 @@ def put_improvement_job(  # noqa: PLR0913
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return run_api_request(
         auth_file,
@@ -810,7 +810,7 @@ def put_improvement_job(  # noqa: PLR0913
 def load_api_session(
     auth_file: Path | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> EnjiApiSession:
     return _load_api_session_impl(auth_file, auth_port=auth_port)
 

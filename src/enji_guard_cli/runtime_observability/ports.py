@@ -35,8 +35,8 @@ class BackendReadinessPort(BackendReadinessObserver, CredentialChangeObserver, P
     """Probe plus the event that invalidates its cached projection."""
 
 
-class RuntimeAuthPort(BackendReadinessObserver, BackgroundRefreshStarter, CredentialChangeObserver, Protocol):
-    """Combined capability used by the supervisor; no auth implementation import."""
+class RuntimeAuthCoordinator(BackendReadinessObserver, BackgroundRefreshStarter, CredentialChangeObserver, Protocol):
+    """Runtime-owned auth coordination capability used by the supervisor."""
 
 
 __all__ = [
@@ -45,5 +45,5 @@ __all__ = [
     "BackendReadinessPort",
     "BackgroundRefreshStarter",
     "CredentialChangeObserver",
-    "RuntimeAuthPort",
+    "RuntimeAuthCoordinator",
 ]

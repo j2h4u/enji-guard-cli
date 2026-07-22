@@ -16,14 +16,10 @@ from enji_guard_cli.auth_session.coordinator import RefreshCoordinator, import_c
 from enji_guard_cli.auth_session.credential_changes import credential_changes
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
 from enji_guard_cli.auth_session.payloads import (
-    AuthRefreshPayload,
     AuthStatusPayload,
     _authenticated_payload,
     _profile_from_response,
     _unauthenticated_payload,
-)
-from enji_guard_cli.auth_session.payloads import (
-    _auth_refresh_payload as _pure_auth_refresh_payload,
 )
 from enji_guard_cli.auth_session.ports import AuthEventSink
 from enji_guard_cli.auth_session.store import (
@@ -172,6 +168,7 @@ async def auth_status_async(
     *,
     event_sink: AuthEventSink | None = None,
 ) -> AuthStatusPayload:
+    _ = event_sink
     target = auth_file if auth_file is not None else default_auth_file()
     if not target.exists():
         return _unauthenticated_payload(target, None, "AUTH_REQUIRED", "auth file does not exist")
@@ -181,29 +178,10 @@ async def auth_status_async(
         return _unauthenticated_payload(target, None, "AUTH_REQUIRED", "auth file is invalid")
 
     if client is not None:
-        return await _auth_status_with_client(target, stored_auth, client, event_sink=event_sink)
+        return await _auth_status_with_client(target, stored_auth, client)
 
     async with HttpxEnjiHttpClient() as owned_client:
-        return await _auth_status_with_client(target, stored_auth, owned_client, event_sink=event_sink)
-
-
-async def refresh_auth_async(
-    auth_file: Path | None = None,
-    client: EnjiHttpClient | None = None,
-    *,
-    event_sink: AuthEventSink | None = None,
-) -> AuthRefreshPayload:
-    target = auth_file if auth_file is not None else default_auth_file()
-    try:
-        if client is not None:
-            refreshed_auth = await refresh_stored_cookie_auth(target, client, event_sink=event_sink)
-            return _auth_refresh_payload(target, refreshed_auth)
-
-        async with HttpxEnjiHttpClient() as owned_client:
-            refreshed_auth = await refresh_stored_cookie_auth(target, owned_client, event_sink=event_sink)
-            return _auth_refresh_payload(target, refreshed_auth)
-    except EnjiHttpError as exc:
-        raise AuthError(exc.code, exc.message) from exc
+        return await _auth_status_with_client(target, stored_auth, owned_client)
 
 
 async def backend_readiness_probe_async(
@@ -286,7 +264,7 @@ def start_auto_refresh_task(
 async def _refresh_stored_cookie_auth_for_auto_refresh(
     path: Path, client: object, event_sink: AuthEventSink | None = None
 ) -> StoredAuth:
-    return await refresh_stored_cookie_auth(path, cast(EnjiHttpClient, client), event_sink=event_sink)
+    return await _refresh_stored_cookie_auth(path, cast(EnjiHttpClient, client), event_sink=event_sink)
 
 
 def _is_auto_refresh_error(exc: Exception) -> TypeGuard[auto_refresh_impl.RefreshErrorLike]:
@@ -297,8 +275,6 @@ async def _auth_status_with_client(
     target: Path,
     stored_auth: StoredAuth,
     client: EnjiHttpClient,
-    *,
-    event_sink: AuthEventSink | None = None,
 ) -> AuthStatusPayload:
     credential_type = stored_auth["credential"]["type"]
     try:
@@ -308,8 +284,6 @@ async def _auth_status_with_client(
 
     if response.status_code == HTTP_OK:
         return _authenticated_payload(target, credential_type, _profile_from_response(response))
-    if is_auth_invalid_response(response) and credential_type == CredentialType.COOKIE.value:
-        return await _auth_status_after_refresh(target, stored_auth, client, event_sink=event_sink)
     return _auth_status_payload_from_response(
         target,
         credential_type,
@@ -344,27 +318,6 @@ def _auth_status_payload_from_response(
     except EnjiHttpError as exc:
         return _unauthenticated_payload(target, credential_type, exc.code, exc.message)
     return _unauthenticated_payload(target, credential_type, "UPSTREAM", "auth status failed")
-
-
-async def _auth_status_after_refresh(
-    target: Path,
-    stored_auth: StoredAuth,
-    client: EnjiHttpClient,
-    *,
-    event_sink: AuthEventSink | None = None,
-) -> AuthStatusPayload:
-    try:
-        refreshed_auth = await refresh_cookie_auth(target, stored_auth, client, event_sink=event_sink)
-        response = await _request_auth_status(refreshed_auth, client)
-    except EnjiHttpError as exc:
-        return _unauthenticated_payload(target, CredentialType.COOKIE.value, exc.code, exc.message)
-    return _auth_status_payload_from_response(
-        target,
-        CredentialType.COOKIE.value,
-        response,
-        auth_invalid_code=AUTH_INVALID_CODE,
-        auth_invalid_message="invalid access token after refresh",
-    )
 
 
 async def _backend_readiness_probe_with_client(
@@ -438,7 +391,7 @@ async def _backend_readiness_probe_with_client(
     )
 
 
-async def refresh_cookie_auth(
+async def _refresh_cookie_auth(
     path: Path,
     stored_auth: StoredAuth,
     client: EnjiHttpClient,
@@ -462,13 +415,13 @@ async def refresh_cookie_auth(
     return await RefreshCoordinator(path, _HttpxRefreshExchange()).refresh(stored_auth)
 
 
-async def refresh_stored_cookie_auth(
+async def _refresh_stored_cookie_auth(
     path: Path, client: EnjiHttpClient, *, event_sink: AuthEventSink | None = None
 ) -> StoredAuth:
     stored_auth = load_stored_auth(path)
     if stored_auth is None:
         raise EnjiHttpError("AUTH_REQUIRED", "auth file is invalid")
-    return await refresh_cookie_auth(path, stored_auth, client, event_sink=event_sink)
+    return await _refresh_cookie_auth(path, stored_auth, client, event_sink=event_sink)
 
 
 def is_auth_invalid_response(response: EnjiHttpResponse) -> bool:
@@ -497,13 +450,6 @@ def _auth_refresh_headers(stored_auth: StoredAuth) -> dict[str, str]:
         }
     )
     return headers
-
-
-def _auth_refresh_payload(auth_file: Path, stored_auth: StoredAuth) -> AuthRefreshPayload:
-    try:
-        return _pure_auth_refresh_payload(auth_file, stored_auth)
-    except ValueError as exc:
-        raise EnjiHttpError("AUTH_REQUIRED", str(exc)) from exc
 
 
 async def _request_auth_status(
