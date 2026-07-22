@@ -160,12 +160,10 @@ class _GatewayHarness:
             ]
         }
         self.task_payload: JsonObjectPayload = {
-            "task": {
-                "id": "task-1",
-                "status": "running",
-                "createdAt": "2026-07-15T08:00:00Z",
-                "startedAt": "2026-07-15T08:01:00Z",
-            }
+            "id": "task-1",
+            "status": "running",
+            "created_at": "2026-07-15T08:00:00Z",
+            "started_at": "2026-07-15T08:01:00Z",
         }
         self.start_payload: JsonObjectPayload = {"task": {"id": "task-2", "status": "queued"}}
         self.snapshot_payload: JsonObjectPayload = {"snapshot": {"content": {"report": "findings", "score": 80}}}
@@ -330,7 +328,7 @@ def test_audit_gateway_translates_task_detail_failures(
 
 
 def test_audit_gateway_rejects_malformed_task_detail(gateway_harness: _GatewayHarness) -> None:
-    gateway_harness.task_payload = {"task": []}
+    gateway_harness.task_payload = {"id": "task-1"}
     with pytest.raises(AuditMalformedError):
         gateway_harness.gateway.task_detail("task-1")
 
@@ -378,7 +376,9 @@ def test_audit_gateway_task_detail_maps_real_http_helper_failures(
 def test_audit_gateway_rejects_task_detail_identity_mismatch_from_real_http_helper(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_bearer_token("token-123", auth_file)
-    client = _TaskDetailHttpFake(EnjiHttpResponse(status_code=200, headers={}, content=b'{"task":{"id":"task-2"}}'))
+    client = _TaskDetailHttpFake(
+        EnjiHttpResponse(status_code=200, headers={}, content=b'{"id":"task-2","status":"completed"}')
+    )
     gateway = AuditGateway(auth_file=auth_file, client=client, auth_port=AuthSessionAdapter())
 
     with pytest.raises(AuditMalformedError, match="mismatched task id"):

@@ -156,19 +156,18 @@ class AuditGateway(AuditGatewayPort):
             if exc.response_malformed:
                 raise AuditMalformedError(f"task detail payload for {task_id} is malformed") from exc
             raise AuditUpstreamError(f"task detail lookup failed for {task_id}: {exc.message}") from exc
-        task_payload = payload.get("task")
-        if not isinstance(task_payload, dict):
-            raise AuditMalformedError(f"task detail payload for {task_id} is malformed")
-        task = task_payload
+        task = payload
         returned_task_id = _optional_str(task.get("id"))
         if returned_task_id is not None and returned_task_id != task_id:
             raise AuditMalformedError(f"task detail payload for {task_id} has mismatched task id")
+        if returned_task_id is None or _optional_str(task.get("status")) is None:
+            raise AuditMalformedError(f"task detail payload for {task_id} is malformed")
         return AuditTaskDetail(
-            task_id=returned_task_id or task_id,
+            task_id=returned_task_id,
             status=_optional_str(task.get("status")),
-            created_at=_optional_str(task.get("createdAt")),
-            started_at=_optional_str(task.get("startedAt")),
-            completed_at=_optional_str(task.get("completedAt")),
+            created_at=_optional_str(task.get("created_at")),
+            started_at=_optional_str(task.get("started_at")),
+            completed_at=_optional_str(task.get("completed_at")),
         )
 
     def runbook_metadata(self, runbook_id: str) -> AuditRunbookMetadata:

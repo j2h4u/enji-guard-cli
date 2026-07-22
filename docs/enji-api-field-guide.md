@@ -139,7 +139,9 @@ contains `projectId`, `actionKey`, a small `fleetTaskBody`, and a unique
 Progress can be reconciled from three projections:
 
 - repository `active-runs` for the current aggregate view;
-- `/api/v1/tasks/{taskId}` and `/activities` for authoritative task-by-ID state;
+- `/api/v1/tasks/{taskId}` and `/activities` for authoritative task-by-ID state.
+  Task detail is a root object (not a `task` envelope) and uses snake-case
+  lifecycle fields: `status`, `created_at`, `started_at`, and `completed_at`;
 - repository `audit-rerun-state` for current SHA, last audited SHA, rerun
   eligibility, and the last Fleet task ID.
 
