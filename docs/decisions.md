@@ -93,25 +93,42 @@ agents can orient quickly before making changes.
 - **Temporary cookie auth with first-class API tokens**: cookie auth is a
   compatibility path. Bearer/API-token support is the preferred stable auth
   path and should remain first-class.
-- **Supervisor-owned cookie-session resilience**: cookie auto refresh belongs to
-  the `enji-guard run` supervisor, not MCP. Refresh rotation reserves a durable,
-  private pending-replacement journal below configured credential storage so a
-  replacement can be recovered after an interrupted auth-file write. The
-  journal stores protected recovery state and must be treated as credential
-  storage; its secret fields are intentionally not described here.
-  HTTP retry profiles allow retries only for reads, safe probes, and idempotent
-  mutations; unsafe mutations and auth refresh are not retried by transport.
-  Transport delay is exponential with jitter and a 30-second cap. Once cookie
-  refresh has reached durable `REQUESTED` or a terminal journal state, the
-  supervisor never retries it; a credential import is required instead.
-  Credential-file changes wake the refresh scheduler and backend-readiness loop
-  immediately instead of waiting for the next heartbeat. There is no manual
-  operator-facing `auth refresh` command; `auth status`, readiness, and
-  telemetry are the validation surfaces.
-- **Auth resilience observability**: runtime diagnosis uses telemetry events
-  `enji_http_retry` plus one `enji_auth_rotation_*` terminal outcome event;
-  outcome payloads contain only stable classification, never credential data,
-  paths, or error messages.
+- **Supervisor-owned cookie-session resilience**: `enji-guard run` is the sole
+  automatic owner of cookie rotation; explicit `auth import-cookie` or
+  `auth import-bearer` is the only other credential writer. Gateway requests,
+  `auth status`, health/readiness, and MCP are pure observers: they neither
+  refresh, replay, nor mutate credentials. Standalone CLI requests have no
+  in-request recovery, and there is no manual refresh command.
+
+  Credential storage is v2. Every import creates a new opaque revision,
+  including byte-identical data. The private v2 journal has exactly five states:
+  `RESERVED` (not dispatched), `REQUESTED` (dispatch began), `ROTATED`
+  (replacement captured), `REJECTED` (protocol-confirmed rejection), and
+  `OUTCOME_UNKNOWN` (the one-time request may have been consumed). `READY` is
+  implicit: a valid credential with no applicable journal. Startup reconciles a
+  matching `RESERVED` safely, recovers `ROTATED`, and durably converts an
+  abandoned `REQUESTED` to `OUTCOME_UNKNOWN` before ordinary readiness starts.
+  `REJECTED` and `OUTCOME_UNKNOWN` are terminal: they remain visible and require
+  an operator to import a fresh browser credential, which supersedes the old
+  revision and clears its journal. No automatic POST follows `REQUESTED`; a
+  failure after dispatch, malformed response, cancellation, timeout, transport
+  failure, or 429/5xx is conservatively unknown. Transport retries do not cover
+  cookie refresh.
+
+  Storage loads are typed rather than collapsed: `ABSENT`, `CORRUPT`,
+  `UNSUPPORTED`, `IO_FAILURE`, clock anomaly, and `LOADED` remain distinct.
+  Only `ABSENT` is ordinary `AUTH_REQUIRED`; corrupt, unsupported, journal, and
+  I/O states are explicit auth failures. The storage contract is one local POSIX
+  host with working `flock`, same-filesystem atomic replace, file and parent
+  directory `fsync`. NFS/CIFS and multi-host writers are unsupported. File
+  watching is an immediate wake-up optimization; bounded monotonic polling is
+  the mandatory fallback because bind-mount events are not guaranteed.
+- **Auth resilience observability**: terminal journal outcomes carry a stable,
+  non-secret `event_key` and are delivered to telemetry at least once, not
+  exactly once; consumers must tolerate duplicates by key. Outcome payloads
+  contain stable classifications only, never credentials, paths, or upstream
+  error messages. A failed telemetry delivery remains eligible for later
+  reconciliation, and invariant/storage failures remain visible and unready.
 - **Supply-chain conservatism**: new Python packages stay quarantined for
   7 to 14 days unless an owner approves earlier adoption; lifecycle and
   install scripts are disabled by default or explicitly allowlisted;

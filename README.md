@@ -297,12 +297,13 @@ the container to all interfaces only because they publish the port on host
 loopback.
 
 Docker health is full service readiness: local MCP plus cached authenticated
-Enji backend readiness. The supervisor refreshes cookie auth and probes backend
-readiness as separate sibling tasks; the probe records failures but does not
-perform refresh itself. Repeated auth/backend failures make the container
-`unhealthy`, so `docker ps` is a passive dashboard for Enji connectivity.
-Bearer/API-token auth is preferred. Cookie-session auto refresh is supervisor-
-owned and is not an MCP responsibility.
+Enji backend readiness. The supervisor alone owns automatic cookie rotation;
+gateway requests, `auth status`, readiness, and MCP only observe credentials
+and never refresh or replay a request. Repeated auth/backend failures make the
+container `unhealthy`, so `docker ps` is a passive dashboard for Enji
+connectivity. Bearer/API-token auth is preferred. See
+[the auth invariants](docs/decisions.md#supervisor-owned-cookie-session-resilience)
+and [deployment recovery](docs/deployment.md#cookie-session-recovery).
 
 For registry-based deployment, use the GHCR image and compose example in
 `docs/deployment.md`.
@@ -342,26 +343,18 @@ Keep that directory writable by the container user because Enji rotates refresh
 cookies. Credentials belong in the configured auth file, not in checked-in env
 templates or persistent `.env` files.
 
-Cookie refresh reserves a durable, private pending-replacement journal under the
-configured credential storage before contacting Enji. It contains protected
-recovery state and must be treated as credential storage; this documentation
-does not describe its secret fields. If auth-file replacement is interrupted,
-the supervisor retries recovery from that journal; do not delete it or copy its
-contents elsewhere.
+Each import creates a fresh credential revision, even for identical input. The
+supervisor uses a private v2 rotation journal before a cookie POST; it is
+credential storage and must not be inspected, copied, or deleted. A dispatched
+request is never automatically replayed. If status or readiness says that
+re-import is required, refresh the browser session and run `auth import-cookie`
+again; that explicit import is the only other credential writer.
 
-Transport retries are profile-aware. Reads, safe probes, and idempotent
-mutations may retry transient transport or 429/5xx failures; unsafe mutations
-and cookie refresh are not retried by the transport layer. Transport backoff
-uses exponential delay with jitter and a 30-second cap (including a bounded
-`Retry-After`). Once cookie refresh is durably dispatched, or reaches a
-terminal outcome, it is never replayed automatically; import fresh browser
-credentials to continue.
-
-Useful telemetry events are written to
-`~/.config/enji-guard/logs/telemetry.jsonl`: `enji_http_retry` and exactly one
-`enji_auth_rotation_*` terminal event for each rotation outcome. Rotation event
-fields are stable classifications only: they never contain credentials, auth
-paths, or upstream error messages.
+Telemetry at `~/.config/enji-guard/logs/telemetry.jsonl` records non-secret
+rotation outcomes with a stable `event_key`. Delivery is at-least-once, so
+duplicate records with the same key are possible. The detailed state, storage,
+and recovery contract is in [docs/decisions.md](docs/decisions.md); deployment
+verification is in [docs/deployment.md](docs/deployment.md#cookie-session-recovery).
 
 After a real cookie re-authentication, refresh the session in the browser,
 request `/api/v1/auth/me`, and import the current `Cookie` request header using

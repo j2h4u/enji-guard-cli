@@ -38,35 +38,50 @@ docker exec -i enji-guard-cli enji-guard health --ready
 docker exec -i enji-guard-cli enji-guard auth status
 ```
 
-Keep the auth directory writable by uid `1000`; Enji rotates refresh cookies.
-Docker health uses cached readiness from the supervisor heartbeat: local MCP
-must listen, backend readiness state must be fresh, and authenticated Enji
-checks must not fail repeatedly. Credential-file changes wake the heartbeat
-immediately, so importing renewed credentials needs no service restart.
+Keep the auth directory writable by uid `1000`; it contains the credential and
+private rotation journal. Docker health uses cached readiness from the
+supervisor heartbeat: local MCP must listen, backend readiness must be fresh,
+and authenticated Enji checks must not fail repeatedly. Gateway calls,
+`auth status`, readiness, and MCP only observe auth; the supervisor is the sole
+automatic rotation owner.
 
-Bearer/API-token auth is preferred. For the temporary cookie-session path, the
-supervisor owns auto refresh. It keeps a durable, private pending-replacement
-journal under the configured credential storage while rotating the auth file;
-preserve that storage and its permissions across restarts. The journal is
-protected credential-storage state; do not inspect or copy its contents.
-There is no operator-facing `enji-guard auth refresh` workflow: import current
-credentials and let the supervisor own refresh and readiness.
+## Cookie-session recovery
+
+Bearer/API-token auth is preferred. Cookie refresh is a one-time-token flow:
+the supervisor records `RESERVED` then `REQUESTED` before one POST. It never
+replays a dispatched request. On restart it reconciles the v2 journal: a safe
+reservation is removed, a captured replacement is recovered, and abandoned
+dispatch becomes `OUTCOME_UNKNOWN`. `REJECTED` and `OUTCOME_UNKNOWN` require
+explicit operator re-import; there is no `auth refresh` command or retry
+workflow.
 
 After a real re-authentication, refresh the browser session, request
-`/api/v1/auth/me`, and import that request's current `Cookie` header. The
-supervisor detects the import, owns any required cookie refresh, and recomputes
-backend readiness immediately. Validate the running container explicitly:
+`/api/v1/auth/me`, and import that request's current `Cookie` header. Do not
+use `document.cookie`. If using the refresh request itself, merge response
+`Set-Cookie` values because its request header has the old refresh token. The
+import creates a new revision, supersedes a terminal generation, wakes the
+supervisor promptly, and readiness is re-evaluated without a restart. Validate
+the running container explicitly:
 
 ```bash
 docker exec -i enji-guard-cli enji-guard health --ready
+docker exec -i enji-guard-cli enji-guard auth status
 ```
 
-Use the telemetry JSONL to inspect the single `enji_auth_rotation_*` terminal
-outcome event emitted for a rotation. Its fields deliberately exclude
-credentials, auth paths, and upstream error messages. These events are
-validation signals, not a guarantee that the current Enji session is valid.
-verify uid `1000` ownership and write permissions for credential storage, then
-repeat the browser re-auth/import and validation sequence.
+If readiness remains unhealthy, verify uid `1000` ownership and write
+permissions for the whole credential directory, then repeat browser
+re-authentication/import and both commands. Keep the storage on one local POSIX
+host filesystem: it requires working `flock`, same-filesystem atomic rename,
+and file/directory `fsync`; NFS/CIFS and multi-host writers are unsupported.
+Watchfiles wakes the supervisor quickly, but bounded polling remains the
+fallback for bind mounts that do not deliver events.
+
+Telemetry is JSONL at `~/.config/enji-guard/logs/telemetry.jsonl`. Rotation
+events have stable non-secret `event_key` values and are at-least-once: dedupe
+by key if consuming them. They deliberately exclude credentials, auth paths,
+and upstream error messages. Treat telemetry, `auth status`, and `health
+--ready` as runtime verification signals, not proof that an Enji session will
+remain valid.
 
 The runtime image defaults `/etc/localtime` to UTC, but the provided compose
 files bind-mount the host `/etc/localtime` so the running service inherits host
