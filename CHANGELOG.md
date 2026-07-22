@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.3](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.2...v2.2.3) (2026-07-22)
+
+
+### Fixes
+
+* pin GHCR compose project name ([#154](https://github.com/j2h4u/enji-guard-cli/issues/154)) ([933bf75](https://github.com/j2h4u/enji-guard-cli/commit/933bf755c95ef0fcba3ce979d22b15ac19821996))
+
 ## [2.2.2](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.1...v2.2.2) (2026-07-22)
 
 
