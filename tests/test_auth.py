@@ -324,8 +324,9 @@ def test_watcher_exception_degrades_to_bounded_revision_polling() -> None:
         events: list[str] = []
 
         async def broken_watcher(_auth_file: Path) -> AsyncGenerator[None]:
+            if _auth_file.name == "":
+                yield
             raise RuntimeError("watcher unavailable")
-            yield
 
         async def sleep(seconds: float) -> None:
             nonlocal clock
