@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from dataclasses import dataclass
+from http.cookies import CookieError
 from pathlib import Path
 from typing import Protocol
 
@@ -341,15 +342,17 @@ def _is_superseded(auth_path: Path, source_revision: str) -> bool:
 def _successful_replacement(source: StoredAuth, response: EnjiHttpResponse) -> str | None:
     if response.status_code != HTTP_OK:
         return None
-    names = set_cookie_names(response.set_cookie_headers)
-    if not {"access_token", "refresh_token"}.issubset(names):
-        return None
     credential = source["credential"]
     if credential["type"] != "cookie":
         return None
     try:
+        names = set_cookie_names(response.set_cookie_headers)
+        if not {"access_token", "refresh_token"}.issubset(names):
+            return None
         return merge_set_cookie_headers(credential["cookie_header"], response.set_cookie_headers).value
-    except ValueError:
+    except (CookieError, ValueError):
+        # Once the refresh POST has returned, malformed cookie protocol data is
+        # ambiguous: the server may already have consumed the one-time cookie.
         return None
 
 

@@ -141,6 +141,55 @@ def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch
     assert slept_with == [900]
 
 
+def test_auto_refresh_loop_survives_terminal_cookie_response_error() -> None:
+    async def exercise() -> None:
+        refresh_attempted = asyncio.Event()
+        credential_imported = asyncio.Event()
+
+        async def changes(_auth_file: Path) -> AsyncGenerator[None]:
+            await credential_imported.wait()
+            yield
+            await asyncio.Event().wait()
+
+        async def terminal_refresh(*_args: object) -> RuntimeStoredAuth:
+            refresh_attempted.set()
+            raise EnjiHttpError("AUTH_IMPORT_REQUIRED", "refresh outcome is unknown")
+
+        class Client:
+            async def __aenter__(self) -> Client:
+                return self
+
+            async def __aexit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
+                return None
+
+        task = asyncio.create_task(
+            auto_refresh_module._auto_refresh_loop(
+                auth_file=Path("auth.json"),
+                refresh_settings=AutoRefreshSettings(enabled=True, lead_seconds=300, fallback_seconds=900),
+                dependencies=auto_refresh_module.AutoRefreshLoopDependencies(
+                    sleep_seconds_fn=lambda **_kwargs: 0,
+                    load_sleep_seconds_stored_auth_fn=lambda _path: None,
+                    cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
+                    refresh_stored_cookie_auth_fn=terminal_refresh,
+                    log_event_fn=lambda *_args, **_kwargs: None,
+                    logger=auto_refresh_module.logging.getLogger("test"),
+                    client_factory=Client,
+                    credential_changes_fn=changes,
+                ),
+            )
+        )
+        await asyncio.wait_for(refresh_attempted.wait(), timeout=1)
+        assert not task.done()
+
+        credential_imported.set()
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(exercise())
+
+
 def test_credential_change_wait_survives_timeout() -> None:
     async def exercise() -> None:
         async def wait_for_change() -> None:

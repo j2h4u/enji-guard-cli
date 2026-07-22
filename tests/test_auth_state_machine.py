@@ -2,10 +2,12 @@ import asyncio
 import json
 import logging
 from collections.abc import Mapping
+from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 
 import pytest
 
+import enji_guard_cli.auth_session.cookies as cookies_module
 from enji_guard_cli.auth_session.api import import_cookie
 from enji_guard_cli.auth_session.coordinator import RefreshCoordinator, import_credential
 from enji_guard_cli.auth_session.models import StoredAuth
@@ -171,6 +173,107 @@ def test_ambiguous_response_is_dispatched_once_per_source_revision(tmp_path: Pat
     journal = load_journal(auth_file)
     assert isinstance(journal, JournalLoaded)
     assert journal.state == OutcomeUnknown(loaded.auth["revision"], "ambiguous refresh response HTTP 502")
+
+
+def test_malformed_success_cookie_response_is_terminal_and_never_replayed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    malformed_header = "refresh_token=malformed"
+    original_load = SimpleCookie.load
+
+    def reject_malformed_header(cookie: SimpleCookie, rawdata: str) -> None:
+        if rawdata == malformed_header:
+            raise CookieError("malformed Set-Cookie")
+        original_load(cookie, rawdata)
+
+    monkeypatch.setattr(cookies_module.SimpleCookie, "load", reject_malformed_header)
+    dispatches = 0
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            nonlocal dispatches
+            dispatches += 1
+            return EnjiHttpResponse(
+                status_code=200,
+                headers={},
+                content=b"{}",
+                set_cookie_headers=("access_token=new", malformed_header),
+            )
+
+    exchange = Exchange()
+    coordinator = RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0)
+    with pytest.raises(EnjiHttpError, match="outcome is unknown"):
+        asyncio.run(coordinator.refresh(loaded.auth))
+
+    journal = load_journal(auth_file)
+    assert isinstance(journal, JournalLoaded)
+    assert journal.state == OutcomeUnknown(loaded.auth["revision"], "ambiguous refresh response HTTP 200")
+
+    with pytest.raises(EnjiHttpError, match="outcome is terminal"):
+        asyncio.run(RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0).refresh())
+    asyncio.run(RefreshCoordinator(auth_file, exchange).recover_startup())
+
+    assert dispatches == 1
+    restarted_journal = load_journal(auth_file)
+    assert isinstance(restarted_journal, JournalLoaded)
+    assert isinstance(restarted_journal.state, OutcomeUnknown)
+
+
+def test_success_cookie_parsing_keeps_separate_expires_comma_header(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            return EnjiHttpResponse(
+                status_code=200,
+                headers={},
+                content=b"{}",
+                set_cookie_headers=(
+                    "access_token=new; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Path=/",
+                    "refresh_token=new; Path=/api/v1/auth",
+                ),
+            )
+
+    rotated = asyncio.run(RefreshCoordinator(auth_file, Exchange()).refresh(loaded.auth))
+
+    assert rotated["credential"] == {"type": "cookie", "cookie_header": "access_token=new; refresh_token=new"}
+
+
+@pytest.mark.parametrize(
+    "set_cookie_headers",
+    [
+        ("access_token=new",),
+        ("access_token=new", "refresh_token=; Max-Age=0"),
+    ],
+)
+def test_incomplete_or_deleting_success_cookies_are_terminal_unknown(
+    tmp_path: Path, set_cookie_headers: tuple[str, ...]
+) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            return EnjiHttpResponse(status_code=200, headers={}, content=b"{}", set_cookie_headers=set_cookie_headers)
+
+    with pytest.raises(EnjiHttpError, match="outcome is unknown"):
+        asyncio.run(RefreshCoordinator(auth_file, Exchange()).refresh(loaded.auth))
+
+    journal = load_journal(auth_file)
+    assert isinstance(journal, JournalLoaded)
+    assert isinstance(journal.state, OutcomeUnknown)
 
 
 def test_rotation_telemetry_is_terminal_once_and_redacts_sentinels(tmp_path: Path) -> None:
