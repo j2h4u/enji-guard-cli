@@ -87,6 +87,22 @@ def test_import_bearer_token_stores_token_credential(tmp_path: Path) -> None:
     assert auth_headers(cast(RuntimeStoredAuth, stored)) == {"Authorization": "Bearer token-123"}
 
 
+def test_future_credential_import_timestamp_has_stable_clock_anomaly_classification(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("session=abc; refresh=def", auth_file)
+    stored = cast(dict[str, object], json.loads(auth_file.read_text(encoding="utf-8")))
+    stored["imported_at"] = "9999-12-31T23:59:59+00:00"
+    auth_file.write_text(json.dumps(stored), encoding="utf-8")
+
+    status = asyncio.run(auth_status_async(auth_file))
+    readiness = asyncio.run(backend_readiness_probe_async(auth_file))
+
+    assert status["code"] == "AUTH_CLOCK_ANOMALY"
+    assert status["message"] == "auth file imported_at is in the future"
+    assert readiness.failure_code == "AUTH_CLOCK_ANOMALY"
+    assert readiness.failure_message == "auth file imported_at is in the future"
+
+
 def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch: pytest.MonkeyPatch) -> None:
     slept_with: list[float] = []
 

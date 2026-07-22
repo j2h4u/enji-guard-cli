@@ -23,8 +23,11 @@ from enji_guard_cli.auth_session.payloads import (
 )
 from enji_guard_cli.auth_session.ports import AuthEventSink
 from enji_guard_cli.auth_session.store import (
+    AuthClockAnomaly,
+    AuthLoaded,
     CredentialType,
     StoredAuth,
+    load_auth,
     load_auth_file,
     stored_auth,
 )
@@ -173,9 +176,12 @@ async def auth_status_async(
     if not target.exists():
         return _unauthenticated_payload(target, None, "AUTH_REQUIRED", "auth file does not exist")
 
-    stored_auth = load_auth_file(target)
-    if stored_auth is None:
+    loaded = load_auth(target)
+    if isinstance(loaded, AuthClockAnomaly):
+        return _unauthenticated_payload(target, None, "AUTH_CLOCK_ANOMALY", "auth file imported_at is in the future")
+    if not isinstance(loaded, AuthLoaded):
         return _unauthenticated_payload(target, None, "AUTH_REQUIRED", "auth file is invalid")
+    stored_auth = loaded.auth
 
     if client is not None:
         return await _auth_status_with_client(target, stored_auth, client)
@@ -201,8 +207,18 @@ async def backend_readiness_probe_async(
             ),
         )
 
-    stored_auth = load_auth_file(target)
-    if stored_auth is None:
+    loaded = load_auth(target)
+    if isinstance(loaded, AuthClockAnomaly):
+        return _backend_readiness_failure(
+            started_at,
+            AuthBackendReadinessResult(
+                ready=False,
+                failure_kind="storage",
+                failure_code="AUTH_CLOCK_ANOMALY",
+                failure_message="auth file imported_at is in the future",
+            ),
+        )
+    if not isinstance(loaded, AuthLoaded):
         return _backend_readiness_failure(
             started_at,
             AuthBackendReadinessResult(
@@ -212,6 +228,7 @@ async def backend_readiness_probe_async(
                 failure_message="auth file is invalid",
             ),
         )
+    stored_auth = loaded.auth
 
     if client is not None:
         return await _backend_readiness_probe_with_client(stored_auth, client, started_at=started_at)

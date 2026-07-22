@@ -1,11 +1,15 @@
 import json
 from dataclasses import asdict, dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
 from enji_guard_cli.atomic_json import write_atomic_json
 from enji_guard_cli.settings import ReadinessSettings, default_settings
+
+# Small allowance for producer/consumer wall-clock skew.  A state farther ahead
+# is not fresh: its age cannot be trusted until the clock anomaly is resolved.
+READINESS_CLOCK_ANOMALY_TOLERANCE = timedelta(seconds=5)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,7 +142,10 @@ def _unavailable_state_verdict(
     if checked_at is None:
         return ReadinessVerdict(ready=False, reason="backend readiness state is invalid", state=state)
     current_time = now if now is not None else datetime.now(UTC)
-    age_seconds = int((current_time.astimezone(UTC) - checked_at).total_seconds())
+    current_time = current_time.astimezone(UTC)
+    if checked_at > current_time + READINESS_CLOCK_ANOMALY_TOLERANCE:
+        return ReadinessVerdict(ready=False, reason="backend readiness state has a clock anomaly", state=state)
+    age_seconds = int((current_time - checked_at).total_seconds())
     if age_seconds > settings.state_stale_after_seconds:
         return ReadinessVerdict(ready=False, reason="backend readiness state is stale", state=state)
     if state.last_success_at is None:

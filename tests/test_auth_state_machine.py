@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 
@@ -36,6 +37,8 @@ from enji_guard_cli.auth_session.state_machine import (
     transition,
 )
 from enji_guard_cli.auth_session.store import (
+    IMPORTED_AT_FUTURE_TOLERANCE,
+    AuthClockAnomaly,
     AuthCorrupt,
     AuthLoaded,
     JournalCorrupt,
@@ -145,6 +148,40 @@ def test_identical_imports_receive_distinct_revisions() -> None:
     second = stored_auth("https://fleet.enji.ai", {"type": "cookie", "cookie_header": "access=a; refresh=b"})
 
     assert first["revision"] != second["revision"]
+
+
+@pytest.mark.parametrize("imported_at", ["not-a-timestamp", "2026-07-03T12:00:00", "2026-07-03T12:00:00+01:00"])
+def test_storage_rejects_malformed_or_non_utc_imported_at(tmp_path: Path, imported_at: str) -> None:
+    auth_file = tmp_path / "auth.json"
+    auth = stored_auth("https://fleet.enji.ai", {"type": "cookie", "cookie_header": "access=a; refresh=b"})
+    auth["imported_at"] = imported_at
+    auth_file.write_text(json.dumps(auth), encoding="utf-8")
+
+    result = load_auth(auth_file, now=datetime(2026, 7, 3, 12, 0, tzinfo=UTC))
+
+    assert result == AuthCorrupt("credential imported_at must be an ISO 8601 UTC timestamp")
+
+
+def test_storage_classifies_future_imported_at_stably(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    now = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)
+    auth = stored_auth("https://fleet.enji.ai", {"type": "cookie", "cookie_header": "access=a; refresh=b"})
+    auth["imported_at"] = (now + IMPORTED_AT_FUTURE_TOLERANCE + timedelta(microseconds=1)).isoformat()
+    auth_file.write_text(json.dumps(auth), encoding="utf-8")
+
+    result = load_auth(auth_file, now=now)
+
+    assert result == AuthClockAnomaly("imported_at")
+
+
+def test_storage_accepts_imported_at_at_future_tolerance_boundary(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    now = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)
+    auth = stored_auth("https://fleet.enji.ai", {"type": "cookie", "cookie_header": "access=a; refresh=b"})
+    auth["imported_at"] = (now + IMPORTED_AT_FUTURE_TOLERANCE).isoformat()
+    auth_file.write_text(json.dumps(auth), encoding="utf-8")
+
+    assert isinstance(load_auth(auth_file, now=now), AuthLoaded)
 
 
 def test_ambiguous_response_is_dispatched_once_per_source_revision(tmp_path: Path) -> None:

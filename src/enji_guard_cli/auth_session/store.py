@@ -10,7 +10,7 @@ import fcntl
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Protocol, TypedDict, cast
@@ -27,6 +27,7 @@ from enji_guard_cli.auth_session.state_machine import (
 )
 
 AUTH_SCHEMA_VERSION = 2
+IMPORTED_AT_FUTURE_TOLERANCE = timedelta(seconds=5)
 
 
 class CredentialType(StrEnum):
@@ -88,11 +89,18 @@ class AuthIoFailure:
 
 
 @dataclass(frozen=True, slots=True)
+class AuthClockAnomaly:
+    """A valid credential whose observational timestamp is implausibly future."""
+
+    field: Literal["imported_at"]
+
+
+@dataclass(frozen=True, slots=True)
 class AuthLoaded:
     auth: StoredAuth
 
 
-AuthLoadResult = AuthAbsent | AuthCorrupt | AuthUnsupported | AuthIoFailure | AuthLoaded
+AuthLoadResult = AuthAbsent | AuthCorrupt | AuthUnsupported | AuthIoFailure | AuthClockAnomaly | AuthLoaded
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,7 +182,7 @@ def auth_file_lock(auth_path: Path, *, failpoint: StorageFailpoint | None = None
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def load_auth(path: Path) -> AuthLoadResult:
+def load_auth(path: Path, *, now: datetime | None = None) -> AuthLoadResult:
     try:
         raw_text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -185,7 +193,7 @@ def load_auth(path: Path) -> AuthLoadResult:
         loaded = cast(object, json.loads(raw_text))
     except json.JSONDecodeError as exc:
         return AuthCorrupt(f"invalid JSON: {exc.msg}")
-    return _parse_auth(loaded)
+    return _parse_auth(loaded, now=now)
 
 
 def load_auth_file(path: Path) -> StoredAuth | None:
@@ -294,7 +302,7 @@ def cas_replace_cookie(
     return CasWritten(replacement)
 
 
-def _parse_auth(loaded: object) -> AuthLoadResult:
+def _parse_auth(loaded: object, *, now: datetime | None = None) -> AuthLoadResult:
     if not isinstance(loaded, dict):
         return AuthCorrupt("credential payload must be an object")
     version = loaded.get("version")
@@ -304,6 +312,9 @@ def _parse_auth(loaded: object) -> AuthLoadResult:
     if metadata is None:
         return AuthCorrupt("credential revision, base_url, and imported_at must be non-empty strings")
     revision, base_url, imported_at = metadata
+    imported_at_validation = _validate_imported_at(imported_at, now=now)
+    if not isinstance(imported_at_validation, datetime):
+        return imported_at_validation
     raw_credential = loaded.get("credential")
     credential = _parse_credential(raw_credential)
     if credential is None:
@@ -327,6 +338,26 @@ def _credential_metadata(payload: Mapping[object, object]) -> tuple[str, str, st
             return revision, base_url, imported_at
         case _:
             return None
+
+
+def _parse_utc_timestamp(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+        return None
+    return parsed.astimezone(UTC)
+
+
+def _validate_imported_at(value: str, *, now: datetime | None) -> datetime | AuthCorrupt | AuthClockAnomaly:
+    parsed = _parse_utc_timestamp(value)
+    if parsed is None:
+        return AuthCorrupt("credential imported_at must be an ISO 8601 UTC timestamp")
+    current_time = (now if now is not None else datetime.now(UTC)).astimezone(UTC)
+    if parsed > current_time + IMPORTED_AT_FUTURE_TOLERANCE:
+        return AuthClockAnomaly("imported_at")
+    return parsed
 
 
 def _parse_credential(raw: object) -> Credential | None:

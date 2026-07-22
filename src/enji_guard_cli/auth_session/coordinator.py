@@ -25,6 +25,7 @@ from enji_guard_cli.auth_session.state_machine import (
 )
 from enji_guard_cli.auth_session.store import (
     AuthAbsent,
+    AuthClockAnomaly,
     AuthCorrupt,
     AuthIoFailure,
     AuthLoaded,
@@ -318,6 +319,8 @@ def _loaded_or_raise(loaded: object) -> StoredAuth:
             return auth
         case AuthAbsent():
             raise EnjiHttpError("AUTH_REQUIRED", "auth file does not exist")
+        case AuthClockAnomaly():
+            raise EnjiHttpError("AUTH_CLOCK_ANOMALY", "auth file imported_at is in the future")
         case AuthCorrupt(detail=detail):
             raise EnjiHttpError("AUTH_REQUIRED", f"auth file is corrupt: {detail}")
         case AuthUnsupported(version=version):
