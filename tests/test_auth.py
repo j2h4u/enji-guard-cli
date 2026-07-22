@@ -281,7 +281,7 @@ def test_auth_status_does_not_refresh_or_replay_on_invalid_cookie(tmp_path: Path
     status = run_auth_status(run_status)
 
     assert status["authenticated"] is False
-    assert status["code"] == "AUTH_INVALID"
+    assert status["code"] == "AUTH_REQUIRED"
     assert captured == [("GET", "/api/v1/auth/me")]
 
 
