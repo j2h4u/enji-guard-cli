@@ -93,7 +93,7 @@ def _status_item(
         audit_key=audit.action_key,
         title=audit.title,
         freshness=compare_heads(current_sha, audited_sha),
-        can_read=_link_readable(link, active_run, lifecycle),
+        can_read=_artifact_expected(audited_sha, active_run, lifecycle),
         task_lifecycle=lifecycle,
         task_id=source.task_id if source is not None else None,
         task_status=run_status,
@@ -103,22 +103,26 @@ def _status_item(
     )
 
 
-def _link_readable(
-    link: AuditTaskLink | None,
+def _artifact_expected(
+    audited_sha: str | None,
     active_run: AuditRun | None,
     lifecycle: AuditTaskLifecycle,
 ) -> bool:
-    if link is None:
+    """Use audit result state, not optional task history, as the read signal."""
+
+    if audited_sha is None and lifecycle != "completed":
         return False
-    # A task projection can lag the active-runs projection and omit its own
-    # status.  An active queued/running task still makes the artifact unreadable.
-    if active_run is not None and task_lifecycle(
-        active_run.status,
-        started_at=active_run.started_at,
-        completed_at=active_run.completed_at,
-    ) in {"queued", "running"}:
-        return False
-    return lifecycle == "completed"
+    # Starting a new run can temporarily hide the previous snapshot. Task-link
+    # history is not an availability contract and may legitimately be empty.
+    return not (
+        active_run is not None
+        and task_lifecycle(
+            active_run.status,
+            started_at=active_run.started_at,
+            completed_at=active_run.completed_at,
+        )
+        in {"queued", "running"}
+    )
 
 
 def _runs_by_action(runs: tuple[AuditRun, ...]) -> dict[str, AuditRun]:
