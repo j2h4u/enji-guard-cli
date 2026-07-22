@@ -36,6 +36,8 @@ from enji_guard_cli.auth_session.store import (
     AuthLoaded,
     JournalCorrupt,
     JournalLoaded,
+    auth_file_lock,
+    delete_journal,
     load_auth,
     load_journal,
     pending_rotation_path,
@@ -183,4 +185,118 @@ def test_explicit_import_supersedes_terminal_journal(tmp_path: Path) -> None:
     imported = import_credential(auth_file, replacement)
 
     assert imported["revision"] == replacement["revision"]
+    assert not pending_rotation_path(auth_file).exists()
+
+
+@pytest.mark.parametrize("target_operation", ["lock_open", "lock", "unlock"])
+def test_auth_lock_exposes_each_durable_lock_boundary(tmp_path: Path, target_operation: str) -> None:
+    auth_file = tmp_path / "auth.json"
+
+    def failpoint(operation: str) -> None:
+        if operation == target_operation:
+            raise OSError(f"injected {target_operation}")
+
+    with pytest.raises(OSError, match=f"injected {target_operation}"), auth_file_lock(auth_file, failpoint=failpoint):
+        pass
+
+
+@pytest.mark.parametrize("target_operation", ["unlink", "parent_directory_open", "parent_directory_fsync"])
+def test_journal_delete_exposes_each_durable_removal_boundary(tmp_path: Path, target_operation: str) -> None:
+    auth_file = tmp_path / "auth.json"
+    auth = stored_auth("https://fleet.enji.ai", {"type": "cookie", "cookie_header": "access=a; refresh=b"})
+    write_journal(auth_file, Reserved(auth["revision"]))
+
+    def failpoint(operation: str) -> None:
+        if operation == target_operation:
+            raise OSError(f"injected {target_operation}")
+
+    with pytest.raises(OSError, match=f"injected {target_operation}"):
+        delete_journal(auth_file, failpoint=failpoint)
+
+
+@pytest.mark.parametrize(
+    "target_operation",
+    ["before_write_journal", "temporary_file", "write", "file_fsync", "rename", "parent_directory_open", "parent_directory_fsync"],
+)
+def test_failure_before_durable_requested_sends_zero_posts(tmp_path: Path, target_operation: str) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    calls = 0
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            nonlocal calls
+            calls += 1
+            raise AssertionError("request must not dispatch before REQUESTED is durable")
+
+    def failpoint(operation: str) -> None:
+        if operation == target_operation:
+            raise OSError(f"injected {target_operation}")
+
+    coordinator = RefreshCoordinator(auth_file, Exchange(), storage_failpoint=failpoint)
+
+    with pytest.raises(OSError, match=f"injected {target_operation}"):
+        asyncio.run(coordinator.refresh())
+    assert calls == 0
+
+
+def test_post_dispatch_persistence_failure_is_terminal_and_never_replayed(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    dispatches = 0
+    journal_writes = 0
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            nonlocal dispatches
+            dispatches += 1
+            return EnjiHttpResponse(
+                status_code=200,
+                headers={},
+                content=b"{}",
+                set_cookie_headers=("access_token=new", "refresh_token=new"),
+            )
+
+    def failpoint(operation: str) -> None:
+        nonlocal journal_writes
+        if operation == "before_write_journal":
+            journal_writes += 1
+            if journal_writes == 3:
+                raise OSError("injected post-dispatch journal failure")
+
+    exchange = Exchange()
+    coordinator = RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0, storage_failpoint=failpoint)
+
+    with pytest.raises(OSError, match="injected post-dispatch journal failure"):
+        asyncio.run(coordinator.refresh())
+    with pytest.raises(EnjiHttpError, match="outcome is terminal"):
+        asyncio.run(RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0).refresh())
+
+    assert dispatches == 1
+    journal = load_journal(auth_file)
+    assert isinstance(journal, JournalLoaded)
+    assert isinstance(journal.state, Requested)
+
+
+def test_rotated_successor_recovery_is_idempotent(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    before = load_auth(auth_file)
+    assert isinstance(before, AuthLoaded)
+    write_journal(auth_file, Rotated(before.auth["revision"], "access_token=new; refresh_token=new"))
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            raise AssertionError("recovery must not dispatch")
+
+    coordinator = RefreshCoordinator(auth_file, Exchange())
+    first = asyncio.run(coordinator.recover_startup())
+    second = asyncio.run(coordinator.recover_startup())
+
+    assert first is not None
+    assert second == first
+    assert first["credential"] == {"type": "cookie", "cookie_header": "access_token=new; refresh_token=new"}
     assert not pending_rotation_path(auth_file).exists()

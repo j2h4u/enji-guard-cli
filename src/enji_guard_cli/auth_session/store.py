@@ -8,7 +8,6 @@ the safe way to replace malformed or unsupported local state.
 import contextlib
 import fcntl
 import json
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -16,7 +15,7 @@ from pathlib import Path
 from typing import Literal, Protocol, TypedDict, cast
 from uuid import uuid4
 
-from enji_guard_cli.atomic_json import write_atomic_json
+from enji_guard_cli.atomic_json import fsync_directory, write_atomic_json
 from enji_guard_cli.auth_session.state_machine import (
     OutcomeUnknown,
     Rejected,
@@ -157,17 +156,20 @@ def pending_rotation_path(auth_path: Path) -> Path:
 
 
 @contextlib.contextmanager
-def auth_file_lock(auth_path: Path):
+def auth_file_lock(auth_path: Path, *, failpoint: StorageFailpoint | None = None):
     """Acquire the POSIX host lock for a short filesystem-only transaction."""
 
     auth_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     lock_path = auth_lock_path(auth_path)
+    _trigger(failpoint, "lock_open")
     with lock_path.open("a", encoding="utf-8") as lock_file:
         lock_path.chmod(0o600)
+        _trigger(failpoint, "lock")
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         try:
             yield
         finally:
+            _trigger(failpoint, "unlock")
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
@@ -209,7 +211,7 @@ def load_journal(auth_path: Path) -> JournalLoadResult:
 
 def write_auth_file(path: Path, payload: StoredAuth, *, failpoint: StorageFailpoint | None = None) -> None:
     _trigger(failpoint, "before_write_credential")
-    write_atomic_json(path, payload, indent=2)
+    write_atomic_json(path, payload, indent=2, failpoint=failpoint)
     _trigger(failpoint, "after_write_credential")
 
 
@@ -249,7 +251,7 @@ def write_journal(auth_path: Path, state: RotationState, *, failpoint: StorageFa
         "reason": reason,
     }
     _trigger(failpoint, "before_write_journal")
-    write_atomic_json(pending_rotation_path(auth_path), payload, indent=2)
+    write_atomic_json(pending_rotation_path(auth_path), payload, indent=2, failpoint=failpoint)
     _trigger(failpoint, "after_write_journal")
 
 
@@ -257,10 +259,11 @@ def delete_journal(auth_path: Path, *, failpoint: StorageFailpoint | None = None
     path = pending_rotation_path(auth_path)
     _trigger(failpoint, "before_delete_journal")
     try:
+        _trigger(failpoint, "unlink")
         path.unlink()
     except FileNotFoundError:
         return
-    _fsync_directory(path.parent)
+    fsync_directory(path.parent, failpoint=failpoint)
     _trigger(failpoint, "after_delete_journal")
 
 
@@ -372,14 +375,3 @@ def _journal_state(
 def _trigger(failpoint: StorageFailpoint | None, operation: str) -> None:
     if failpoint is not None:
         failpoint(operation)
-
-
-def _fsync_directory(path: Path) -> None:
-    try:
-        directory_fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(directory_fd)
-    finally:
-        os.close(directory_fd)

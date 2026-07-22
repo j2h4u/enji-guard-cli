@@ -41,3 +41,20 @@ def test_atomic_json_rejects_unserializable_payload_before_creating_files(tmp_pa
         atomic_json.write_atomic_json(destination, {"value": object()})
 
     assert not destination.parent.exists()
+
+
+@pytest.mark.parametrize(
+    "target_operation",
+    ["temporary_file", "write", "file_fsync", "rename", "parent_directory_open", "parent_directory_fsync"],
+)
+def test_atomic_json_exposes_each_durable_write_boundary(
+    tmp_path: Path, target_operation: str
+) -> None:
+    destination = tmp_path / "state" / "value.json"
+
+    def failpoint(operation: str) -> None:
+        if operation == target_operation:
+            raise OSError(f"injected {target_operation}")
+
+    with pytest.raises(OSError, match=f"injected {target_operation}"):
+        atomic_json.write_atomic_json(destination, {"value": 1}, failpoint=failpoint)

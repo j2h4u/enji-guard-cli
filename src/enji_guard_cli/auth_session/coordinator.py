@@ -31,6 +31,7 @@ from enji_guard_cli.auth_session.store import (
     JournalCorrupt,
     JournalIoFailure,
     JournalLoaded,
+    StorageFailpoint,
     StoredAuth,
     auth_file_lock,
     cas_replace_cookie,
@@ -84,11 +85,13 @@ class RefreshCoordinator:
         *,
         poll_seconds: float = 0.05,
         terminal_wait_seconds: float = 1.0,
+        storage_failpoint: StorageFailpoint | None = None,
     ) -> None:
         self._auth_path = auth_path
         self._exchange = exchange
         self._poll_seconds = poll_seconds
         self._terminal_wait_seconds = terminal_wait_seconds
+        self._storage_failpoint = storage_failpoint
         self._lock = asyncio.Lock()
 
     async def refresh(self, expected: StoredAuth | None = None) -> StoredAuth:
@@ -141,7 +144,7 @@ class RefreshCoordinator:
         return await asyncio.to_thread(self._recover_startup)
 
     def _prepare(self, expected: StoredAuth | None) -> _Preparation:
-        with auth_file_lock(self._auth_path):
+        with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
             loaded = load_auth(self._auth_path)
             current = _loaded_or_raise(loaded)
             if expected is not None and current["revision"] != expected["revision"]:
@@ -156,10 +159,10 @@ class RefreshCoordinator:
 
             reserved = transition(Ready(current["revision"]), Begin(current["revision"])).state
             assert isinstance(reserved, Reserved)
-            write_journal(self._auth_path, reserved)
+            write_journal(self._auth_path, reserved, failpoint=self._storage_failpoint)
             requested_transition = transition(reserved, DispatchBegun())
             assert isinstance(requested_transition.state, Requested)
-            write_journal(self._auth_path, requested_transition.state)
+            write_journal(self._auth_path, requested_transition.state, failpoint=self._storage_failpoint)
             return _Dispatch(current)
 
     def _recover_or_wait(self, current: StoredAuth) -> _ReturnAuth | _WaitForRevision | None:
@@ -172,7 +175,7 @@ class RefreshCoordinator:
         if isinstance(state, Ready):
             raise EnjiHttpError("STORAGE", "refresh journal contains an invalid ready state")
         if state.source_revision != current["revision"]:
-            delete_journal(self._auth_path)
+            delete_journal(self._auth_path, failpoint=self._storage_failpoint)
             return None
         if isinstance(state, Rotated):
             return self._recover_rotated(state)
@@ -184,9 +187,14 @@ class RefreshCoordinator:
         return None
 
     def _recover_rotated(self, state: Rotated) -> _ReturnAuth:
-        recovered = cas_replace_cookie(self._auth_path, state.source_revision, state.replacement_cookie_header)
+        recovered = cas_replace_cookie(
+            self._auth_path,
+            state.source_revision,
+            state.replacement_cookie_header,
+            failpoint=self._storage_failpoint,
+        )
         if isinstance(recovered, CasWritten):
-            delete_journal(self._auth_path)
+            delete_journal(self._auth_path, failpoint=self._storage_failpoint)
             return _ReturnAuth(recovered.auth)
         assert isinstance(recovered, CasSuperseded)
         return _ReturnAuth(_loaded_or_raise(load_auth(self._auth_path)))
@@ -200,37 +208,39 @@ class RefreshCoordinator:
         return self._commit_unknown(source["revision"], f"ambiguous refresh response HTTP {response.status_code}")
 
     def _commit_success(self, source_revision: str, cookie_header: str) -> StoredAuth:
-        with auth_file_lock(self._auth_path):
+        with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
             if _is_superseded(self._auth_path, source_revision):
                 return _loaded_or_raise(load_auth(self._auth_path))
             state = Requested(source_revision)
             rotated_transition = transition(state, ExchangeSucceeded(cookie_header))
             assert isinstance(rotated_transition.state, Rotated)
-            write_journal(self._auth_path, rotated_transition.state)
-            result = cas_replace_cookie(self._auth_path, source_revision, cookie_header)
+            write_journal(self._auth_path, rotated_transition.state, failpoint=self._storage_failpoint)
+            result = cas_replace_cookie(
+                self._auth_path, source_revision, cookie_header, failpoint=self._storage_failpoint
+            )
             if isinstance(result, CasWritten):
-                delete_journal(self._auth_path)
+                delete_journal(self._auth_path, failpoint=self._storage_failpoint)
                 return result.auth
             return _loaded_or_raise(load_auth(self._auth_path))
 
     def _commit_rejected(self, source_revision: str, reason: str) -> NoReturn:
-        with auth_file_lock(self._auth_path):
+        with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
             if not _is_superseded(self._auth_path, source_revision):
                 state = transition(Requested(source_revision), ExchangeRejected(reason)).state
                 assert isinstance(state, Rejected)
-                write_journal(self._auth_path, state)
+                write_journal(self._auth_path, state, failpoint=self._storage_failpoint)
         raise EnjiHttpError("AUTH_REQUIRED", "stored refresh cookie is not authenticated")
 
     def _commit_unknown(self, source_revision: str, reason: str) -> NoReturn:
-        with auth_file_lock(self._auth_path):
+        with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
             if not _is_superseded(self._auth_path, source_revision):
                 state = transition(Requested(source_revision), ExchangeOutcomeUnknown(reason)).state
                 assert isinstance(state, OutcomeUnknown)
-                write_journal(self._auth_path, state)
+                write_journal(self._auth_path, state, failpoint=self._storage_failpoint)
         raise EnjiHttpError("AUTH_IMPORT_REQUIRED", "refresh outcome is unknown; import a fresh browser credential")
 
     def _recover_startup(self) -> StoredAuth | None:
-        with auth_file_lock(self._auth_path):
+        with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
             loaded = load_auth(self._auth_path)
             if not isinstance(loaded, AuthLoaded):
                 return None
@@ -240,22 +250,20 @@ class RefreshCoordinator:
                 if isinstance(state, Ready):
                     raise EnjiHttpError("STORAGE", "refresh journal contains an invalid ready state")
                 if state.source_revision != loaded.auth["revision"]:
-                    delete_journal(self._auth_path)
+                    delete_journal(self._auth_path, failpoint=self._storage_failpoint)
                 elif isinstance(state, Rotated):
                     result = cas_replace_cookie(
-                        self._auth_path,
-                        state.source_revision,
-                        state.replacement_cookie_header,
+                        self._auth_path, state.source_revision, state.replacement_cookie_header, failpoint=self._storage_failpoint
                     )
                     if isinstance(result, CasWritten):
-                        delete_journal(self._auth_path)
+                        delete_journal(self._auth_path, failpoint=self._storage_failpoint)
                         return result.auth
                 elif isinstance(state, Reserved):
-                    delete_journal(self._auth_path)
+                    delete_journal(self._auth_path, failpoint=self._storage_failpoint)
                 elif isinstance(state, Requested):
                     unknown = transition(state, ExchangeOutcomeUnknown("process exited after refresh dispatch")).state
                     assert isinstance(unknown, OutcomeUnknown)
-                    write_journal(self._auth_path, unknown)
+                    write_journal(self._auth_path, unknown, failpoint=self._storage_failpoint)
             return loaded.auth
 
 
