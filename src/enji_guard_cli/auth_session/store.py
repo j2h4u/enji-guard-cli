@@ -68,6 +68,17 @@ class RotationJournalPayload(TypedDict):
     successor_revision: str | None
     outcome: RotationOutcome | None
     event_key: str | None
+    outbox_enqueued: bool
+
+
+class OutcomeOutboxRecordPayload(TypedDict):
+    outcome: RotationOutcome
+    event_key: str
+
+
+class OutcomeOutboxPayload(TypedDict):
+    version: Literal[2]
+    records: list[OutcomeOutboxRecordPayload]
 
 
 JournalStateName = Literal["RESERVED", "REQUESTED", "ROTATED", "REJECTED", "OUTCOME_UNKNOWN"]
@@ -82,6 +93,7 @@ class _JournalFields:
     successor_revision: str | None
     outcome: RotationOutcome | None
     event_key: str | None
+    outbox_enqueued: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +105,7 @@ class _JournalPayloadFields:
     successor_revision: str | None
     outcome: RotationOutcome | None
     event_key: str | None
+    outbox_enqueued: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,9 +163,42 @@ class JournalIoFailure:
 @dataclass(frozen=True, slots=True)
 class JournalLoaded:
     state: RotationState
+    outbox_enqueued: bool = False
 
 
 JournalLoadResult = JournalAbsent | JournalCorrupt | JournalIoFailure | JournalLoaded
+
+
+@dataclass(frozen=True, slots=True)
+class OutcomeOutboxRecord:
+    """A non-secret terminal outcome awaiting sink acknowledgement."""
+
+    outcome: RotationOutcome
+    event_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class OutcomeOutboxAbsent:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class OutcomeOutboxCorrupt:
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class OutcomeOutboxIoFailure:
+    operation: str
+    error: OSError
+
+
+@dataclass(frozen=True, slots=True)
+class OutcomeOutboxLoaded:
+    records: tuple[OutcomeOutboxRecord, ...]
+
+
+OutcomeOutboxLoadResult = OutcomeOutboxAbsent | OutcomeOutboxCorrupt | OutcomeOutboxIoFailure | OutcomeOutboxLoaded
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +236,12 @@ def auth_lock_path(auth_path: Path) -> Path:
 
 def pending_rotation_path(auth_path: Path) -> Path:
     return auth_path.with_name(f".{auth_path.name}.rotation.pending")
+
+
+def pending_outcome_path(auth_path: Path) -> Path:
+    """Return the independent, non-secret terminal-outcome outbox path."""
+
+    return auth_path.with_name(f".{auth_path.name}.rotation.outbox")
 
 
 @contextlib.contextmanager
@@ -246,14 +298,37 @@ def load_journal(auth_path: Path) -> JournalLoadResult:
     return _parse_journal(loaded)
 
 
+def load_outbox(auth_path: Path) -> OutcomeOutboxLoadResult:
+    """Load terminal outcomes without coupling them to rotation generation state."""
+
+    path = pending_outcome_path(auth_path)
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return OutcomeOutboxAbsent()
+    except OSError as exc:
+        return OutcomeOutboxIoFailure("read outcome outbox", exc)
+    try:
+        loaded = cast(object, json.loads(raw_text))
+    except json.JSONDecodeError as exc:
+        return OutcomeOutboxCorrupt(f"invalid JSON: {exc.msg}")
+    return _parse_outbox(loaded)
+
+
 def write_auth_file(path: Path, payload: StoredAuth, *, failpoint: StorageFailpoint | None = None) -> None:
     _trigger(failpoint, "before_write_credential")
     write_atomic_json(path, payload, indent=2, failpoint=failpoint)
     _trigger(failpoint, "after_write_credential")
 
 
-def write_journal(auth_path: Path, state: RotationState, *, failpoint: StorageFailpoint | None = None) -> None:
-    payload = _journal_payload(state)
+def write_journal(
+    auth_path: Path,
+    state: RotationState,
+    *,
+    outbox_enqueued: bool = False,
+    failpoint: StorageFailpoint | None = None,
+) -> None:
+    payload = _journal_payload(state, outbox_enqueued=outbox_enqueued)
     _trigger(failpoint, "before_write_journal")
     write_atomic_json(pending_rotation_path(auth_path), payload, indent=2, failpoint=failpoint)
     _trigger(failpoint, "after_write_journal")
@@ -269,6 +344,42 @@ def delete_journal(auth_path: Path, *, failpoint: StorageFailpoint | None = None
         return
     fsync_directory(path.parent, failpoint=failpoint)
     _trigger(failpoint, "after_delete_journal")
+
+
+def enqueue_outcome(auth_path: Path, record: OutcomeOutboxRecord, *, failpoint: StorageFailpoint | None = None) -> None:
+    """Durably append one terminal outcome, retaining prior unacknowledged records."""
+
+    records = _outbox_records_or_raise(load_outbox(auth_path))
+    if any(existing.event_key == record.event_key for existing in records):
+        return
+    _trigger(failpoint, "before_enqueue_outcome")
+    write_atomic_json(
+        pending_outcome_path(auth_path), _outbox_payload((*records, record)), indent=2, failpoint=failpoint
+    )
+    _trigger(failpoint, "after_enqueue_outcome")
+
+
+def acknowledge_outcome(auth_path: Path, event_key: str, *, failpoint: StorageFailpoint | None = None) -> None:
+    """Remove an accepted outcome durably; duplicate delivery remains safe on a crash."""
+
+    records = _outbox_records_or_raise(load_outbox(auth_path))
+    retained = tuple(record for record in records if record.event_key != event_key)
+    if len(retained) == len(records):
+        return
+    _trigger(failpoint, "before_acknowledge_outcome")
+    path = pending_outcome_path(auth_path)
+    if retained:
+        write_atomic_json(path, _outbox_payload(retained), indent=2, failpoint=failpoint)
+    else:
+        _trigger(failpoint, "before_unlink_outcome")
+        try:
+            _trigger(failpoint, "unlink")
+            path.unlink()
+        except FileNotFoundError:
+            return
+        fsync_directory(path.parent, failpoint=failpoint)
+        _trigger(failpoint, "after_unlink_outcome")
+    _trigger(failpoint, "after_acknowledge_outcome")
 
 
 def cas_replace_cookie(
@@ -375,7 +486,60 @@ def _parse_journal(loaded: object) -> JournalLoadResult:
     if isinstance(fields, JournalCorrupt):
         return fields
     state = _journal_state(fields)
-    return JournalLoaded(state) if state is not None else JournalCorrupt("journal state payload is inconsistent")
+    return (
+        JournalLoaded(state, fields.outbox_enqueued)
+        if state is not None
+        else JournalCorrupt("journal state payload is inconsistent")
+    )
+
+
+def _parse_outbox(loaded: object) -> OutcomeOutboxLoadResult:
+    if not isinstance(loaded, dict) or loaded.get("version") != AUTH_SCHEMA_VERSION:
+        return OutcomeOutboxCorrupt("outbox version must be 2")
+    raw_records = loaded.get("records")
+    if not isinstance(raw_records, list):
+        return OutcomeOutboxCorrupt("outbox records must be a list")
+    records: list[OutcomeOutboxRecord] = []
+    event_keys: set[str] = set()
+    for raw_record in raw_records:
+        record = _parse_outbox_record(raw_record)
+        if record is None:
+            return OutcomeOutboxCorrupt("outbox records must contain valid unique outcome event keys")
+        if record.event_key in event_keys:
+            return OutcomeOutboxCorrupt("outbox event keys must be unique")
+        event_keys.add(record.event_key)
+        records.append(record)
+    return OutcomeOutboxLoaded(tuple(records))
+
+
+def _parse_outbox_record(raw_record: object) -> OutcomeOutboxRecord | None:
+    if not isinstance(raw_record, dict):
+        return None
+    raw_outcome = raw_record.get("outcome")
+    event_key = raw_record.get("event_key")
+    if not isinstance(event_key, str) or not event_key:
+        return None
+    match raw_outcome:
+        case "rotated" | "rejected" | "outcome_unknown" as outcome:
+            if event_key.startswith("auth-rotation:") and event_key.endswith(f":{outcome}"):
+                return OutcomeOutboxRecord(outcome, event_key)
+        case _:
+            pass
+    return None
+
+
+def _outbox_records_or_raise(loaded: OutcomeOutboxLoadResult) -> tuple[OutcomeOutboxRecord, ...]:
+    match loaded:
+        case OutcomeOutboxAbsent():
+            return ()
+        case OutcomeOutboxLoaded(records=records):
+            return records
+        case OutcomeOutboxCorrupt(detail=detail):
+            raise OSError(f"outcome outbox is corrupt: {detail}")
+        case OutcomeOutboxIoFailure(operation=operation, error=error):
+            raise OSError(f"{operation} failed: {error}") from error
+        case _:
+            raise TypeError(f"unexpected outbox load result: {type(loaded).__name__}")
 
 
 def _journal_fields(payload: dict[object, object]) -> _JournalFields | JournalCorrupt:
@@ -385,12 +549,15 @@ def _journal_fields(payload: dict[object, object]) -> _JournalFields | JournalCo
     successor_revision = payload.get("successor_revision")
     outcome = payload.get("outcome")
     event_key = payload.get("event_key")
+    outbox_enqueued = payload.get("outbox_enqueued")
     if not isinstance(source_revision, str) or not source_revision:
         return JournalCorrupt("journal source_revision must be a non-empty string")
     if not isinstance(replacement, str | type(None)) or not isinstance(reason, str | type(None)):
         return JournalCorrupt("journal replacement_cookie_header and reason must be strings or null")
     if not isinstance(successor_revision, str | type(None)) or not isinstance(event_key, str | type(None)):
         return JournalCorrupt("journal successor_revision and event_key must be strings or null")
+    if not isinstance(outbox_enqueued, bool):
+        return JournalCorrupt("journal outbox_enqueued must be a boolean")
     match outcome:
         case "rotated":
             parsed_outcome: RotationOutcome | None = "rotated"
@@ -403,7 +570,14 @@ def _journal_fields(payload: dict[object, object]) -> _JournalFields | JournalCo
         case _:
             return JournalCorrupt("journal outcome must be a known terminal outcome or null")
     return _JournalFields(
-        source_revision, payload.get("state"), replacement, reason, successor_revision, parsed_outcome, event_key
+        source_revision,
+        payload.get("state"),
+        replacement,
+        reason,
+        successor_revision,
+        parsed_outcome,
+        event_key,
+        outbox_enqueued,
     )
 
 
@@ -415,47 +589,62 @@ def _journal_state(fields: _JournalFields) -> RotationState | None:
         fields.successor_revision,
         fields.outcome,
         fields.event_key,
+        fields.outbox_enqueued,
     ):
-        case "RESERVED", None, None, None, None, None:
+        case "RESERVED", None, None, None, None, None, False:
             return Reserved(fields.source_revision)
-        case "REQUESTED", None, None, None, None, None:
+        case "REQUESTED", None, None, None, None, None, False:
             return Requested(fields.source_revision)
-        case "ROTATED", str() as cookie_header, None, str() as successor, "rotated", str() as key:
+        case "ROTATED", str() as cookie_header, None, str() as successor, "rotated", str() as key, bool():
             state = Rotated(fields.source_revision, cookie_header, successor)
             return state if key == rotation_event_metadata(state).event_key else None
-        case "REJECTED", None, str() as rejection_reason, None, "rejected", str() as key:
+        case "REJECTED", None, str() as rejection_reason, None, "rejected", str() as key, bool():
             state = Rejected(fields.source_revision, rejection_reason)
             return state if key == rotation_event_metadata(state).event_key else None
-        case "OUTCOME_UNKNOWN", None, str() as unknown_reason, None, "outcome_unknown", str() as key:
+        case "OUTCOME_UNKNOWN", None, str() as unknown_reason, None, "outcome_unknown", str() as key, bool():
             state = OutcomeUnknown(fields.source_revision, unknown_reason)
             return state if key == rotation_event_metadata(state).event_key else None
     return None
 
 
-def _journal_payload(state: RotationState) -> RotationJournalPayload:
+def _journal_payload(state: RotationState, *, outbox_enqueued: bool) -> RotationJournalPayload:
     """Serialize only combinations which represent a valid v2 durable state."""
 
     match state:
         case Reserved(source_revision=source_revision):
-            fields = _JournalPayloadFields(source_revision, "RESERVED", None, None, None, None, None)
+            fields = _JournalPayloadFields(source_revision, "RESERVED", None, None, None, None, None, False)
         case Requested(source_revision=source_revision):
-            fields = _JournalPayloadFields(source_revision, "REQUESTED", None, None, None, None, None)
+            fields = _JournalPayloadFields(source_revision, "REQUESTED", None, None, None, None, None, False)
         case Rotated(
             source_revision=source_revision, replacement_cookie_header=replacement, successor_revision=successor
         ):
             metadata = rotation_event_metadata(state)
             fields = _JournalPayloadFields(
-                source_revision, "ROTATED", replacement, None, successor, metadata.outcome, metadata.event_key
+                source_revision,
+                "ROTATED",
+                replacement,
+                None,
+                successor,
+                metadata.outcome,
+                metadata.event_key,
+                outbox_enqueued,
             )
         case Rejected(source_revision=source_revision, reason=reason):
             metadata = rotation_event_metadata(state)
             fields = _JournalPayloadFields(
-                source_revision, "REJECTED", None, reason, None, metadata.outcome, metadata.event_key
+                source_revision, "REJECTED", None, reason, None, metadata.outcome, metadata.event_key, outbox_enqueued
             )
         case OutcomeUnknown(source_revision=source_revision, reason=reason):
             metadata = rotation_event_metadata(state)
             fields = _JournalPayloadFields(
-                source_revision, "OUTCOME_UNKNOWN", None, reason, None, metadata.outcome, metadata.event_key
+                source_revision,
+                "OUTCOME_UNKNOWN",
+                None,
+                reason,
+                None,
+                metadata.outcome,
+                metadata.event_key,
+                outbox_enqueued,
             )
         case Ready():
             raise TypeError("READY is implicit and cannot be persisted in a rotation journal")
@@ -474,6 +663,14 @@ def _journal_payload_base(fields: _JournalPayloadFields) -> RotationJournalPaylo
         "successor_revision": fields.successor_revision,
         "outcome": fields.outcome,
         "event_key": fields.event_key,
+        "outbox_enqueued": fields.outbox_enqueued,
+    }
+
+
+def _outbox_payload(records: tuple[OutcomeOutboxRecord, ...]) -> OutcomeOutboxPayload:
+    return {
+        "version": AUTH_SCHEMA_VERSION,
+        "records": [{"outcome": record.outcome, "event_key": record.event_key} for record in records],
     }
 
 

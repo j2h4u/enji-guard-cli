@@ -45,10 +45,17 @@ from enji_guard_cli.auth_session.store import (
     JournalIoFailure,
     JournalLoaded,
     JournalLoadResult,
+    OutcomeOutboxAbsent,
+    OutcomeOutboxLoaded,
+    OutcomeOutboxRecord,
     StoredAuth,
+    acknowledge_outcome,
     cas_replace_cookie,
+    enqueue_outcome,
     load_auth,
     load_journal,
+    load_outbox,
+    pending_outcome_path,
     pending_rotation_path,
     stored_auth,
     write_auth_file,
@@ -190,6 +197,72 @@ def test_terminal_journal_event_key_is_stable_and_contains_no_credentials(
     assert f'"event_key": "{metadata.event_key}"' in serialized
     assert metadata.event_key == rotation_event_key("source-revision", metadata.outcome)
     assert "SENTINEL" not in metadata.event_key
+
+
+def test_outbox_records_are_non_secret_and_retain_multiple_unique_keys(tmp_path: Path) -> None:
+    auth_path = tmp_path / "SENTINEL_AUTH_PATH.json"
+    first = OutcomeOutboxRecord("rejected", "auth-rotation:first:rejected")
+    second = OutcomeOutboxRecord("outcome_unknown", "auth-rotation:second:outcome_unknown")
+
+    enqueue_outcome(auth_path, first)
+    enqueue_outcome(auth_path, first)
+    enqueue_outcome(auth_path, second)
+
+    loaded = load_outbox(auth_path)
+    assert isinstance(loaded, OutcomeOutboxLoaded)
+    assert loaded.records == (first, second)
+    serialized = pending_outcome_path(auth_path).read_text(encoding="utf-8")
+    assert "SENTINEL" not in serialized
+    assert "cookie" not in serialized
+    assert "reason" not in serialized
+
+
+@pytest.mark.parametrize("target_operation", ["before_enqueue_outcome", "temporary_file", "write", "file_fsync"])
+def test_outbox_enqueue_failures_preserve_prior_records(tmp_path: Path, target_operation: str) -> None:
+    auth_path = tmp_path / "auth.json"
+    first = OutcomeOutboxRecord("rejected", "auth-rotation:first:rejected")
+    second = OutcomeOutboxRecord("outcome_unknown", "auth-rotation:second:outcome_unknown")
+    enqueue_outcome(auth_path, first)
+
+    def failpoint(operation: str) -> None:
+        if operation == target_operation:
+            raise OSError(f"injected {target_operation}")
+
+    with pytest.raises(OSError, match=f"injected {target_operation}"):
+        enqueue_outcome(auth_path, second, failpoint=failpoint)
+
+    loaded = load_outbox(auth_path)
+    assert isinstance(loaded, OutcomeOutboxLoaded)
+    assert loaded.records == (first,)
+
+
+@pytest.mark.parametrize("target_operation", ["before_acknowledge_outcome", "before_unlink_outcome", "unlink"])
+def test_outbox_acknowledgement_unlink_failures_retain_record(tmp_path: Path, target_operation: str) -> None:
+    auth_path = tmp_path / "auth.json"
+    record = OutcomeOutboxRecord("rejected", "auth-rotation:source:rejected")
+    enqueue_outcome(auth_path, record)
+
+    def failpoint(operation: str) -> None:
+        if operation == target_operation:
+            raise OSError(f"injected {target_operation}")
+
+    with pytest.raises(OSError, match=f"injected {target_operation}"):
+        acknowledge_outcome(auth_path, record.event_key, failpoint=failpoint)
+
+    loaded = load_outbox(auth_path)
+    assert isinstance(loaded, OutcomeOutboxLoaded)
+    assert loaded.records == (record,)
+
+
+def test_outbox_acknowledgement_removes_accepted_final_record(tmp_path: Path) -> None:
+    auth_path = tmp_path / "auth.json"
+    record = OutcomeOutboxRecord("rotated", "auth-rotation:source:rotated")
+    enqueue_outcome(auth_path, record)
+
+    acknowledge_outcome(auth_path, record.event_key)
+
+    assert isinstance(load_outbox(auth_path), OutcomeOutboxAbsent)
+    assert not pending_outcome_path(auth_path).exists()
 
 
 def test_rotated_successor_revision_is_generated_before_persistence_and_used_by_cas(tmp_path: Path) -> None:

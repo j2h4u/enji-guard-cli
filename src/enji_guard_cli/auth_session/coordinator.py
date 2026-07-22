@@ -38,13 +38,20 @@ from enji_guard_cli.auth_session.store import (
     JournalCorrupt,
     JournalIoFailure,
     JournalLoaded,
+    OutcomeOutboxCorrupt,
+    OutcomeOutboxIoFailure,
+    OutcomeOutboxLoaded,
+    OutcomeOutboxRecord,
     StorageFailpoint,
     StoredAuth,
+    acknowledge_outcome,
     auth_file_lock,
     cas_replace_cookie,
     delete_journal,
+    enqueue_outcome,
     load_auth,
     load_journal,
+    load_outbox,
     write_auth_file,
     write_journal,
 )
@@ -217,6 +224,7 @@ class RefreshCoordinator:
             journal_preparation = self._recover_or_wait(current)
             if journal_preparation is not None:
                 return journal_preparation
+            self._drain_outbox()
             if expected is not None and current["revision"] != expected["revision"]:
                 return _ReturnAuth(current)
 
@@ -235,29 +243,30 @@ class RefreshCoordinator:
         if not isinstance(journal, JournalLoaded):
             return None
         state = journal.state
+        outbox_enqueued = journal.outbox_enqueued
         if isinstance(state, Ready):
             raise EnjiHttpError("STORAGE", "refresh journal contains an invalid ready state")
         if isinstance(state, Rotated) and state.successor_revision == current["revision"]:
-            self._deliver_rotated(state)
+            self._record_terminal_outcome(state, outbox_enqueued=outbox_enqueued)
             return _ReturnAuth(current)
         if state.source_revision != current["revision"]:
-            delete_journal(self._auth_path, failpoint=self._storage_failpoint)
+            self._discard_rotation_state(state, outbox_enqueued=outbox_enqueued)
             return None
-        return self._recover_matching_state(state)
+        return self._recover_matching_state(state, outbox_enqueued=outbox_enqueued)
 
     def _recover_matching_state(
-        self, state: Rotated | Reserved | Requested | Rejected | OutcomeUnknown
+        self, state: Rotated | Reserved | Requested | Rejected | OutcomeUnknown, *, outbox_enqueued: bool
     ) -> _RecoveryPreparation:
         if isinstance(state, Rotated):
-            return self._recover_rotated(state)
+            return self._recover_rotated(state, outbox_enqueued=outbox_enqueued)
         if isinstance(state, Reserved):
             delete_journal(self._auth_path, failpoint=self._storage_failpoint)
             return None
         if isinstance(state, (Rejected, OutcomeUnknown)):
-            self._deliver_terminal(state)
+            self._record_terminal_outcome(state, outbox_enqueued=outbox_enqueued)
         return _WaitForRevision(state.source_revision)
 
-    def _recover_rotated(self, state: Rotated) -> _ReturnAuth:
+    def _recover_rotated(self, state: Rotated, *, outbox_enqueued: bool) -> _ReturnAuth:
         recovered = cas_replace_cookie(
             self._auth_path,
             state.source_revision,
@@ -266,7 +275,7 @@ class RefreshCoordinator:
             failpoint=self._storage_failpoint,
         )
         if isinstance(recovered, CasWritten):
-            self._deliver_rotated(state)
+            self._record_terminal_outcome(state, outbox_enqueued=outbox_enqueued)
             return _ReturnAuth(recovered.auth)
         assert isinstance(recovered, CasSuperseded)
         return _ReturnAuth(_loaded_or_raise(load_auth(self._auth_path)))
@@ -295,7 +304,7 @@ class RefreshCoordinator:
                 failpoint=self._storage_failpoint,
             )
             if isinstance(result, CasWritten):
-                self._deliver_rotated(rotated_transition.state)
+                self._record_terminal_outcome(rotated_transition.state, outbox_enqueued=False)
                 return result.auth
             return _loaded_or_raise(load_auth(self._auth_path))
 
@@ -305,7 +314,7 @@ class RefreshCoordinator:
                 state = transition(Requested(source_revision), ExchangeRejected(reason)).state
                 assert isinstance(state, Rejected)
                 write_journal(self._auth_path, state, failpoint=self._storage_failpoint)
-                self._deliver_terminal(state)
+                self._record_terminal_outcome(state, outbox_enqueued=False)
             else:
                 return _loaded_or_raise(load_auth(self._auth_path))
         raise TerminalRevisionRequiredError(source_revision, message="stored refresh cookie is not authenticated")
@@ -316,7 +325,7 @@ class RefreshCoordinator:
                 state = transition(Requested(source_revision), ExchangeOutcomeUnknown(reason)).state
                 assert isinstance(state, OutcomeUnknown)
                 write_journal(self._auth_path, state, failpoint=self._storage_failpoint)
-                self._deliver_terminal(state)
+                self._record_terminal_outcome(state, outbox_enqueued=False)
             else:
                 return _loaded_or_raise(load_auth(self._auth_path))
         raise TerminalRevisionRequiredError(
@@ -328,6 +337,7 @@ class RefreshCoordinator:
             loaded = load_auth(self._auth_path)
             if not isinstance(loaded, AuthLoaded):
                 return None
+            self._drain_outbox()
             return self._recover_startup_journal(loaded.auth)
 
     def _recover_startup_journal(self, current: StoredAuth) -> StoredAuth:
@@ -335,52 +345,99 @@ class RefreshCoordinator:
         result = current
         if isinstance(journal, JournalLoaded):
             state = journal.state
+            outbox_enqueued = journal.outbox_enqueued
             if isinstance(state, Ready):
                 raise EnjiHttpError("STORAGE", "refresh journal contains an invalid ready state")
             if isinstance(state, Rotated) and state.successor_revision == current["revision"]:
-                self._deliver_rotated(state)
+                self._record_terminal_outcome(state, outbox_enqueued=outbox_enqueued)
             elif state.source_revision != current["revision"]:
-                delete_journal(self._auth_path, failpoint=self._storage_failpoint)
+                self._discard_rotation_state(state, outbox_enqueued=outbox_enqueued)
             elif isinstance(state, Rotated):
-                result = self._recover_rotated(state).auth
+                result = self._recover_rotated(state, outbox_enqueued=outbox_enqueued).auth
             elif isinstance(state, Reserved):
                 delete_journal(self._auth_path, failpoint=self._storage_failpoint)
             elif isinstance(state, Requested):
                 unknown = transition(state, ExchangeOutcomeUnknown("process exited after refresh dispatch")).state
                 assert isinstance(unknown, OutcomeUnknown)
                 write_journal(self._auth_path, unknown, failpoint=self._storage_failpoint)
-                self._deliver_terminal(unknown)
+                self._record_terminal_outcome(unknown, outbox_enqueued=False)
             else:
-                self._deliver_terminal(state)
+                assert isinstance(state, (Rejected, OutcomeUnknown))
+                self._record_terminal_outcome(state, outbox_enqueued=outbox_enqueued)
         return result
 
-    def _deliver_rotated(self, state: Rotated) -> None:
-        """Deliver then remove a recovered/successful rotation only on acceptance."""
+    def _discard_rotation_state(
+        self, state: Rotated | Reserved | Requested | Rejected | OutcomeUnknown, *, outbox_enqueued: bool
+    ) -> None:
+        """Clear obsolete coordination state after retaining any terminal outcome."""
 
-        if self._deliver_terminal(state):
+        if isinstance(state, (Rotated, Rejected, OutcomeUnknown)) and not outbox_enqueued:
+            enqueue_outcome(self._auth_path, _outbox_record(state), failpoint=self._storage_failpoint)
+        delete_journal(self._auth_path, failpoint=self._storage_failpoint)
+
+    def _record_terminal_outcome(self, state: Rotated | Rejected | OutcomeUnknown, *, outbox_enqueued: bool) -> None:
+        """Make delivery independent from terminal generation coordination."""
+
+        if not outbox_enqueued:
+            enqueue_outcome(self._auth_path, _outbox_record(state), failpoint=self._storage_failpoint)
+            write_journal(self._auth_path, state, outbox_enqueued=True, failpoint=self._storage_failpoint)
+        self._drain_outbox()
+        if isinstance(state, Rotated) and not self._outbox_contains(_outbox_record(state).event_key):
             delete_journal(self._auth_path, failpoint=self._storage_failpoint)
 
-    def _deliver_terminal(self, state: Rotated | Rejected | OutcomeUnknown) -> bool:
-        """Attempt one non-secret outbox delivery.
+    def _drain_outbox(self) -> None:
+        """Deliver every accepted durable record once per reconciliation pass."""
 
-        An outcome sink accepts only by returning ``True``.  Returning
-        ``False``, raising, or an absent sink leaves the terminal record for a
-        later attempt.  Runtime composition supplies the telemetry sink.
-        """
+        outbox = load_outbox(self._auth_path)
+        if isinstance(outbox, OutcomeOutboxCorrupt):
+            raise EnjiHttpError("STORAGE", f"outcome outbox is corrupt: {outbox.detail}")
+        if isinstance(outbox, OutcomeOutboxIoFailure):
+            raise EnjiHttpError("STORAGE", f"{outbox.operation} failed: {outbox.error}")
+        if not isinstance(outbox, OutcomeOutboxLoaded):
+            return
+        for record in outbox.records:
+            if self._deliver_outbox_record(record):
+                acknowledge_outcome(self._auth_path, record.event_key, failpoint=self._storage_failpoint)
 
-        metadata = rotation_event_metadata(state)
-        event = f"enji_auth_rotation_{metadata.outcome}"
-        fields: dict[str, object] = {"event_key": metadata.event_key}
+    def _outbox_contains(self, event_key: str) -> bool:
+        outbox = load_outbox(self._auth_path)
+        if isinstance(outbox, OutcomeOutboxCorrupt):
+            raise EnjiHttpError("STORAGE", f"outcome outbox is corrupt: {outbox.detail}")
+        if isinstance(outbox, OutcomeOutboxIoFailure):
+            raise EnjiHttpError("STORAGE", f"{outbox.operation} failed: {outbox.error}")
+        return isinstance(outbox, OutcomeOutboxLoaded) and any(
+            record.event_key == event_key for record in outbox.records
+        )
+
+    def _deliver_outbox_record(self, record: OutcomeOutboxRecord) -> bool:
         if self._outcome_sink is None:
             return False
-        return self._outcome_sink(_LOGGER, logging.INFO, event, fields) is True
+        try:
+            return (
+                self._outcome_sink(
+                    _LOGGER,
+                    logging.INFO,
+                    f"enji_auth_rotation_{record.outcome}",
+                    {"event_key": record.event_key},
+                )
+                is True
+            )
+        except OSError, RuntimeError, ValueError:
+            return False
 
 
 def import_credential(auth_path: Path, auth: StoredAuth) -> StoredAuth:
-    """Linearize explicit import before clearing any older source journal."""
+    """Supersede rotation coordination without erasing unacknowledged outcomes."""
 
     with auth_file_lock(auth_path):
         write_auth_file(auth_path, auth)
+        journal = load_journal(auth_path)
+        if (
+            isinstance(journal, JournalLoaded)
+            and isinstance(journal.state, (Rotated, Rejected, OutcomeUnknown))
+            and not journal.outbox_enqueued
+        ):
+            enqueue_outcome(auth_path, _outbox_record(journal.state))
         delete_journal(auth_path)
     return auth
 
@@ -401,6 +458,11 @@ def _loaded_or_raise(loaded: object) -> StoredAuth:
             raise EnjiHttpError("STORAGE", f"{operation} failed: {error}")
         case _:
             raise TypeError(f"unexpected auth load result: {type(loaded).__name__}")
+
+
+def _outbox_record(state: Rotated | Rejected | OutcomeUnknown) -> OutcomeOutboxRecord:
+    metadata = rotation_event_metadata(state)
+    return OutcomeOutboxRecord(metadata.outcome, metadata.event_key)
 
 
 def _journal_error_message(journal: JournalCorrupt | JournalIoFailure) -> str:

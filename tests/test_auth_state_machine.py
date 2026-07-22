@@ -49,10 +49,13 @@ from enji_guard_cli.auth_session.store import (
     AuthLoaded,
     JournalCorrupt,
     JournalLoaded,
+    OutcomeOutboxRecord,
     auth_file_lock,
     delete_journal,
+    enqueue_outcome,
     load_auth,
     load_journal,
+    pending_outcome_path,
     pending_rotation_path,
     stored_auth,
     write_journal,
@@ -661,7 +664,10 @@ def test_rotated_outbox_retries_same_key_after_sink_failure_without_another_post
     assert not pending_rotation_path(auth_file).exists()
 
 
-def test_terminal_outbox_survives_sink_failure_and_replays_after_restart(tmp_path: Path) -> None:
+@pytest.mark.parametrize("sink_result", [False, RuntimeError("sink unavailable")])
+def test_terminal_outbox_survives_sink_failure_import_and_restart(
+    tmp_path: Path, sink_result: bool | RuntimeError
+) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=old", auth_file)
     loaded = load_auth(auth_file)
@@ -672,7 +678,9 @@ def test_terminal_outbox_survives_sink_failure_and_replays_after_restart(tmp_pat
     def failing_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
         _ = logger, level, event
         delivery_keys.append(str(fields["event_key"]))
-        return False
+        if isinstance(sink_result, Exception):
+            raise sink_result
+        return sink_result
 
     class Exchange:
         async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
@@ -689,24 +697,6 @@ def test_terminal_outbox_survives_sink_failure_and_replays_after_restart(tmp_pat
     )
     assert pending_rotation_path(auth_file).exists()
 
-    def accepting_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
-        _ = logger, level
-        assert event == "enji_auth_rotation_outcome_unknown"
-        delivery_keys.append(str(fields["event_key"]))
-        return True
-
-    coordinator = RefreshCoordinator(
-        auth_file,
-        Exchange(),
-        terminal_wait_seconds=0,
-        dependencies=CoordinatorDependencies(outcome_sink=accepting_sink),
-    )
-    with pytest.raises(EnjiHttpError, match="outcome is terminal"):
-        asyncio.run(coordinator.refresh(loaded.auth))
-
-    assert delivery_keys == [f"auth-rotation:{loaded.auth['revision']}:outcome_unknown"] * 2
-    assert pending_rotation_path(auth_file).exists()
-
     import_credential(
         auth_file,
         stored_auth(
@@ -714,6 +704,71 @@ def test_terminal_outbox_survives_sink_failure_and_replays_after_restart(tmp_pat
         ),
     )
     assert not pending_rotation_path(auth_file).exists()
+    assert pending_outcome_path(auth_file).exists()
+
+    def accepting_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
+        _ = logger, level
+        assert event == "enji_auth_rotation_outcome_unknown"
+        delivery_keys.append(str(fields["event_key"]))
+        return True
+
+    restarted = RefreshCoordinator(
+        auth_file,
+        Exchange(),
+        dependencies=CoordinatorDependencies(outcome_sink=accepting_sink),
+    )
+    assert asyncio.run(restarted.recover_startup()) is not None
+
+    assert delivery_keys == [f"auth-rotation:{loaded.auth['revision']}:outcome_unknown"] * 2
+    assert not pending_outcome_path(auth_file).exists()
+    assert not pending_rotation_path(auth_file).exists()
+
+
+def test_multiple_unacknowledged_outcomes_drain_in_order_once(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=current; refresh_token=current", auth_file)
+    first = OutcomeOutboxRecord("rejected", "auth-rotation:first:rejected")
+    second = OutcomeOutboxRecord("outcome_unknown", "auth-rotation:second:outcome_unknown")
+    enqueue_outcome(auth_file, first)
+    enqueue_outcome(auth_file, second)
+    events: list[str] = []
+
+    def accepting_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
+        _ = logger, level, event
+        events.append(str(fields["event_key"]))
+        return True
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            raise AssertionError("outbox draining must not dispatch a refresh")
+
+    coordinator = RefreshCoordinator(
+        auth_file, Exchange(), dependencies=CoordinatorDependencies(outcome_sink=accepting_sink)
+    )
+    assert asyncio.run(coordinator.recover_startup()) is not None
+    assert asyncio.run(coordinator.recover_startup()) is not None
+
+    assert events == [first.event_key, second.event_key]
+    assert not pending_outcome_path(auth_file).exists()
+
+
+def test_import_progresses_with_stale_unacknowledged_outbox(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    before = load_auth(auth_file)
+    assert isinstance(before, AuthLoaded)
+    record = OutcomeOutboxRecord("outcome_unknown", "auth-rotation:old:outcome_unknown")
+    enqueue_outcome(auth_file, record)
+    replacement = stored_auth(
+        before.auth["base_url"], {"type": "cookie", "cookie_header": "access_token=fresh; refresh_token=fresh"}
+    )
+
+    imported = import_credential(auth_file, replacement)
+
+    assert imported == replacement
+    assert load_auth(auth_file) == AuthLoaded(replacement)
+    assert pending_outcome_path(auth_file).exists()
 
 
 @pytest.mark.parametrize(
