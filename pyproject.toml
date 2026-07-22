@@ -41,6 +41,7 @@ extend-exclude = [".planning"]
 
 [tool.ruff.lint]
 explicit-preview-rules = true
+extend-select = ["RUF100"]
 select = [
     "E4",
     "E7",

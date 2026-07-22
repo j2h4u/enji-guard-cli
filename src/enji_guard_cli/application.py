@@ -88,10 +88,8 @@ from enji_guard_cli.portfolio.repositories import add_repository, move_repositor
 from enji_guard_cli.portfolio.selectors import GatewayPortfolioTargetService, GatewaySelectorResolver
 from enji_guard_cli.portfolio.status import (
     PortfolioOverview,
-    PortfolioStatus,
     RepositoryStatus,
     assemble_overview,
-    assemble_status,
     status_for_repo,
 )
 from enji_guard_cli.runtime_observability.ports import RuntimeAuthPort
@@ -284,11 +282,6 @@ class Application:
         batch = self._audit_start_service().start(target.repo_id, target.project_id, selected, catalog)
         return {"repo_id": target.repo_id, "project_id": target.project_id, **batch}
 
-    def audit_start_one(self, repo_id: str, project_id: str, audit: AuditDefinition) -> object:
-        catalog = self.audit_catalog()
-        batch = self._audit_start_service().start(repo_id, project_id, (audit,), catalog)
-        return cast(list[dict[str, object]], batch["results"])[0]
-
     def audit_read(
         self, repo: str, selectors: list[str] | None = None, *, project: str | None = None, all_audits: bool = False
     ) -> AuditRead:
@@ -445,15 +438,6 @@ class Application:
             target, audits=_AuditStatusReader(self, catalog), starter=_AuditStarter(self, catalog)
         )
 
-    def portfolio_status(self, sort: RepositorySortName = "default") -> PortfolioStatus:
-        catalog = self.audit_catalog()
-        return assemble_status(
-            gateway=self.portfolio_gateway,
-            audits=_AuditStatusReader(self, catalog),
-            fanout=self.fanout,
-            sort=sort,
-        )
-
     def portfolio_overview(self, project: str | None = None, sort: RepositorySortName = "default") -> PortfolioOverview:
         return assemble_overview(gateway=self.portfolio_gateway, fanout=self.fanout, project=project, sort=sort)
 
@@ -571,10 +555,6 @@ class Application:
 
     def language(self) -> AccountPreferences:
         return self.portfolio_gateway.get_preferences()
-
-    def get_language(self) -> AccountPreferences:
-        """Return account language for the delivery adapter."""
-        return self.language()
 
     def set_language(self, language: str) -> AccountPreferences:
         return self.portfolio_gateway.set_preferences(AccountPreferences(language))

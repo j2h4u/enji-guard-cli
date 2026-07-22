@@ -31,7 +31,6 @@ from enji_guard_cli.enji_gateway.http import (
     repo_active_runs,
     repo_audit_rerun_state,
     repo_task_links,
-    reports_list,
     runbook,
     start_audit_run,
     task_detail,
@@ -59,7 +58,6 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
     client = FakeEnjiHttpClient(
         [
             json_response({"limits": {}}),
-            json_response({"projects": []}),
             json_response({"project": {"id": "project_1"}, "repos": [], "webResources": []}),
             json_response({"id": "project_1"}, status_code=201),
             json_response({"project": {"id": "project_1"}}, status_code=201),
@@ -85,7 +83,6 @@ def test_implemented_enji_api_paths_exist_in_openapi_contract(tmp_path: Path) ->
     )
 
     access(auth_file, client, auth_port=AUTH_PORT)
-    reports_list(auth_file, client, auth_port=AUTH_PORT)
     project_detail("project_1", auth_file, client, auth_port=AUTH_PORT)
     create_project("Pets", auth_file, client, auth_port=AUTH_PORT)
     rename_project("project_1", "Friends", auth_file, client, auth_port=AUTH_PORT)

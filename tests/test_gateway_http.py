@@ -40,7 +40,6 @@ from enji_guard_cli.enji_gateway.http import (
     repo_active_runs,
     repo_audit_rerun_state,
     repo_task_links,
-    reports_list,
     runbook,
     start_audit_run,
     task_detail,
@@ -152,93 +151,6 @@ def test_report_language_endpoints_use_observed_paths_and_payloads(tmp_path: Pat
         ("GET", "https://fleet.enji.ai/api/ux/user-preferences", None),
         ("GET", "https://fleet.enji.ai/api/ux/projects/project_1/run-language", None),
         ("PUT", "https://fleet.enji.ai/api/ux/user-preferences", {"language": "en"}),
-    ]
-
-
-def test_reports_list_returns_compact_project_overview(tmp_path: Path) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_cookie("session=abc", auth_file)
-    client = FakeEnjiHttpClient(
-        [
-            json_response(
-                {
-                    "projects": [
-                        {
-                            "id": "project_1",
-                            "name": "Pets",
-                            "repoIds": ["repo_1", "repo_2", 7],
-                            "scores": {
-                                "security": {"critical": 1, "high": 2},
-                                "health": 98.5,
-                            },
-                            "reconPending": True,
-                            "ignored": "value",
-                        },
-                        {
-                            "id": 9,
-                            "name": None,
-                            "repoIds": "bad-shape",
-                            "scores": [],
-                            "reconPending": "later",
-                        },
-                    ]
-                }
-            )
-        ]
-    )
-
-    payload = reports_list(auth_file, client, auth_port=AUTH_PORT)
-
-    assert payload == {
-        "projects": [
-            {
-                "id": "project_1",
-                "name": "Pets",
-                "repo_ids": ["repo_1", "repo_2"],
-                "scores": {
-                    "security": {"critical": 1, "high": 2},
-                    "health": 98.5,
-                },
-                "recon_pending": True,
-            },
-            {
-                "id": None,
-                "name": None,
-                "repo_ids": [],
-                "scores": {},
-                "recon_pending": None,
-            },
-        ]
-    }
-    assert client.requests[0].headers == {"Cookie": "session=abc", "Origin": AUTH_REFRESH_ORIGIN}
-
-
-def test_reports_list_filters_project_selector(tmp_path: Path) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_cookie("session=abc", auth_file)
-    client = FakeEnjiHttpClient(
-        [
-            json_response(
-                {
-                    "projects": [
-                        {"id": "project_1", "name": "Pets", "repoIds": ["repo_1"]},
-                        {"id": "project_2", "name": "Work", "repoIds": ["repo_2"]},
-                    ]
-                }
-            )
-        ]
-    )
-
-    payload = reports_list(auth_file, client, selector="pets/*", auth_port=AUTH_PORT)
-
-    assert payload["projects"] == [
-        {
-            "id": "project_1",
-            "name": "Pets",
-            "repo_ids": ["repo_1"],
-            "scores": {},
-            "recon_pending": None,
-        }
     ]
 
 
@@ -537,39 +449,12 @@ def test_audit_email_preferences_use_expected_requests(tmp_path: Path) -> None:
     assert client.requests[1].json_body == {"manualRunCompletion": False, "scheduledRunCompletion": False}
 
 
-def test_reports_list_rejects_unsupported_filters(tmp_path: Path) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_cookie("session=abc", auth_file)
-
-    try:
-        reports_list(auth_file, FakeEnjiHttpClient([]), stale=True, auth_port=AUTH_PORT)
-    except EnjiApiError as exc:
-        assert exc.code == "VALIDATION"
-        assert exc.message == "stale filtering is not available in the compact project overview yet"
-    else:
-        raise AssertionError("expected EnjiApiError")
-
-
 def test_access_raises_auth_required_when_auth_file_is_missing(tmp_path: Path) -> None:
     try:
         access(tmp_path / "missing.json", FakeEnjiHttpClient([]), auth_port=AUTH_PORT)
     except EnjiApiError as exc:
         assert exc.code == "AUTH_REQUIRED"
         assert exc.message == "auth file does not exist"
-    else:
-        raise AssertionError("expected EnjiHttpError")
-
-
-def test_reports_list_raises_upstream_error_for_non_object_response(tmp_path: Path) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_bearer_token("token-123", auth_file)
-    client = FakeEnjiHttpClient([json_response(["unexpected"])])
-
-    try:
-        reports_list(auth_file, client, auth_port=AUTH_PORT)
-    except EnjiApiError as exc:
-        assert exc.code == "UPSTREAM"
-        assert exc.message == "reports list returned unexpected JSON"
     else:
         raise AssertionError("expected EnjiHttpError")
 

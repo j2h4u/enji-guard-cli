@@ -71,13 +71,6 @@ USER_PREFERENCES_PUT_ENDPOINT_SPEC = EnjiEndpointSpec(
     retry_profile=RetryProfile.IDEMPOTENT_MUTATION,
     request_body_ref="#/components/requestBodies/UserLanguageUpdate",
 )
-REPORTS_LIST_ENDPOINT_SPEC = EnjiEndpointSpec(
-    method="GET",
-    path_template="/api/ux/projects",
-    operation_id="listProjects",
-    operation="reports list",
-    retry_profile=RetryProfile.READ,
-)
 PROJECTS_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="GET",
     path_template="/api/ux/projects",
@@ -297,7 +290,6 @@ IMPLEMENTED_ENJI_ENDPOINTS = (
     ACCESS_ENDPOINT_SPEC,
     GIT_CREDENTIALS_ENDPOINT_SPEC,
     GITLAB_PROJECTS_ENDPOINT_SPEC,
-    REPORTS_LIST_ENDPOINT_SPEC,
     PROJECTS_ENDPOINT_SPEC,
     PROJECT_DETAIL_ENDPOINT_SPEC,
     PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC,

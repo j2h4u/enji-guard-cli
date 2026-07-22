@@ -10,7 +10,6 @@ from enji_guard_cli.enji_gateway.client import (
     EnjiApiSession,
     run_api_no_content,
     run_api_request,
-    run_api_request_async,
 )
 from enji_guard_cli.enji_gateway.client import (
     load_api_session as _load_api_session_impl,
@@ -44,7 +43,6 @@ from enji_guard_cli.enji_gateway.contract import (
     REPO_TASK_LINKS_ENDPOINT_SPEC,
     REPO_TRANSFER_ENDPOINT_SPEC,
     REPO_TRANSFER_PREFLIGHT_ENDPOINT_SPEC,
-    REPORTS_LIST_ENDPOINT_SPEC,
     RUNBOOK_ENDPOINT_SPEC,
     TASK_DETAIL_ENDPOINT_SPEC,
     USER_PREFERENCES_GET_ENDPOINT_SPEC,
@@ -61,9 +59,6 @@ HTTP_OK = 200
 HTTP_CREATED = 201
 HTTP_NO_CONTENT = 204
 GITHUB_LOCATOR_PARTS = 2
-REPORTS_LIST_DEFAULT_SELECTOR = "*"
-REPORTS_LIST_DEFAULT_STALE = False
-REPORTS_LIST_DEFAULT_MIN_SEVERITY: str | None = None
 HTTP_CREATED_ONLY = frozenset({HTTP_CREATED})
 HTTP_NO_CONTENT_ONLY = frozenset({HTTP_NO_CONTENT})
 HTTP_OK_OR_NO_CONTENT = frozenset({HTTP_OK, HTTP_NO_CONTENT})
@@ -89,18 +84,6 @@ class AccessPayload(TypedDict):
     full_access: bool | None
     limits: AccessLimitsPayload
     usage: list[JsonValue]
-
-
-class ProjectOverviewPayload(TypedDict):
-    id: str | None
-    name: str | None
-    repo_ids: list[str]
-    scores: dict[str, JsonValue]
-    recon_pending: bool | None
-
-
-class ReportsListPayload(TypedDict):
-    projects: list[ProjectOverviewPayload]
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,17 +170,6 @@ def access(
     )
 
 
-async def access_async(
-    auth_file: Path | None = None, client: EnjiHttpClient | None = None, *, auth_port: GatewayAuthPort
-) -> AccessPayload:
-    return await run_api_request_async(
-        auth_file,
-        client,
-        ACCESS_ENDPOINT.request(),
-        auth_port=auth_port,
-    )
-
-
 def _parse_access_payload(payload: dict[str, object]) -> AccessPayload:
     access_payload = _as_dict(payload.get("access"))
     limits = _as_dict(access_payload.get("limits"))
@@ -217,42 +189,6 @@ def _parse_access_payload(payload: dict[str, object]) -> AccessPayload:
         },
         "usage": _normalize_json_list(access_payload.get("usage")),
     }
-
-
-def reports_list(  # noqa: PLR0913
-    auth_file: Path | None = None,
-    client: EnjiHttpClient | None = None,
-    *,
-    selector: str = REPORTS_LIST_DEFAULT_SELECTOR,
-    stale: bool = REPORTS_LIST_DEFAULT_STALE,
-    min_severity: str | None = REPORTS_LIST_DEFAULT_MIN_SEVERITY,
-    auth_port: GatewayAuthPort,
-) -> ReportsListPayload:
-    _validate_reports_filters(stale=stale, min_severity=min_severity)
-    return run_api_request(
-        auth_file,
-        client,
-        REPORTS_LIST_ENDPOINT.request(parser=_reports_list_parser(selector)),
-        auth_port=auth_port,
-    )
-
-
-async def reports_list_async(  # noqa: PLR0913
-    auth_file: Path | None = None,
-    client: EnjiHttpClient | None = None,
-    *,
-    selector: str = REPORTS_LIST_DEFAULT_SELECTOR,
-    stale: bool = REPORTS_LIST_DEFAULT_STALE,
-    min_severity: str | None = REPORTS_LIST_DEFAULT_MIN_SEVERITY,
-    auth_port: GatewayAuthPort,
-) -> ReportsListPayload:
-    _validate_reports_filters(stale=stale, min_severity=min_severity)
-    return await run_api_request_async(
-        auth_file,
-        client,
-        REPORTS_LIST_ENDPOINT.request(parser=_reports_list_parser(selector)),
-        auth_port=auth_port,
-    )
 
 
 def projects(
@@ -871,61 +807,12 @@ def put_improvement_job(  # noqa: PLR0913
     )
 
 
-def _reports_list_parser(selector: str) -> JsonObjectParser[ReportsListPayload]:
-    def parse(payload: dict[str, object]) -> ReportsListPayload:
-        return _parse_reports_list_payload(payload, selector)
-
-    return parse
-
-
-def _parse_reports_list_payload(payload: dict[str, object], selector: str) -> ReportsListPayload:
-    raw_projects = payload.get("projects")
-    if not isinstance(raw_projects, list):
-        return {"projects": []}
-    projects = [_normalize_project(project) for project in raw_projects]
-    return {"projects": _filter_projects(projects, selector)}
-
-
 def load_api_session(
     auth_file: Path | None = None,
     *,
     auth_port: GatewayAuthPort,
 ) -> EnjiApiSession:
     return _load_api_session_impl(auth_file, auth_port=auth_port)
-
-
-def _validate_reports_filters(*, stale: bool, min_severity: str | None) -> None:
-    if stale:
-        raise EnjiApiError("VALIDATION", "stale filtering is not available in the compact project overview yet")
-    if min_severity is not None:
-        raise EnjiApiError("VALIDATION", "min_severity filtering is not available in the compact project overview yet")
-
-
-def _filter_projects(projects: list[ProjectOverviewPayload], selector: str) -> list[ProjectOverviewPayload]:
-    if selector == "*":
-        return projects
-    if selector.endswith("/*"):
-        project_selector = selector.removesuffix("/*")
-        return [project for project in projects if _matches_project(project, project_selector)]
-    if selector.startswith("repo_"):
-        return [project for project in projects if selector in project["repo_ids"]]
-    raise EnjiApiError("BAD_SELECTOR", "reports list currently supports '*', '<project>/*', and repo ids")
-
-
-def _matches_project(project: ProjectOverviewPayload, selector: str) -> bool:
-    name = project["name"]
-    return project["id"] == selector or (name is not None and name.casefold() == selector.casefold())
-
-
-def _normalize_project(project: object) -> ProjectOverviewPayload:
-    project_object = _as_dict(project)
-    return {
-        "id": _optional_str(project_object.get("id")),
-        "name": _optional_str(project_object.get("name")),
-        "repo_ids": _normalize_str_list(project_object.get("repoIds")),
-        "scores": _normalize_json_object(project_object.get("scores")),
-        "recon_pending": _optional_bool(project_object.get("reconPending")),
-    }
 
 
 def _parse_json_object_payload(payload: dict[str, object]) -> JsonObjectPayload:
@@ -950,10 +837,6 @@ USER_PREFERENCES_GET_ENDPOINT = ApiEndpoint(
 USER_PREFERENCES_PUT_ENDPOINT = ApiEndpoint(
     spec=USER_PREFERENCES_PUT_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
-)
-REPORTS_LIST_ENDPOINT = ApiEndpoint(
-    spec=REPORTS_LIST_ENDPOINT_SPEC,
-    parser=_reports_list_parser(REPORTS_LIST_DEFAULT_SELECTOR),
 )
 PROJECTS_ENDPOINT = ApiEndpoint(
     spec=PROJECTS_ENDPOINT_SPEC,

@@ -24,22 +24,6 @@ class RepositoryStatus:
 
 
 @dataclass(frozen=True, slots=True)
-class ProjectStatus:
-    project: ProjectRef
-    repositories: tuple[RepositoryStatus, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class PortfolioStatus:
-    observed_at: str
-    projects: tuple[ProjectStatus, ...]
-
-    @property
-    def repositories(self) -> tuple[RepositoryStatus, ...]:
-        return tuple(repo for project in self.projects for repo in project.repositories)
-
-
-@dataclass(frozen=True, slots=True)
 class RepositoryOverview:
     repository: RepositoryRef
     active_runs: tuple[PortfolioActiveRun, ...] = ()
@@ -60,27 +44,6 @@ class PortfolioOverview:
 def repository_status(repository: RepositoryRef, *, audits: AuditStatusReader) -> RepositoryStatus:
     status = audits.status(repository.repo_id)
     return RepositoryStatus(repository=repository, audit=status)
-
-
-def assemble_status(
-    *,
-    gateway: PortfolioGatewayPort,
-    audits: AuditStatusReader,
-    fanout: BoundedFanout,
-    sort: RepositorySortName = "default",
-) -> PortfolioStatus:
-    details = fanout.map(gateway.list_projects(), lambda project: gateway.project_detail(project.project_id))
-    repositories = tuple(repository for detail in details for repository in detail.repositories)
-    statuses = fanout.map(repositories, lambda repository: repository_status(repository, audits=audits))
-    status_by_id = {status.repository.repo_id: status for status in statuses}
-    projects = tuple(
-        ProjectStatus(
-            detail.project,
-            _sort_repositories(tuple(status_by_id[repo.repo_id] for repo in detail.repositories), sort),
-        )
-        for detail in details
-    )
-    return PortfolioStatus(datetime.now(UTC).isoformat(), projects)
 
 
 def assemble_overview(
