@@ -1,6 +1,6 @@
 import asyncio
 import logging
-import random
+import secrets
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
 from contextlib import AbstractAsyncContextManager
@@ -11,6 +11,8 @@ from typing import Protocol
 
 from enji_guard_cli.auth_session.coordinator import PreDispatchLocalError, TerminalRevisionRequiredError
 from enji_guard_cli.auth_session.store import AuthLoaded, StoredAuth, load_auth
+
+_JITTER_RANDOM = secrets.SystemRandom()
 
 
 def _stored_auth_revision(auth_file: Path) -> str | None:
@@ -58,7 +60,7 @@ class AutoRefreshLoopDependencies:
     credential_changes_fn: Callable[[Path], AsyncGenerator[None]]
     revision_reader: Callable[[Path], str | None] = _stored_auth_revision
     monotonic_fn: Callable[[], float] = time.monotonic
-    random_fn: Callable[[], float] = random.random
+    random_fn: Callable[[], float] = _JITTER_RANDOM.random
     sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep
 
 
