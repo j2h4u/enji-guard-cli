@@ -6,6 +6,7 @@
 ### Fixes
 
 * **audit:** parse authoritative task detail contract ([#148](https://github.com/j2h4u/enji-guard-cli/issues/148)) ([7665c35](https://github.com/j2h4u/enji-guard-cli/commit/7665c35d24db9a9f84f18578987e69d47fd2e494))
+* honor explicit health listener options, scan candidate images before publishing, remove dead legacy surfaces with RUF100 enforcement, and pass typed audit updates through the application facade ([#150](https://github.com/j2h4u/enji-guard-cli/issues/150)) ([6a539a7](https://github.com/j2h4u/enji-guard-cli/commit/6a539a7f1af3c616e01288864de1b7bf8629f61f))
 
 ## [2.2.0](https://github.com/j2h4u/enji-guard-cli/compare/v2.1.0...v2.2.0) (2026-07-22)
 
