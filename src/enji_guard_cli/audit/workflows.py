@@ -156,7 +156,12 @@ def _read_history_item(  # noqa: PLR0913
         completed_at=ref.completed_at,
         collected_at=ref.collected_at,
     )
-    newer_run = newer_run_for_report(ref, observation.active_runs, action_key=item.audit_key)
+    newer_run = newer_run_for_report(
+        ref,
+        observation.active_runs,
+        action_key=item.audit_key,
+        report_is_stale=item.freshness.state == "stale",
+    )
     return ArtifactReadItem(item.audit_key, True, artifact, None, item.freshness, newer_run)
 
 

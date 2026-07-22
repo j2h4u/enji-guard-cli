@@ -166,6 +166,22 @@ def test_newer_run_for_report_requires_parseable_report_completion() -> None:
     assert newer_run_for_report(ref, (timestamp_less,), action_key="audit.security") is None
 
 
+def test_stale_report_marks_reused_timestamp_less_active_task_as_newer() -> None:
+    ref = _report_ref()
+    reused = AuditRun("task-old", "audit.security", "pending", None, None, None)
+
+    result = newer_run_for_report(
+        ref,
+        (reused,),
+        action_key="audit.security",
+        report_is_stale=True,
+    )
+
+    assert result is not None
+    assert result.task_id == "task-old"
+    assert result.state == "queued"
+
+
 def _status_item() -> AuditStatusItem:
     return AuditStatusItem(
         "audit.security",

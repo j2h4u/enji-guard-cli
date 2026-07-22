@@ -130,6 +130,7 @@ def newer_run_for_report(
     runs: tuple[AuditRun, ...],
     *,
     action_key: str | None = None,
+    report_is_stale: bool = False,
 ) -> AuditNewerRun | None:
     """Return a matching active task that is newer than the selected report."""
 
@@ -143,9 +144,29 @@ def newer_run_for_report(
     candidates: list[tuple[tuple[float, int, str, str], AuditRun, str]] = []
     for run in runs:
         state = task_lifecycle(run.status, started_at=run.started_at, completed_at=run.completed_at)
-        if run.task_id is None or run.task_id == ref.task_id or state not in {"queued", "running"}:
+        if run.task_id is None or state not in {"queued", "running"}:
             continue
         if action_key is not None and run.action_key != action_key:
+            continue
+        # Enji may reuse the completed report's task id while projecting a
+        # newly queued run.  A stale report plus a matching active projection
+        # is sufficient evidence that the displayed artifact is being
+        # superseded, even when upstream supplies no new timestamp or id.
+        if report_is_stale:
+            candidates.append(
+                (
+                    (
+                        _parse_time(run.started_at or run.created_at) or float("-inf"),
+                        lifecycle_priority(state),
+                        run.task_id,
+                        run.status or "",
+                    ),
+                    run,
+                    state,
+                )
+            )
+            continue
+        if run.task_id == ref.task_id:
             continue
         started = run.started_at or run.created_at
         started_epoch = _parse_time(started)
