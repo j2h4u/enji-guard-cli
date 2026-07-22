@@ -5,7 +5,6 @@ from enji_guard_cli.auth_session.models import (
     AuthSessionStatus,
     AuthStatusPayload,
     CredentialType,
-    PendingRefreshRotation,
     StoredAuth,
 )
 from enji_guard_cli.auth_session.ports import AuthSessionPort
@@ -24,7 +23,6 @@ __all__ = [
     "AuthSessionStatus",
     "AuthStatusPayload",
     "CredentialType",
-    "PendingRefreshRotation",
     "StoredAuth",
     "auth_status",
     "default_auth_file",

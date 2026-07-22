@@ -499,31 +499,6 @@ def test_settings_expose_pool_and_graceful_shutdown_values() -> None:
     assert settings.service.mcp_graceful_shutdown_timeout_seconds == 5.0
 
 
-def test_auto_refresh_retry_wait_uses_injected_maximum(monkeypatch: pytest.MonkeyPatch) -> None:
-    from types import SimpleNamespace
-
-    from enji_guard_cli.auth_session import auto_refresh as auto_refresh_module
-    from enji_guard_cli.settings import AutoRefreshSettings
-
-    monkeypatch.setattr(auto_refresh_module.random, "uniform", lambda _low, _high: 0.0)
-    settings = AutoRefreshSettings(
-        enabled=True,
-        lead_seconds=300,
-        fallback_seconds=900,
-        retry_seconds=900,
-        retry_initial_seconds=2.0,
-        retry_max_seconds=7.5,
-        retry_jitter_seconds=30.0,
-        auth_required_retry_seconds=900,
-    )
-    wait = auto_refresh_module._AuthRefreshWait(settings)
-    state = SimpleNamespace(
-        attempt_number=20,
-        outcome=SimpleNamespace(exception=lambda: RuntimeError()),
-    )
-    assert wait(cast(auto_refresh_module.RetryCallState, state)) == 7.5
-
-
 def test_supervisor_uses_configured_graceful_shutdown_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

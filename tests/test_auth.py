@@ -27,12 +27,11 @@ from enji_guard_cli.auth_session.api import (
     import_bearer_token,
     import_cookie,
     load_stored_auth,
-    merge_set_cookie_headers,
     refresh_auth_async,
-    set_cookie_names,
     start_auto_refresh_task,
 )
 from enji_guard_cli.auth_session.api import StoredAuth as RuntimeStoredAuth
+from enji_guard_cli.auth_session.cookies import merge_set_cookie_headers, set_cookie_names
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
 from enji_guard_cli.delivery.cli.app import app
 from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER, AutoRefreshSettings
@@ -473,148 +472,6 @@ def test_refresh_auth_updates_rotated_access_and_refresh_cookies(tmp_path: Path)
     }
 
 
-def test_refresh_auth_recovers_deferred_cookie_rotation_without_second_post(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    auth_file = tmp_path / "auth.json"
-    access_token = unsigned_jwt({"exp": 1782744000})
-    import_cookie("access_token=old; refresh_token=old", auth_file)
-    post_count = 0
-    persistence_attempts = 0
-    original_replace = auth_module.replace_cookie_credential
-
-    def fail_twice(path: Path, stored: RuntimeStoredAuth, cookie_header: str) -> RuntimeStoredAuth:
-        nonlocal persistence_attempts
-        persistence_attempts += 1
-        if persistence_attempts <= 2:
-            raise OSError(28, "disk full")
-        return original_replace(path, stored, cookie_header)
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal post_count
-        post_count += 1
-        return httpx.Response(
-            200,
-            headers=[
-                ("Set-Cookie", f"access_token={access_token}; Path=/; HttpOnly"),
-                ("Set-Cookie", "refresh_token=new; Path=/api/v1/auth; HttpOnly"),
-            ],
-            request=request,
-        )
-
-    monkeypatch.setattr(auth_module, "replace_cookie_credential", fail_twice)
-
-    async def run_refresh() -> AuthRefreshPayload:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await refresh_auth_async(auth_file, HttpxEnjiHttpClient(client))
-
-    with pytest.raises(AuthError) as exc_info:
-        asyncio.run(run_refresh())
-    assert exc_info.value.code == "STORAGE"
-    with pytest.raises(AuthError) as exc_info:
-        asyncio.run(run_refresh())
-    assert exc_info.value.code == "STORAGE"
-
-    payload = asyncio.run(run_refresh())
-
-    assert payload["ok"] is True
-    assert post_count == 1
-    assert persistence_attempts == 3
-    stored_auth = load_stored_auth(auth_file)
-    assert stored_auth is not None
-    assert stored_auth["credential"] == {
-        "type": "cookie",
-        "cookie_header": f"access_token={access_token}; refresh_token=new",
-    }
-
-
-def test_refresh_auth_accepts_already_persisted_deferred_rotation(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    auth_file = tmp_path / "auth.json"
-    access_token = unsigned_jwt({"exp": 1782744000})
-    import_cookie("access_token=old; refresh_token=old", auth_file)
-    original_replace = auth_module.replace_cookie_credential
-    post_count = 0
-
-    def fail_persistence(_path: Path, _stored: RuntimeStoredAuth, _cookie_header: str) -> RuntimeStoredAuth:
-        raise OSError(28, "disk full")
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal post_count
-        post_count += 1
-        return httpx.Response(
-            200,
-            headers=[
-                ("Set-Cookie", f"access_token={access_token}; Path=/; HttpOnly"),
-                ("Set-Cookie", "refresh_token=rotated; Path=/api/v1/auth; HttpOnly"),
-            ],
-            request=request,
-        )
-
-    monkeypatch.setattr(auth_module, "replace_cookie_credential", fail_persistence)
-
-    async def run_refresh() -> AuthRefreshPayload:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await refresh_auth_async(auth_file, HttpxEnjiHttpClient(client))
-
-    with pytest.raises(AuthError):
-        asyncio.run(run_refresh())
-
-    initial_auth = load_stored_auth(auth_file)
-    assert initial_auth is not None
-    original_replace(auth_file, initial_auth, f"access_token={access_token}; refresh_token=rotated")
-
-    payload = asyncio.run(run_refresh())
-
-    assert payload["ok"] is True
-    assert post_count == 1
-
-
-def test_refresh_auth_discards_deferred_rotation_when_auth_file_is_superseded(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_cookie("access_token=old; refresh_token=old", auth_file)
-    original_replace = auth_module.replace_cookie_credential
-    fail_persistence = True
-
-    def fail_then_write(path: Path, stored: RuntimeStoredAuth, cookie_header: str) -> RuntimeStoredAuth:
-        if fail_persistence:
-            raise OSError(5, "io error")
-        return original_replace(path, stored, cookie_header)
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            headers=[
-                ("Set-Cookie", f"access_token={unsigned_jwt({'exp': 1782744000})}; Path=/; HttpOnly"),
-                ("Set-Cookie", "refresh_token=rotated; Path=/api/v1/auth; HttpOnly"),
-            ],
-            request=request,
-        )
-
-    monkeypatch.setattr(auth_module, "replace_cookie_credential", fail_then_write)
-
-    async def run_refresh() -> AuthRefreshPayload:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await refresh_auth_async(auth_file, HttpxEnjiHttpClient(client))
-
-    with pytest.raises(AuthError):
-        asyncio.run(run_refresh())
-
-    import_cookie("access_token=operator; refresh_token=operator", auth_file)
-    payload = asyncio.run(run_refresh())
-
-    assert payload["ok"] is True
-    stored_auth = load_stored_auth(auth_file)
-    assert stored_auth is not None
-    assert stored_auth["credential"] == {
-        "type": "cookie",
-        "cookie_header": "access_token=operator; refresh_token=operator",
-    }
-
-
 def test_refresh_auth_rejects_success_response_without_refresh_cookie(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=old", auth_file)
@@ -634,14 +491,13 @@ def test_refresh_auth_rejects_success_response_without_refresh_cookie(tmp_path: 
     with pytest.raises(AuthError) as exc_info:
         asyncio.run(run_refresh())
 
-    assert exc_info.value.code == "UPSTREAM"
-    assert exc_info.value.message == "auth refresh did not return refresh_token Set-Cookie"
+    assert exc_info.value.code == "AUTH_IMPORT_REQUIRED"
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}
 
 
-def test_refresh_auth_persists_rotated_cookies_before_transient_error(tmp_path: Path) -> None:
+def test_refresh_auth_marks_transient_response_unknown_without_persisting_cookies(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     expires_at = datetime(2026, 6, 29, 12, 15, tzinfo=UTC)
     access_token = unsigned_jwt({"exp": int(expires_at.timestamp())})
@@ -664,14 +520,10 @@ def test_refresh_auth_persists_rotated_cookies_before_transient_error(tmp_path: 
     with pytest.raises(AuthError) as exc_info:
         asyncio.run(run_refresh())
 
-    assert exc_info.value.code == "UPSTREAM"
-    assert exc_info.value.message == "auth refresh failed with HTTP 502"
+    assert exc_info.value.code == "AUTH_IMPORT_REQUIRED"
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
-    assert stored_auth["credential"] == {
-        "type": "cookie",
-        "cookie_header": f"access_token={access_token}; refresh_token=new",
-    }
+    assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}
 
 
 def test_refresh_auth_does_not_persist_incomplete_transient_cookie_rotation(tmp_path: Path) -> None:
@@ -692,7 +544,7 @@ def test_refresh_auth_does_not_persist_incomplete_transient_cookie_rotation(tmp_
     with pytest.raises(AuthError) as exc_info:
         asyncio.run(run_refresh())
 
-    assert exc_info.value.code == "UPSTREAM"
+    assert exc_info.value.code == "AUTH_IMPORT_REQUIRED"
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}
@@ -719,7 +571,7 @@ def test_refresh_auth_does_not_persist_deleting_auth_cookie_from_transient_error
     with pytest.raises(AuthError) as exc_info:
         asyncio.run(run_refresh())
 
-    assert exc_info.value.code == "UPSTREAM"
+    assert exc_info.value.code == "AUTH_IMPORT_REQUIRED"
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}

@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import stat
@@ -6,17 +5,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import cast
 
-import httpx
 import pytest
 from pytest import MonkeyPatch
 
-import enji_guard_cli.auth_session.api as auth_module
 from enji_guard_cli.application import ApplicationResult
-from enji_guard_cli.auth_session.api import AuthError, import_cookie, refresh_auth_async
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.telemetry import configure_logging, log_event
 from enji_guard_cli.settings import LogFormat, LogLevelName, TelemetrySettings
-from enji_guard_cli.transport import HttpxEnjiHttpClient
 
 
 def test_json_logging_keeps_structured_safe_fields_and_drops_objects(capsys: pytest.CaptureFixture[str]) -> None:
@@ -173,50 +168,6 @@ def test_configure_logging_keeps_httpx_quiet_by_default() -> None:
     configure_logging(_telemetry_settings(log_file=None, log_format="text"))
 
     assert logging.getLogger("httpx").level == logging.WARNING
-
-
-def test_rotation_durability_telemetry_is_safe_and_keeps_storage_error_details(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_cookie("access_token=old; refresh_token=old", auth_file)
-    configure_logging(_telemetry_settings(log_file=None, log_format="json"))
-    original_replace = auth_module.replace_cookie_credential
-
-    def fail_persistence(_path: Path, _stored: object, _cookie_header: str) -> object:
-        raise OSError(28, f"secret-cookie at {tmp_path}")
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            headers=[
-                ("Set-Cookie", "access_token=secret-access; Path=/; HttpOnly"),
-                ("Set-Cookie", "refresh_token=secret-refresh; Path=/api/v1/auth; HttpOnly"),
-            ],
-            request=request,
-        )
-
-    monkeypatch.setattr(auth_module, "replace_cookie_credential", fail_persistence)
-
-    async def run_refresh() -> object:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await refresh_auth_async(auth_file, HttpxEnjiHttpClient(client), event_sink=log_event)
-
-    with pytest.raises(AuthError):
-        asyncio.run(run_refresh())
-    monkeypatch.setattr(auth_module, "replace_cookie_credential", original_replace)
-    asyncio.run(run_refresh())
-
-    payloads = [cast(dict[str, object], json.loads(line)) for line in capsys.readouterr().err.splitlines()]
-    deferred = next(payload for payload in payloads if payload["message"] == "enji_auth_refresh_rotation_deferred")
-
-    assert deferred["error_type"] == "OSError"
-    assert deferred["errno"] == 28
-    serialized = json.dumps(payloads)
-    assert "secret-cookie" not in serialized
-    assert "secret-access" not in serialized
-    assert "secret-refresh" not in serialized
-    assert str(tmp_path) not in serialized
 
 
 def _telemetry_settings(

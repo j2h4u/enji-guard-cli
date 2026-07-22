@@ -14,7 +14,6 @@ from enji_guard_cli.auth_session.store import (
     CookieCredential,
     Credential,
     CredentialType,
-    PendingRefreshRotation,
     StoredAuth,
 )
 
@@ -80,6 +79,5 @@ __all__ = [
     "Credential",
     "CredentialType",
     "ImportCredentialPayload",
-    "PendingRefreshRotation",
     "StoredAuth",
 ]
