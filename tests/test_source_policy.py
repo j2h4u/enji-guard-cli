@@ -45,6 +45,13 @@ UV_VERSION = "0.11.17"
 
 
 def _compose_common_service_fields(path: Path) -> dict[str, object]:
+    compose = _compose_config(path)
+    services = cast(dict[str, object], compose["services"])
+    service = cast(dict[str, object], services["enji-guard-cli"])
+    return {field: service[field] for field in COMMON_SERVICE_FIELDS}
+
+
+def _compose_config(path: Path) -> dict[str, object]:
     environment = os.environ.copy()
     environment["ENJI_GUARD_IMAGE_REF"] = COMPOSE_IMAGE_REF
     result = subprocess.run(
@@ -55,10 +62,7 @@ def _compose_common_service_fields(path: Path) -> dict[str, object]:
         env=environment,
         text=True,
     )
-    compose = cast(dict[str, object], json.loads(result.stdout))
-    services = cast(dict[str, object], compose["services"])
-    service = cast(dict[str, object], services["enji-guard-cli"])
-    return {field: service[field] for field in COMMON_SERVICE_FIELDS}
+    return cast(dict[str, object], json.loads(result.stdout))
 
 
 def test_dockerfile_default_command_is_loopback_safe() -> None:
@@ -79,6 +83,12 @@ def test_local_and_ghcr_compose_critical_settings_stay_in_sync() -> None:
     ghcr = _compose_common_service_fields(ROOT / "deploy" / "docker-compose.ghcr.yml")
 
     assert local == ghcr
+
+
+def test_ghcr_compose_declares_stable_project_name() -> None:
+    compose = _compose_config(ROOT / "deploy" / "docker-compose.ghcr.yml")
+
+    assert compose["name"] == "enji-guard-cli"
 
 
 def test_container_publish_workflow_run_requires_trusted_source() -> None:

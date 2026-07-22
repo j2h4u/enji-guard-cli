@@ -1,3 +1,5 @@
+name: enji-guard-cli
+
 services:
   enji-guard-cli:
     image: ${ENJI_GUARD_IMAGE_REF:?set ENJI_GUARD_IMAGE_REF to a full immutable image reference such as ghcr.io/j2h4u/enji-guard-cli:sha-<commit> or ghcr.io/j2h4u/enji-guard-cli@sha256:<digest>; version tags are mutable}
