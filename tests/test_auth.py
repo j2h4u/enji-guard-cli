@@ -12,12 +12,11 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
-import enji_guard_cli.auth_session.api as auth_module
 import enji_guard_cli.auth_session.auto_refresh as auto_refresh_module
 from enji_guard_cli.auth_session.adapters import RuntimeAuthCoordinator
 from enji_guard_cli.auth_session.api import (
     AuthStatusPayload,
-    _refresh_stored_cookie_auth,
+    _refresh_cookie_auth,
     auth_headers,
     auth_status_async,
     backend_readiness_probe_async,
@@ -25,13 +24,13 @@ from enji_guard_cli.auth_session.api import (
     cookie_refresh_sleep_seconds,
     import_bearer_token,
     import_cookie,
-    load_stored_auth,
     start_auto_refresh_task,
 )
 from enji_guard_cli.auth_session.api import StoredAuth as RuntimeStoredAuth
 from enji_guard_cli.auth_session.cookies import merge_set_cookie_headers, set_cookie_names
 from enji_guard_cli.auth_session.coordinator import PreDispatchLocalError, TerminalRevisionRequiredError
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
+from enji_guard_cli.auth_session.ports import AuthOutcomeSink
 from enji_guard_cli.auth_session.state_machine import OutcomeUnknown, Rejected, RotationState
 from enji_guard_cli.auth_session.store import AuthLoaded, load_auth, write_journal
 from enji_guard_cli.delivery.cli.app import app
@@ -65,6 +64,39 @@ class StoredAuth(TypedDict):
     base_url: str
     credential: StoredCredential
     imported_at: str
+
+
+def _loaded_auth(path: Path) -> RuntimeStoredAuth:
+    loaded = load_auth(path)
+    assert isinstance(loaded, AuthLoaded)
+    return loaded.auth
+
+
+async def _refresh_stored_cookie_auth(
+    path: Path, client: HttpxEnjiHttpClient, *, outcome_sink: object = None
+) -> RuntimeStoredAuth:
+    return await _refresh_cookie_auth(
+        path, _loaded_auth(path), client, outcome_sink=cast(AuthOutcomeSink | None, outcome_sink)
+    )
+
+
+def load_stored_auth(path: Path) -> RuntimeStoredAuth:
+    """Test-only convenience: production has no nullable auth reader."""
+
+    return _loaded_auth(path)
+
+
+def _test_cookie_auth(revision: str = "old") -> RuntimeStoredAuth:
+    return cast(
+        RuntimeStoredAuth,
+        {
+            "version": 2,
+            "revision": revision,
+            "base_url": "https://fleet.example.test",
+            "credential": {"type": "cookie", "cookie_header": "access=old; refresh=old"},
+            "imported_at": "2026-01-01T00:00:00+00:00",
+        },
+    )
 
 
 def test_import_cookie_stores_cookie_credential(tmp_path: Path) -> None:
@@ -147,58 +179,43 @@ def test_terminal_auth_projection_bypasses_status_and_readiness_network(
     assert requests == []
 
 
-def test_auto_refresh_loop_retries_after_storage_or_validation_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    slept_with: list[float] = []
+def test_auto_refresh_loop_observes_corrupt_credential_without_dispatch() -> None:
+    async def exercise() -> None:
+        observed = asyncio.Event()
+        dispatches = 0
 
-    class FakeHttpxEnjiHttpClient:
-        async def __aenter__(self) -> FakeHttpxEnjiHttpClient:
-            return self
+        async def no_dispatch(*_args: object) -> RuntimeStoredAuth:
+            nonlocal dispatches
+            dispatches += 1
+            raise AssertionError("invalid credential state must not dispatch")
 
-        async def __aexit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
-            return None
+        def log_event(*args: object) -> None:
+            if args[2] == "enji_auth_auto_refresh_observing_credential":
+                observed.set()
 
-        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
-            raise AssertionError(f"request should not be called: {request.operation}")
-
-    def fake_sleep_seconds(*, auth_file: Path, refresh_settings: AutoRefreshSettings, **_kwargs: object) -> int:
-        raise ValueError("invalid auth state")
-
-    async def fake_sleep(seconds: float) -> None:
-        slept_with.append(seconds)
-        raise asyncio.CancelledError
-
-    def fake_log_event(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    async def fail_refresh(*_args: object, **_kwargs: object) -> RuntimeStoredAuth:
-        raise AssertionError("refresh should not be called")
-
-    monkeypatch.setattr(auto_refresh_module.asyncio, "sleep", fake_sleep)
-
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(
+        task = asyncio.create_task(
             auto_refresh_module._auto_refresh_loop(
                 auth_file=Path("auth.json"),
-                refresh_settings=AutoRefreshSettings(
-                    enabled=True,
-                    lead_seconds=300,
-                    fallback_seconds=900,
-                ),
+                refresh_settings=AutoRefreshSettings(enabled=True, lead_seconds=300, fallback_seconds=900),
                 dependencies=auto_refresh_module.AutoRefreshLoopDependencies(
-                    sleep_seconds_fn=fake_sleep_seconds,
-                    load_sleep_seconds_stored_auth_fn=lambda _path: None,
+                    load_auth_fn=lambda _path: auto_refresh_module.AuthCorrupt("invalid JSON"),
                     cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
-                    refresh_stored_cookie_auth_fn=fail_refresh,
-                    log_event_fn=fake_log_event,
+                    refresh_cookie_auth_fn=no_dispatch,
+                    log_event_fn=log_event,
                     logger=auto_refresh_module.logging.getLogger("test"),
-                    sleep_fn=fake_sleep,
-                    client_factory=FakeHttpxEnjiHttpClient,
+                    client_factory=_TestClient,
                     credential_changes_fn=_never_changes,
                 ),
             )
         )
+        await asyncio.wait_for(observed.wait(), timeout=1)
+        assert task.done() is False
+        assert dispatches == 0
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
 
-    assert slept_with == [5.0]
+    asyncio.run(exercise())
 
 
 def test_auto_refresh_loop_survives_terminal_cookie_response_error() -> None:
@@ -227,14 +244,14 @@ def test_auto_refresh_loop_survives_terminal_cookie_response_error() -> None:
                 auth_file=Path("auth.json"),
                 refresh_settings=AutoRefreshSettings(enabled=True, lead_seconds=300, fallback_seconds=900),
                 dependencies=auto_refresh_module.AutoRefreshLoopDependencies(
-                    sleep_seconds_fn=lambda **_kwargs: 0,
-                    load_sleep_seconds_stored_auth_fn=lambda _path: None,
+                    load_auth_fn=lambda _path: AuthLoaded(_test_cookie_auth("r1")),
                     cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
-                    refresh_stored_cookie_auth_fn=terminal_refresh,
+                    refresh_cookie_auth_fn=lambda _path, _auth, _client: terminal_refresh(),
                     log_event_fn=lambda *_args, **_kwargs: None,
                     logger=auto_refresh_module.logging.getLogger("test"),
                     client_factory=Client,
                     credential_changes_fn=changes,
+                    revision_reader=lambda _path: "r1",
                 ),
             )
         )
@@ -256,14 +273,13 @@ def test_credential_change_wait_survives_timeout() -> None:
             await asyncio.Event().wait()
             yield
 
-        async def unused_refresh(_path: Path, _client: object) -> RuntimeStoredAuth:
+        async def unused_refresh(_path: Path, _auth: RuntimeStoredAuth, _client: object) -> RuntimeStoredAuth:
             return cast(RuntimeStoredAuth, {})
 
         dependencies = auto_refresh_module.AutoRefreshLoopDependencies(
-            sleep_seconds_fn=lambda **_kwargs: 0,
-            load_sleep_seconds_stored_auth_fn=lambda _path: None,
+            load_auth_fn=lambda _path: AuthLoaded(_test_cookie_auth()),
             cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
-            refresh_stored_cookie_auth_fn=unused_refresh,
+            refresh_cookie_auth_fn=unused_refresh,
             log_event_fn=lambda *_args, **_kwargs: None,
             logger=auto_refresh_module.logging.getLogger("test"),
             client_factory=_TestClient,
@@ -389,7 +405,8 @@ def test_long_schedule_is_interrupted_by_revision_polling_before_refresh() -> No
                 monotonic_fn=lambda: clock,
                 sleep_fn=sleep,
                 refresh_fn=refresh,
-                sleep_seconds_fn=sleep_seconds,
+                cookie_refresh_sleep_seconds_fn=sleep_seconds,
+                load_auth_fn=lambda _path: AuthLoaded(_test_cookie_auth(revision)),
             ),
         )
         with pytest.raises(asyncio.CancelledError):
@@ -433,7 +450,7 @@ def test_pre_dispatch_retry_is_bounded_and_never_posts_before_reservation() -> N
                 monotonic_fn=lambda: clock,
                 sleep_fn=sleep,
                 refresh_fn=no_post_before_reservation,
-                sleep_seconds_fn=lambda **_kwargs: 0,
+                cookie_refresh_sleep_seconds_fn=lambda **_kwargs: 0,
             ),
         )
         settings = _scheduler_settings(pre_dispatch_retry_limit=2, fallback_seconds=100)
@@ -484,7 +501,8 @@ def test_requested_outcome_waits_for_import_without_retrying_dispatch() -> None:
                 monotonic_fn=lambda: clock,
                 sleep_fn=sleep,
                 refresh_fn=requested,
-                sleep_seconds_fn=sleep_seconds,
+                cookie_refresh_sleep_seconds_fn=sleep_seconds,
+                load_auth_fn=lambda _path: AuthLoaded(_test_cookie_auth(revision)),
             ),
         )
         with pytest.raises(asyncio.CancelledError):
@@ -887,10 +905,16 @@ def test_refresh_auth_does_not_persist_cookies_from_auth_failure(tmp_path: Path,
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}
 
 
-def test_start_auto_refresh_task_skips_bearer_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_start_auto_refresh_task_observes_bearer_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_bearer_token("token-123", auth_file)
 
+    captured: list[Path] = []
+
+    async def fake_auto_refresh_loop(*, auth_file: Path, **_kwargs: object) -> None:
+        captured.append(auth_file)
+
+    monkeypatch.setattr("enji_guard_cli.auth_session.auto_refresh._auto_refresh_loop", fake_auto_refresh_loop)
     monkeypatch.setattr(
         "enji_guard_cli.auth_session.api.default_settings",
         lambda: type(
@@ -903,7 +927,13 @@ def test_start_auto_refresh_task_skips_bearer_credentials(monkeypatch: pytest.Mo
         )(),
     )
 
-    assert start_auto_refresh_task() is None
+    async def run_task() -> None:
+        task = start_auto_refresh_task()
+        assert task is not None
+        await task
+
+    asyncio.run(run_task())
+    assert captured == [auth_file]
 
 
 def test_start_auto_refresh_task_runs_without_bootstrapped_auth_file(
@@ -947,7 +977,6 @@ def test_start_auto_refresh_task_uses_explicit_auth_file_without_default_fallbac
     custom_auth_file = tmp_path / "custom" / "auth.json"
     default_auth_file = tmp_path / "default" / "auth.json"
     captured: dict[str, object] = {}
-    loaded_paths: list[Path] = []
 
     async def fake_auto_refresh_loop(
         *, auth_file: Path, refresh_settings: AutoRefreshSettings, **_kwargs: object
@@ -956,7 +985,6 @@ def test_start_auto_refresh_task_uses_explicit_auth_file_without_default_fallbac
         captured["refresh_settings"] = refresh_settings
 
     monkeypatch.setattr("enji_guard_cli.auth_session.auto_refresh._auto_refresh_loop", fake_auto_refresh_loop)
-    monkeypatch.setattr(auth_module, "load_stored_auth", lambda path: loaded_paths.append(path) or None)
     monkeypatch.setattr(
         "enji_guard_cli.auth_session.api.default_settings",
         lambda: type(
@@ -978,7 +1006,6 @@ def test_start_auto_refresh_task_uses_explicit_auth_file_without_default_fallbac
 
     assert captured["auth_file"] == custom_auth_file
     assert captured["auth_file"] != default_auth_file
-    assert loaded_paths == [custom_auth_file]
 
 
 def test_runtime_auth_adapter_wires_telemetry_and_durable_outcome_sinks(
@@ -995,11 +1022,9 @@ def test_runtime_auth_adapter_wires_telemetry_and_durable_outcome_sinks(
         *,
         auth_file: Path,
         refresh_settings: AutoRefreshSettings,
-        credential_cookie_type: str,
         dependencies: auto_refresh_module.AutoRefreshTaskDependencies,
     ) -> None:
         assert refresh_settings.enabled is True
-        assert credential_cookie_type == "cookie"
         captured_dependencies.append(dependencies)
         assert auth_file == tmp_path / ("custom-auth.json" if len(captured_dependencies) == 1 else "isolated-auth.json")
 
@@ -1095,8 +1120,9 @@ class _LoopOverrides:
     revision_reader: Callable[[Path], str | None] = lambda _path: "old"
     monotonic_fn: Callable[[], float] = lambda: 0
     sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep
-    refresh_fn: Callable[[Path, object], Awaitable[RuntimeStoredAuth]] | None = None
-    sleep_seconds_fn: Callable[..., int] | None = None
+    refresh_fn: Callable[[Path, RuntimeStoredAuth, object], Awaitable[RuntimeStoredAuth]] | None = None
+    cookie_refresh_sleep_seconds_fn: Callable[..., int] | None = None
+    load_auth_fn: Callable[[Path], AuthLoaded] = lambda _path: AuthLoaded(_test_cookie_auth())
     log_event_fn: Callable[..., None] = lambda *_args, **_kwargs: None
 
 
@@ -1105,20 +1131,17 @@ def _loop_dependencies(
 ) -> auto_refresh_module.AutoRefreshLoopDependencies:
     resolved_overrides = overrides if overrides is not None else _LoopOverrides()
 
-    async def refresh(_path: Path, _client: object) -> RuntimeStoredAuth:
+    async def refresh(_path: Path, _auth: RuntimeStoredAuth, _client: object) -> RuntimeStoredAuth:
         return cast(RuntimeStoredAuth, {})
 
     return auto_refresh_module.AutoRefreshLoopDependencies(
-        sleep_seconds_fn=(
-            resolved_overrides.sleep_seconds_fn
-            if resolved_overrides.sleep_seconds_fn is not None
+        load_auth_fn=resolved_overrides.load_auth_fn,
+        cookie_refresh_sleep_seconds_fn=(
+            resolved_overrides.cookie_refresh_sleep_seconds_fn
+            if resolved_overrides.cookie_refresh_sleep_seconds_fn is not None
             else lambda **_kwargs: 0
         ),
-        load_sleep_seconds_stored_auth_fn=lambda _path: None,
-        cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
-        refresh_stored_cookie_auth_fn=resolved_overrides.refresh_fn
-        if resolved_overrides.refresh_fn is not None
-        else refresh,
+        refresh_cookie_auth_fn=resolved_overrides.refresh_fn if resolved_overrides.refresh_fn is not None else refresh,
         log_event_fn=resolved_overrides.log_event_fn,
         logger=auto_refresh_module.logging.getLogger("test"),
         client_factory=_TestClient,

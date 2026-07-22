@@ -451,11 +451,11 @@ def _loaded_or_raise(loaded: object) -> StoredAuth:
         case AuthClockAnomaly():
             raise EnjiHttpError("AUTH_CLOCK_ANOMALY", "auth file imported_at is in the future")
         case AuthCorrupt(detail=detail):
-            raise EnjiHttpError("AUTH_REQUIRED", f"auth file is corrupt: {detail}")
+            raise EnjiHttpError("AUTH_CORRUPT", f"auth file is corrupt: {detail}")
         case AuthUnsupported(version=version):
-            raise EnjiHttpError("AUTH_REQUIRED", f"auth file version is unsupported: {version!r}")
+            raise EnjiHttpError("AUTH_UNSUPPORTED", f"auth file version is unsupported: {version!r}")
         case AuthIoFailure(operation=operation, error=error):
-            raise EnjiHttpError("STORAGE", f"{operation} failed: {error}")
+            raise EnjiHttpError("AUTH_IO_FAILURE", f"{operation} failed: {error}")
         case _:
             raise TypeError(f"unexpected auth load result: {type(loaded).__name__}")
 

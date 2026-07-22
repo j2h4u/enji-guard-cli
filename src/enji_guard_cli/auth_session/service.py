@@ -11,6 +11,7 @@ from enji_guard_cli.auth_session.models import (
     ImportCredentialPayload,
     StoredAuth,
 )
+from enji_guard_cli.auth_session.store import AuthLoaded, AuthLoadResult, load_auth
 from enji_guard_cli.settings import EnjiGuardSettings, default_settings
 from enji_guard_cli.transport import EnjiHttpClient
 
@@ -36,12 +37,17 @@ class AuthSessionService:
     def import_bearer_token(self, raw_token: str) -> ImportCredentialPayload:
         return _api.import_bearer_token(raw_token, self.auth_file)
 
-    def load(self) -> StoredAuth | None:
+    def load(self) -> AuthLoadResult:
         target = self.auth_file if self.auth_file is not None else _api.default_auth_file()
-        return _api.load_stored_auth(target)
+        return load_auth(target)
 
     def auth_headers(self, stored_auth: StoredAuth | None = None) -> dict[str, str]:
-        current = stored_auth if stored_auth is not None else self.load()
+        current = stored_auth
+        if current is None:
+            loaded = self.load()
+            if not isinstance(loaded, AuthLoaded):
+                return {}
+            current = loaded.auth
         if current is None:
             return {}
         return _api.auth_headers(current)

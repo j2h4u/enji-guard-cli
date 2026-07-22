@@ -367,7 +367,7 @@ def test_watcher_disabled_revision_polling_detects_atomic_credential_replacement
         first_read = asyncio.Event()
         reads = 0
 
-        async def unused_refresh(_path: Path, _client: object) -> StoredAuth:
+        async def unused_refresh(_path: Path, _auth: StoredAuth, _client: object) -> StoredAuth:
             raise AssertionError("watcher-disabled polling must not refresh")
 
         def revision_reader(path: Path) -> str | None:
@@ -378,10 +378,9 @@ def test_watcher_disabled_revision_polling_detects_atomic_credential_replacement
             return loaded.auth["revision"] if isinstance(loaded, AuthLoaded) else None
 
         dependencies = auto_refresh.AutoRefreshLoopDependencies(
-            sleep_seconds_fn=lambda **_kwargs: 0,
-            load_sleep_seconds_stored_auth_fn=lambda _path: None,
+            load_auth_fn=load_auth,
             cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
-            refresh_stored_cookie_auth_fn=unused_refresh,
+            refresh_cookie_auth_fn=unused_refresh,
             log_event_fn=lambda *_args, **_kwargs: None,
             logger=auto_refresh.logging.getLogger("test"),
             client_factory=_UnusedClient,

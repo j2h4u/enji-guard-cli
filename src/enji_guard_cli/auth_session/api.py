@@ -27,7 +27,6 @@ from enji_guard_cli.auth_session.store import (
     CredentialType,
     StoredAuth,
     load_auth,
-    load_auth_file,
     load_journal,
     stored_auth,
 )
@@ -128,10 +127,6 @@ def auth_headers(stored_auth: StoredAuth) -> dict[str, str]:
     return {"Authorization": f"Bearer {credential['token']}"}
 
 
-def load_stored_auth(path: Path) -> StoredAuth | None:
-    return load_auth_file(path)
-
-
 def cookie_access_expires_at(stored_auth: StoredAuth) -> datetime | None:
     credential = stored_auth["credential"]
     if credential["type"] != CredentialType.COOKIE.value:
@@ -226,16 +221,13 @@ def start_auto_refresh_task(
     return auto_refresh_impl.start_auto_refresh_task(
         auth_file=resolved_auth_file,
         refresh_settings=resolved_settings.auto_refresh,
-        credential_cookie_type=CredentialType.COOKIE.value,
         dependencies=auto_refresh_impl.AutoRefreshTaskDependencies(
-            load_stored_auth_fn=load_stored_auth,
             auto_refresh_loop_fn=auto_refresh_impl._auto_refresh_loop,
             loop_dependencies=auto_refresh_impl.AutoRefreshLoopDependencies(
-                sleep_seconds_fn=auto_refresh_impl._auto_refresh_sleep_seconds,
-                load_sleep_seconds_stored_auth_fn=load_stored_auth,
+                load_auth_fn=load_auth,
                 cookie_refresh_sleep_seconds_fn=cookie_refresh_sleep_seconds,
-                refresh_stored_cookie_auth_fn=lambda path, client: _refresh_stored_cookie_auth_for_auto_refresh(
-                    path, client, outcome_sink
+                refresh_cookie_auth_fn=lambda path, auth, client: _refresh_cookie_auth(
+                    path, auth, cast(EnjiHttpClient, client), outcome_sink=outcome_sink
                 ),
                 log_event_fn=resolved_event_sink,
                 logger=_LOGGER,
@@ -266,12 +258,6 @@ async def reconcile_auth_startup(
         _StartupOnlyExchange(),
         dependencies=CoordinatorDependencies(outcome_sink=outcome_sink),
     ).recover_startup()
-
-
-async def _refresh_stored_cookie_auth_for_auto_refresh(
-    path: Path, client: object, outcome_sink: AuthOutcomeSink | None = None
-) -> StoredAuth:
-    return await _refresh_stored_cookie_auth(path, cast(EnjiHttpClient, client), outcome_sink=outcome_sink)
 
 
 async def _auth_status_with_client(
@@ -419,15 +405,6 @@ async def _refresh_cookie_auth(
         _HttpxRefreshExchange(),
         dependencies=CoordinatorDependencies(outcome_sink=outcome_sink),
     ).refresh(stored_auth)
-
-
-async def _refresh_stored_cookie_auth(
-    path: Path, client: EnjiHttpClient, *, outcome_sink: AuthOutcomeSink | None = None
-) -> StoredAuth:
-    stored_auth = load_stored_auth(path)
-    if stored_auth is None:
-        raise EnjiHttpError("AUTH_REQUIRED", "auth file is invalid")
-    return await _refresh_cookie_auth(path, stored_auth, client, outcome_sink=outcome_sink)
 
 
 def _auth_projection(path: Path):

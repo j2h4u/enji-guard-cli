@@ -10,10 +10,11 @@ from enji_guard_cli.auth_session.api import (
     _refresh_cookie_auth,
     backend_readiness_probe_async,
     import_cookie,
-    load_stored_auth,
 )
 from enji_guard_cli.auth_session.state_machine import Rotated
 from enji_guard_cli.auth_session.store import (
+    AuthLoaded,
+    load_auth,
     pending_rotation_path,
     write_journal,
 )
@@ -27,6 +28,14 @@ from enji_guard_cli.enji_gateway.contract import (
     RetryProfile,
 )
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient, RetryConfig
+
+
+def load_stored_auth(path: Path):
+    """Test-only convenience: production has no nullable auth reader."""
+
+    loaded = load_auth(path)
+    assert isinstance(loaded, AuthLoaded)
+    return loaded.auth
 
 
 def test_api_endpoint_request_preserves_retry_profile_for_every_implemented_path() -> None:

@@ -276,13 +276,6 @@ def load_auth(path: Path, *, now: datetime | None = None) -> AuthLoadResult:
     return _parse_auth(loaded, now=now)
 
 
-def load_auth_file(path: Path) -> StoredAuth | None:
-    """Temporary legacy adapter while runtime readers migrate to typed projections."""
-
-    result = load_auth(path)
-    return result.auth if isinstance(result, AuthLoaded) else None
-
-
 def load_journal(auth_path: Path) -> JournalLoadResult:
     path = pending_rotation_path(auth_path)
     try:

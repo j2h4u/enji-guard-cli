@@ -9,8 +9,8 @@ from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
 from enji_guard_cli.auth_session.api import (
     import_bearer_token,
     import_cookie,
-    load_stored_auth,
 )
+from enji_guard_cli.auth_session.store import AuthLoaded, load_auth
 from enji_guard_cli.enji_gateway.client import get_json_object
 from enji_guard_cli.enji_gateway.http import (
     AuditRunCreate,
@@ -50,6 +50,14 @@ from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpRes
 AUTH_REFRESH_ORIGIN = DEFAULT_GUARD_ORIGIN
 AUTH_REFRESH_REFERER = DEFAULT_GUARD_REFERER
 AUTH_PORT = GatewayCredentialReader()
+
+
+def load_stored_auth(path: Path):
+    """Test-only convenience: production has no nullable auth reader."""
+
+    loaded = load_auth(path)
+    assert isinstance(loaded, AuthLoaded)
+    return loaded.auth
 
 
 @dataclass
