@@ -18,6 +18,17 @@ class AuthEventSink(Protocol):
     def __call__(self, logger: Logger, level: int, event: str, fields: Mapping[str, object]) -> None: ...
 
 
+class AuthOutcomeSink(Protocol):
+    """Synchronous durable-outbox delivery boundary for terminal rotations.
+
+    Returning ``True`` means the sink accepted the event durably.  Returning
+    ``False`` or raising leaves the terminal journal in place for a later
+    delivery attempt.  The event fields contain only the stable ``event_key``.
+    """
+
+    def __call__(self, logger: Logger, level: int, event: str, fields: Mapping[str, object]) -> bool: ...
+
+
 class AuthReadinessPort(Protocol):
     """Backend observation capability consumed by runtime composition."""
 
@@ -44,4 +55,11 @@ class AuthStorePort(Protocol):
     def save(self, auth_file: Path, stored_auth: StoredAuth) -> None: ...
 
 
-__all__ = ["AuthEventSink", "AuthReadinessPort", "AuthRefreshTaskPort", "AuthSessionPort", "AuthStorePort"]
+__all__ = [
+    "AuthEventSink",
+    "AuthOutcomeSink",
+    "AuthReadinessPort",
+    "AuthRefreshTaskPort",
+    "AuthSessionPort",
+    "AuthStorePort",
+]

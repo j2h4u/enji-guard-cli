@@ -327,9 +327,10 @@ def test_rotation_telemetry_is_terminal_once_and_redacts_sentinels(tmp_path: Pat
     assert isinstance(loaded, AuthLoaded)
     events: list[tuple[str, dict[str, object]]] = []
 
-    def sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> None:
+    def sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
         _ = logger, level
         events.append((event, dict(fields)))
+        return True
 
     class Exchange:
         async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
@@ -341,14 +342,14 @@ def test_rotation_telemetry_is_terminal_once_and_redacts_sentinels(tmp_path: Pat
                 set_cookie_headers=("access_token=new", "refresh_token=new"),
             )
 
-    asyncio.run(RefreshCoordinator(auth_file, Exchange(), event_sink=sink).refresh(loaded.auth))
+    asyncio.run(RefreshCoordinator(auth_file, Exchange(), outcome_sink=sink).refresh(loaded.auth))
 
-    assert events == [("enji_auth_rotation_rotated", {})]
+    assert events == [("enji_auth_rotation_rotated", {"event_key": f"auth-rotation:{loaded.auth['revision']}:rotated"})]
     assert secret not in repr(events)
     assert "SENTINEL_AUTH_PATH" not in repr(events)
 
 
-def test_terminal_journal_emits_reimport_without_replaying_or_leaking(tmp_path: Path) -> None:
+def test_terminal_journal_redelivers_outcome_without_replaying_or_leaking(tmp_path: Path) -> None:
     auth_file = tmp_path / "SENTINEL_AUTH_PATH.json"
     import_cookie("access_token=SENTINEL_SECRET; refresh_token=SENTINEL_SECRET", auth_file)
     loaded = load_auth(auth_file)
@@ -356,20 +357,26 @@ def test_terminal_journal_emits_reimport_without_replaying_or_leaking(tmp_path: 
     write_journal(auth_file, OutcomeUnknown(loaded.auth["revision"], "SENTINEL_ERROR_MESSAGE"))
     events: list[tuple[str, dict[str, object]]] = []
 
-    def sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> None:
+    def sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
         _ = logger, level
         events.append((event, dict(fields)))
+        return True
 
     class Exchange:
         async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
             del source
             raise AssertionError("terminal journal must not dispatch")
 
-    coordinator = RefreshCoordinator(auth_file, Exchange(), terminal_wait_seconds=0, event_sink=sink)
+    coordinator = RefreshCoordinator(auth_file, Exchange(), terminal_wait_seconds=0, outcome_sink=sink)
     with pytest.raises(EnjiHttpError, match="import a fresh browser credential"):
         asyncio.run(coordinator.refresh(loaded.auth))
 
-    assert events == [("enji_auth_rotation_reimport_required", {})]
+    assert events == [
+        (
+            "enji_auth_rotation_outcome_unknown",
+            {"event_key": f"auth-rotation:{loaded.auth['revision']}:outcome_unknown"},
+        )
+    ]
     rendered = repr(events)
     assert "SENTINEL_SECRET" not in rendered
     assert "SENTINEL_AUTH_PATH" not in rendered
@@ -498,18 +505,268 @@ def test_rotated_successor_recovery_is_idempotent(tmp_path: Path) -> None:
     import_cookie("access_token=old; refresh_token=old", auth_file)
     before = load_auth(auth_file)
     assert isinstance(before, AuthLoaded)
-    write_journal(auth_file, Rotated(before.auth["revision"], "access_token=new; refresh_token=new"))
+    rotated_state = Rotated(before.auth["revision"], "access_token=new; refresh_token=new", "persisted-successor")
+    write_journal(auth_file, rotated_state)
 
     class Exchange:
         async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
             del source
             raise AssertionError("recovery must not dispatch")
 
-    coordinator = RefreshCoordinator(auth_file, Exchange())
+    def accepting_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
+        _ = logger, level, event, fields
+        return True
+
+    coordinator = RefreshCoordinator(auth_file, Exchange(), outcome_sink=accepting_sink)
     first = asyncio.run(coordinator.recover_startup())
     second = asyncio.run(coordinator.recover_startup())
 
     assert first is not None
     assert second == first
+    assert first["revision"] == rotated_state.successor_revision
     assert first["credential"] == {"type": "cookie", "cookie_header": "access_token=new; refresh_token=new"}
+    assert not pending_rotation_path(auth_file).exists()
+
+
+def test_rotated_outbox_retries_same_key_after_sink_failure_without_another_post(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    delivery_keys: list[str] = []
+
+    def rejecting_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
+        _ = logger, level
+        assert event == "enji_auth_rotation_rotated"
+        delivery_keys.append(str(fields["event_key"]))
+        return False
+
+    class Exchange:
+        calls = 0
+
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            self.calls += 1
+            return EnjiHttpResponse(
+                status_code=200,
+                headers={},
+                content=b"{}",
+                set_cookie_headers=("access_token=new", "refresh_token=new"),
+            )
+
+    exchange = Exchange()
+    rotated = asyncio.run(RefreshCoordinator(auth_file, exchange, outcome_sink=rejecting_sink).refresh(loaded.auth))
+
+    assert exchange.calls == 1
+    journal = load_journal(auth_file)
+    assert isinstance(journal, JournalLoaded)
+    assert isinstance(journal.state, Rotated)
+    assert rotated["revision"] == journal.state.successor_revision
+
+    def accepting_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
+        _ = logger, level, event
+        delivery_keys.append(str(fields["event_key"]))
+        return True
+
+    recovered = asyncio.run(RefreshCoordinator(auth_file, exchange, outcome_sink=accepting_sink).recover_startup())
+
+    assert recovered == rotated
+    assert exchange.calls == 1
+    assert delivery_keys == [f"auth-rotation:{loaded.auth['revision']}:rotated"] * 2
+    assert not pending_rotation_path(auth_file).exists()
+
+
+def test_terminal_outbox_survives_sink_failure_and_replays_after_restart(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    write_journal(auth_file, OutcomeUnknown(loaded.auth["revision"], "request timed out"))
+    delivery_keys: list[str] = []
+
+    def failing_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
+        _ = logger, level, event
+        delivery_keys.append(str(fields["event_key"]))
+        return False
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            raise AssertionError("terminal outcome must not be replayed")
+
+    assert (
+        asyncio.run(RefreshCoordinator(auth_file, Exchange(), outcome_sink=failing_sink).recover_startup())
+        == loaded.auth
+    )
+    assert pending_rotation_path(auth_file).exists()
+
+    def accepting_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
+        _ = logger, level
+        assert event == "enji_auth_rotation_outcome_unknown"
+        delivery_keys.append(str(fields["event_key"]))
+        return True
+
+    coordinator = RefreshCoordinator(auth_file, Exchange(), terminal_wait_seconds=0, outcome_sink=accepting_sink)
+    with pytest.raises(EnjiHttpError, match="outcome is terminal"):
+        asyncio.run(coordinator.refresh(loaded.auth))
+
+    assert delivery_keys == [f"auth-rotation:{loaded.auth['revision']}:outcome_unknown"] * 2
+    assert pending_rotation_path(auth_file).exists()
+
+    import_credential(
+        auth_file,
+        stored_auth(
+            loaded.auth["base_url"], {"type": "cookie", "cookie_header": "access_token=fresh; refresh_token=fresh"}
+        ),
+    )
+    assert not pending_rotation_path(auth_file).exists()
+
+
+@pytest.mark.parametrize(
+    ("response", "expected_type"),
+    [
+        (
+            EnjiHttpResponse(
+                status_code=401,
+                headers={},
+                content=b'{"error":{"code":"AUTH_INVALID"}}',
+            ),
+            Rejected,
+        ),
+        (EnjiHttpResponse(status_code=401, headers={}, content=b"<html>proxy</html>"), OutcomeUnknown),
+    ],
+)
+def test_refresh_rejection_requires_confirmed_enji_protocol_response(
+    tmp_path: Path, response: EnjiHttpResponse, expected_type: type[Rejected | OutcomeUnknown]
+) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            return response
+
+    with pytest.raises(EnjiHttpError):
+        asyncio.run(RefreshCoordinator(auth_file, Exchange()).refresh(loaded.auth))
+
+    journal = load_journal(auth_file)
+    assert isinstance(journal, JournalLoaded)
+    assert isinstance(journal.state, expected_type)
+
+
+def test_cancelled_exchange_becomes_terminal_unknown_and_is_not_replayed(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+
+    async def exercise() -> None:
+        started = asyncio.Event()
+
+        class Exchange:
+            calls = 0
+
+            async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+                del source
+                self.calls += 1
+                started.set()
+                await asyncio.Event().wait()
+                raise AssertionError("cancelled exchange must not resume")
+
+        exchange = Exchange()
+        task = asyncio.create_task(RefreshCoordinator(auth_file, exchange).refresh(loaded.auth))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert exchange.calls == 1
+
+    asyncio.run(exercise())
+    journal = load_journal(auth_file)
+    assert isinstance(journal, JournalLoaded)
+    assert isinstance(journal.state, OutcomeUnknown)
+
+    class NoReplayExchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            raise AssertionError("terminal cancellation must not dispatch again")
+
+    with pytest.raises(EnjiHttpError, match="outcome is terminal"):
+        asyncio.run(RefreshCoordinator(auth_file, NoReplayExchange(), terminal_wait_seconds=0).refresh(loaded.auth))
+
+
+def test_transport_failure_is_terminal_unknown_and_does_not_dispatch_again(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+
+    class Exchange:
+        calls = 0
+
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            self.calls += 1
+            raise EnjiHttpError("NETWORK", "connection reset")
+
+    exchange = Exchange()
+    with pytest.raises(EnjiHttpError, match="outcome is unknown"):
+        asyncio.run(RefreshCoordinator(auth_file, exchange).refresh(loaded.auth))
+    with pytest.raises(EnjiHttpError, match="outcome is terminal"):
+        asyncio.run(RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0).refresh(loaded.auth))
+
+    assert exchange.calls == 1
+
+
+def test_import_at_commit_boundary_supersedes_rotation_result(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+
+    async def exercise() -> None:
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        class Exchange:
+            calls = 0
+
+            async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+                del source
+                self.calls += 1
+                started.set()
+                await release.wait()
+                return EnjiHttpResponse(
+                    status_code=200,
+                    headers={},
+                    content=b"{}",
+                    set_cookie_headers=("access_token=rotated", "refresh_token=rotated"),
+                )
+
+        exchange = Exchange()
+        refresh_task = asyncio.create_task(RefreshCoordinator(auth_file, exchange).refresh(loaded.auth))
+        await started.wait()
+        imported = import_credential(
+            auth_file,
+            stored_auth(
+                loaded.auth["base_url"],
+                {"type": "cookie", "cookie_header": "access_token=imported; refresh_token=imported"},
+            ),
+        )
+        release.set()
+        result = await refresh_task
+
+        assert exchange.calls == 1
+        assert result == imported
+
+    asyncio.run(exercise())
+    current = load_auth(auth_file)
+    assert isinstance(current, AuthLoaded)
+    assert current.auth["credential"] == {
+        "type": "cookie",
+        "cookie_header": "access_token=imported; refresh_token=imported",
+    }
     assert not pending_rotation_path(auth_file).exists()

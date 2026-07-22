@@ -21,7 +21,7 @@ from enji_guard_cli.auth_session.payloads import (
     _profile_from_response,
     _unauthenticated_payload,
 )
-from enji_guard_cli.auth_session.ports import AuthEventSink
+from enji_guard_cli.auth_session.ports import AuthEventSink, AuthOutcomeSink
 from enji_guard_cli.auth_session.store import (
     AuthClockAnomaly,
     AuthLoaded,
@@ -423,7 +423,27 @@ async def _refresh_cookie_auth(
                 )
             )
 
-    return await RefreshCoordinator(path, _HttpxRefreshExchange(), event_sink=event_sink).refresh(stored_auth)
+    return await RefreshCoordinator(
+        path,
+        _HttpxRefreshExchange(),
+        outcome_sink=_outcome_sink_from_event_sink(event_sink),
+    ).refresh(stored_auth)
+
+
+def _outcome_sink_from_event_sink(event_sink: AuthEventSink | None) -> AuthOutcomeSink:
+    """Temporary runtime-boundary adapter for the established telemetry callback.
+
+    The telemetry callback is synchronous, so returning normally is its durable
+    acceptance signal.  The coordinator itself has only the explicit outcome
+    sink contract and never knows about the broad callback.
+    """
+
+    def deliver(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
+        if event_sink is not None:
+            event_sink(logger, level, event, fields)
+        return True
+
+    return deliver
 
 
 async def _refresh_stored_cookie_auth(
