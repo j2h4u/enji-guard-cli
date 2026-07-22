@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enji_guard_cli.audit.artifacts import ArtifactReadItem, read_artifacts, select_artifacts
 from enji_guard_cli.audit.catalog import parse_catalog_result
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit.observation import AuditRepositoryObservation
 from enji_guard_cli.audit.ports import (
     AuditCatalogPort,
     AuditGatewayPort,
@@ -22,6 +23,7 @@ class AuditWorkflowDependencies:
     gateway: AuditGatewayPort
     project: Callable[[str], AuditProject]
     frozen_catalog: AuditCatalog | None = None
+    repository_observation: Callable[[str], AuditRepositoryObservation] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,12 +61,13 @@ def prepare_start(
     dependencies: AuditWorkflowDependencies,
 ) -> AuditStartPlan:
     catalog = _catalog(dependencies)
+    observation = _observation(repo_id, dependencies)
     status = build_status(
         repo_id,
         catalog,
-        dependencies.gateway.task_links(repo_id).links,
-        dependencies.gateway.active_runs(repo_id).runs,
-        dependencies.gateway.rerun_state(repo_id),
+        observation.task_links,
+        observation.active_runs,
+        observation.rerun_state,
     )
     return AuditStartPlan(
         catalog=catalog,
@@ -84,12 +87,13 @@ def read_for_repo(
     tolerate_unavailable: bool | None = None,
 ) -> tuple[ArtifactReadItem, ...]:
     catalog = _catalog(dependencies)
+    observation = _observation(repo_id, dependencies)
     status = build_status(
         repo_id,
         catalog,
-        dependencies.gateway.task_links(repo_id).links,
-        dependencies.gateway.active_runs(repo_id).runs,
-        dependencies.gateway.rerun_state(repo_id),
+        observation.task_links,
+        observation.active_runs,
+        observation.rerun_state,
     )
     selected = select_artifacts(status.items, selectors, all_artifacts=all_audits, catalog=catalog)
     groups = {audit.action_key: audit.metric_group for audit in catalog.published_audits}
@@ -108,3 +112,13 @@ def _catalog(dependencies: AuditWorkflowDependencies) -> AuditCatalog:
         return dependencies.frozen_catalog
 
     return parse_catalog_result(dependencies.catalog.catalog())
+
+
+def _observation(repo_id: str, dependencies: AuditWorkflowDependencies) -> AuditRepositoryObservation:
+    if dependencies.repository_observation is not None:
+        return dependencies.repository_observation(repo_id)
+    return AuditRepositoryObservation(
+        task_links=dependencies.gateway.task_links(repo_id).links,
+        active_runs=dependencies.gateway.active_runs(repo_id).runs,
+        rerun_state=dependencies.gateway.rerun_state(repo_id),
+    )
