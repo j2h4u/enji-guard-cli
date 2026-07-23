@@ -192,9 +192,9 @@ def test_storage_classifies_future_imported_at_stably(tmp_path: Path) -> None:
     "case",
     [
         ("absent", "AUTH_REQUIRED", "auth file does not exist", 0),
-        ("corrupt", "AUTH_REQUIRED", "auth file is corrupt: invalid JSON: Expecting value", 0),
-        ("unsupported", "AUTH_REQUIRED", "auth file version is unsupported: 3", 0),
-        ("io_failure", "STORAGE", "read credential failed: injected read failure", 0),
+        ("corrupt", "AUTH_CORRUPT", "auth file is corrupt: invalid JSON: Expecting value", 0),
+        ("unsupported", "AUTH_UNSUPPORTED", "auth file version is unsupported: 3", 0),
+        ("io_failure", "AUTH_IO_FAILURE", "read credential failed: injected read failure", 0),
         ("clock_anomaly", "AUTH_CLOCK_ANOMALY", "auth file imported_at is in the future", 0),
         (
             "loaded",

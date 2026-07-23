@@ -32,7 +32,16 @@ from enji_guard_cli.auth_session.coordinator import PreDispatchLocalError, Termi
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
 from enji_guard_cli.auth_session.ports import AuthOutcomeSink
 from enji_guard_cli.auth_session.state_machine import OutcomeUnknown, Rejected, RotationState
-from enji_guard_cli.auth_session.store import AuthLoaded, load_auth, write_journal
+from enji_guard_cli.auth_session.store import (
+    AuthAbsent,
+    AuthClockAnomaly,
+    AuthCorrupt,
+    AuthIoFailure,
+    AuthLoaded,
+    AuthUnsupported,
+    load_auth,
+    write_journal,
+)
 from enji_guard_cli.delivery.cli.app import app
 from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER, AutoRefreshSettings
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient
@@ -94,6 +103,19 @@ def _test_cookie_auth(revision: str = "old") -> RuntimeStoredAuth:
             "revision": revision,
             "base_url": "https://fleet.example.test",
             "credential": {"type": "cookie", "cookie_header": "access=old; refresh=old"},
+            "imported_at": "2026-01-01T00:00:00+00:00",
+        },
+    )
+
+
+def _test_bearer_auth(revision: str = "bearer") -> RuntimeStoredAuth:
+    return cast(
+        RuntimeStoredAuth,
+        {
+            "version": 2,
+            "revision": revision,
+            "base_url": "https://fleet.example.test",
+            "credential": {"type": "bearer_token", "token": "test-token"},
             "imported_at": "2026-01-01T00:00:00+00:00",
         },
     )
@@ -179,10 +201,23 @@ def test_terminal_auth_projection_bypasses_status_and_readiness_network(
     assert requests == []
 
 
-def test_auto_refresh_loop_observes_corrupt_credential_without_dispatch() -> None:
+@pytest.mark.parametrize(
+    ("loaded", "expected_code"),
+    [
+        (AuthAbsent(), "AUTH_REQUIRED"),
+        (AuthCorrupt("invalid JSON"), "AUTH_CORRUPT"),
+        (AuthUnsupported(3), "AUTH_UNSUPPORTED"),
+        (AuthIoFailure("read credential", OSError("denied")), "AUTH_IO_FAILURE"),
+        (AuthClockAnomaly("imported_at"), "AUTH_CLOCK_ANOMALY"),
+    ],
+)
+def test_auto_refresh_loop_observes_non_cookie_storage_states_without_dispatch(
+    loaded: object, expected_code: str
+) -> None:
     async def exercise() -> None:
         observed = asyncio.Event()
         dispatches = 0
+        observed_codes: list[str] = []
 
         async def no_dispatch(*_args: object) -> RuntimeStoredAuth:
             nonlocal dispatches
@@ -191,6 +226,7 @@ def test_auto_refresh_loop_observes_corrupt_credential_without_dispatch() -> Non
 
         def log_event(*args: object) -> None:
             if args[2] == "enji_auth_auto_refresh_observing_credential":
+                observed_codes.append(cast(dict[str, str], args[3])["code"])
                 observed.set()
 
         task = asyncio.create_task(
@@ -198,7 +234,7 @@ def test_auto_refresh_loop_observes_corrupt_credential_without_dispatch() -> Non
                 auth_file=Path("auth.json"),
                 refresh_settings=AutoRefreshSettings(enabled=True, lead_seconds=300, fallback_seconds=900),
                 dependencies=auto_refresh_module.AutoRefreshLoopDependencies(
-                    load_auth_fn=lambda _path: auto_refresh_module.AuthCorrupt("invalid JSON"),
+                    load_auth_fn=lambda _path: cast(auto_refresh_module.AuthLoadResult, loaded),
                     cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
                     refresh_cookie_auth_fn=no_dispatch,
                     log_event_fn=log_event,
@@ -210,6 +246,113 @@ def test_auto_refresh_loop_observes_corrupt_credential_without_dispatch() -> Non
         )
         await asyncio.wait_for(observed.wait(), timeout=1)
         assert task.done() is False
+        assert dispatches == 0
+        assert observed_codes == [expected_code]
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(exercise())
+
+
+def test_auto_refresh_loop_observes_bearer_then_schedules_cookie_revision_without_posting() -> None:
+    async def exercise() -> None:
+        loaded = AuthLoaded(_test_bearer_auth())
+        revision = "bearer"
+        changed = asyncio.Event()
+        scheduled = asyncio.Event()
+        dispatches = 0
+
+        async def changes(_auth_file: Path) -> AsyncGenerator[None]:
+            await changed.wait()
+            yield
+            await asyncio.Event().wait()
+
+        def sleep_seconds(**_kwargs: object) -> int:
+            scheduled.set()
+            return 3600
+
+        async def no_dispatch(*_args: object) -> RuntimeStoredAuth:
+            nonlocal dispatches
+            dispatches += 1
+            raise AssertionError("scheduled cookie must not dispatch before its due time")
+
+        task = asyncio.create_task(
+            auto_refresh_module._auto_refresh_loop(
+                auth_file=Path("auth.json"),
+                refresh_settings=_scheduler_settings(),
+                dependencies=_loop_dependencies(
+                    changes=changes,
+                    overrides=_LoopOverrides(
+                        load_auth_fn=lambda _path: loaded,
+                        revision_reader=lambda _path: revision,
+                        cookie_refresh_sleep_seconds_fn=sleep_seconds,
+                        refresh_fn=no_dispatch,
+                    ),
+                ),
+            )
+        )
+        await asyncio.sleep(0)
+        assert dispatches == 0
+
+        loaded = AuthLoaded(_test_cookie_auth("cookie"))
+        revision = "cookie"
+        changed.set()
+        await asyncio.wait_for(scheduled.wait(), timeout=1)
+        assert dispatches == 0
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(exercise())
+
+
+def test_auto_refresh_loop_stops_cookie_dispatch_after_bearer_revision() -> None:
+    async def exercise() -> None:
+        loaded = AuthLoaded(_test_cookie_auth())
+        revision = "old"
+        observed_bearer = asyncio.Event()
+        dispatches = 0
+
+        async def changes(_auth_file: Path) -> AsyncGenerator[None]:
+            await asyncio.Event().wait()
+            yield
+
+        async def sleep(_seconds: float) -> None:
+            nonlocal loaded, revision
+            loaded = AuthLoaded(_test_bearer_auth("bearer"))
+            revision = "bearer"
+
+        def log_event(*args: object) -> None:
+            fields = cast(dict[str, str], args[3])
+            if args[2] == "enji_auth_auto_refresh_observing_credential" and fields == {
+                "credential_type": "bearer_token"
+            }:
+                observed_bearer.set()
+
+        async def no_dispatch(*_args: object) -> RuntimeStoredAuth:
+            nonlocal dispatches
+            dispatches += 1
+            raise AssertionError("bearer replacement must prevent cookie dispatch")
+
+        task = asyncio.create_task(
+            auto_refresh_module._auto_refresh_loop(
+                auth_file=Path("auth.json"),
+                refresh_settings=_scheduler_settings(),
+                dependencies=_loop_dependencies(
+                    changes=changes,
+                    overrides=_LoopOverrides(
+                        load_auth_fn=lambda _path: loaded,
+                        revision_reader=lambda _path: revision,
+                        sleep_fn=sleep,
+                        cookie_refresh_sleep_seconds_fn=lambda **_kwargs: 60,
+                        refresh_fn=no_dispatch,
+                        log_event_fn=log_event,
+                    ),
+                ),
+            )
+        )
+        await asyncio.wait_for(observed_bearer.wait(), timeout=1)
         assert dispatches == 0
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
