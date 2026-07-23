@@ -7,6 +7,7 @@ from enji_guard_cli.audit.ports import (
     AuditRerunState,
     AuditRun,
     AuditRunbookMetadata,
+    AuditRunStart,
     AuditTaskBody,
     AuditWebsite,
 )
@@ -124,6 +125,41 @@ def test_batch_start_protection_considers_all_matching_runs() -> None:
 
     assert result["state"] == "already_running"
     assert result["task_id"] == "task-running"
+
+
+def test_batch_start_does_not_treat_stale_active_run_as_current_head_duplicate() -> None:
+    audit = AuditDefinition(
+        "audit.security",
+        "Security",
+        "vulns",
+        "audit",
+        runbook_id="runbook",
+        artifact_schema_name="upfront.audit.summary",
+        artifact_schema_version="v1",
+    )
+    project = _context().project
+    context = StartAuditsContext("repo_1", "project_1", [audit], AuditCatalog((audit,), audit))
+    state = _StartOneState(
+        AuditRerunState("new", "old", None, None, {"audit.security": "old"}),
+        (AuditRun("stale-running", "audit.security", "running", None, None, None, current_head_sha="old"),),
+        project,
+    )
+    recorded: list[AuditRunStart] = []
+    dependencies = StartAuditDependencies(
+        make_audit_run_create=lambda *_: "request",
+        start_audit_run=lambda request: {"task_id": "new-task", "status": "pending", "request": request},
+        project_detail=lambda _: project,
+        runbook=lambda _: AuditRunbookMetadata("runbook", None, None),
+        current_repo_active_runs=lambda _: (),
+        record_started_run=recorded.append,
+        task_identity=lambda _: ("new-task", "pending"),
+    )
+
+    result = _start_one_audit(audit, context=context, state=state, dependencies=dependencies)
+
+    assert result["state"] == "started"
+    assert result["task_id"] == "new-task"
+    assert recorded[0].current_head_sha == "new"
 
 
 @pytest.mark.parametrize(
