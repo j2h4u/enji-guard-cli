@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.8](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.7...v2.2.8) (2026-07-23)
+
+
+### Fixes
+
+* **docker:** use available MCP host port ([26746e2](https://github.com/j2h4u/enji-guard-cli/commit/26746e2b71097a7a7cd0bcd31ce6b66b770e46e4))
+
 ## [2.2.7](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.6...v2.2.7) (2026-07-23)
 
 
