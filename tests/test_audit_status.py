@@ -95,6 +95,65 @@ def test_audited_result_remains_readable_when_task_link_history_is_empty() -> No
     assert status.items[0].task_lifecycle == "none"
     assert status.items[0].can_read is True
     assert status.items[0].freshness.state == "fresh"
+    assert status.items[0].current_head.state == "ready"
+    assert status.items[0].current_head.action_required == "none"
+
+
+def test_stale_readable_report_with_current_head_run_is_not_ambiguous_ready() -> None:
+    status = build_status(
+        "repo-1",
+        _catalog(),
+        (),
+        (
+            AuditRun(
+                "current-run",
+                "audit.security",
+                "in_progress",
+                "2026-01-01T00:03:00+00:00",
+                None,
+                None,
+                current_head_sha="current-sha",
+                last_audited_head_sha="old-sha",
+            ),
+        ),
+        AuditRerunState("current-sha", None, None, None, {"audit.security": "old-sha"}),
+    )
+
+    item = status.items[0]
+    assert item.can_read is True
+    assert item.freshness.state == "stale"
+    assert item.task_lifecycle == "running"
+    assert item.current_head.state == "running"
+    assert item.current_head.action_required == "wait_for_current_head_run"
+    assert item.current_head.task_id == "current-run"
+
+
+def test_stale_report_with_only_old_active_run_requires_current_head_start() -> None:
+    status = build_status(
+        "repo-1",
+        _catalog(),
+        (),
+        (
+            AuditRun(
+                "old-run",
+                "audit.security",
+                "in_progress",
+                "2026-01-01T00:03:00+00:00",
+                None,
+                None,
+                current_head_sha="old-sha",
+            ),
+        ),
+        AuditRerunState("current-sha", None, None, None, {"audit.security": "old-sha"}),
+    )
+
+    item = status.items[0]
+    assert item.can_read is True
+    assert item.freshness.state == "stale"
+    assert item.current_head.state == "blocked"
+    assert item.current_head.action_required == "start_current_head_run"
+    assert item.current_head.stale_active_task_id == "old-run"
+    assert item.current_head.stale_active_current_head_sha == "old-sha"
 
 
 @pytest.mark.parametrize(

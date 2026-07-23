@@ -4,6 +4,7 @@ from enji_guard_cli.audit.freshness import compare_heads
 from enji_guard_cli.audit.lifecycle import active_runs_for_action, projection_sort_key, task_lifecycle
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.ports import (
+    AuditCurrentHeadStatus,
     AuditRerunState,
     AuditRun,
     AuditStatus,
@@ -61,10 +62,12 @@ def _status_item(
         source = None
         lifecycle = "none"
     run_status = source.status if source is not None else None
+    freshness = compare_heads(current_sha, audited_sha)
+    current_head = _current_head_status(freshness.state, current_sha, active_run, run_lifecycle)
     return AuditStatusItem(
         audit_key=audit.action_key,
         title=audit.title,
-        freshness=compare_heads(current_sha, audited_sha),
+        freshness=freshness,
         can_read=_artifact_expected(audited_sha, lifecycle),
         task_lifecycle=lifecycle,
         task_id=source.task_id if source is not None else None,
@@ -72,7 +75,63 @@ def _status_item(
         created_at=source.created_at if source is not None else None,
         started_at=source.started_at if source is not None else None,
         completed_at=source.completed_at if source is not None else None,
+        current_head=current_head,
     )
+
+
+def _current_head_status(
+    freshness_state: str,
+    current_sha: str | None,
+    active_run: AuditRun | None,
+    run_lifecycle: AuditTaskLifecycle,
+) -> AuditCurrentHeadStatus:
+    if freshness_state == "fresh":
+        return AuditCurrentHeadStatus("ready", "none")
+    if freshness_state == "unknown":
+        return AuditCurrentHeadStatus("unknown", "resolve_unknown_head")
+    if active_run is None:
+        return AuditCurrentHeadStatus("missing", "start_current_head_run")
+    return _active_current_head_status(current_sha, active_run, run_lifecycle)
+
+
+def _active_current_head_status(
+    current_sha: str | None,
+    active_run: AuditRun,
+    run_lifecycle: AuditTaskLifecycle,
+) -> AuditCurrentHeadStatus:
+    run_sha = active_run.current_head_sha
+    if current_sha is not None and run_sha is not None and run_sha != current_sha:
+        return AuditCurrentHeadStatus(
+            "blocked",
+            "start_current_head_run",
+            stale_active_task_id=active_run.task_id,
+            stale_active_current_head_sha=run_sha,
+        )
+    if run_lifecycle == "failed":
+        return AuditCurrentHeadStatus(
+            "failed",
+            "inspect_failed_run",
+            task_id=active_run.task_id,
+            task_status=active_run.status,
+            task_current_head_sha=run_sha,
+        )
+    if run_lifecycle == "queued":
+        return AuditCurrentHeadStatus(
+            "queued",
+            "wait_for_current_head_run",
+            task_id=active_run.task_id,
+            task_status=active_run.status,
+            task_current_head_sha=run_sha,
+        )
+    if run_lifecycle == "running":
+        return AuditCurrentHeadStatus(
+            "running",
+            "wait_for_current_head_run",
+            task_id=active_run.task_id,
+            task_status=active_run.status,
+            task_current_head_sha=run_sha,
+        )
+    return AuditCurrentHeadStatus("missing", "start_current_head_run")
 
 
 def _artifact_expected(
