@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.4](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.3...v2.2.4) (2026-07-23)
+
+
+### Fixes
+
+* **auth:** make cookie rotation crash-consistent ([#159](https://github.com/j2h4u/enji-guard-cli/issues/159)) ([72bcdb3](https://github.com/j2h4u/enji-guard-cli/commit/72bcdb332fd3fb2ef6fb65a0d137c9296292b71a))
+* **compose:** require build provenance ([#161](https://github.com/j2h4u/enji-guard-cli/issues/161)) ([a4a2d37](https://github.com/j2h4u/enji-guard-cli/commit/a4a2d3788e70cefcb38dcfc8e01f615a413dba83))
+
 ## [2.2.3](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.2...v2.2.3) (2026-07-22)
 
 
