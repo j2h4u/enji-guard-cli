@@ -192,7 +192,7 @@ jobs:
           push: false
           tags: enji-guard-cli:ci
           build-args: |
-            PACKAGE_VERSION=0.0.0+sha.${{ github.sha }}
+            PACKAGE_VERSION=0.0.1+sha.${{ github.sha }}
             SOURCE_COMMIT=${{ github.sha }}
 
       - name: Verify credentialless runtime contract

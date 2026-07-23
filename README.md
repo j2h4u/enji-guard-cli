@@ -284,7 +284,7 @@ mkdir -p ~/.config/enji-guard/logs
 chown -R 1000:1000 ~/.config/enji-guard
 chmod 700 ~/.config/enji-guard
 
-docker compose up -d --force-recreate --remove-orphans --wait
+just docker-up
 docker exec -i enji-guard-cli enji-guard --help
 docker exec -i enji-guard-cli enji-guard health --ready
 ```
@@ -295,6 +295,11 @@ with explicit `--allow-external-host`; use that only behind a trusted boundary.
 The image default stays loopback-safe; the compose files explicitly bind inside
 the container to all interfaces only because they publish the port on host
 loopback.
+
+Use `just docker-up` (or `just docker-build`) for local Compose images. It
+derives and passes the installed package version and current Git SHA as required
+build provenance; a plain `docker compose up --build` intentionally fails until
+those values are supplied.
 
 Docker health is full service readiness: local MCP plus cached authenticated
 Enji backend readiness. The supervisor alone owns automatic cookie rotation;
@@ -430,7 +435,7 @@ an independent per-project language setter.
 Local HTTP MCP service:
 
 ```bash
-docker compose up -d --force-recreate --remove-orphans --wait
+just docker-up
 ```
 
 The current FastMCP streamable-HTTP default endpoint is:

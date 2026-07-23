@@ -8,6 +8,8 @@ from typing import cast
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_IMAGE_REF = "ghcr.io/j2h4u/enji-guard-cli@sha256:" + "0" * 64
+COMPOSE_PACKAGE_VERSION = "1.2.3+local.test"
+COMPOSE_SOURCE_COMMIT = "13920645c8c7"
 COMMON_SERVICE_FIELDS = (
     "command",
     "restart",
@@ -54,6 +56,8 @@ def _compose_common_service_fields(path: Path) -> dict[str, object]:
 def _compose_config(path: Path) -> dict[str, object]:
     environment = os.environ.copy()
     environment["ENJI_GUARD_IMAGE_REF"] = COMPOSE_IMAGE_REF
+    environment["PACKAGE_VERSION"] = COMPOSE_PACKAGE_VERSION
+    environment["SOURCE_COMMIT"] = COMPOSE_SOURCE_COMMIT
     result = subprocess.run(
         ["docker", "compose", "-f", str(path.relative_to(ROOT)), "config", "--format", "json"],
         check=True,
@@ -63,6 +67,45 @@ def _compose_config(path: Path) -> dict[str, object]:
         text=True,
     )
     return cast(dict[str, object], json.loads(result.stdout))
+
+
+def test_local_compose_requires_build_provenance() -> None:
+    environment = os.environ.copy()
+    environment.pop("PACKAGE_VERSION", None)
+    environment.pop("SOURCE_COMMIT", None)
+
+    result = subprocess.run(
+        ["docker", "compose", "config", "--format", "json"],
+        capture_output=True,
+        cwd=ROOT,
+        env=environment,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "required variable" in result.stderr
+    assert any(variable in result.stderr for variable in ("PACKAGE_VERSION", "SOURCE_COMMIT"))
+
+    build = subprocess.run(
+        ["docker", "compose", "build"],
+        capture_output=True,
+        cwd=ROOT,
+        env=environment,
+        text=True,
+    )
+    assert build.returncode != 0
+    assert "required variable" in build.stderr
+    assert any(variable in build.stderr for variable in ("PACKAGE_VERSION", "SOURCE_COMMIT"))
+
+
+def test_local_compose_passes_non_placeholder_build_provenance() -> None:
+    compose = _compose_config(ROOT / "docker-compose.yml")
+    services = cast(dict[str, object], compose["services"])
+    service = cast(dict[str, object], services["enji-guard-cli"])
+    build = cast(dict[str, object], service["build"])
+    args = cast(dict[str, str], build["args"])
+
+    assert args == {"PACKAGE_VERSION": COMPOSE_PACKAGE_VERSION, "SOURCE_COMMIT": COMPOSE_SOURCE_COMMIT}
 
 
 def test_dockerfile_default_command_is_loopback_safe() -> None:
@@ -76,6 +119,16 @@ def test_dockerfile_runtime_dependency_layer_disables_source_builds() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
     assert "uv sync --frozen --no-build --no-install-project --no-dev" in dockerfile
+
+
+def test_dockerfile_rejects_placeholder_build_provenance() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "ARG PACKAGE_VERSION=0.0.0+local" not in dockerfile
+    assert "ARG SOURCE_COMMIT=unknown" not in dockerfile
+    assert 'RUN PACKAGE_VERSION="${PACKAGE_VERSION}" SOURCE_COMMIT="${SOURCE_COMMIT}" python' in dockerfile
+    assert "PACKAGE_VERSION must be a non-0.0.0 semantic version" in dockerfile
+    assert "SOURCE_COMMIT must be a Git object id" in dockerfile
 
 
 def test_local_and_ghcr_compose_critical_settings_stay_in_sync() -> None:

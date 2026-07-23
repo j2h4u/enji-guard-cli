@@ -89,8 +89,10 @@ crap-check:
 
 # Validate Dockerfile and Compose files without running containers.
 docker-check:
-    docker compose config --quiet
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
+    package_version="$(uv run python -c 'from importlib.metadata import version; print(version("enji-guard-cli"))')"; \
+    source_commit="$(git rev-parse HEAD)"; \
+    PACKAGE_VERSION="$package_version" SOURCE_COMMIT="$source_commit" docker compose config --quiet; \
+    PACKAGE_VERSION="$package_version" SOURCE_COMMIT="$source_commit" docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
     docker build --check .
 
 # Build the Docker image.
@@ -104,12 +106,16 @@ docker-build: docker-check
         -t enji-guard-cli:local .
 
 # Recreate the local Docker service.
-docker-up:
-    docker compose up -d --force-recreate --remove-orphans --wait --wait-timeout 90
+docker-up: docker-build
+    package_version="$(uv run python -c 'from importlib.metadata import version; print(version("enji-guard-cli"))')"; \
+    source_commit="$(git rev-parse HEAD)"; \
+    PACKAGE_VERSION="$package_version" SOURCE_COMMIT="$source_commit" docker compose up -d --force-recreate --remove-orphans --wait --wait-timeout 90
 
 # Recreate the Docker service in source bind-mount dev mode.
-dev-up:
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate --remove-orphans --wait --wait-timeout 90
+dev-up: docker-build
+    package_version="$(uv run python -c 'from importlib.metadata import version; print(version("enji-guard-cli"))')"; \
+    source_commit="$(git rev-parse HEAD)"; \
+    PACKAGE_VERSION="$package_version" SOURCE_COMMIT="$source_commit" docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate --remove-orphans --wait --wait-timeout 90
 
 # Reload bind-mounted source after local code changes.
 dev-reload:
