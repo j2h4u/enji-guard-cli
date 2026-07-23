@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.12](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.11...v2.2.12) (2026-07-23)
+
+
+### Fixes
+
+* **audit:** expose only active runs ([#178](https://github.com/j2h4u/enji-guard-cli/issues/178)) ([31ebc50](https://github.com/j2h4u/enji-guard-cli/commit/31ebc50dd555697779c3c0e2012863c7bb49f43c))
+
 ## [2.2.11](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.10...v2.2.11) (2026-07-23)
 
 
