@@ -52,6 +52,13 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 - Enji audits are slow. Do not treat `wait` as a barrier before analysis. After
   `audit start`, run `status`; read and summarize ready reports immediately,
   then check running reports later with sparse polling.
+- For the simple question “are Enji audits ready?”, run exactly one
+  `status REPO` first. Do not call `wait`, `audit summary`, task-level
+  diagnostics, or extra cross-checks unless `status` shows a concrete anomaly
+  such as excessive runtime, mismatched current/audited SHA, contradictory
+  active-run/task state, reconciliation errors, or upstream unavailability.
+  Never use `wait --timeout 1s` as a refresh surrogate; `wait` is a blocking
+  completion wait, not a status probe.
 - `status` and `audit start` do not trust Enji active-runs alone; the service
   keeps a short local started-task ledger and reconciles it with `task-by-id`
   so incomplete active-runs projections do not trigger duplicate starts.
