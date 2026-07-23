@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.2.5](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.4...v2.2.5) (2026-07-23)
+
+
+### Fixes
+
+* **release:** treat maintenance commits as releasable ([#163](https://github.com/j2h4u/enji-guard-cli/issues/163)) ([08a04c7](https://github.com/j2h4u/enji-guard-cli/commit/08a04c7d8bb256c7e68597ef6d011818a45a2649))
+
+
+### Refactoring
+
+* remove verified dead code ([#162](https://github.com/j2h4u/enji-guard-cli/issues/162)) ([c4ae8dd](https://github.com/j2h4u/enji-guard-cli/commit/c4ae8ddf39910e1d1b31e309e5dbcb616fd02742))
+
 ## [2.2.4](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.3...v2.2.4) (2026-07-23)
 
 
