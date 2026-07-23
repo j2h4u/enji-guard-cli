@@ -443,7 +443,7 @@ just docker-up
 The current FastMCP streamable-HTTP default endpoint is:
 
 ```text
-http://127.0.0.1:18080/mcp
+http://127.0.0.1:18082/mcp
 ```
 
 Override the published loopback port with `ENJI_GUARD_MCP_HOST_PORT`.
