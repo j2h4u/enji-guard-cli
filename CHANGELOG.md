@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.6](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.5...v2.2.6) (2026-07-23)
+
+
+### Fixes
+
+* **ci:** require releasable PR titles ([#165](https://github.com/j2h4u/enji-guard-cli/issues/165)) ([60afcef](https://github.com/j2h4u/enji-guard-cli/commit/60afcef312a5580ac5d5951b08a3fd8874e766d4))
+
 ## [2.2.5](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.4...v2.2.5) (2026-07-23)
 
 
