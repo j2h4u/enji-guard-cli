@@ -15,13 +15,26 @@ from typing import Self
 import httpx
 
 from enji_guard_cli.settings import EnjiGuardSettings, default_settings
-from enji_guard_cli.transport import EnjiHttpClient, EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient, RetryConfig
+from enji_guard_cli.transport import (
+    EnjiHttpClient,
+    EnjiHttpRequest,
+    EnjiHttpResponse,
+    HttpxEnjiHttpClient,
+    RetryConfig,
+    TransportEventSink,
+    discard_transport_event,
+)
 
 
 class PooledEnjiHttpClient:
     """Thread-safe async bridge to one owner-loop ``HttpxEnjiHttpClient``."""
 
-    def __init__(self, settings: EnjiGuardSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: EnjiGuardSettings | None = None,
+        *,
+        event_sink: TransportEventSink = discard_transport_event,
+    ) -> None:
         resolved_settings = settings if settings is not None else default_settings()
         pool = resolved_settings.transport.pool
         retry = resolved_settings.transport.retry
@@ -40,6 +53,7 @@ class PooledEnjiHttpClient:
         )
         self._limits = limits
         self._retry_config = retry_config
+        self._event_sink = event_sink
         self._state_lock = threading.Lock()
         self._ready = threading.Event()
         self._shutdown_complete = threading.Event()
@@ -217,7 +231,11 @@ class PooledEnjiHttpClient:
                 self._shutdown_complete.set()
 
     async def _initialize_owner(self) -> None:
-        self._executor = HttpxEnjiHttpClient(limits=self._limits, retry_config=self._retry_config)
+        self._executor = HttpxEnjiHttpClient(
+            limits=self._limits,
+            retry_config=self._retry_config,
+            event_sink=self._event_sink,
+        )
 
     async def _shutdown_owner(self) -> None:
         executor = self._executor

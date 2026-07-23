@@ -37,6 +37,7 @@ from enji_guard_cli.transport import (
     EnjiHttpRequest,
     EnjiHttpResponse,
     HttpxEnjiHttpClient,
+    discard_transport_event,
     raise_for_response_status,
 )
 from enji_guard_cli.transport_types import RetryProfile
@@ -171,7 +172,7 @@ async def auth_status_async(
     if client is not None:
         return await _auth_status_with_client(target, stored_auth, client)
 
-    async with HttpxEnjiHttpClient() as owned_client:
+    async with HttpxEnjiHttpClient(event_sink=discard_transport_event) as owned_client:
         return await _auth_status_with_client(target, stored_auth, owned_client)
 
 
@@ -199,7 +200,7 @@ async def backend_readiness_probe_async(
         return await _backend_readiness_probe_with_client(stored_auth, client, started_at=started_at)
 
     settings = default_settings()
-    async with HttpxEnjiHttpClient() as owned_client:
+    async with HttpxEnjiHttpClient(event_sink=discard_transport_event) as owned_client:
         return await _backend_readiness_probe_with_client(
             stored_auth,
             owned_client,

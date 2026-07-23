@@ -5,7 +5,7 @@ from pathlib import Path
 
 from enji_guard_cli.auth_session import api as auth_api
 from enji_guard_cli.auth_session.credential_changes import credential_changes
-from enji_guard_cli.auth_session.ports import AuthEventSink, AuthOutcomeSink
+from enji_guard_cli.auth_session.ports import AuthEventSink, AuthHttpClient, AuthOutcomeSink
 from enji_guard_cli.runtime_observability.ports import (
     BackendReadinessObservation,
 )
@@ -25,17 +25,19 @@ class RuntimeAuthCoordinatorAdapter(RuntimeAuthCoordinatorPort):
         settings: EnjiGuardSettings | None = None,
         event_sink: AuthEventSink,
         outcome_sink: AuthOutcomeSink,
+        client: AuthHttpClient | None = None,
     ) -> None:
         self.settings = settings if settings is not None else default_settings()
         self.auth_file = auth_file if auth_file is not None else self.settings.auth.auth_file
         self.event_sink = event_sink
         self.outcome_sink = outcome_sink
+        self.client = client
 
     async def reconcile_startup(self) -> None:
         await auth_api.reconcile_auth_startup(self.auth_file, outcome_sink=self.outcome_sink)
 
     async def observe_backend_readiness(self) -> BackendReadinessObservation:
-        result = await auth_api.backend_readiness_probe_async(self.auth_file)
+        result = await auth_api.backend_readiness_probe_async(self.auth_file, self.client)
         return BackendReadinessObservation(
             ready=result.ready,
             failure_kind=result.failure_kind,

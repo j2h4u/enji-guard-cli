@@ -270,7 +270,7 @@ forbidden_modules = [
     "enji_guard_cli.enji_gateway.contract",
     "enji_guard_cli.enji_gateway.client",
 ]
-allow_indirect_imports = true
+allow_indirect_imports = false
 
 [[tool.importlinter.contracts]]
 id = "runtime-observability-stays-operational"

@@ -13,7 +13,6 @@ import httpx
 from tenacity import AsyncRetrying, RetryCallState, retry_if_exception, stop_after_attempt
 from tenacity.wait import wait_base
 
-from enji_guard_cli.runtime_observability.telemetry import log_event
 from enji_guard_cli.settings import default_settings
 from enji_guard_cli.transport_types import RetryProfile
 
@@ -68,6 +67,22 @@ class EnjiHttpResponse:
 
 class EnjiHttpClient(Protocol):
     async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse: ...
+
+
+class TransportEventSink(Protocol):
+    """Narrow observability callback owned by the HTTP transport boundary."""
+
+    def __call__(self, logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> None: ...
+
+
+def discard_transport_event(
+    logger: logging.Logger,
+    level: int,
+    event: str,
+    fields: Mapping[str, object],
+) -> None:
+    """Explicit no-op for standalone transport clients outside runtime composition."""
+    _ = logger, level, event, fields
 
 
 class EnjiHttpError(Exception):
@@ -137,10 +152,12 @@ class HttpxEnjiHttpClient:
         *,
         retry_config: RetryConfig | None = None,
         limits: httpx.Limits | None = None,
+        event_sink: TransportEventSink = discard_transport_event,
     ) -> None:
         self._owned_client = client is None
         self._client = client if client is not None else _new_async_client(limits)
         self._retry_config = retry_config or RetryConfig()
+        self._event_sink = event_sink
 
     async def __aenter__(self) -> Self:
         return self
@@ -161,7 +178,7 @@ class HttpxEnjiHttpClient:
                     wait=_RetryWait(self._retry_config),
                     stop=stop_after_attempt(self._retry_config.total + 1),
                     reraise=True,
-                    before_sleep=lambda state: _log_retry(request, state),
+                    before_sleep=lambda state: self._log_retry(request, state),
                 )
                 try:
                     async for attempt in retrying:
@@ -170,11 +187,11 @@ class HttpxEnjiHttpClient:
                 except _RetryableResponseError as exc:
                     response = exc.response
         except httpx.HTTPError as exc:
-            _log_http_error(request, started_at, exc, attempt=self._retry_config.total + 1)
+            self._log_http_error(request, started_at, exc, attempt=self._retry_config.total + 1)
             raise EnjiTransportError(request.operation, exc) from exc
 
         assert response is not None
-        _log_http_response(
+        self._log_http_response(
             request,
             started_at,
             response.status_code,
@@ -201,6 +218,65 @@ class HttpxEnjiHttpClient:
         if request.profile.can_retry and response.status_code in self._retry_config.status_forcelist:
             raise _RetryableResponseError(response)
         return response
+
+    def _log_retry(self, request: EnjiHttpRequest, retry_state: RetryCallState) -> None:
+        exception = retry_state.outcome.exception() if retry_state.outcome is not None else None
+        retry_class = "status" if isinstance(exception, _RetryableResponseError) else "transport"
+        delay = retry_state.next_action.sleep if retry_state.next_action is not None else 0.0
+        self._event_sink(
+            _LOGGER,
+            logging.WARNING,
+            "enji_http_retry",
+            {
+                "operation": request.operation,
+                "method": request.method,
+                "path": _url_path(request.url),
+                "profile": request.profile.value,
+                "attempt": retry_state.attempt_number,
+                "delay_seconds": delay,
+                "retry_class": retry_class,
+            },
+        )
+
+    def _log_http_response(
+        self, request: EnjiHttpRequest, started_at: float, status_code: int, *, attempt: int
+    ) -> None:
+        self._event_sink(
+            _LOGGER,
+            logging.INFO,
+            "enji_http_response",
+            {
+                "operation": request.operation,
+                "method": request.method,
+                "path": _url_path(request.url),
+                "profile": request.profile.value,
+                "attempt": attempt,
+                "delay_seconds": 0.0,
+                "retry_class": "none",
+                "status_code": status_code,
+                "elapsed_ms": _elapsed_ms(started_at),
+            },
+        )
+
+    def _log_http_error(
+        self, request: EnjiHttpRequest, started_at: float, exc: httpx.HTTPError, *, attempt: int
+    ) -> None:
+        self._event_sink(
+            _LOGGER,
+            logging.WARNING,
+            "enji_http_error",
+            {
+                "operation": request.operation,
+                "method": request.method,
+                "path": _url_path(request.url),
+                "profile": request.profile.value,
+                "attempt": attempt,
+                "delay_seconds": 0.0,
+                "retry_class": "transport",
+                "error_type": exc.__class__.__name__,
+                "elapsed_ms": _elapsed_ms(started_at),
+            },
+        )
 
 
 class _RetryWait(wait_base):
@@ -253,64 +329,6 @@ def _retry_after_from_attempt(retry_state: RetryCallState) -> int | None:
     if not isinstance(exception, _RetryableResponseError):
         return None
     return retry_after_seconds(dict(exception.response.headers))
-
-
-def _log_retry(request: EnjiHttpRequest, retry_state: RetryCallState) -> None:
-    exception = retry_state.outcome.exception() if retry_state.outcome is not None else None
-    retry_class = "status" if isinstance(exception, _RetryableResponseError) else "transport"
-    delay = retry_state.next_action.sleep if retry_state.next_action is not None else 0.0
-    log_event(
-        _LOGGER,
-        logging.WARNING,
-        "enji_http_retry",
-        {
-            "operation": request.operation,
-            "method": request.method,
-            "path": _url_path(request.url),
-            "profile": request.profile.value,
-            "attempt": retry_state.attempt_number,
-            "delay_seconds": delay,
-            "retry_class": retry_class,
-        },
-    )
-
-
-def _log_http_response(request: EnjiHttpRequest, started_at: float, status_code: int, *, attempt: int) -> None:
-    log_event(
-        _LOGGER,
-        logging.INFO,
-        "enji_http_response",
-        {
-            "operation": request.operation,
-            "method": request.method,
-            "path": _url_path(request.url),
-            "profile": request.profile.value,
-            "attempt": attempt,
-            "delay_seconds": 0.0,
-            "retry_class": "none",
-            "status_code": status_code,
-            "elapsed_ms": _elapsed_ms(started_at),
-        },
-    )
-
-
-def _log_http_error(request: EnjiHttpRequest, started_at: float, exc: httpx.HTTPError, *, attempt: int) -> None:
-    log_event(
-        _LOGGER,
-        logging.WARNING,
-        "enji_http_error",
-        {
-            "operation": request.operation,
-            "method": request.method,
-            "path": _url_path(request.url),
-            "profile": request.profile.value,
-            "attempt": attempt,
-            "delay_seconds": 0.0,
-            "retry_class": "transport",
-            "error_type": exc.__class__.__name__,
-            "elapsed_ms": _elapsed_ms(started_at),
-        },
-    )
 
 
 def _response_from_httpx(response: httpx.Response) -> EnjiHttpResponse:

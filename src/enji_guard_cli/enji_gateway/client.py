@@ -19,6 +19,7 @@ from enji_guard_cli.transport import (
     EnjiJsonValue,
     EnjiMalformedResponseError,
     HttpxEnjiHttpClient,
+    discard_transport_event,
     raise_for_response_status,
 )
 from enji_guard_cli.transport_types import RetryProfile
@@ -128,7 +129,7 @@ async def run_api_request_async[T](
         if client is not None:
             return await request_parsed_json_object(session, client, spec)
 
-        async with HttpxEnjiHttpClient() as owned_client:
+        async with HttpxEnjiHttpClient(event_sink=discard_transport_event) as owned_client:
             return await request_parsed_json_object(session, owned_client, spec)
     except EnjiHttpError as exc:
         raise EnjiApiError(
@@ -161,7 +162,7 @@ async def run_api_no_content_async(
         if client is not None:
             return await request_no_content(session, client, spec)
 
-        async with HttpxEnjiHttpClient() as owned_client:
+        async with HttpxEnjiHttpClient(event_sink=discard_transport_event) as owned_client:
             return await request_no_content(session, owned_client, spec)
     except EnjiHttpError as exc:
         raise EnjiApiError(

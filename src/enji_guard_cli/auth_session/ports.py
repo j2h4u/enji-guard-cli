@@ -6,6 +6,13 @@ from pathlib import Path
 from typing import Protocol
 
 from enji_guard_cli.auth_session.models import AuthSessionStatus, StoredAuth
+from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse
+
+
+class AuthHttpClient(Protocol):
+    """HTTP capability consumed by Auth Session without a runtime dependency."""
+
+    async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse: ...
 
 
 class AuthEventSink(Protocol):
@@ -41,6 +48,7 @@ class AuthStorePort(Protocol):
 
 __all__ = [
     "AuthEventSink",
+    "AuthHttpClient",
     "AuthOutcomeSink",
     "AuthSessionPort",
     "AuthStorePort",

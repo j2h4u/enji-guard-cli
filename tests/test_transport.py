@@ -6,7 +6,7 @@ from typing import cast
 import httpx
 import pytest
 
-from enji_guard_cli.runtime_observability.telemetry import configure_logging
+from enji_guard_cli.runtime_observability.telemetry import configure_logging, log_event
 from enji_guard_cli.settings import TelemetrySettings
 from enji_guard_cli.transport import (
     EnjiHttpRequest,
@@ -56,7 +56,7 @@ def test_httpx_enji_http_client_logs_sanitized_request_metadata(capsys: pytest.C
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"ok": True}, request=request))
         ) as client:
-            await HttpxEnjiHttpClient(client).request(
+            await HttpxEnjiHttpClient(client, event_sink=log_event).request(
                 EnjiHttpRequest(
                     method="GET",
                     url="https://fleet.enji.ai/api/ux/me/access?token=secret",

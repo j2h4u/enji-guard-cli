@@ -26,15 +26,16 @@ def create_application(auth_file: Path | None = None) -> Application:
         lookup_grace_seconds=settings.active_run_ledger.lookup_grace_seconds,
     )
     credential_reader = GatewayCredentialReader(auth_file, settings=settings)
+    pooled_client = PooledEnjiHttpClient(settings, event_sink=log_event)
     runtime_auth = RuntimeAuthCoordinatorAdapter(
         auth_file,
         settings=settings,
         event_sink=log_event,
         outcome_sink=persist_event,
+        client=pooled_client,
     )
-    auth_service = AuthSessionService(auth_file, settings=settings)
+    auth_service = AuthSessionService(auth_file, pooled_client, settings=settings)
     fanout = BoundedFanout(settings.fanout)
-    pooled_client = PooledEnjiHttpClient(settings)
     try:
         portfolio_gateway = PortfolioGateway(auth_file, pooled_client, auth_port=credential_reader)
         return Application(
