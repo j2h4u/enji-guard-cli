@@ -3,6 +3,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Local images must always identify the source that produced them.
+        # `just docker-build` and `just docker-up` compute these from the
+        # installed package and current checkout before invoking Compose.
+        PACKAGE_VERSION: ${PACKAGE_VERSION:?run 'just docker-build' or 'just docker-up' to supply package provenance}
+        SOURCE_COMMIT: ${SOURCE_COMMIT:?run 'just docker-build' or 'just docker-up' to supply source provenance}
     image: enji-guard-cli:local
     container_name: enji-guard-cli
     command: ["run", "--transport", "streamable-http", "--host", "0.0.0.0", "--allow-external-host"]
