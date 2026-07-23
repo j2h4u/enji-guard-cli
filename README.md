@@ -231,9 +231,11 @@ does not alter the package's SemVer.
 
 Release automation is handled by release-please. It opens a release PR from
 conventional commits, updates `CHANGELOG.md`, and creates the GitHub Release
-after that PR is merged. Use `feat:` and `fix:` only for changes that should be
-visible in release notes; keep internal churn under `chore:`, `refactor:`,
-`test:`, `ci:`, or `docs:`.
+after that PR is merged. PR titles must be releasable Conventional Commit
+subjects because squash merges use that title as the release input. Use `feat:`
+for minor releases, `fix:` for patch fixes, and `!` for breaking major changes;
+maintenance work uses `chore:`, `refactor:`, `test:`, `ci:`, `docs:`, `build:`,
+or `style:` and still produces a patch release.
 
 Commit-derived notes are sufficient for routine releases. For a broad
 user-facing change, curate the implementation PR's release notes when commit
