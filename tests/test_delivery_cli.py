@@ -73,6 +73,25 @@ def test_operator_command_tree_uses_audit_vocabulary() -> None:
         assert command in result.stdout
 
 
+def test_root_without_arguments_shows_agent_mental_model() -> None:
+    result = CliRunner().invoke(app, [])
+    assert result.exit_code == 0
+    assert "Mental model" in result.stdout
+    assert "status REPO" in result.stdout
+    assert "one fresh snapshot" in result.stdout
+    assert "wait REPO" in result.stdout
+    assert "do not use short timeouts as refresh" in result.stdout
+
+
+def test_audit_help_warns_that_wait_is_not_refresh() -> None:
+    result = CliRunner().invoke(app, ["audit", "--help"])
+    assert result.exit_code == 0
+    assert "Use status REPO as the first readiness check" in result.stdout
+    assert "wait is a real blocking wait" in result.stdout
+    assert "not a" in result.stdout
+    assert "refresh" in result.stdout
+
+
 def test_audit_read_and_summary_are_public_commands() -> None:
     root = get_command(app)
     assert isinstance(root, TyperGroup)
