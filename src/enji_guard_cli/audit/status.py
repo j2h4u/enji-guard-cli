@@ -4,7 +4,6 @@ from enji_guard_cli.audit.freshness import compare_heads
 from enji_guard_cli.audit.lifecycle import active_runs_for_action, projection_sort_key, task_lifecycle
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.ports import (
-    AuditItemStatus,
     AuditRerunState,
     AuditRun,
     AuditStatus,
@@ -31,33 +30,6 @@ def build_status(
         for audit in catalog.published_audits
     )
     return AuditStatus(repo_id=repo_id, current_head_sha=current_sha, items=items)
-
-
-def status_items_from_projections(
-    catalog: AuditCatalog,
-    links: tuple[AuditTaskLink, ...],
-    active_runs: tuple[AuditRun, ...],
-    rerun_state: AuditRerunState | None,
-) -> tuple[AuditStatusItem, ...]:
-    return build_status("", catalog, links, active_runs, rerun_state).items
-
-
-def audit_status_items(status: AuditStatus) -> tuple[AuditItemStatus, ...]:
-    """Project typed status into the small DTO used by run/read use-cases."""
-
-    return tuple(
-        AuditItemStatus(
-            action_key=item.audit_key,
-            current_head_sha=item.freshness.current_head_sha,
-            audited_head_sha=item.freshness.audited_head_sha,
-            can_read=item.can_read,
-            completed_at=item.completed_at,
-            task_id=item.task_id,
-            task_status=item.task_status,
-            task_active=item.active,
-        )
-        for item in status.items
-    )
 
 
 def _status_item(

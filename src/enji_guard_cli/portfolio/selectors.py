@@ -39,14 +39,6 @@ def resolve_project(projects: Sequence[ProjectRef], selector: str | None = None)
     return matches[0]
 
 
-def resolve_project_id(projects: Sequence[ProjectRef], selector: str | None = None) -> str:
-    return resolve_project(projects, selector).project_id
-
-
-def project_candidates(projects: Sequence[ProjectRef]) -> str:
-    return _project_candidates(projects)
-
-
 def repository_matches(repository: RepositoryRef, selector: str) -> bool:
     normalized = selector.casefold()
     if repository.repo_id.casefold() == normalized:
