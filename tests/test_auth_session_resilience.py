@@ -46,7 +46,7 @@ def test_api_endpoint_request_preserves_retry_profile_for_every_implemented_path
 
 def test_auth_request_paths_assign_auth_refresh_and_read_profiles(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
-    import_cookie("access=old; refresh=long", auth_file)
+    import_cookie("access_token=old; refresh_token=long", auth_file)
     captured: list[RetryProfile] = []
 
     class Client:
@@ -142,7 +142,7 @@ def test_non_replayable_profiles_do_not_auto_retry_status_responses(profile: Ret
 
 def test_gateway_unsafe_request_is_not_replayed_or_refreshed(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
-    import_cookie("access=old; refresh=long", auth_file)
+    import_cookie("access_token=old; refresh_token=long", auth_file)
     session = api_client_module.load_api_session(auth_file, auth_port=GatewayCredentialReader())
     calls: list[EnjiHttpRequest] = []
 
@@ -173,11 +173,11 @@ def test_gateway_unsafe_request_is_not_replayed_or_refreshed(tmp_path: Path) -> 
 
 def test_rotated_cookie_journal_recovers_from_disk_without_replaying_post(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
-    import_cookie("access=old; refresh=long", auth_file)
+    import_cookie("access_token=old; refresh_token=long", auth_file)
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
 
-    write_journal(auth_file, Rotated(stored_auth["revision"], "access=new; refresh=rotated"))
+    write_journal(auth_file, Rotated(stored_auth["revision"], "access_token=new; refresh_token=rotated"))
     journal_path = pending_rotation_path(auth_file)
     assert journal_path.stat().st_mode & 0o777 == 0o600
 
@@ -192,7 +192,7 @@ def test_rotated_cookie_journal_recovers_from_disk_without_replaying_post(tmp_pa
     recovered = asyncio.run(_refresh_cookie_auth(auth_file, stored_auth, Client()))
 
     assert calls == 0
-    assert recovered["credential"] == {"type": "cookie", "cookie_header": "access=new; refresh=rotated"}
+    assert recovered["credential"] == {"type": "cookie", "cookie_header": "access_token=new; refresh_token=rotated"}
     # An unacknowledged durable outcome remains in the outbox for the runtime
     # telemetry sink to drain on a later reconciliation.
     assert journal_path.exists()
@@ -200,7 +200,7 @@ def test_rotated_cookie_journal_recovers_from_disk_without_replaying_post(tmp_pa
 
 def test_corrupt_refresh_journal_avoids_refresh_request(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
-    import_cookie("access=old; refresh=long", auth_file)
+    import_cookie("access_token=old; refresh_token=long", auth_file)
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
 

@@ -125,16 +125,21 @@ def _test_bearer_auth(revision: str = "bearer") -> RuntimeStoredAuth:
 
 def test_import_cookie_stores_cookie_credential(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
-    result = import_cookie("Cookie: session=abc; refresh=def", auth_file)
+    result = import_cookie("Cookie: session=abc; access_token=old; refresh_token=long", auth_file)
 
     stored = cast(StoredAuth, json.loads(auth_file.read_text(encoding="utf-8")))
     assert result["credential_type"] == "cookie"
     assert result.get("cookie_count") == 2
     assert stored["credential"] == {
         "type": "cookie",
-        "cookie_header": "session=abc; refresh=def",
+        "cookie_header": "access_token=old; refresh_token=long",
     }
     assert auth_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_import_cookie_rejects_header_without_auth_cookies(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="auth cookie pairs"):
+        import_cookie("session=abc; cf_clearance=cloudflare", tmp_path / "auth.json")
 
 
 def test_import_bearer_token_stores_token_credential(tmp_path: Path) -> None:
@@ -149,7 +154,7 @@ def test_import_bearer_token_stores_token_credential(tmp_path: Path) -> None:
 
 def test_future_credential_import_timestamp_has_stable_clock_anomaly_classification(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
-    import_cookie("session=abc; refresh=def", auth_file)
+    import_cookie("access_token=old; refresh_token=long", auth_file)
     stored = cast(dict[str, object], json.loads(auth_file.read_text(encoding="utf-8")))
     stored["imported_at"] = "9999-12-31T23:59:59+00:00"
     auth_file.write_text(json.dumps(stored), encoding="utf-8")
@@ -699,11 +704,14 @@ def test_wait_cancellation_closes_watcher_generator() -> None:
 
 def test_merge_set_cookie_headers_updates_existing_cookie_without_keeping_attributes() -> None:
     updated = merge_set_cookie_headers(
-        "access=old; refresh=long",
-        ["access=new; Path=/; HttpOnly; SameSite=Lax"],
+        "session=abc; access_token=old; refresh_token=long",
+        [
+            "access_token=new; Path=/; HttpOnly; SameSite=Lax",
+            "analytics=ignored; Path=/",
+        ],
     )
 
-    assert updated.value == "access=new; refresh=long"
+    assert updated.value == "access_token=new; refresh_token=long"
     assert updated.count == 2
 
 
@@ -785,7 +793,7 @@ def test_auth_status_uses_stored_credential_headers(tmp_path: Path) -> None:
 
 def test_auth_status_returns_rate_limit_payload(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
-    import_cookie("session=abc", auth_file)
+    import_cookie("access_token=old; refresh_token=long", auth_file)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(429, headers={"Retry-After": "7"}, request=request)
@@ -824,7 +832,7 @@ def test_auth_status_does_not_refresh_or_replay_on_invalid_cookie(tmp_path: Path
 
 def test_backend_readiness_probe_does_not_refresh_on_auth_invalid(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
-    import_cookie("access=old; refresh=long", auth_file)
+    import_cookie("access_token=old; refresh_token=long", auth_file)
     captured: list[tuple[str, str]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -844,7 +852,7 @@ def test_backend_readiness_probe_does_not_refresh_on_auth_invalid(tmp_path: Path
     assert captured == [("GET", "/api/v1/auth/me")]
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
-    assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access=old; refresh=long"}
+    assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=long"}
 
 
 def test_refresh_auth_updates_rotated_access_and_refresh_cookies(tmp_path: Path) -> None:

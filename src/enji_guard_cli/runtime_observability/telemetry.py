@@ -123,7 +123,10 @@ def _parse_log_level(raw_level: str) -> int:
         "INFO": logging.INFO,
         "DEBUG": logging.DEBUG,
     }
-    return levels.get(raw_level.strip().upper(), logging.WARNING)
+    level_name = raw_level.strip().upper()
+    if level_name not in levels:
+        raise ValueError(f"unknown telemetry log level: {raw_level}")
+    return levels[level_name]
 
 
 def _safe_log_fields(fields: Mapping[str, object]) -> dict[str, LogFieldValue]:

@@ -489,7 +489,7 @@ def test_api_error_payload_is_preserved_for_unexpected_status(tmp_path: Path) ->
 
 def test_cookie_permission_forbidden_does_not_refresh(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
-    import_cookie("access=old; refresh=long", auth_file)
+    import_cookie("access_token=old; refresh_token=long", auth_file)
     client = FakeEnjiHttpClient(
         [
             json_response(
