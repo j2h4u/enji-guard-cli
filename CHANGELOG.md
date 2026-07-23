@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.13](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.12...v2.2.13) (2026-07-23)
+
+
+### Fixes
+
+* **audit:** start current-head runs ([#180](https://github.com/j2h4u/enji-guard-cli/issues/180)) ([ac7e408](https://github.com/j2h4u/enji-guard-cli/commit/ac7e4082ba2e4b1eb3e5901035922d38694a7ff7))
+
 ## [2.2.12](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.11...v2.2.12) (2026-07-23)
 
 
