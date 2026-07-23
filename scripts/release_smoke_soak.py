@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo", required=True)
     parser.add_argument("--project")
     parser.add_argument("--container", default="enji-guard-cli")
-    parser.add_argument("--mcp-url", default="http://127.0.0.1:8001/mcp")
+    parser.add_argument("--mcp-url", default="http://127.0.0.1:18080/mcp")
     parser.add_argument("--duration", type=float, default=300.0)
     parser.add_argument("--interval", type=float, default=30.0)
     parser.add_argument("--max-failures", type=int, default=0)

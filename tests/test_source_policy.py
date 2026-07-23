@@ -53,11 +53,13 @@ def _compose_common_service_fields(path: Path) -> dict[str, object]:
     return {field: service[field] for field in COMMON_SERVICE_FIELDS}
 
 
-def _compose_config(path: Path) -> dict[str, object]:
+def _compose_config(path: Path, *, host_port: str | None = None) -> dict[str, object]:
     environment = os.environ.copy()
     environment["ENJI_GUARD_IMAGE_REF"] = COMPOSE_IMAGE_REF
     environment["PACKAGE_VERSION"] = COMPOSE_PACKAGE_VERSION
     environment["SOURCE_COMMIT"] = COMPOSE_SOURCE_COMMIT
+    if host_port is not None:
+        environment["ENJI_GUARD_MCP_HOST_PORT"] = host_port
     result = subprocess.run(
         ["docker", "compose", "-f", str(path.relative_to(ROOT)), "config", "--format", "json"],
         check=True,
@@ -136,6 +138,27 @@ def test_local_and_ghcr_compose_critical_settings_stay_in_sync() -> None:
     ghcr = _compose_common_service_fields(ROOT / "deploy" / "docker-compose.ghcr.yml")
 
     assert local == ghcr
+
+
+def test_compose_publishes_mcp_on_configurable_nonconflicting_host_port() -> None:
+    for path in (ROOT / "docker-compose.yml", ROOT / "deploy" / "docker-compose.ghcr.yml"):
+        compose = _compose_config(path)
+        services = cast(dict[str, object], compose["services"])
+        service = cast(dict[str, object], services["enji-guard-cli"])
+        ports = cast(list[dict[str, object]], service["ports"])
+
+        assert ports == [
+            {"host_ip": "127.0.0.1", "mode": "ingress", "protocol": "tcp", "published": "18080", "target": 8000}
+        ]
+
+        overridden = _compose_config(path, host_port="18081")
+        overridden_services = cast(dict[str, object], overridden["services"])
+        overridden_service = cast(dict[str, object], overridden_services["enji-guard-cli"])
+        overridden_ports = cast(list[dict[str, object]], overridden_service["ports"])
+
+        assert overridden_ports == [
+            {"host_ip": "127.0.0.1", "mode": "ingress", "protocol": "tcp", "published": "18081", "target": 8000}
+        ]
 
 
 def test_ghcr_compose_declares_stable_project_name() -> None:
