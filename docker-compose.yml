@@ -15,7 +15,7 @@ services:
     restart: unless-stopped
     init: true
     ports:
-      - "127.0.0.1:${ENJI_GUARD_MCP_HOST_PORT:-18080}:8000"
+      - "127.0.0.1:${ENJI_GUARD_MCP_HOST_PORT:-18082}:8000"
     mem_limit: 512m
     memswap_limit: 512m
     pids_limit: 128

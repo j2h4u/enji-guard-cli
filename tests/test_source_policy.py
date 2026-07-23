@@ -148,7 +148,7 @@ def test_compose_publishes_mcp_on_configurable_nonconflicting_host_port() -> Non
         ports = cast(list[dict[str, object]], service["ports"])
 
         assert ports == [
-            {"host_ip": "127.0.0.1", "mode": "ingress", "protocol": "tcp", "published": "18080", "target": 8000}
+            {"host_ip": "127.0.0.1", "mode": "ingress", "protocol": "tcp", "published": "18082", "target": 8000}
         ]
 
         overridden = _compose_config(path, host_port="18081")

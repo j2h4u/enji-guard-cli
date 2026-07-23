@@ -130,7 +130,7 @@ release-status:
 
 # Read-only smoke against a running Docker service.  The empty project value
 # intentionally means account-wide selection; no mutating operation is used.
-release-smoke repo project="" container="enji-guard-cli" mcp_url="http://127.0.0.1:18080/mcp":
+release-smoke repo project="" container="enji-guard-cli" mcp_url="http://127.0.0.1:18082/mcp":
     uv run python -m scripts.release_smoke --repo "{{repo}}" --project "{{project}}" --container "{{container}}" --mcp-url "{{mcp_url}}"
 
 # Recreate the service and verify auth status survives the restart.
