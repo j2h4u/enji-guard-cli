@@ -28,8 +28,7 @@ def normalize_cookie_header(raw_cookie: str) -> CookieHeader:
     if not cookie:
         raise ValueError("cookie input does not contain cookie pairs")
 
-    normalized = "; ".join(f"{name}={morsel.coded_value}" for name, morsel in cookie.items())
-    return CookieHeader(value=normalized, count=len(cookie))
+    return _auth_cookie_header(cookie)
 
 
 def merge_set_cookie_headers(cookie_header: str, set_cookie_headers: Iterable[str]) -> CookieHeader:
@@ -40,12 +39,10 @@ def merge_set_cookie_headers(cookie_header: str, set_cookie_headers: Iterable[st
         updated_cookie.load(set_cookie_header)
         for name, morsel in updated_cookie.items():
             validate_auth_cookie_update(name, morsel)
-            cookie[name] = morsel.value
+            if name in AUTH_COOKIE_NAMES:
+                cookie[name] = morsel.value
 
-    if not cookie:
-        raise ValueError("cookie input does not contain cookie pairs")
-    normalized = "; ".join(f"{name}={morsel.coded_value}" for name, morsel in cookie.items())
-    return CookieHeader(value=normalized, count=len(cookie))
+    return _auth_cookie_header(cookie)
 
 
 def set_cookie_names(set_cookie_headers: Iterable[str]) -> tuple[str, ...]:
@@ -112,6 +109,14 @@ def _extract_cookie_line(raw_cookie: str) -> str:
             return line.split(":", 1)[1].strip()
 
     return stripped
+
+
+def _auth_cookie_header(cookie: SimpleCookie) -> CookieHeader:
+    auth_items = tuple((name, morsel) for name, morsel in cookie.items() if name in AUTH_COOKIE_NAMES)
+    if not auth_items:
+        raise ValueError("cookie input does not contain auth cookie pairs")
+    normalized = "; ".join(f"{name}={morsel.coded_value}" for name, morsel in auth_items)
+    return CookieHeader(value=normalized, count=len(auth_items))
 
 
 def _morsel_deletes_cookie(morsel: Morsel[str]) -> bool:

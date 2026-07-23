@@ -225,7 +225,7 @@ def test_backend_readiness_loop_reprobes_immediately_after_credential_change(
 
 @pytest.mark.parametrize("fails_after_change", [False, True])
 def test_backend_readiness_watcher_failure_keeps_periodic_heartbeat_and_siblings_alive(
-    tmp_path: Path, fails_after_change: bool
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fails_after_change: bool
 ) -> None:
     probes = 0
     third_probe = asyncio.Event()
@@ -254,11 +254,13 @@ def test_backend_readiness_watcher_failure_keeps_periodic_heartbeat_and_siblings
     settings = ReadinessSettings(
         enabled=True,
         state_file=tmp_path / "readiness.json",
-        heartbeat_interval_seconds=0,
+        heartbeat_interval_seconds=30,
         heartbeat_timeout_seconds=2.0,
         failure_threshold=3,
         state_stale_after_seconds=60,
     )
+    monkeypatch.setattr(runtime, "log_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runtime, "_wait_for_readiness_trigger", _immediate_readiness_trigger)
 
     async def scenario() -> None:
         initial_state = backend_readiness_starting_state(checked_at=runtime.datetime.now(runtime.UTC))
@@ -284,6 +286,19 @@ def test_backend_readiness_watcher_failure_keeps_periodic_heartbeat_and_siblings
 
     assert probes >= 3
     assert siblings_cancelled == {"mcp", "refresh"}
+
+
+async def _immediate_readiness_trigger(change_task: asyncio.Task[None] | None, interval_seconds: int) -> bool:
+    assert interval_seconds == 30
+    await asyncio.sleep(0)
+    if change_task is None:
+        return False
+    if not change_task.done():
+        await asyncio.sleep(0)
+    if not change_task.done():
+        return False
+    change_task.result()
+    return True
 
 
 def test_backend_readiness_loop_cancellation_closes_pending_credential_watcher(tmp_path: Path) -> None:

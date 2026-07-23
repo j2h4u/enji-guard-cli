@@ -7,6 +7,12 @@ type LogLevelName = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
 type McpTransportName = Literal["stdio", "sse", "streamable-http"]
 type RepositorySortName = Literal["default", "name", "weakest", "overall", "latest-audit"]
 
+LOG_FORMAT_NAMES = frozenset({"text", "json"})
+LOG_LEVEL_NAMES = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
+REPOSITORY_SORT_NAMES = frozenset({"default", "name", "weakest", "overall", "latest-audit"})
+MIN_HTTP_STATUS_CODE = 100
+MAX_HTTP_STATUS_CODE = 599
+
 APP_CONFIG_PARENT_DIR_NAME = ".config"
 APP_CONFIG_DIR_NAME = "enji-guard"
 AUTH_FILE_NAME = "auth.json"
@@ -76,6 +82,11 @@ class AuthSettings:
     guard_origin: str
     guard_referer: str
 
+    def __post_init__(self) -> None:
+        _require_non_empty("auth.base_url", self.base_url)
+        _require_non_empty("auth.guard_origin", self.guard_origin)
+        _require_non_empty("auth.guard_referer", self.guard_referer)
+
 
 @dataclass(frozen=True, slots=True)
 class AutoRefreshSettings:
@@ -88,6 +99,17 @@ class AutoRefreshSettings:
     pre_dispatch_retry_max_seconds: float = DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_MAX_SECONDS
     pre_dispatch_retry_jitter_seconds: float = DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_JITTER_SECONDS
 
+    def __post_init__(self) -> None:
+        _require_non_negative("auto_refresh.lead_seconds", self.lead_seconds)
+        _require_positive("auto_refresh.fallback_seconds", self.fallback_seconds)
+        _require_positive("auto_refresh.revision_poll_seconds", self.revision_poll_seconds)
+        _require_non_negative("auto_refresh.pre_dispatch_retry_limit", self.pre_dispatch_retry_limit)
+        _require_positive("auto_refresh.pre_dispatch_retry_initial_seconds", self.pre_dispatch_retry_initial_seconds)
+        _require_positive("auto_refresh.pre_dispatch_retry_max_seconds", self.pre_dispatch_retry_max_seconds)
+        _require_non_negative("auto_refresh.pre_dispatch_retry_jitter_seconds", self.pre_dispatch_retry_jitter_seconds)
+        if self.pre_dispatch_retry_initial_seconds > self.pre_dispatch_retry_max_seconds:
+            raise ValueError("auto_refresh.pre_dispatch_retry_initial_seconds must be <= max seconds")
+
 
 @dataclass(frozen=True, slots=True)
 class TransportRetrySettings:
@@ -98,6 +120,17 @@ class TransportRetrySettings:
     retryable_status_codes: tuple[int, ...]
     respect_retry_after_header: bool
 
+    def __post_init__(self) -> None:
+        _require_non_negative("transport.retry.total", self.total)
+        _require_non_negative("transport.retry.backoff_factor", self.backoff_factor)
+        _require_positive("transport.retry.max_delay_seconds", self.max_delay_seconds)
+        _require_non_negative("transport.retry.jitter_seconds", self.jitter_seconds)
+        if not self.retryable_status_codes:
+            raise ValueError("transport.retry.retryable_status_codes must not be empty")
+        for status_code in self.retryable_status_codes:
+            if status_code < MIN_HTTP_STATUS_CODE or status_code > MAX_HTTP_STATUS_CODE:
+                raise ValueError("transport.retry.retryable_status_codes must be valid HTTP status codes")
+
 
 @dataclass(frozen=True, slots=True)
 class TransportPoolSettings:
@@ -105,12 +138,22 @@ class TransportPoolSettings:
     max_keepalive_connections: int = DEFAULT_TRANSPORT_MAX_KEEPALIVE_CONNECTIONS
     keepalive_expiry_seconds: float = DEFAULT_TRANSPORT_KEEPALIVE_EXPIRY_SECONDS
 
+    def __post_init__(self) -> None:
+        _require_positive("transport.pool.max_connections", self.max_connections)
+        _require_non_negative("transport.pool.max_keepalive_connections", self.max_keepalive_connections)
+        _require_positive("transport.pool.keepalive_expiry_seconds", self.keepalive_expiry_seconds)
+        if self.max_keepalive_connections > self.max_connections:
+            raise ValueError("transport.pool.max_keepalive_connections must be <= max_connections")
+
 
 @dataclass(frozen=True, slots=True)
 class TransportSettings:
     timeout_seconds: float
     retry: TransportRetrySettings
     pool: TransportPoolSettings = field(default_factory=TransportPoolSettings)
+
+    def __post_init__(self) -> None:
+        _require_positive("transport.timeout_seconds", self.timeout_seconds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,11 +164,21 @@ class TelemetrySettings:
     max_bytes: int
     backup_count: int
 
+    def __post_init__(self) -> None:
+        _require_one_of("telemetry.level_name", self.level_name, LOG_LEVEL_NAMES)
+        _require_one_of("telemetry.log_format", self.log_format, LOG_FORMAT_NAMES)
+        _require_positive("telemetry.max_bytes", self.max_bytes)
+        _require_non_negative("telemetry.backup_count", self.backup_count)
+
 
 @dataclass(frozen=True, slots=True)
 class ServiceSettings:
     local_readiness_timeout_seconds: float
     mcp_graceful_shutdown_timeout_seconds: float = DEFAULT_MCP_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS
+
+    def __post_init__(self) -> None:
+        _require_positive("service.local_readiness_timeout_seconds", self.local_readiness_timeout_seconds)
+        _require_positive("service.mcp_graceful_shutdown_timeout_seconds", self.mcp_graceful_shutdown_timeout_seconds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +189,12 @@ class ReadinessSettings:
     heartbeat_timeout_seconds: float
     failure_threshold: int
     state_stale_after_seconds: int
+
+    def __post_init__(self) -> None:
+        _require_positive("readiness.heartbeat_interval_seconds", self.heartbeat_interval_seconds)
+        _require_positive("readiness.heartbeat_timeout_seconds", self.heartbeat_timeout_seconds)
+        _require_positive("readiness.failure_threshold", self.failure_threshold)
+        _require_positive("readiness.state_stale_after_seconds", self.state_stale_after_seconds)
 
     @property
     def ready_after_failure_count(self) -> int:
@@ -149,10 +208,21 @@ class AuditWaitSettings:
     timeout_text: str
     heartbeat_seconds: int
 
+    def __post_init__(self) -> None:
+        _require_positive("audit_wait.poll_seconds", self.poll_seconds)
+        _require_positive("audit_wait.timeout_seconds", self.timeout_seconds)
+        _require_non_empty("audit_wait.timeout_text", self.timeout_text)
+        _require_positive("audit_wait.heartbeat_seconds", self.heartbeat_seconds)
+        if self.timeout_seconds < self.poll_seconds:
+            raise ValueError("audit_wait.timeout_seconds must be >= poll_seconds")
+
 
 @dataclass(frozen=True, slots=True)
 class RepoSettings:
     default_sort: RepositorySortName
+
+    def __post_init__(self) -> None:
+        _require_one_of("repo.default_sort", self.default_sort, REPOSITORY_SORT_NAMES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +230,10 @@ class ActiveRunLedgerSettings:
     state_file: Path
     ttl_seconds: int
     lookup_grace_seconds: int
+
+    def __post_init__(self) -> None:
+        _require_positive("active_run_ledger.ttl_seconds", self.ttl_seconds)
+        _require_non_negative("active_run_ledger.lookup_grace_seconds", self.lookup_grace_seconds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +244,9 @@ class AuditCatalogSettings:
 @dataclass(frozen=True, slots=True)
 class FanoutSettings:
     max_concurrency: int
+
+    def __post_init__(self) -> None:
+        _require_positive("fanout.max_concurrency", self.max_concurrency)
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,3 +337,24 @@ def default_settings() -> EnjiGuardSettings:
 
 def default_config_root() -> Path:
     return Path.home() / APP_CONFIG_PARENT_DIR_NAME / APP_CONFIG_DIR_NAME
+
+
+def _require_non_empty(name: str, value: str) -> None:
+    if not value.strip():
+        raise ValueError(f"{name} must not be empty")
+
+
+def _require_positive(name: str, value: int | float) -> None:
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+
+
+def _require_non_negative(name: str, value: int | float) -> None:
+    if value < 0:
+        raise ValueError(f"{name} must be non-negative")
+
+
+def _require_one_of(name: str, value: str, allowed: frozenset[str]) -> None:
+    if value not in allowed:
+        allowed_values = ", ".join(sorted(allowed))
+        raise ValueError(f"{name} must be one of: {allowed_values}")
