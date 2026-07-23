@@ -83,7 +83,8 @@ def test_local_compose_requires_build_provenance() -> None:
     )
 
     assert result.returncode != 0
-    assert "PACKAGE_VERSION" in result.stderr
+    assert "required variable" in result.stderr
+    assert any(variable in result.stderr for variable in ("PACKAGE_VERSION", "SOURCE_COMMIT"))
 
     build = subprocess.run(
         ["docker", "compose", "build"],
@@ -93,7 +94,8 @@ def test_local_compose_requires_build_provenance() -> None:
         text=True,
     )
     assert build.returncode != 0
-    assert "PACKAGE_VERSION" in build.stderr
+    assert "required variable" in build.stderr
+    assert any(variable in build.stderr for variable in ("PACKAGE_VERSION", "SOURCE_COMMIT"))
 
 
 def test_local_compose_passes_non_placeholder_build_provenance() -> None:
@@ -125,8 +127,8 @@ def test_dockerfile_rejects_placeholder_build_provenance() -> None:
     assert "ARG PACKAGE_VERSION=0.0.0+local" not in dockerfile
     assert "ARG SOURCE_COMMIT=unknown" not in dockerfile
     assert 'RUN PACKAGE_VERSION="${PACKAGE_VERSION}" SOURCE_COMMIT="${SOURCE_COMMIT}" python' in dockerfile
-    assert 'PACKAGE_VERSION must be a non-0.0.0 semantic version' in dockerfile
-    assert 'SOURCE_COMMIT must be a Git object id' in dockerfile
+    assert "PACKAGE_VERSION must be a non-0.0.0 semantic version" in dockerfile
+    assert "SOURCE_COMMIT must be a Git object id" in dockerfile
 
 
 def test_local_and_ghcr_compose_critical_settings_stay_in_sync() -> None:
