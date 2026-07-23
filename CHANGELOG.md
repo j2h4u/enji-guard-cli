@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.7](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.6...v2.2.7) (2026-07-23)
+
+
+### Fixes
+
+* **docker:** avoid MCP host port collision ([0a0f6a9](https://github.com/j2h4u/enji-guard-cli/commit/0a0f6a92711b262345626f0d3f4a4aa28bf7738a))
+
 ## [2.2.6](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.5...v2.2.6) (2026-07-23)
 
 
