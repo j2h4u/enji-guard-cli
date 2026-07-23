@@ -28,10 +28,6 @@ def stale(current_head_sha: str | None, audited_head_sha: str | None) -> bool | 
     return compare_heads(current_head_sha, audited_head_sha).stale
 
 
-def stale_audits(status: tuple[AuditItemStatus, ...]) -> tuple[str, ...]:
-    return tuple(item.action_key for item in status if freshness_for_status(item).state == "stale")
-
-
 def aggregate_freshness(status: tuple[AuditItemStatus, ...]) -> AuditFreshnessState:
     states = {freshness_for_status(item).state for item in status}
     if states == {"fresh"}:

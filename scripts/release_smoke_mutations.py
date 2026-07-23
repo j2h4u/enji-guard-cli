@@ -36,12 +36,6 @@ def _run(settings: DockerSmokeSettings, command: Sequence[str]) -> tuple[int, st
     return result.returncode, result.stdout, result.stderr
 
 
-def _assert_success(settings: DockerSmokeSettings, command: Sequence[str], label: str) -> None:
-    code, _stdout, _stderr = _run(settings, command)
-    if code != 0:
-        raise SmokeFailure(f"{label} exited {code}")
-
-
 def _project_mutation(settings: DockerSmokeSettings, command: Sequence[str], label: str) -> Mapping[str, object]:
     code, stdout, _stderr = _run(settings, command)
     if code != 0:

@@ -71,37 +71,6 @@ class _StartOneState:
     project: AuditProject
 
 
-def start_audit[TCreateRequest](
-    repo_id: str,
-    project_id: str,
-    audit: AuditDefinition,
-    catalog: AuditCatalog,
-    *,
-    dependencies: StartAuditDependencies[TCreateRequest],
-) -> object | AuditRunSkippedPayload:
-    active_runs = active_runs_for_action(dependencies.current_repo_active_runs(repo_id), audit.action_key)
-    if active_runs:
-        return skipped_audit_payload(audit.action_key, audit.action_key, active_runs)
-    response = dependencies.start_audit_run(
-        dependencies.make_audit_run_create(
-            repo_id,
-            project_id,
-            audit.action_key,
-            audit_run_task_body(
-                AuditRunTaskContext(
-                    project_id, repo_id, audit.action_key, dependencies.project_detail(project_id), catalog
-                ),
-                runbook=dependencies.runbook,
-            ),
-        )
-    )
-    task_id, task_status = dependencies.task_identity(response)
-    dependencies.record_started_run(
-        AuditRunStart(repo_id, project_id, audit.action_key, task_id, task_status, None, None)
-    )
-    return response
-
-
 def start_audits_for_target[TCreateRequest](
     context: StartAuditsContext,
     *,

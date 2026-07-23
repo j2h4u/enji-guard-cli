@@ -40,10 +40,6 @@ class MutationScope:
             raise ValueError(f"{operation}: pass REPO, --all-repos with --project, or --all-projects")
         return cls("repo", repo=repo, project=project)
 
-    @property
-    def is_batch(self) -> bool:
-        return self.kind != "repo"
-
 
 def validate_write_scope(
     repo: str | None, project: str | None, *, all_repos: bool, all_projects: bool, operation: str

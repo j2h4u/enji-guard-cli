@@ -1,12 +1,11 @@
 """Read completed audit artifacts without leaking gateway payload vocabulary."""
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, cast
 
 from enji_guard_cli.audit.errors import AuditNotFoundError
 from enji_guard_cli.audit.lifecycle import _timestamp, lifecycle_priority, task_lifecycle
-from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit.models import AuditCatalog
 from enji_guard_cli.audit.ports import (
     AuditArtifact,
     AuditFreshness,
@@ -194,25 +193,6 @@ def newer_run_for_report(
         run.started_at,
         cast(Literal["queued", "running"], state),
     )
-
-
-def artifact_for_definition(
-    repo_id: str,
-    audit: AuditDefinition,
-    *,
-    reader: Callable[[str, str], AuditArtifact],
-) -> AuditArtifact:
-    if audit.metric_group is None:
-        raise ValueError(f"{audit.action_key} is not a published audit")
-    return reader(repo_id, audit.action_key)
-
-
-def _unreadable_reason(item: AuditStatusItem) -> str:
-    return {
-        "queued": "queued",
-        "running": "running",
-        "failed": "failed",
-    }.get(item.task_lifecycle, "missing")
 
 
 def _nonblank(value: str | None) -> bool:

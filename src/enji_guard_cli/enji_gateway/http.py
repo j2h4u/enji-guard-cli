@@ -1002,12 +1002,6 @@ def _audit_auto_run_request(subscription: JsonObjectPayload) -> JsonObjectPayloa
     return {field: subscription.get(field) for field in AUDIT_AUTO_RUN_FIELDS}
 
 
-def _normalize_str_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str)]
-
-
 def _normalize_json_object(value: object) -> dict[str, JsonValue]:
     if not isinstance(value, dict):
         return {}

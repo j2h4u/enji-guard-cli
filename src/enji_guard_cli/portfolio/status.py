@@ -110,44 +110,6 @@ def _overview_latest_audit_at(item: RepositoryOverview) -> str:
     return max((run.completed_at or "" for run in item.active_runs), default="")
 
 
-def _sort_repositories(
-    repositories: tuple[RepositoryStatus, ...], sort: RepositorySortName
-) -> tuple[RepositoryStatus, ...]:
-    if sort == "default":
-        return repositories
-    if sort == "name":
-        return tuple(
-            sorted(
-                repositories,
-                key=lambda item: item.repository.identity.canonical_key,
-            )
-        )
-    if sort in {"weakest", "overall"}:
-
-        def score(item: RepositoryStatus) -> float:
-            values = [float(value) for value in item.repository.scores.values() if value is not None]
-            if not values:
-                return float("inf")
-            return min(values) if sort == "weakest" else sum(values) / len(values)
-
-        return tuple(
-            sorted(
-                repositories,
-                key=lambda item: (
-                    score(item),
-                    item.repository.identity.canonical_key,
-                ),
-            )
-        )
-    if sort == "latest-audit":
-        return tuple(sorted(repositories, key=_latest_audit_at, reverse=True))
-    raise ValueError(f"unknown repository sort: {sort}")
-
-
-def _latest_audit_at(item: RepositoryStatus) -> str:
-    return max((audit.completed_at or "" for audit in item.audit.summary.items), default="")
-
-
 def status_for_repo(
     repo: str,
     project: str | None = None,

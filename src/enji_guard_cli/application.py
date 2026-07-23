@@ -602,9 +602,6 @@ class Application:
     ) -> tuple[AuditDefinition, ...]:
         return choose_audits(catalog, selectors, all_audits=all_audits)
 
-    def _active_runs(self, repo_id: str):
-        return self._audit_start_service().active_runs(repo_id)
-
     def _audit_repository_observer(self) -> AuditRepositoryObserver:
         return AuditRepositoryObserver(self.audit_gateway, self.ledger, self.fanout)
 
