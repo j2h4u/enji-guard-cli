@@ -5,13 +5,15 @@ from pathlib import Path
 from enji_guard_cli.application import Application
 from enji_guard_cli.audit.catalog_observation import AuditCatalogObserver
 from enji_guard_cli.audit.ledger import FileAuditLedger
-from enji_guard_cli.auth_session.adapters import GatewayCredentialReader, RuntimeAuthCoordinator
+from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.enji_gateway import AuditGateway, GitLabGateway, PortfolioGateway
 from enji_guard_cli.enji_gateway.pooled_client import PooledEnjiHttpClient
 from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.mcp_facade import McpQueryFacade
 from enji_guard_cli.portfolio.selectors import GatewayPortfolioTargetService
+from enji_guard_cli.runtime_observability.auth_coordinator import RuntimeAuthCoordinatorAdapter
+from enji_guard_cli.runtime_observability.telemetry import log_event, persist_event
 from enji_guard_cli.settings import default_settings
 
 
@@ -24,7 +26,12 @@ def create_application(auth_file: Path | None = None) -> Application:
         lookup_grace_seconds=settings.active_run_ledger.lookup_grace_seconds,
     )
     credential_reader = GatewayCredentialReader(auth_file, settings=settings)
-    runtime_auth = RuntimeAuthCoordinator(auth_file, settings=settings)
+    runtime_auth = RuntimeAuthCoordinatorAdapter(
+        auth_file,
+        settings=settings,
+        event_sink=log_event,
+        outcome_sink=persist_event,
+    )
     auth_service = AuthSessionService(auth_file, settings=settings)
     fanout = BoundedFanout(settings.fanout)
     pooled_client = PooledEnjiHttpClient(settings)

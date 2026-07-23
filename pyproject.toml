@@ -256,12 +256,13 @@ allowed_importers = [
 
 [[tool.importlinter.contracts]]
 id = "auth-session-stays-credential-focused"
-name = "Auth Session does not depend on product contexts or delivery"
+name = "Auth Session does not depend on runtime, product, delivery, or gateway implementations"
 type = "forbidden"
 source_modules = ["enji_guard_cli.auth_session"]
 forbidden_modules = [
     "enji_guard_cli.audit",
     "enji_guard_cli.portfolio",
+    "enji_guard_cli.runtime_observability",
     "enji_guard_cli.application",
     "enji_guard_cli.delivery",
     "enji_guard_cli.enji_gateway.wire",
@@ -269,6 +270,7 @@ forbidden_modules = [
     "enji_guard_cli.enji_gateway.contract",
     "enji_guard_cli.enji_gateway.client",
 ]
+allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 id = "runtime-observability-stays-operational"

@@ -13,7 +13,6 @@ import pytest
 from typer.testing import CliRunner
 
 import enji_guard_cli.auth_session.auto_refresh as auto_refresh_module
-from enji_guard_cli.auth_session.adapters import RuntimeAuthCoordinator
 from enji_guard_cli.auth_session.api import (
     AuthStatusPayload,
     _refresh_cookie_auth,
@@ -43,6 +42,7 @@ from enji_guard_cli.auth_session.store import (
     write_journal,
 )
 from enji_guard_cli.delivery.cli.app import app
+from enji_guard_cli.runtime_observability.auth_coordinator import RuntimeAuthCoordinatorAdapter
 from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER, AutoRefreshSettings
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient
 
@@ -1151,7 +1151,7 @@ def test_start_auto_refresh_task_uses_explicit_auth_file_without_default_fallbac
     assert captured["auth_file"] != default_auth_file
 
 
-def test_runtime_auth_adapter_wires_telemetry_and_durable_outcome_sinks(
+def test_runtime_auth_adapter_wires_runtime_owned_telemetry_and_durable_outcome_sinks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     captured_dependencies: list[auto_refresh_module.AutoRefreshTaskDependencies] = []
@@ -1173,7 +1173,6 @@ def test_runtime_auth_adapter_wires_telemetry_and_durable_outcome_sinks(
 
     monkeypatch.setattr(auto_refresh_module, "start_auto_refresh_task", fake_start_auto_refresh_task)
 
-    monkeypatch.setattr("enji_guard_cli.auth_session.adapters.log_event", event_sink)
     outcome_events: list[tuple[str, dict[str, object]]] = []
 
     def outcome_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
@@ -1181,7 +1180,11 @@ def test_runtime_auth_adapter_wires_telemetry_and_durable_outcome_sinks(
         outcome_events.append((event, dict(fields)))
         return True
 
-    adapter = RuntimeAuthCoordinator(tmp_path / "custom-auth.json", outcome_sink=outcome_sink)
+    adapter = RuntimeAuthCoordinatorAdapter(
+        tmp_path / "custom-auth.json",
+        event_sink=event_sink,
+        outcome_sink=outcome_sink,
+    )
     assert adapter.start_background_refresh_task() is None
 
     dependencies = captured_dependencies[0].loop_dependencies
@@ -1197,7 +1200,11 @@ def test_runtime_auth_adapter_wires_telemetry_and_durable_outcome_sinks(
     ]
     assert all(fields == {"safe": True} for _event, fields in events)
 
-    isolated_adapter = RuntimeAuthCoordinator(tmp_path / "isolated-auth.json")
+    isolated_adapter = RuntimeAuthCoordinatorAdapter(
+        tmp_path / "isolated-auth.json",
+        event_sink=event_sink,
+        outcome_sink=outcome_sink,
+    )
     assert isolated_adapter.start_background_refresh_task() is None
     isolated_dependencies = captured_dependencies[1].loop_dependencies
     isolated_dependencies.log_event_fn(logging.getLogger("test"), logging.INFO, "leak-check", {})
