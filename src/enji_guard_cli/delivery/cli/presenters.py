@@ -71,7 +71,12 @@ def repository_status_text(payload: tuple[RepositoryStatus, ...]) -> str:
                 if item.active or item.task_lifecycle == "failed"
                 else ("ready" if item.can_read else "missing")
             )
-            lines.append(f"  {selector}  state={state} freshness={item.freshness.state}")
+            details = [f"state={state}", f"freshness={item.freshness.state}"]
+            if item.current_head.state != "ready":
+                details.append(f"current_head={item.current_head.state}")
+            if item.current_head.action_required != "none":
+                details.append(f"action={item.current_head.action_required}")
+            lines.append(f"  {selector}  {' '.join(details)}")
     return "\n".join(lines)
 
 

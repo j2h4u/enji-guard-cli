@@ -254,6 +254,14 @@ class AuditNewerRun:
 
 AuditFreshnessState = Literal["fresh", "stale", "unknown"]
 AuditTaskLifecycle = Literal["none", "queued", "running", "failed", "completed"]
+AuditCurrentHeadState = Literal["ready", "queued", "running", "missing", "blocked", "failed", "unknown"]
+AuditCurrentHeadAction = Literal[
+    "none",
+    "wait_for_current_head_run",
+    "start_current_head_run",
+    "inspect_failed_run",
+    "resolve_unknown_head",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,6 +278,19 @@ class AuditFreshness:
 
 
 @dataclass(frozen=True, slots=True)
+class AuditCurrentHeadStatus:
+    """Operational readiness of one audit for the repository's current head."""
+
+    state: AuditCurrentHeadState
+    action_required: AuditCurrentHeadAction
+    task_id: str | None = None
+    task_status: str | None = None
+    task_current_head_sha: str | None = None
+    stale_active_task_id: str | None = None
+    stale_active_current_head_sha: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AuditStatusItem:
     """Status of one published audit, independent of upstream wire fields."""
 
@@ -283,6 +304,9 @@ class AuditStatusItem:
     created_at: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
+    current_head: AuditCurrentHeadStatus = field(
+        default_factory=lambda: AuditCurrentHeadStatus("unknown", "resolve_unknown_head")
+    )
 
     @property
     def active(self) -> bool:
