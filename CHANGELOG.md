@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.2.9](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.8...v2.2.9) (2026-07-23)
+
+
+### Fixes
+
+* **cli:** show audit mental model without args ([8767c2c](https://github.com/j2h4u/enji-guard-cli/commit/8767c2cc08894716509b267ea7231fecd5d4fd3d))
+
+
+### Documentation
+
+* **agents:** clarify Enji audit status checks ([827b08c](https://github.com/j2h4u/enji-guard-cli/commit/827b08ca268386b0ffdb83aaec9716ca7ce9b9a3))
+
 ## [2.2.8](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.7...v2.2.8) (2026-07-23)
 
 
