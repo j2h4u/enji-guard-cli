@@ -13,6 +13,7 @@ import pytest
 from typer.testing import CliRunner
 
 import enji_guard_cli.auth_session.auto_refresh as auto_refresh_module
+import enji_guard_cli.transport as transport_module
 from enji_guard_cli.auth_session.api import (
     AuthStatusPayload,
     _refresh_cookie_auth,
@@ -45,6 +46,7 @@ from enji_guard_cli.delivery.cli.app import app
 from enji_guard_cli.runtime_observability.auth_coordinator import RuntimeAuthCoordinatorAdapter
 from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER, AutoRefreshSettings
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient
+from enji_guard_cli.transport_types import RetryProfile
 
 AUTH_REFRESH_ORIGIN = DEFAULT_GUARD_ORIGIN
 AUTH_REFRESH_REFERER = DEFAULT_GUARD_REFERER
@@ -1149,6 +1151,68 @@ def test_start_auto_refresh_task_uses_explicit_auth_file_without_default_fallbac
 
     assert captured["auth_file"] == custom_auth_file
     assert captured["auth_file"] != default_auth_file
+
+
+def test_auto_refresh_transport_factory_forwards_injected_redacted_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_dependencies: list[auto_refresh_module.AutoRefreshTaskDependencies] = []
+    events: list[tuple[str, dict[str, object]]] = []
+
+    def event_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> None:
+        _ = logger, level
+        events.append((event, dict(fields)))
+
+    def fake_start_auto_refresh_task(
+        *,
+        auth_file: Path,
+        refresh_settings: AutoRefreshSettings,
+        dependencies: auto_refresh_module.AutoRefreshTaskDependencies,
+    ) -> None:
+        _ = auth_file, refresh_settings
+        captured_dependencies.append(dependencies)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/transport-error":
+            raise httpx.ConnectError("secret-network-detail", request=request)
+        return httpx.Response(200, json={"ok": True}, request=request)
+
+    monkeypatch.setattr(auto_refresh_module, "start_auto_refresh_task", fake_start_auto_refresh_task)
+    monkeypatch.setattr(
+        transport_module,
+        "_new_async_client",
+        lambda _limits: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    assert start_auto_refresh_task(event_sink=event_sink) is None
+    client_factory = captured_dependencies[0].loop_dependencies.client_factory
+
+    async def exercise() -> None:
+        async with client_factory() as client:
+            await cast(HttpxEnjiHttpClient, client).request(
+                EnjiHttpRequest(
+                    method="POST",
+                    url="https://fleet.example.test/transport-response?token=secret-token",
+                    operation="auth refresh",
+                    headers={"Cookie": "refresh=secret-cookie"},
+                    profile=RetryProfile.AUTH_REFRESH,
+                )
+            )
+            with pytest.raises(EnjiHttpError):
+                await cast(HttpxEnjiHttpClient, client).request(
+                    EnjiHttpRequest(
+                        method="POST",
+                        url="https://fleet.example.test/transport-error?token=secret-token",
+                        operation="auth refresh",
+                        headers={"Cookie": "refresh=secret-cookie"},
+                        profile=RetryProfile.AUTH_REFRESH,
+                    )
+                )
+
+    asyncio.run(exercise())
+
+    assert [event for event, _fields in events] == ["enji_http_response", "enji_http_error"]
+    assert events[0][1]["path"] == "/transport-response"
+    assert events[1][1]["path"] == "/transport-error"
+    assert "secret" not in json.dumps(events)
 
 
 def test_runtime_auth_adapter_wires_runtime_owned_telemetry_and_durable_outcome_sinks(

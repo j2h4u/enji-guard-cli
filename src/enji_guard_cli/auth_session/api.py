@@ -233,7 +233,7 @@ def start_auto_refresh_task(
                 log_event_fn=resolved_event_sink,
                 logger=_LOGGER,
                 sleep_fn=asyncio.sleep,
-                client_factory=HttpxEnjiHttpClient,
+                client_factory=lambda: HttpxEnjiHttpClient(event_sink=resolved_event_sink),
                 credential_changes_fn=credential_changes,
             ),
         ),
