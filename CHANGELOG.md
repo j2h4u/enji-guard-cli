@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.11](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.10...v2.2.11) (2026-07-23)
+
+
+### Fixes
+
+* **audit:** expose current-head readiness ([#176](https://github.com/j2h4u/enji-guard-cli/issues/176)) ([ecda863](https://github.com/j2h4u/enji-guard-cli/commit/ecda8630dbeac0f7256367b686108a4cd5d39ed1))
+
 ## [2.2.10](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.9...v2.2.10) (2026-07-23)
 
 
