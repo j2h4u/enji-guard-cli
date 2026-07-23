@@ -15,33 +15,27 @@ from enji_guard_cli.settings import ReadinessSettings
 
 def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
     refresh_started = False
-    refresh_cancelled = False
     readiness_started = False
-    readiness_cancelled = False
     served_while_refresh_was_running = False
     refresh_tasks: list[asyncio.Task[None]] = []
     readiness_tasks: list[asyncio.Task[None]] = []
+    startup_reconciled = False
     sentinel_settings = runtime.default_settings()
 
     async def fake_refresh_loop() -> None:
-        nonlocal refresh_cancelled, refresh_started
+        nonlocal refresh_started
 
         refresh_started = True
-        try:
-            await asyncio.Future[None]()
-        finally:
-            refresh_cancelled = True
+        await asyncio.Future[None]()
 
     async def fake_readiness_loop() -> None:
-        nonlocal readiness_cancelled, readiness_started
+        nonlocal readiness_started
 
         readiness_started = True
-        try:
-            await asyncio.Future[None]()
-        finally:
-            readiness_cancelled = True
+        await asyncio.Future[None]()
 
     def fake_start_auto_refresh_task() -> asyncio.Task[None]:
+        assert startup_reconciled is True
         refresh_task = asyncio.create_task(fake_refresh_loop())
         refresh_tasks.append(refresh_task)
         return refresh_task
@@ -49,6 +43,7 @@ def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypat
     def fake_start_backend_readiness_task(*, observer: object, settings: object) -> asyncio.Task[None]:
         assert observer is auth
         assert settings is sentinel_settings
+        assert startup_reconciled is True
         readiness_task = asyncio.create_task(fake_readiness_loop())
         readiness_tasks.append(readiness_task)
         return readiness_task
@@ -62,22 +57,23 @@ def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypat
         nonlocal served_while_refresh_was_running
 
         assert server == "server"
+        assert startup_reconciled is True
         assert transport == "streamable-http"
         assert mount_path is None
         await asyncio.sleep(0)
         served_while_refresh_was_running = (
-            refresh_started
-            and readiness_started
-            and len(refresh_tasks) == 1
-            and len(readiness_tasks) == 1
-            and not refresh_tasks[0].done()
-            and not readiness_tasks[0].done()
+            refresh_started and readiness_started and not refresh_tasks[0].done() and not readiness_tasks[0].done()
         )
 
     monkeypatch.setattr(runtime, "start_backend_readiness_task", fake_start_backend_readiness_task)
 
     class FakeRuntimeAuth:
-        def start_auto_refresh_task(self) -> asyncio.Task[None]:
+        async def reconcile_startup(self) -> None:
+            nonlocal startup_reconciled
+            await asyncio.sleep(0)
+            startup_reconciled = True
+
+        def start_background_refresh_task(self) -> asyncio.Task[None]:
             return fake_start_auto_refresh_task()
 
         async def observe_backend_readiness(self) -> BackendReadinessObservation:
@@ -100,10 +96,6 @@ def test_run_service_async_supervises_mcp_and_refresh_as_sibling_tasks(monkeypat
     )
 
     assert served_while_refresh_was_running is True
-    assert refresh_cancelled is True
-    assert readiness_cancelled is True
-    assert len(refresh_tasks) == 1
-    assert len(readiness_tasks) == 1
     assert refresh_tasks[0].cancelled()
     assert readiness_tasks[0].cancelled()
 
@@ -229,6 +221,109 @@ def test_backend_readiness_loop_reprobes_immediately_after_credential_change(
         )
 
     assert probes == 2
+
+
+@pytest.mark.parametrize("fails_after_change", [False, True])
+def test_backend_readiness_watcher_failure_keeps_periodic_heartbeat_and_siblings_alive(
+    tmp_path: Path, fails_after_change: bool
+) -> None:
+    probes = 0
+    third_probe = asyncio.Event()
+    siblings_cancelled: set[str] = set()
+
+    class Observer:
+        async def observe_backend_readiness(self) -> BackendReadinessObservation:
+            nonlocal probes
+
+            probes += 1
+            if probes == 3:
+                third_probe.set()
+            return BackendReadinessObservation(ready=True)
+
+        async def credential_changes(self):
+            if fails_after_change:
+                yield None
+            raise RuntimeError("watcher failed")
+
+    async def sibling(name: str) -> None:
+        try:
+            await asyncio.Future[None]()
+        finally:
+            siblings_cancelled.add(name)
+
+    settings = ReadinessSettings(
+        enabled=True,
+        state_file=tmp_path / "readiness.json",
+        heartbeat_interval_seconds=0,
+        heartbeat_timeout_seconds=2.0,
+        failure_threshold=3,
+        state_stale_after_seconds=60,
+    )
+
+    async def scenario() -> None:
+        initial_state = backend_readiness_starting_state(checked_at=runtime.datetime.now(runtime.UTC))
+        readiness_task = asyncio.create_task(
+            runtime._backend_readiness_loop(settings=settings, initial_state=initial_state, observer=Observer())
+        )
+        mcp_task = asyncio.create_task(sibling("mcp"))
+        refresh_task = asyncio.create_task(sibling("refresh"))
+
+        await asyncio.wait_for(third_probe.wait(), timeout=1)
+        assert readiness_task.done() is False
+        assert mcp_task.done() is False
+        assert refresh_task.done() is False
+
+        readiness_task.cancel()
+        mcp_task.cancel()
+        refresh_task.cancel()
+        for task in (readiness_task, mcp_task, refresh_task):
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    asyncio.run(scenario())
+
+    assert probes >= 3
+    assert siblings_cancelled == {"mcp", "refresh"}
+
+
+def test_backend_readiness_loop_cancellation_closes_pending_credential_watcher(tmp_path: Path) -> None:
+    watcher_closed = asyncio.Event()
+    first_probe = asyncio.Event()
+
+    class Observer:
+        async def observe_backend_readiness(self) -> BackendReadinessObservation:
+            first_probe.set()
+            return BackendReadinessObservation(ready=True)
+
+        async def credential_changes(self):
+            try:
+                while True:
+                    await asyncio.Future[None]()
+                    yield None
+            finally:
+                watcher_closed.set()
+
+    settings = ReadinessSettings(
+        enabled=True,
+        state_file=tmp_path / "readiness.json",
+        heartbeat_interval_seconds=30,
+        heartbeat_timeout_seconds=2.0,
+        failure_threshold=3,
+        state_stale_after_seconds=60,
+    )
+
+    async def scenario() -> None:
+        initial_state = backend_readiness_starting_state(checked_at=runtime.datetime.now(runtime.UTC))
+        task = asyncio.create_task(
+            runtime._backend_readiness_loop(settings=settings, initial_state=initial_state, observer=Observer())
+        )
+        await asyncio.wait_for(first_probe.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.wait_for(watcher_closed.wait(), timeout=1)
+
+    asyncio.run(scenario())
 
 
 def test_start_backend_readiness_task_writes_starting_state(

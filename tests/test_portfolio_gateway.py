@@ -4,7 +4,7 @@ import pytest
 
 from enji_guard_cli.application import Application
 from enji_guard_cli.audit.ports import AuditGatewayPort
-from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
+from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.enji_gateway import PortfolioGateway
 from enji_guard_cli.enji_gateway.ports import GatewayClient
@@ -43,7 +43,7 @@ def test_project_detail_composes_live_collections_into_audit_project(
     import enji_guard_cli.enji_gateway.portfolio_gateway as module
 
     monkeypatch.setattr(module, "_project_detail", lambda *_args, **_kwargs: payload)
-    gateway = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=AuthSessionAdapter())
+    gateway = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=GatewayCredentialReader())
     application = Application(
         audit_gateway=cast(AuditGatewayPort, _AuditGateway()),
         portfolio_gateway=gateway,
@@ -80,7 +80,7 @@ def test_project_detail_normalizes_github_wire_identity_fields(
     import enji_guard_cli.enji_gateway.portfolio_gateway as module
 
     monkeypatch.setattr(module, "_project_detail", lambda *_args, **_kwargs: payload)
-    gateway = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=AuthSessionAdapter())
+    gateway = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=GatewayCredentialReader())
 
     project = gateway.project_detail("project-1")
     repository = project.repositories[0]
@@ -108,9 +108,9 @@ def test_project_active_runs_are_project_owned_neutral_models(monkeypatch: pytes
 
     monkeypatch.setattr(module, "_project_active_runs", lambda *_args, **_kwargs: payload)
 
-    runs = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=AuthSessionAdapter()).project_active_runs(
-        "project-1"
-    )
+    runs = PortfolioGateway(
+        client=cast(GatewayClient, object()), auth_port=GatewayCredentialReader()
+    ).project_active_runs("project-1")
 
     assert runs[0].repo_id == "repo-1"
     assert runs[0].task_id == "task-1"
@@ -150,7 +150,7 @@ def test_add_repository_passes_neutral_identity_and_gitlab_credential(
 
     monkeypatch.setattr(module, "_add_project_repo", fake_add)
     identity = RepositoryIdentity(provider, locator, host)
-    repo = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=AuthSessionAdapter()).add_repository(
+    repo = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=GatewayCredentialReader()).add_repository(
         "project-1", identity, credential
     )
 
@@ -161,7 +161,7 @@ def test_add_repository_passes_neutral_identity_and_gitlab_credential(
 
 
 def test_add_repository_rejects_invalid_credential_combinations() -> None:
-    gateway = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=AuthSessionAdapter())
+    gateway = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=GatewayCredentialReader())
     with pytest.raises(ValueError, match="only valid for GitLab"):
         gateway.add_repository(
             "project-1", RepositoryIdentity(RepositoryProvider.GITHUB, "acme/cat", "github.com"), "cred"
@@ -180,6 +180,6 @@ def test_repository_mutation_response_requires_complete_neutral_identity(monkeyp
         "_add_project_repo",
         lambda *args, **kwargs: {"id": "repo-1", "projectId": "project-1", "provider": "github"},
     )
-    gateway = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=AuthSessionAdapter())
+    gateway = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=GatewayCredentialReader())
     with pytest.raises(PortfolioMalformedError, match="neutral provider identity"):
         gateway.add_repository("project-1", RepositoryIdentity(RepositoryProvider.GITHUB, "acme/cat", "github.com"))

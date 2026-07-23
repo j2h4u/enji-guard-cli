@@ -4,7 +4,7 @@ from typing import cast
 
 import pytest
 
-from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
+from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
 from enji_guard_cli.auth_session.api import import_bearer_token
 from enji_guard_cli.delivery.cli.app import _emit, _json
 from enji_guard_cli.enji_gateway import GitLabGateway
@@ -16,7 +16,7 @@ from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvid
 from enji_guard_cli.portfolio.selectors import parse_repository_selector
 from enji_guard_cli.transport import EnjiHttpClient, EnjiHttpRequest, EnjiHttpResponse
 
-AUTH_PORT = AuthSessionAdapter()
+AUTH_PORT = GatewayCredentialReader()
 
 
 def _credential(*, credential_id: str = "cred-1", metadata: JsonObjectPayload | None = None) -> JsonObjectPayload:

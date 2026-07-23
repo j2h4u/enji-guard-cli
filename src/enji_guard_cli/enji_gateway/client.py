@@ -1,13 +1,13 @@
 import asyncio
 from collections.abc import Callable, Collection, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 from urllib.parse import quote, urlencode
 
 from enji_guard_cli.auth_session.models import StoredAuth
 from enji_guard_cli.enji_gateway.contract import EnjiEndpointSpec, HttpMethod
-from enji_guard_cli.enji_gateway.ports import GatewayAuthPort
+from enji_guard_cli.enji_gateway.ports import GatewayCredentialError, GatewayCredentialReader
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.settings import default_settings
@@ -19,18 +19,15 @@ from enji_guard_cli.transport import (
     EnjiJsonValue,
     EnjiMalformedResponseError,
     HttpxEnjiHttpClient,
+    discard_transport_event,
     raise_for_response_status,
 )
 from enji_guard_cli.transport_types import RetryProfile
 
 HTTP_OK = 200
 HTTP_UNAUTHORIZED = 401
-HTTP_FORBIDDEN = 403
 HTTP_OK_ONLY = frozenset({HTTP_OK})
-AUTH_REQUIRED_CODE = "AUTH_REQUIRED"
 AUTH_INVALID_CODE = "AUTH_INVALID"
-AUTH_REFRESH_PATH = "/api/v1/auth/refresh"
-REFRESHABLE_FORBIDDEN_CODES = frozenset({AUTH_INVALID_CODE, AUTH_REQUIRED_CODE})
 
 type JsonObjectParser[T] = Callable[[dict[str, object]], T]
 type ApiPathParams = Mapping[str, str]
@@ -43,14 +40,7 @@ class EnjiApiSession:
     base_url: str
     headers: dict[str, str]
     stored_auth: StoredAuth
-    auth_port: GatewayAuthPort
-    refresh_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    refresh_epoch: int = 0
-
-    def update_stored_auth(self, stored_auth: StoredAuth) -> None:
-        self.stored_auth = stored_auth
-        self.headers = api_headers(stored_auth, self.auth_port)
-        self.refresh_epoch += 1
+    auth_port: GatewayCredentialReader
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,15 +85,14 @@ class ApiEndpoint[T]:
 def load_api_session(
     auth_file: Path | None = None,
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> EnjiApiSession:
     port = auth_port
     target = auth_file if auth_file is not None else default_settings().auth.auth_file
-    stored_auth = port.load(target)
-    if not target.exists():
-        raise EnjiApiError("AUTH_REQUIRED", "auth file does not exist")
-    if stored_auth is None:
-        raise EnjiApiError("AUTH_REQUIRED", "auth file is invalid")
+    try:
+        stored_auth = port.load(target)
+    except GatewayCredentialError as exc:
+        raise EnjiApiError(exc.code, exc.message) from exc
 
     return EnjiApiSession(
         auth_file=target,
@@ -114,7 +103,7 @@ def load_api_session(
     )
 
 
-def api_headers(stored_auth: StoredAuth, auth_port: GatewayAuthPort) -> dict[str, str]:
+def api_headers(stored_auth: StoredAuth, auth_port: GatewayCredentialReader) -> dict[str, str]:
     return {**auth_port.headers(stored_auth), "Origin": default_settings().auth.guard_origin}
 
 
@@ -123,7 +112,7 @@ def run_api_request[T](
     client: EnjiHttpClient | None,
     spec: ApiRequestSpec[T],
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> T:
     return asyncio.run(run_api_request_async(auth_file, client, spec, auth_port=auth_port))
 
@@ -133,14 +122,14 @@ async def run_api_request_async[T](
     client: EnjiHttpClient | None,
     spec: ApiRequestSpec[T],
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> T:
     try:
         session = load_api_session(auth_file, auth_port=auth_port)
         if client is not None:
             return await request_parsed_json_object(session, client, spec)
 
-        async with HttpxEnjiHttpClient() as owned_client:
+        async with HttpxEnjiHttpClient(event_sink=discard_transport_event) as owned_client:
             return await request_parsed_json_object(session, owned_client, spec)
     except EnjiHttpError as exc:
         raise EnjiApiError(
@@ -156,7 +145,7 @@ def run_api_no_content(
     client: EnjiHttpClient | None,
     spec: ApiRequestSpec[JsonObjectPayload],
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     return asyncio.run(run_api_no_content_async(auth_file, client, spec, auth_port=auth_port))
 
@@ -166,14 +155,14 @@ async def run_api_no_content_async(
     client: EnjiHttpClient | None,
     spec: ApiRequestSpec[JsonObjectPayload],
     *,
-    auth_port: GatewayAuthPort,
+    auth_port: GatewayCredentialReader,
 ) -> JsonObjectPayload:
     try:
         session = load_api_session(auth_file, auth_port=auth_port)
         if client is not None:
             return await request_no_content(session, client, spec)
 
-        async with HttpxEnjiHttpClient() as owned_client:
+        async with HttpxEnjiHttpClient(event_sink=discard_transport_event) as owned_client:
             return await request_no_content(session, owned_client, spec)
     except EnjiHttpError as exc:
         raise EnjiApiError(
@@ -197,9 +186,7 @@ async def request_no_content(
     client: EnjiHttpClient,
     spec: ApiRequestSpec[JsonObjectPayload],
 ) -> JsonObjectPayload:
-    response = await request_with_refresh(
-        session,
-        client,
+    response = await client.request(
         EnjiHttpRequest(
             method=spec.method,
             url=f"{session.base_url}{spec.path}",
@@ -207,7 +194,7 @@ async def request_no_content(
             headers=dict(session.headers),
             profile=spec.retry_profile,
             json_body=spec.json_body,
-        ),
+        )
     )
     raise_for_api_response_status(response, operation=spec.operation, expected_statuses=spec.expected_statuses)
     if not response.content:
@@ -243,9 +230,7 @@ async def request_json_object[T](
     client: EnjiHttpClient,
     spec: ApiRequestSpec[T],
 ) -> dict[str, object]:
-    response = await request_with_refresh(
-        session,
-        client,
+    response = await client.request(
         EnjiHttpRequest(
             method=spec.method,
             url=f"{session.base_url}{spec.path}",
@@ -253,74 +238,13 @@ async def request_json_object[T](
             headers=dict(session.headers),
             profile=spec.retry_profile,
             json_body=spec.json_body,
-        ),
+        )
     )
     raise_for_api_response_status(response, operation=spec.operation, expected_statuses=spec.expected_statuses)
     payload = response.json(operation=spec.operation)
     if not isinstance(payload, dict):
         raise EnjiMalformedResponseError(spec.operation, "unexpected JSON")
     return cast(dict[str, object], payload)
-
-
-async def request_with_refresh(
-    session: EnjiApiSession,
-    client: EnjiHttpClient,
-    request: EnjiHttpRequest,
-) -> EnjiHttpResponse:
-    refresh_epoch = session.refresh_epoch
-    response = await client.request(request)
-    if not should_refresh(session, request, response):
-        return response
-
-    await refresh_session_once(session, client, refresh_epoch)
-    if not request.profile.replay_safe:
-        return response
-    retry_response = await client.request(request_with_current_headers(request, session))
-    if is_auth_invalid_response(retry_response):
-        raise EnjiHttpError(AUTH_INVALID_CODE, "invalid access token after refresh", status_code=HTTP_UNAUTHORIZED)
-    return retry_response
-
-
-def should_refresh(session: EnjiApiSession, request: EnjiHttpRequest, response: EnjiHttpResponse) -> bool:
-    if not is_cookie_session(session):
-        return False
-    if request.url == f"{session.base_url}{AUTH_REFRESH_PATH}":
-        return False
-    return response.status_code == HTTP_UNAUTHORIZED or is_refreshable_forbidden_response(response)
-
-
-def is_refreshable_forbidden_response(response: EnjiHttpResponse) -> bool:
-    if response.status_code != HTTP_FORBIDDEN:
-        return False
-    api_error = api_error_from_response(response)
-    return api_error is not None and api_error.code in REFRESHABLE_FORBIDDEN_CODES
-
-
-async def refresh_session_once(
-    session: EnjiApiSession,
-    client: EnjiHttpClient,
-    observed_refresh_epoch: int,
-) -> None:
-    async with session.refresh_lock:
-        if session.refresh_epoch != observed_refresh_epoch:
-            return
-        await refresh_session(session, client)
-
-
-async def refresh_session(session: EnjiApiSession, client: EnjiHttpClient) -> None:
-    session.update_stored_auth(await session.auth_port.refresh(session.auth_file, session.stored_auth, client))
-
-
-def request_with_current_headers(request: EnjiHttpRequest, session: EnjiApiSession) -> EnjiHttpRequest:
-    return EnjiHttpRequest(
-        method=request.method,
-        url=request.url,
-        operation=request.operation,
-        headers=dict(session.headers),
-        profile=request.profile,
-        json_body=request.json_body,
-        timeout_seconds=request.timeout_seconds,
-    )
 
 
 def raise_for_api_response_status(
@@ -354,10 +278,6 @@ def api_error_from_response(response: EnjiHttpResponse) -> EnjiHttpError | None:
         return None
     message = optional_str(error_payload.get("message")) or code
     return EnjiHttpError(code, message, status_code=response.status_code)
-
-
-def is_cookie_session(session: EnjiApiSession) -> bool:
-    return session.auth_port.is_cookie_session(session.stored_auth)
 
 
 def is_auth_invalid_response(response: EnjiHttpResponse) -> bool:

@@ -5,13 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
+from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
 from enji_guard_cli.auth_session.api import (
-    AUTH_REFRESH_USER_AGENT,
     import_bearer_token,
     import_cookie,
-    load_stored_auth,
 )
+from enji_guard_cli.auth_session.store import AuthLoaded, load_auth
 from enji_guard_cli.enji_gateway.client import get_json_object
 from enji_guard_cli.enji_gateway.http import (
     AuditRunCreate,
@@ -50,7 +49,15 @@ from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpRes
 
 AUTH_REFRESH_ORIGIN = DEFAULT_GUARD_ORIGIN
 AUTH_REFRESH_REFERER = DEFAULT_GUARD_REFERER
-AUTH_PORT = AuthSessionAdapter()
+AUTH_PORT = GatewayCredentialReader()
+
+
+def load_stored_auth(path: Path):
+    """Test-only convenience: production has no nullable auth reader."""
+
+    loaded = load_auth(path)
+    assert isinstance(loaded, AuthLoaded)
+    return loaded.auth
 
 
 @dataclass
@@ -505,213 +512,55 @@ def test_cookie_permission_forbidden_does_not_refresh(tmp_path: Path) -> None:
     ]
 
 
-def test_cookie_auth_invalid_forbidden_refreshes(tmp_path: Path) -> None:
+def test_cookie_auth_invalid_forbidden_is_not_refreshed_or_replayed(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=long", auth_file)
     client = FakeEnjiHttpClient(
         [
             json_response({"error": {"code": "AUTH_INVALID"}}, status_code=403),
-            json_response(
-                {"message": "token refreshed"},
-                set_cookie_headers=(
-                    "access_token=new; Path=/; HttpOnly",
-                    "refresh_token=new-refresh; Path=/api/v1/auth; HttpOnly",
-                ),
-            ),
-            json_response({"activeRuns": []}),
         ]
     )
 
-    payload = repo_active_runs("repo_1", auth_file, client, auth_port=AUTH_PORT)
-
-    assert payload == {"activeRuns": []}
+    with pytest.raises(EnjiApiError) as exc_info:
+        repo_active_runs("repo_1", auth_file, client, auth_port=AUTH_PORT)
+    assert exc_info.value.code == "AUTH_INVALID"
     assert [(request.method, request.url) for request in client.requests] == [
         ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/active-runs"),
-        ("POST", "https://fleet.enji.ai/api/v1/auth/refresh"),
-        ("GET", "https://fleet.enji.ai/api/ux/repos/repo_1/active-runs"),
     ]
-    assert client.requests[2].headers == {
-        "Cookie": "access_token=new; refresh_token=new-refresh",
-        "Origin": AUTH_REFRESH_ORIGIN,
-    }
 
 
-def test_access_refreshes_cookie_on_auth_invalid_and_retries_once(tmp_path: Path) -> None:
+def test_gateway_cookie_auth_invalid_is_not_refreshed_or_replayed(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=long", auth_file)
-    client = FakeEnjiHttpClient(
-        [
-            json_response({"error": {"code": "AUTH_INVALID", "message": "invalid access token"}}, status_code=401),
-            json_response(
-                {"message": "token refreshed"},
-                set_cookie_headers=(
-                    "access_token=new; Path=/; HttpOnly",
-                    "refresh_token=new-refresh; Path=/api/v1/auth; HttpOnly",
-                ),
-            ),
-            json_response({"access": {"group": "pro", "fullAccess": True, "limits": {"canUseSchedules": True}}}),
-        ]
-    )
-
-    payload = access(auth_file, client, auth_port=AUTH_PORT)
-
-    assert payload["group"] == "pro"
-    assert payload["limits"]["can_use_schedules"] is True
-    assert [(request.method, request.url) for request in client.requests] == [
-        ("GET", "https://fleet.enji.ai/api/ux/me/access"),
-        ("POST", "https://fleet.enji.ai/api/v1/auth/refresh"),
-        ("GET", "https://fleet.enji.ai/api/ux/me/access"),
-    ]
-    assert client.requests[0].headers == {
-        "Cookie": "access_token=old; refresh_token=long",
-        "Origin": AUTH_REFRESH_ORIGIN,
-    }
-    assert client.requests[1].headers == {
-        "Cookie": "access_token=old; refresh_token=long",
-        "Origin": AUTH_REFRESH_ORIGIN,
-        "Referer": AUTH_REFRESH_REFERER,
-        "User-Agent": AUTH_REFRESH_USER_AGENT,
-    }
-    assert client.requests[2].headers == {
-        "Cookie": "access_token=new; refresh_token=new-refresh",
-        "Origin": AUTH_REFRESH_ORIGIN,
-    }
-    stored_auth = load_stored_auth(auth_file)
-    assert stored_auth is not None
-    assert stored_auth["credential"] == {
-        "type": "cookie",
-        "cookie_header": "access_token=new; refresh_token=new-refresh",
-    }
-
-
-def test_access_refreshes_cookie_on_plain_unauthorized_and_retries_once(tmp_path: Path) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_cookie("access_token=old; refresh_token=long", auth_file)
-    client = FakeEnjiHttpClient(
-        [
-            json_response({"message": "unauthorized"}, status_code=401),
-            json_response(
-                {"message": "token refreshed"},
-                set_cookie_headers=(
-                    "access_token=new; Path=/; HttpOnly",
-                    "refresh_token=new-refresh; Path=/api/v1/auth; HttpOnly",
-                ),
-            ),
-            json_response({"access": {"group": "pro", "fullAccess": True, "limits": {"canUseSchedules": True}}}),
-        ]
-    )
-
-    payload = access(auth_file, client, auth_port=AUTH_PORT)
-
-    assert payload["group"] == "pro"
-    assert [(request.method, request.url) for request in client.requests] == [
-        ("GET", "https://fleet.enji.ai/api/ux/me/access"),
-        ("POST", "https://fleet.enji.ai/api/v1/auth/refresh"),
-        ("GET", "https://fleet.enji.ai/api/ux/me/access"),
-    ]
-    assert client.requests[2].headers == {
-        "Cookie": "access_token=new; refresh_token=new-refresh",
-        "Origin": AUTH_REFRESH_ORIGIN,
-    }
-
-
-def test_access_surfaces_auth_required_when_refresh_cookie_is_invalid(tmp_path: Path) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_cookie("access_token=old; refresh_token=expired", auth_file)
-    client = FakeEnjiHttpClient(
-        [
-            json_response({"error": {"code": "AUTH_INVALID"}}, status_code=401),
-            json_response({"error": {"code": "AUTH_REQUIRED"}}, status_code=401),
-        ]
-    )
-
-    try:
-        access(auth_file, client, auth_port=AUTH_PORT)
-    except EnjiApiError as exc:
-        assert exc.code == "AUTH_REQUIRED"
-        assert exc.message == "stored refresh cookie is not authenticated"
-    else:
-        raise AssertionError("expected EnjiApiError")
-
-    assert [(request.method, request.url) for request in client.requests] == [
-        ("GET", "https://fleet.enji.ai/api/ux/me/access"),
-        ("POST", "https://fleet.enji.ai/api/v1/auth/refresh"),
-    ]
-
-
-def test_bearer_token_auth_invalid_does_not_use_cookie_refresh(tmp_path: Path) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_bearer_token("token-123", auth_file)
     client = FakeEnjiHttpClient([json_response({"error": {"code": "AUTH_INVALID"}}, status_code=401)])
 
-    try:
+    with pytest.raises(EnjiApiError, match="invalid access token"):
         access(auth_file, client, auth_port=AUTH_PORT)
-    except EnjiApiError as exc:
-        assert exc.code == "AUTH_INVALID"
-        assert exc.message == "invalid access token"
-    else:
-        raise AssertionError("expected EnjiApiError")
 
     assert [(request.method, request.url) for request in client.requests] == [
         ("GET", "https://fleet.enji.ai/api/ux/me/access")
     ]
+    stored_auth = load_stored_auth(auth_file)
+    assert stored_auth is not None
+    assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=long"}
 
 
-def test_access_retries_only_once_after_cookie_refresh(tmp_path: Path) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_cookie("access_token=old; refresh_token=long", auth_file)
-    client = FakeEnjiHttpClient(
-        [
-            json_response({"error": {"code": "AUTH_INVALID"}}, status_code=401),
-            json_response(
-                {"message": "token refreshed"},
-                set_cookie_headers=(
-                    "access_token=new; Path=/",
-                    "refresh_token=new-refresh; Path=/api/v1/auth",
-                ),
-            ),
-            json_response({"error": {"code": "AUTH_INVALID"}}, status_code=401),
-        ]
-    )
-
-    try:
-        access(auth_file, client, auth_port=AUTH_PORT)
-    except EnjiApiError as exc:
-        assert exc.code == "AUTH_INVALID"
-        assert exc.message == "invalid access token after refresh"
-    else:
-        raise AssertionError("expected EnjiApiError")
-
-    assert [(request.method, request.url) for request in client.requests] == [
-        ("GET", "https://fleet.enji.ai/api/ux/me/access"),
-        ("POST", "https://fleet.enji.ai/api/v1/auth/refresh"),
-        ("GET", "https://fleet.enji.ai/api/ux/me/access"),
-    ]
-
-
-def test_concurrent_auth_invalid_responses_dedupe_cookie_refresh(tmp_path: Path) -> None:
+def test_gateway_concurrent_auth_invalid_requests_issue_no_refresh_posts(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=long", auth_file)
     session = load_api_session(auth_file, auth_port=AUTH_PORT)
     client = ConcurrentRefreshFakeClient()
 
-    async def run() -> tuple[dict[str, object], dict[str, object]]:
-        return await asyncio.gather(
+    async def run() -> None:
+        results = await asyncio.gather(
             get_json_object(session, client, path="/api/ux/me/access", operation="access"),
             get_json_object(session, client, path="/api/ux/me/access", operation="access"),
+            return_exceptions=True,
         )
+        assert all(isinstance(result, EnjiHttpError) for result in results)
 
-    payloads = asyncio.run(run())
-
-    assert payloads == [
-        {"access": {"group": "pro", "fullAccess": True, "limits": {}}},
-        {"access": {"group": "pro", "fullAccess": True, "limits": {}}},
-    ]
-    assert [request.method for request in client.requests].count("POST") == 1
-    assert client.requests[-1].headers == {
-        "Cookie": "access_token=new; refresh_token=new-refresh",
-        "Origin": AUTH_REFRESH_ORIGIN,
-    }
+    asyncio.run(run())
+    assert [request.method for request in client.requests] == ["GET", "GET"]
 
 
 def json_response(

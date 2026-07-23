@@ -1,53 +1,34 @@
 import asyncio
-import contextlib
-import fcntl
 import logging
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import NotRequired, TypedDict, TypeGuard, cast
+from typing import NotRequired, TypedDict, cast
 
 from enji_guard_cli.auth_session import auto_refresh as auto_refresh_impl
 from enji_guard_cli.auth_session.cookies import (
-    CookieHeader as CookieHeader,
-)
-from enji_guard_cli.auth_session.cookies import (
     cookie_value,
     jwt_expires_at,
-    merge_set_cookie_headers,
     normalize_cookie_header,
-    set_cookie_names,
-    should_persist_transient_refresh_cookies,
 )
+from enji_guard_cli.auth_session.coordinator import CoordinatorDependencies, RefreshCoordinator, import_credential
 from enji_guard_cli.auth_session.credential_changes import credential_changes
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
 from enji_guard_cli.auth_session.payloads import (
-    AuthRefreshPayload,
     AuthStatusPayload,
     _authenticated_payload,
     _profile_from_response,
     _unauthenticated_payload,
 )
-from enji_guard_cli.auth_session.payloads import (
-    _auth_refresh_payload as _pure_auth_refresh_payload,
-)
-from enji_guard_cli.auth_session.ports import AuthEventSink
+from enji_guard_cli.auth_session.ports import AuthEventSink, AuthOutcomeSink
+from enji_guard_cli.auth_session.projection import AuthProjectionError, network_credential, project_auth
 from enji_guard_cli.auth_session.store import (
     CredentialType,
-    PendingRefreshRotation,
     StoredAuth,
-    consume_pending_rotation,
-    load_auth_file,
-    load_pending_rotation,
-    mark_pending_rotation_rotated,
-    record_pending_rotation_error,
-    reserve_pending_rotation,
+    load_auth,
+    load_journal,
     stored_auth,
-    write_auth_file,
-)
-from enji_guard_cli.auth_session.store import (
-    replace_cookie_credential as store_replace_cookie_credential,
 )
 from enji_guard_cli.settings import DEFAULT_BASE_URL, AutoRefreshSettings, EnjiGuardSettings, default_settings
 from enji_guard_cli.transport import (
@@ -56,6 +37,7 @@ from enji_guard_cli.transport import (
     EnjiHttpRequest,
     EnjiHttpResponse,
     HttpxEnjiHttpClient,
+    discard_transport_event,
     raise_for_response_status,
 )
 from enji_guard_cli.transport_types import RetryProfile
@@ -69,9 +51,7 @@ HTTP_OK = 200
 HTTP_UNAUTHORIZED = 401
 HTTP_FORBIDDEN = 403
 HTTP_AUTH_FAILURE_CODES = frozenset({401, 403})
-HTTP_TRANSIENT_REFRESH_ERROR_CODES = frozenset({429, 500, 502, 503, 504})
 _LOGGER = logging.getLogger(__name__)
-_COOKIE_REFRESH_LOCK = asyncio.Lock()
 
 
 def _noop_event_sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> None:
@@ -116,11 +96,7 @@ def import_cookie(
 ) -> ImportCredentialPayload:
     cookie_header = normalize_cookie_header(raw_cookie)
     target = auth_file if auth_file is not None else default_auth_file()
-    with _cookie_refresh_file_lock(target):
-        write_auth_file(
-            target,
-            stored_auth(base_url, {"type": "cookie", "cookie_header": cookie_header.value}),
-        )
+    import_credential(target, stored_auth(base_url, {"type": "cookie", "cookie_header": cookie_header.value}))
     return {
         "ok": True,
         "auth_file": str(target),
@@ -135,11 +111,9 @@ def import_bearer_token(
     base_url: str = DEFAULT_BASE_URL,
 ) -> ImportCredentialPayload:
     target = auth_file if auth_file is not None else default_auth_file()
-    with _cookie_refresh_file_lock(target):
-        write_auth_file(
-            target,
-            stored_auth(base_url, {"type": "bearer_token", "token": normalize_bearer_token(raw_token)}),
-        )
+    import_credential(
+        target, stored_auth(base_url, {"type": "bearer_token", "token": normalize_bearer_token(raw_token)})
+    )
     return {
         "ok": True,
         "auth_file": str(target),
@@ -152,10 +126,6 @@ def auth_headers(stored_auth: StoredAuth) -> dict[str, str]:
     if credential["type"] == CredentialType.COOKIE.value:
         return {"Cookie": credential["cookie_header"]}
     return {"Authorization": f"Bearer {credential['token']}"}
-
-
-def load_stored_auth(path: Path) -> StoredAuth | None:
-    return load_auth_file(path)
 
 
 def cookie_access_expires_at(stored_auth: StoredAuth) -> datetime | None:
@@ -182,57 +152,28 @@ def cookie_refresh_sleep_seconds(
     return max(refresh_at_delta, 0)
 
 
-def replace_cookie_credential(path: Path, stored_auth: StoredAuth, cookie_header: str) -> StoredAuth:
-    return store_replace_cookie_credential(path, stored_auth, cookie_header)
-
-
 def auth_status(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
-    *,
-    event_sink: AuthEventSink | None = None,
 ) -> AuthStatusPayload:
-    return asyncio.run(auth_status_async(auth_file, client, event_sink=event_sink))
+    return asyncio.run(auth_status_async(auth_file, client))
 
 
 async def auth_status_async(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
-    *,
-    event_sink: AuthEventSink | None = None,
 ) -> AuthStatusPayload:
     target = auth_file if auth_file is not None else default_auth_file()
-    if not target.exists():
-        return _unauthenticated_payload(target, None, "AUTH_REQUIRED", "auth file does not exist")
-
-    stored_auth = load_auth_file(target)
-    if stored_auth is None:
-        return _unauthenticated_payload(target, None, "AUTH_REQUIRED", "auth file is invalid")
+    try:
+        stored_auth = network_credential(_auth_projection(target))
+    except AuthProjectionError as exc:
+        return _unauthenticated_payload(target, None, exc.code, exc.message)
 
     if client is not None:
-        return await _auth_status_with_client(target, stored_auth, client, event_sink=event_sink)
+        return await _auth_status_with_client(target, stored_auth, client)
 
-    async with HttpxEnjiHttpClient() as owned_client:
-        return await _auth_status_with_client(target, stored_auth, owned_client, event_sink=event_sink)
-
-
-async def refresh_auth_async(
-    auth_file: Path | None = None,
-    client: EnjiHttpClient | None = None,
-    *,
-    event_sink: AuthEventSink | None = None,
-) -> AuthRefreshPayload:
-    target = auth_file if auth_file is not None else default_auth_file()
-    try:
-        if client is not None:
-            refreshed_auth = await refresh_stored_cookie_auth(target, client, event_sink=event_sink)
-            return _auth_refresh_payload(target, refreshed_auth)
-
-        async with HttpxEnjiHttpClient() as owned_client:
-            refreshed_auth = await refresh_stored_cookie_auth(target, owned_client, event_sink=event_sink)
-            return _auth_refresh_payload(target, refreshed_auth)
-    except EnjiHttpError as exc:
-        raise AuthError(exc.code, exc.message) from exc
+    async with HttpxEnjiHttpClient(event_sink=discard_transport_event) as owned_client:
+        return await _auth_status_with_client(target, stored_auth, owned_client)
 
 
 async def backend_readiness_probe_async(
@@ -241,26 +182,17 @@ async def backend_readiness_probe_async(
 ) -> AuthBackendReadinessResult:
     started_at = time.monotonic()
     target = auth_file if auth_file is not None else default_auth_file()
-    if not target.exists():
+    try:
+        stored_auth = network_credential(_auth_projection(target))
+    except AuthProjectionError as exc:
         return _backend_readiness_failure(
             started_at,
             AuthBackendReadinessResult(
                 ready=False,
                 failure_kind="storage",
-                failure_code="AUTH_REQUIRED",
-                failure_message="auth file does not exist",
-            ),
-        )
-
-    stored_auth = load_auth_file(target)
-    if stored_auth is None:
-        return _backend_readiness_failure(
-            started_at,
-            AuthBackendReadinessResult(
-                ready=False,
-                failure_kind="storage",
-                failure_code="AUTH_REQUIRED",
-                failure_message="auth file is invalid",
+                failure_code=exc.code,
+                failure_message=exc.message,
+                bypass_grace=True,
             ),
         )
 
@@ -268,7 +200,7 @@ async def backend_readiness_probe_async(
         return await _backend_readiness_probe_with_client(stored_auth, client, started_at=started_at)
 
     settings = default_settings()
-    async with HttpxEnjiHttpClient() as owned_client:
+    async with HttpxEnjiHttpClient(event_sink=discard_transport_event) as owned_client:
         return await _backend_readiness_probe_with_client(
             stored_auth,
             owned_client,
@@ -282,6 +214,7 @@ def start_auto_refresh_task(
     *,
     settings: EnjiGuardSettings | None = None,
     event_sink: AuthEventSink | None = None,
+    outcome_sink: AuthOutcomeSink | None = None,
 ) -> asyncio.Task[None] | None:
     resolved_settings = settings if settings is not None else default_settings()
     resolved_auth_file = auth_file if auth_file is not None else resolved_settings.auth.auth_file
@@ -289,45 +222,49 @@ def start_auto_refresh_task(
     return auto_refresh_impl.start_auto_refresh_task(
         auth_file=resolved_auth_file,
         refresh_settings=resolved_settings.auto_refresh,
-        credential_cookie_type=CredentialType.COOKIE.value,
         dependencies=auto_refresh_impl.AutoRefreshTaskDependencies(
-            load_stored_auth_fn=load_stored_auth,
             auto_refresh_loop_fn=auto_refresh_impl._auto_refresh_loop,
             loop_dependencies=auto_refresh_impl.AutoRefreshLoopDependencies(
-                sleep_seconds_fn=auto_refresh_impl._auto_refresh_sleep_seconds,
-                load_sleep_seconds_stored_auth_fn=load_stored_auth,
+                load_auth_fn=load_auth,
                 cookie_refresh_sleep_seconds_fn=cookie_refresh_sleep_seconds,
-                refresh_stored_cookie_auth_fn=lambda path, client: _refresh_stored_cookie_auth_for_auto_refresh(
-                    path, client, resolved_event_sink
+                refresh_cookie_auth_fn=lambda path, auth, client: _refresh_cookie_auth(
+                    path, auth, cast(EnjiHttpClient, client), outcome_sink=outcome_sink
                 ),
-                cookie_access_expires_at_fn=cookie_access_expires_at,
-                is_refresh_error_fn=_is_auto_refresh_error,
                 log_event_fn=resolved_event_sink,
                 logger=_LOGGER,
                 sleep_fn=asyncio.sleep,
-                client_factory=HttpxEnjiHttpClient,
+                client_factory=lambda: HttpxEnjiHttpClient(event_sink=resolved_event_sink),
                 credential_changes_fn=credential_changes,
             ),
         ),
     )
 
 
-async def _refresh_stored_cookie_auth_for_auto_refresh(
-    path: Path, client: object, event_sink: AuthEventSink | None = None
-) -> StoredAuth:
-    return await refresh_stored_cookie_auth(path, cast(EnjiHttpClient, client), event_sink=event_sink)
+async def reconcile_auth_startup(
+    auth_file: Path | None = None,
+    *,
+    outcome_sink: AuthOutcomeSink | None = None,
+) -> None:
+    """Durably reconcile abandoned rotations before runtime observers start."""
 
+    target = auth_file if auth_file is not None else default_auth_file()
 
-def _is_auto_refresh_error(exc: Exception) -> TypeGuard[auto_refresh_impl.RefreshErrorLike]:
-    return isinstance(exc, EnjiHttpError)
+    class _StartupOnlyExchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            raise AssertionError("startup reconciliation must not dispatch refresh")
+
+    await RefreshCoordinator(
+        target,
+        _StartupOnlyExchange(),
+        dependencies=CoordinatorDependencies(outcome_sink=outcome_sink),
+    ).recover_startup()
 
 
 async def _auth_status_with_client(
     target: Path,
     stored_auth: StoredAuth,
     client: EnjiHttpClient,
-    *,
-    event_sink: AuthEventSink | None = None,
 ) -> AuthStatusPayload:
     credential_type = stored_auth["credential"]["type"]
     try:
@@ -337,8 +274,6 @@ async def _auth_status_with_client(
 
     if response.status_code == HTTP_OK:
         return _authenticated_payload(target, credential_type, _profile_from_response(response))
-    if is_auth_invalid_response(response) and credential_type == CredentialType.COOKIE.value:
-        return await _auth_status_after_refresh(target, stored_auth, client, event_sink=event_sink)
     return _auth_status_payload_from_response(
         target,
         credential_type,
@@ -373,27 +308,6 @@ def _auth_status_payload_from_response(
     except EnjiHttpError as exc:
         return _unauthenticated_payload(target, credential_type, exc.code, exc.message)
     return _unauthenticated_payload(target, credential_type, "UPSTREAM", "auth status failed")
-
-
-async def _auth_status_after_refresh(
-    target: Path,
-    stored_auth: StoredAuth,
-    client: EnjiHttpClient,
-    *,
-    event_sink: AuthEventSink | None = None,
-) -> AuthStatusPayload:
-    try:
-        refreshed_auth = await refresh_cookie_auth(target, stored_auth, client, event_sink=event_sink)
-        response = await _request_auth_status(refreshed_auth, client)
-    except EnjiHttpError as exc:
-        return _unauthenticated_payload(target, CredentialType.COOKIE.value, exc.code, exc.message)
-    return _auth_status_payload_from_response(
-        target,
-        CredentialType.COOKIE.value,
-        response,
-        auth_invalid_code=AUTH_INVALID_CODE,
-        auth_invalid_message="invalid access token after refresh",
-    )
 
 
 async def _backend_readiness_probe_with_client(
@@ -467,237 +381,35 @@ async def _backend_readiness_probe_with_client(
     )
 
 
-async def refresh_cookie_auth(
+async def _refresh_cookie_auth(
     path: Path,
     stored_auth: StoredAuth,
     client: EnjiHttpClient,
     *,
-    event_sink: AuthEventSink | None = None,
+    outcome_sink: AuthOutcomeSink | None = None,
 ) -> StoredAuth:
-    resolved_event_sink = _event_sink_or_noop(event_sink)
-    async with _COOKIE_REFRESH_LOCK:
-        with _cookie_refresh_file_lock(path):
-            latest_auth = _latest_auth_for_refresh(path, stored_auth)
-            if latest_auth["credential"]["type"] != CredentialType.COOKIE.value:
-                raise EnjiHttpError("AUTH_REQUIRED", "stored credential is not cookie based")
-            pending_rotation = load_pending_rotation(path)
-            if pending_rotation is not None and pending_rotation["state"] == "rotated":
-                return _recover_pending_refresh_rotation(path, latest_auth, pending_rotation, resolved_event_sink)
-            if pending_rotation is not None:
-                consume_pending_rotation(path)
-            if latest_auth is not stored_auth:
-                return latest_auth
-            return await _refresh_cookie_auth_unlocked(path, stored_auth, client, resolved_event_sink)
+
+    class _HttpxRefreshExchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            return await client.request(
+                EnjiHttpRequest(
+                    method="POST",
+                    url=f"{source['base_url']}{AUTH_REFRESH_PATH}",
+                    operation="auth refresh",
+                    headers=_auth_refresh_headers(source),
+                    profile=RetryProfile.AUTH_REFRESH,
+                )
+            )
+
+    return await RefreshCoordinator(
+        path,
+        _HttpxRefreshExchange(),
+        dependencies=CoordinatorDependencies(outcome_sink=outcome_sink),
+    ).refresh(stored_auth)
 
 
-async def refresh_stored_cookie_auth(
-    path: Path, client: EnjiHttpClient, *, event_sink: AuthEventSink | None = None
-) -> StoredAuth:
-    stored_auth = load_stored_auth(path)
-    if stored_auth is None:
-        raise EnjiHttpError("AUTH_REQUIRED", "auth file is invalid")
-    return await refresh_cookie_auth(path, stored_auth, client, event_sink=event_sink)
-
-
-async def _refresh_cookie_auth_unlocked(
-    path: Path, stored_auth: StoredAuth, client: EnjiHttpClient, event_sink: AuthEventSink
-) -> StoredAuth:
-    credential = stored_auth["credential"]
-    if credential["type"] != CredentialType.COOKIE.value:
-        raise EnjiHttpError("AUTH_REQUIRED", "stored credential is not cookie based")
-    try:
-        reserve_pending_rotation(path, stored_auth)
-    except OSError as exc:
-        raise EnjiHttpError("STORAGE", f"failed to reserve refreshed cookie: {exc}") from exc
-    response = await client.request(
-        EnjiHttpRequest(
-            method="POST",
-            url=f"{stored_auth['base_url']}{AUTH_REFRESH_PATH}",
-            operation="auth refresh",
-            headers=_auth_refresh_headers(stored_auth),
-            profile=RetryProfile.AUTH_REFRESH,
-        )
-    )
-    if response.status_code in {HTTP_UNAUTHORIZED, HTTP_FORBIDDEN}:
-        event_sink(
-            _LOGGER,
-            logging.WARNING,
-            "enji_auth_refresh_cookie_rejected",
-            {
-                "classification": "upstream_refresh_cookie_rejected",
-                "status_code": response.status_code,
-            },
-        )
-        raise EnjiHttpError(
-            "AUTH_REQUIRED", "stored refresh cookie is not authenticated", status_code=response.status_code
-        )
-    _log_refresh_set_cookie_names(response, event_sink)
-    _validate_successful_refresh_cookie_rotation(response)
-    refreshed_auth = _persist_refresh_response_cookies(path, stored_auth, response, event_sink)
-    raise_for_response_status(response, operation="auth refresh", expected_statuses={HTTP_OK})
-    return refreshed_auth
-
-
-def _validate_successful_refresh_cookie_rotation(response: EnjiHttpResponse) -> None:
-    if response.status_code != HTTP_OK:
-        return
-    names = set_cookie_names(response.set_cookie_headers)
-    if "access_token" not in names:
-        raise EnjiHttpError("UPSTREAM", "auth refresh did not return access_token Set-Cookie")
-    if "refresh_token" not in names:
-        raise EnjiHttpError("UPSTREAM", "auth refresh did not return refresh_token Set-Cookie")
-
-
-def _log_refresh_set_cookie_names(response: EnjiHttpResponse, event_sink: AuthEventSink) -> None:
-    if response.status_code != HTTP_OK:
-        return
-    names = set_cookie_names(response.set_cookie_headers)
-    event_sink(
-        _LOGGER,
-        logging.INFO,
-        "enji_auth_refresh_set_cookie_received",
-        {"set_cookie_names": ",".join(names), "set_cookie_count": len(names)},
-    )
-
-
-def _persist_refresh_response_cookies(
-    path: Path,
-    stored_auth: StoredAuth,
-    response: EnjiHttpResponse,
-    event_sink: AuthEventSink,
-) -> StoredAuth:
-    if not response.set_cookie_headers:
-        return stored_auth
-    if response.status_code != HTTP_OK and not _should_persist_transient_refresh_cookies(response):
-        return stored_auth
-    credential = stored_auth["credential"]
-    if credential["type"] != CredentialType.COOKIE.value:
-        raise EnjiHttpError("AUTH_REQUIRED", "stored credential is not cookie based")
-    try:
-        cookie_header = merge_set_cookie_headers(credential["cookie_header"], response.set_cookie_headers)
-    except ValueError as exc:
-        raise EnjiHttpError("AUTH_REQUIRED", str(exc)) from exc
-    try:
-        pending_rotation = load_pending_rotation(path)
-        if pending_rotation is None:
-            raise OSError("pending refresh rotation journal is missing")
-        mark_pending_rotation_rotated(path, pending_rotation, cookie_header.value)
-        return replace_cookie_credential(path, stored_auth, cookie_header.value)
-    except OSError as exc:
-        pending_rotation = load_pending_rotation(path)
-        if pending_rotation is not None:
-            with contextlib.suppress(OSError):
-                record_pending_rotation_error(path, pending_rotation, type(exc).__name__, exc.errno)
-        _log_refresh_rotation_persistence(event_sink, "enji_auth_refresh_rotation_deferred", logging.WARNING, exc)
-        raise EnjiHttpError("STORAGE", f"failed to persist refreshed cookie: {exc}") from exc
-    except ValueError as exc:
-        raise EnjiHttpError("AUTH_REQUIRED", str(exc)) from exc
-
-
-def _should_persist_transient_refresh_cookies(response: EnjiHttpResponse) -> bool:
-    return should_persist_transient_refresh_cookies(
-        response.status_code,
-        HTTP_TRANSIENT_REFRESH_ERROR_CODES,
-        response.set_cookie_headers,
-    )
-
-
-def _recover_pending_refresh_rotation(
-    path: Path,
-    latest_auth: StoredAuth,
-    pending_rotation: PendingRefreshRotation,
-    event_sink: AuthEventSink,
-) -> StoredAuth:
-    cookie_header = pending_rotation["replacement_cookie_header"]
-    if cookie_header is None:
-        consume_pending_rotation(path)
-        return latest_auth
-    if _cookie_auth_matches(latest_auth, pending_rotation["previous_auth"]):
-        try:
-            recovered_auth = replace_cookie_credential(path, latest_auth, cookie_header)
-        except OSError as exc:
-            with contextlib.suppress(OSError):
-                record_pending_rotation_error(path, pending_rotation, type(exc).__name__, exc.errno)
-            _log_refresh_rotation_persistence(event_sink, "enji_auth_refresh_rotation_deferred", logging.WARNING, exc)
-            raise EnjiHttpError("STORAGE", f"failed to persist refreshed cookie: {exc}") from exc
-        consume_pending_rotation(path)
-        _log_pending_refresh_rotation(
-            event_sink, "enji_auth_refresh_rotation_recovered", logging.INFO, pending_rotation
-        )
-        return recovered_auth
-
-    if _cookie_auth_matches_header(latest_auth, cookie_header):
-        consume_pending_rotation(path)
-        _log_pending_refresh_rotation(
-            event_sink, "enji_auth_refresh_rotation_recovered", logging.INFO, pending_rotation
-        )
-        return latest_auth
-
-    consume_pending_rotation(path)
-    _log_pending_refresh_rotation(
-        event_sink, "enji_auth_refresh_rotation_superseded", logging.WARNING, pending_rotation
-    )
-    return latest_auth
-
-
-def _cookie_auth_matches(left: StoredAuth, right: StoredAuth) -> bool:
-    if left["base_url"] != right["base_url"]:
-        return False
-    credential = right["credential"]
-    if credential["type"] != CredentialType.COOKIE.value:
-        return False
-    return _cookie_auth_matches_header(left, credential["cookie_header"])
-
-
-def _cookie_auth_matches_header(stored_auth: StoredAuth, cookie_header: str) -> bool:
-    credential = stored_auth["credential"]
-    return credential["type"] == CredentialType.COOKIE.value and credential["cookie_header"] == cookie_header
-
-
-def _log_refresh_rotation_persistence(event_sink: AuthEventSink, event: str, level: int, exc: OSError) -> None:
-    event_sink(_LOGGER, level, event, _storage_error_fields(type(exc).__name__, exc.errno))
-
-
-def _log_pending_refresh_rotation(
-    event_sink: AuthEventSink, event: str, level: int, pending_rotation: PendingRefreshRotation
-) -> None:
-    event_sink(_LOGGER, level, event, _storage_error_fields(pending_rotation["error_type"], pending_rotation["errno"]))
-
-
-def _storage_error_fields(error_type: str | None, errno: int | None) -> dict[str, object]:
-    fields: dict[str, object] = {"error_type": error_type or "unknown"}
-    if errno is not None:
-        fields["errno"] = errno
-    return fields
-
-
-def _latest_auth_for_refresh(path: Path, stored_auth: StoredAuth) -> StoredAuth:
-    latest_auth = load_stored_auth(path)
-    if latest_auth is None:
-        return stored_auth
-
-    latest_credential = latest_auth["credential"]
-    stored_credential = stored_auth["credential"]
-    if latest_credential["type"] != CredentialType.COOKIE.value:
-        return latest_auth
-    if stored_credential["type"] != CredentialType.COOKIE.value:
-        return latest_auth
-    if latest_credential["cookie_header"] != stored_credential["cookie_header"]:
-        return latest_auth
-    return stored_auth
-
-
-@contextlib.contextmanager
-def _cookie_refresh_file_lock(path: Path) -> Iterator[None]:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    lock_path = path.with_suffix(f"{path.suffix}.lock")
-    with lock_path.open("a", encoding="utf-8") as lock_file:
-        lock_path.chmod(0o600)
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+def _auth_projection(path: Path):
+    return project_auth(load_auth(path), load_journal(path))
 
 
 def is_auth_invalid_response(response: EnjiHttpResponse) -> bool:
@@ -728,13 +440,6 @@ def _auth_refresh_headers(stored_auth: StoredAuth) -> dict[str, str]:
     return headers
 
 
-def _auth_refresh_payload(auth_file: Path, stored_auth: StoredAuth) -> AuthRefreshPayload:
-    try:
-        return _pure_auth_refresh_payload(auth_file, stored_auth)
-    except ValueError as exc:
-        raise EnjiHttpError("AUTH_REQUIRED", str(exc)) from exc
-
-
 async def _request_auth_status(
     stored_auth: StoredAuth,
     client: EnjiHttpClient,
@@ -763,6 +468,7 @@ def _backend_readiness_failure(started_at: float, probe: AuthBackendReadinessRes
         failure_status_code=probe.failure_status_code,
         credential_type=probe.credential_type,
         elapsed_ms=_elapsed_ms(started_at),
+        bypass_grace=probe.bypass_grace,
     )
 
 

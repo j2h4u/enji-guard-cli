@@ -3,6 +3,7 @@ from pathlib import Path
 
 from enji_guard_cli.runtime_observability.readiness import (
     INITIAL_BACKEND_READINESS_STATE,
+    READINESS_CLOCK_ANOMALY_TOLERANCE,
     BackendReadinessProbe,
     backend_readiness_state_after_probe,
     read_backend_readiness_state,
@@ -85,6 +86,33 @@ def test_readiness_verdict_tolerates_failures_below_threshold_after_success(tmp_
     assert verdict.state.ready is True
 
 
+def test_readiness_terminal_auth_failure_bypasses_grace_after_success(tmp_path: Path) -> None:
+    settings = readiness_settings(tmp_path)
+    now = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)
+    success = backend_readiness_state_after_probe(
+        INITIAL_BACKEND_READINESS_STATE,
+        BackendReadinessProbe(ready=True, credential_type="cookie"),
+        checked_at=now - timedelta(seconds=1),
+    )
+    terminal = backend_readiness_state_after_probe(
+        success,
+        BackendReadinessProbe(
+            ready=False,
+            failure_kind="storage",
+            failure_code="AUTH_REFRESH_OUTCOME_UNKNOWN",
+            failure_message="refresh outcome is unknown; import a fresh browser credential",
+            bypass_grace=True,
+        ),
+        checked_at=now,
+    )
+    write_backend_readiness_state(settings.state_file, terminal)
+
+    verdict = readiness_verdict(settings, now=now)
+
+    assert verdict.ready is False
+    assert verdict.reason == "backend readiness has a terminal auth failure"
+
+
 def test_readiness_verdict_fails_at_threshold(tmp_path: Path) -> None:
     settings = readiness_settings(tmp_path)
     now = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)
@@ -128,6 +156,37 @@ def test_readiness_verdict_fails_when_state_is_stale(tmp_path: Path) -> None:
 
     assert verdict.ready is False
     assert verdict.reason == "backend readiness state is stale"
+
+
+def test_readiness_verdict_fails_closed_for_materially_future_state(tmp_path: Path) -> None:
+    settings = readiness_settings(tmp_path)
+    now = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)
+    state = backend_readiness_state_after_probe(
+        INITIAL_BACKEND_READINESS_STATE,
+        BackendReadinessProbe(ready=True, credential_type="cookie"),
+        checked_at=now + READINESS_CLOCK_ANOMALY_TOLERANCE + timedelta(microseconds=1),
+    )
+    write_backend_readiness_state(settings.state_file, state)
+
+    verdict = readiness_verdict(settings, now=now)
+
+    assert verdict.ready is False
+    assert verdict.reason == "backend readiness state has a clock anomaly"
+
+
+def test_readiness_verdict_accepts_state_at_clock_anomaly_tolerance_boundary(tmp_path: Path) -> None:
+    settings = readiness_settings(tmp_path)
+    now = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)
+    state = backend_readiness_state_after_probe(
+        INITIAL_BACKEND_READINESS_STATE,
+        BackendReadinessProbe(ready=True, credential_type="cookie"),
+        checked_at=now + READINESS_CLOCK_ANOMALY_TOLERANCE,
+    )
+    write_backend_readiness_state(settings.state_file, state)
+
+    verdict = readiness_verdict(settings, now=now)
+
+    assert verdict.ready is True
 
 
 def readiness_settings(tmp_path: Path) -> ReadinessSettings:

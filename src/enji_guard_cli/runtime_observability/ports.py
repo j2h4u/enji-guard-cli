@@ -17,14 +17,11 @@ class BackendReadinessObservation:
     failure_status_code: int | None = None
     credential_type: str | None = None
     elapsed_ms: int | None = None
+    bypass_grace: bool = False
 
 
 class BackendReadinessObserver(Protocol):
     async def observe_backend_readiness(self) -> BackendReadinessObservation: ...
-
-
-class BackgroundRefreshStarter(Protocol):
-    def start_auto_refresh_task(self) -> asyncio.Task[None] | None: ...
 
 
 class CredentialChangeObserver(Protocol):
@@ -35,15 +32,18 @@ class BackendReadinessPort(BackendReadinessObserver, CredentialChangeObserver, P
     """Probe plus the event that invalidates its cached projection."""
 
 
-class RuntimeAuthPort(BackendReadinessObserver, BackgroundRefreshStarter, CredentialChangeObserver, Protocol):
-    """Combined capability used by the supervisor; no auth implementation import."""
+class RuntimeAuthCoordinator(BackendReadinessObserver, CredentialChangeObserver, Protocol):
+    """Runtime-owned auth coordination capability used by the supervisor."""
+
+    async def reconcile_startup(self) -> None: ...
+
+    def start_background_refresh_task(self) -> asyncio.Task[None] | None: ...
 
 
 __all__ = [
     "BackendReadinessObservation",
     "BackendReadinessObserver",
     "BackendReadinessPort",
-    "BackgroundRefreshStarter",
     "CredentialChangeObserver",
-    "RuntimeAuthPort",
+    "RuntimeAuthCoordinator",
 ]

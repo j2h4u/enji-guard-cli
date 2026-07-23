@@ -1,39 +1,41 @@
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
-from typing import cast
 
 import httpx
 import pytest
 
-import enji_guard_cli.auth_session.api as auth_module
-import enji_guard_cli.auth_session.auto_refresh as auto_refresh_module
 import enji_guard_cli.enji_gateway.client as api_client_module
-from enji_guard_cli.auth_session.adapters import AuthSessionAdapter
+from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
 from enji_guard_cli.auth_session.api import (
+    _refresh_cookie_auth,
     backend_readiness_probe_async,
     import_cookie,
-    load_stored_auth,
-    refresh_cookie_auth,
 )
+from enji_guard_cli.auth_session.state_machine import Rotated
 from enji_guard_cli.auth_session.store import (
-    load_pending_rotation,
-    mark_pending_rotation_rotated,
+    AuthLoaded,
+    load_auth,
     pending_rotation_path,
-    reserve_pending_rotation,
+    write_journal,
 )
 from enji_guard_cli.enji_gateway.client import (
     ApiEndpoint,
     ApiRequestSpec,
-    EnjiApiSession,
     request_json_object,
 )
 from enji_guard_cli.enji_gateway.contract import (
     IMPLEMENTED_ENJI_ENDPOINTS,
     RetryProfile,
 )
-from enji_guard_cli.settings import AutoRefreshSettings
-from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient, RetryConfig
+from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient, RetryConfig
+
+
+def load_stored_auth(path: Path):
+    """Test-only convenience: production has no nullable auth reader."""
+
+    loaded = load_auth(path)
+    assert isinstance(loaded, AuthLoaded)
+    return loaded.auth
 
 
 def test_api_endpoint_request_preserves_retry_profile_for_every_implemented_path() -> None:
@@ -66,7 +68,7 @@ def test_auth_request_paths_assign_auth_refresh_and_read_profiles(tmp_path: Path
     async def run() -> None:
         stored_auth = load_stored_auth(auth_file)
         assert stored_auth is not None
-        await refresh_cookie_auth(auth_file, stored_auth, Client())
+        await _refresh_cookie_auth(auth_file, stored_auth, Client())
         await backend_readiness_probe_async(auth_file, Client())
 
     asyncio.run(run())
@@ -138,10 +140,10 @@ def test_non_replayable_profiles_do_not_auto_retry_status_responses(profile: Ret
     assert calls == 1
 
 
-def test_unsafe_request_is_not_replayed_after_cookie_refresh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_gateway_unsafe_request_is_not_replayed_or_refreshed(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access=old; refresh=long", auth_file)
-    session = api_client_module.load_api_session(auth_file, auth_port=AuthSessionAdapter())
+    session = api_client_module.load_api_session(auth_file, auth_port=GatewayCredentialReader())
     calls: list[EnjiHttpRequest] = []
 
     class Client:
@@ -152,11 +154,6 @@ def test_unsafe_request_is_not_replayed_after_cookie_refresh(monkeypatch: pytest
                 headers={},
                 content=b'{"error":{"code":"AUTH_INVALID"}}',
             )
-
-    async def fake_refresh(current: EnjiApiSession, _client: object) -> None:
-        current.update_stored_auth(current.stored_auth)
-
-    monkeypatch.setattr(api_client_module, "refresh_session", fake_refresh)
 
     spec = ApiRequestSpec(
         method="POST",
@@ -174,22 +171,15 @@ def test_unsafe_request_is_not_replayed_after_cookie_refresh(monkeypatch: pytest
     assert calls[0].profile is RetryProfile.UNSAFE_MUTATION
 
 
-def test_pending_rotated_cookie_journal_recovers_from_disk_and_is_private(tmp_path: Path) -> None:
+def test_rotated_cookie_journal_recovers_from_disk_without_replaying_post(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access=old; refresh=long", auth_file)
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
 
-    pending = reserve_pending_rotation(auth_file, stored_auth)
+    write_journal(auth_file, Rotated(stored_auth["revision"], "access=new; refresh=rotated"))
     journal_path = pending_rotation_path(auth_file)
     assert journal_path.stat().st_mode & 0o777 == 0o600
-    mark_pending_rotation_rotated(auth_file, pending, "access=new; refresh=rotated")
-
-    # A fresh load is the process-restart boundary: recovery must use the
-    # durable rotated value and must not issue another refresh request.
-    reloaded_pending = load_pending_rotation(auth_file)
-    assert reloaded_pending is not None
-    assert reloaded_pending["replacement_cookie_header"] == "access=new; refresh=rotated"
 
     calls = 0
 
@@ -199,25 +189,22 @@ def test_pending_rotated_cookie_journal_recovers_from_disk_and_is_private(tmp_pa
             calls += 1
             raise AssertionError("durable rotated journal should avoid refresh request")
 
-    recovered = asyncio.run(refresh_cookie_auth(auth_file, stored_auth, Client()))
+    recovered = asyncio.run(_refresh_cookie_auth(auth_file, stored_auth, Client()))
 
     assert calls == 0
     assert recovered["credential"] == {"type": "cookie", "cookie_header": "access=new; refresh=rotated"}
-    assert not journal_path.exists()
+    # An unacknowledged durable outcome remains in the outbox for the runtime
+    # telemetry sink to drain on a later reconciliation.
+    assert journal_path.exists()
 
 
-def test_refresh_reserve_storage_failure_avoids_refresh_request(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_corrupt_refresh_journal_avoids_refresh_request(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access=old; refresh=long", auth_file)
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
 
-    def fail_reserve(*_args: object, **_kwargs: object) -> None:
-        raise OSError(28, "disk full")
-
-    monkeypatch.setattr(auth_module, "reserve_pending_rotation", fail_reserve)
+    pending_rotation_path(auth_file).write_text("not json", encoding="utf-8")
     calls = 0
 
     class Client:
@@ -226,34 +213,6 @@ def test_refresh_reserve_storage_failure_avoids_refresh_request(
             calls += 1
             raise AssertionError("refresh request must not run without a journal")
 
-    with pytest.raises(auth_module.EnjiHttpError, match="failed to reserve refreshed cookie"):
-        asyncio.run(refresh_cookie_auth(auth_file, stored_auth, Client()))
+    with pytest.raises(EnjiHttpError, match="refresh journal is corrupt"):
+        asyncio.run(_refresh_cookie_auth(auth_file, stored_auth, Client()))
     assert calls == 0
-
-
-def test_auto_refresh_backoff_grows_caps_and_auth_required_is_calmer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(auto_refresh_module.random, "uniform", lambda _low, _high: 0.0)
-    settings = AutoRefreshSettings(
-        enabled=True,
-        lead_seconds=300,
-        fallback_seconds=900,
-        retry_seconds=900,
-        retry_initial_seconds=30,
-        retry_max_seconds=10_000,
-        retry_jitter_seconds=30,
-        auth_required_retry_seconds=900,
-    )
-    wait = auto_refresh_module._AuthRefreshWait(settings)
-
-    def delay(attempt: int, exception: object) -> float:
-        state = SimpleNamespace(
-            attempt_number=attempt,
-            outcome=SimpleNamespace(exception=lambda: exception),
-        )
-        return wait(cast(auto_refresh_module.RetryCallState, state))
-
-    assert [delay(attempt, RuntimeError()) for attempt in range(1, 5)] == [30, 60, 120, 240]
-    assert delay(20, RuntimeError()) == 10_000
-    assert [delay(attempt, SimpleNamespace(code="AUTH_REQUIRED")) for attempt in range(1, 4)] == [900, 900, 900]

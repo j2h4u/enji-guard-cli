@@ -21,6 +21,7 @@ from enji_guard_cli.enji_gateway import pooled_client as pooled_client_module
 from enji_guard_cli.portfolio.models import AccessInfo, AccessLimits
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
 from enji_guard_cli.runtime_observability import supervisor as supervisor_module
+from enji_guard_cli.runtime_observability.auth_coordinator import RuntimeAuthCoordinatorAdapter
 from enji_guard_cli.settings import default_settings
 from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse
 
@@ -49,9 +50,10 @@ RESPONSE = EnjiHttpResponse(status_code=200, headers={}, content=b"{}")
 class _RecordingExecutor:
     instances: ClassVar[list[_RecordingExecutor]] = []
 
-    def __init__(self, *, limits: object, retry_config: object) -> None:
+    def __init__(self, *, limits: object, retry_config: object, event_sink: object) -> None:
         self.limits = limits
         self.retry_config = retry_config
+        self.event_sink = event_sink
         self.owner_thread = threading.get_ident()
         self.owner_loop = asyncio.get_running_loop()
         self.request_threads: set[int] = set()
@@ -81,13 +83,14 @@ class _RecordingExecutor:
 
 
 class _FailingExecutor(_RecordingExecutor):
-    def __init__(self, *, limits: object, retry_config: object) -> None:
+    def __init__(self, *, limits: object, retry_config: object, event_sink: object) -> None:
+        del limits, retry_config, event_sink
         raise RuntimeError("owner loop failed")
 
 
 class _FailingCloseExecutor(_RecordingExecutor):
-    def __init__(self, *, limits: object, retry_config: object) -> None:
-        super().__init__(limits=limits, retry_config=retry_config)
+    def __init__(self, *, limits: object, retry_config: object, event_sink: object) -> None:
+        super().__init__(limits=limits, retry_config=retry_config, event_sink=event_sink)
         self.close_entered = threading.Event()
         self.close_release = asyncio.Event()
 
@@ -499,31 +502,6 @@ def test_settings_expose_pool_and_graceful_shutdown_values() -> None:
     assert settings.service.mcp_graceful_shutdown_timeout_seconds == 5.0
 
 
-def test_auto_refresh_retry_wait_uses_injected_maximum(monkeypatch: pytest.MonkeyPatch) -> None:
-    from types import SimpleNamespace
-
-    from enji_guard_cli.auth_session import auto_refresh as auto_refresh_module
-    from enji_guard_cli.settings import AutoRefreshSettings
-
-    monkeypatch.setattr(auto_refresh_module.random, "uniform", lambda _low, _high: 0.0)
-    settings = AutoRefreshSettings(
-        enabled=True,
-        lead_seconds=300,
-        fallback_seconds=900,
-        retry_seconds=900,
-        retry_initial_seconds=2.0,
-        retry_max_seconds=7.5,
-        retry_jitter_seconds=30.0,
-        auth_required_retry_seconds=900,
-    )
-    wait = auto_refresh_module._AuthRefreshWait(settings)
-    state = SimpleNamespace(
-        attempt_number=20,
-        outcome=SimpleNamespace(exception=lambda: RuntimeError()),
-    )
-    assert wait(cast(auto_refresh_module.RetryCallState, state)) == 7.5
-
-
 def test_supervisor_uses_configured_graceful_shutdown_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -567,8 +545,9 @@ def test_composition_injects_one_client_into_both_gateways_and_application_lifec
     import enji_guard_cli.composition as composition_module
 
     class Client:
-        def __init__(self, _settings: object) -> None:
+        def __init__(self, _settings: object, *, event_sink: object) -> None:
             self.close_calls = 0
+            self.event_sink = event_sink
 
         def close(self) -> None:
             self.close_calls += 1
@@ -580,8 +559,8 @@ def test_composition_injects_one_client_into_both_gateways_and_application_lifec
 
     client_instances: list[Client] = []
 
-    def make_client(settings: object) -> Client:
-        client = Client(settings)
+    def make_client(settings: object, *, event_sink: object) -> Client:
+        client = Client(settings, event_sink=event_sink)
         client_instances.append(client)
         return client
 
@@ -594,6 +573,10 @@ def test_composition_injects_one_client_into_both_gateways_and_application_lifec
     assert len(client_instances) == 1
     assert cast(Gateway, application.audit_gateway).client is client_instances[0]
     assert cast(Gateway, application.portfolio_gateway).client is client_instances[0]
+    assert client_instances[0].event_sink is composition_module.log_event
+    assert application.auth.client is client_instances[0]
+    assert isinstance(application.runtime_auth, RuntimeAuthCoordinatorAdapter)
+    assert application.runtime_auth.client is client_instances[0]
     assert application.lifecycle is client_instances[0]
 
 
@@ -606,14 +589,14 @@ def test_composition_closes_pool_when_gateway_construction_fails(
     class Client:
         close_calls = 0
 
-        def __init__(self, _settings: object) -> None:
-            pass
+        def __init__(self, _settings: object, *, event_sink: object) -> None:
+            del event_sink
 
         def close(self) -> None:
             self.close_calls += 1
 
-    client = Client(object())
-    monkeypatch.setattr(composition_module, "PooledEnjiHttpClient", lambda _settings: client)
+    client = Client(object(), event_sink=object())
+    monkeypatch.setattr(composition_module, "PooledEnjiHttpClient", lambda _settings, *, event_sink: client)
     monkeypatch.setattr(composition_module, "PortfolioGateway", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         composition_module,

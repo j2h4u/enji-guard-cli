@@ -14,7 +14,6 @@ from enji_guard_cli.auth_session.store import (
     CookieCredential,
     Credential,
     CredentialType,
-    PendingRefreshRotation,
     StoredAuth,
 )
 
@@ -41,6 +40,7 @@ class AuthBackendReadinessResult:
     failure_status_code: int | None = None
     credential_type: str | None = None
     elapsed_ms: int | None = None
+    bypass_grace: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +80,5 @@ __all__ = [
     "Credential",
     "CredentialType",
     "ImportCredentialPayload",
-    "PendingRefreshRotation",
     "StoredAuth",
 ]

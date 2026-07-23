@@ -26,7 +26,7 @@ A change is ready when:
 - candidate images pass `just release-contract IMAGE` before publication;
 - runtime or release changes pass the read-only authenticated `release-smoke`
   journey, including recreate when auth persistence is in scope;
-- auth/runtime changes are validated with the running service (`auth status`, `health --ready`, telemetry when relevant), not with ad hoc refresh commands.
+- auth/runtime changes are validated with the running service (`auth status`, `health --ready`, telemetry when relevant), not with ad hoc refresh commands; terminal cookie states are recovered by an explicit browser credential import, never a replay or manual refresh.
 
 ## Handoff
 
@@ -36,6 +36,7 @@ Leave durable context only when it changes future work:
 - update `AGENTS.md` for developer/QA/Ops rules;
 - update `docs/decisions.md` for architectural decisions and invariants;
 - keep schedule, catalog-driven audit/autofix behavior, and auth/runtime wording aligned across docs when those workflows change;
+- keep the v2 auth revision/journal, observer-only boundary, single-host storage contract, and at-least-once telemetry wording aligned across README, decisions, and deployment docs;
 - do not keep temporary investigation backlogs after they are resolved.
 
 ## Release Notes

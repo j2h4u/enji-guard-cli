@@ -5,11 +5,14 @@ from logging import Logger
 from pathlib import Path
 from typing import Protocol
 
-from enji_guard_cli.auth_session.models import (
-    AuthBackendReadinessResult,
-    AuthSessionStatus,
-    StoredAuth,
-)
+from enji_guard_cli.auth_session.models import AuthSessionStatus, StoredAuth
+from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse
+
+
+class AuthHttpClient(Protocol):
+    """HTTP capability consumed by Auth Session without a runtime dependency."""
+
+    async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse: ...
 
 
 class AuthEventSink(Protocol):
@@ -18,16 +21,15 @@ class AuthEventSink(Protocol):
     def __call__(self, logger: Logger, level: int, event: str, fields: Mapping[str, object]) -> None: ...
 
 
-class AuthReadinessPort(Protocol):
-    """Backend observation capability consumed by runtime composition."""
+class AuthOutcomeSink(Protocol):
+    """Synchronous durable-outbox delivery boundary for terminal rotations.
 
-    async def backend_readiness_probe_async(self) -> AuthBackendReadinessResult: ...
+    Returning ``True`` means the sink accepted the event durably.  Returning
+    ``False`` or raising leaves the terminal journal in place for a later
+    delivery attempt.  The event fields contain only the stable ``event_key``.
+    """
 
-
-class AuthRefreshTaskPort(Protocol):
-    """Background refresh task capability consumed by runtime composition."""
-
-    def start_auto_refresh_task(self): ...
+    def __call__(self, logger: Logger, level: int, event: str, fields: Mapping[str, object]) -> bool: ...
 
 
 class AuthSessionPort(Protocol):
@@ -44,4 +46,10 @@ class AuthStorePort(Protocol):
     def save(self, auth_file: Path, stored_auth: StoredAuth) -> None: ...
 
 
-__all__ = ["AuthEventSink", "AuthReadinessPort", "AuthRefreshTaskPort", "AuthSessionPort", "AuthStorePort"]
+__all__ = [
+    "AuthEventSink",
+    "AuthHttpClient",
+    "AuthOutcomeSink",
+    "AuthSessionPort",
+    "AuthStorePort",
+]

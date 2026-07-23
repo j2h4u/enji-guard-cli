@@ -1,17 +1,35 @@
 import asyncio
 import logging
-import random
+import secrets
+import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, TypeGuard
+from typing import Protocol
 
-from tenacity import AsyncRetrying, RetryCallState, retry_if_exception, stop_never
-from tenacity.wait import wait_base
+from enji_guard_cli.auth_session.coordinator import PreDispatchLocalError, TerminalRevisionRequiredError
+from enji_guard_cli.auth_session.store import (
+    AuthAbsent,
+    AuthClockAnomaly,
+    AuthCorrupt,
+    AuthIoFailure,
+    AuthLoaded,
+    AuthLoadResult,
+    AuthUnsupported,
+    StoredAuth,
+    load_auth,
+)
 
-from enji_guard_cli.auth_session.store import StoredAuth
+_JITTER_RANDOM = secrets.SystemRandom()
+
+
+def _stored_auth_revision(auth_file: Path) -> str | None:
+    loaded = load_auth(auth_file)
+    if isinstance(loaded, AuthLoaded):
+        return loaded.auth["revision"]
+    return None
 
 
 class AutoRefreshSettingsLike(Protocol):
@@ -25,104 +43,40 @@ class AutoRefreshSettingsLike(Protocol):
     def fallback_seconds(self) -> int: ...
 
     @property
-    def retry_seconds(self) -> int: ...
+    def revision_poll_seconds(self) -> float: ...
 
     @property
-    def retry_initial_seconds(self) -> float: ...
+    def pre_dispatch_retry_limit(self) -> int: ...
 
     @property
-    def retry_max_seconds(self) -> float: ...
+    def pre_dispatch_retry_initial_seconds(self) -> float: ...
 
     @property
-    def retry_jitter_seconds(self) -> float: ...
+    def pre_dispatch_retry_max_seconds(self) -> float: ...
 
     @property
-    def auth_required_retry_seconds(self) -> int: ...
-
-
-class RefreshErrorLike(Protocol):
-    code: str
-    status_code: int | None
+    def pre_dispatch_retry_jitter_seconds(self) -> float: ...
 
 
 @dataclass(frozen=True)
 class AutoRefreshLoopDependencies:
-    sleep_seconds_fn: Callable[..., int]
-    load_sleep_seconds_stored_auth_fn: Callable[[Path], StoredAuth | None]
+    load_auth_fn: Callable[[Path], AuthLoadResult]
     cookie_refresh_sleep_seconds_fn: Callable[..., int]
-    refresh_stored_cookie_auth_fn: Callable[[Path, object], Awaitable[StoredAuth]]
-    cookie_access_expires_at_fn: Callable[[StoredAuth], datetime | None]
-    is_refresh_error_fn: Callable[[Exception], TypeGuard[RefreshErrorLike]]
+    refresh_cookie_auth_fn: Callable[[Path, StoredAuth, object], Awaitable[StoredAuth]]
     log_event_fn: Callable[..., None]
     logger: logging.Logger
     client_factory: Callable[[], AbstractAsyncContextManager[object]]
     credential_changes_fn: Callable[[Path], AsyncGenerator[None]]
+    revision_reader: Callable[[Path], str | None] = _stored_auth_revision
+    monotonic_fn: Callable[[], float] = time.monotonic
+    random_fn: Callable[[], float] = _JITTER_RANDOM.random
     sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep
 
 
 @dataclass(frozen=True)
 class AutoRefreshTaskDependencies:
-    load_stored_auth_fn: Callable[[Path], StoredAuth | None]
     auto_refresh_loop_fn: Callable[..., Coroutine[object, object, None]]
     loop_dependencies: AutoRefreshLoopDependencies
-
-
-class _AuthRefreshWait(wait_base):
-    def __init__(self, settings: AutoRefreshSettingsLike) -> None:
-        self._settings = settings
-
-    def __call__(self, retry_state: RetryCallState) -> float:
-        exception = retry_state.outcome.exception() if retry_state.outcome is not None else None
-        attempt_number = int(retry_state.attempt_number)
-        if getattr(exception, "code", None) == "AUTH_REQUIRED":
-            base = float(self._settings.auth_required_retry_seconds)
-        else:
-            exponent = max(attempt_number - 1, 0)
-            growth = float(self._settings.retry_initial_seconds) * (2.0**exponent)
-            cap = float(self._settings.retry_max_seconds)
-            base = min(cap, growth)
-        jitter = random.uniform(0.0, self._settings.retry_jitter_seconds)  # noqa: S311 - non-secret delay jitter
-        return min(base + jitter, float(self._settings.retry_max_seconds))
-
-
-class AuthSessionResilience:
-    """Supervise cookie-session recovery with bounded, classified Tenacity backoff."""
-
-    def __init__(self, settings: AutoRefreshSettingsLike, dependencies: AutoRefreshLoopDependencies) -> None:
-        self._settings = settings
-        self._dependencies = dependencies
-
-    async def refresh(self, operation: Callable[[], Awaitable[StoredAuth]]) -> StoredAuth:
-        retrying = AsyncRetrying(
-            retry=retry_if_exception(_is_resilience_retryable),
-            wait=_AuthRefreshWait(self._settings),
-            stop=stop_never,
-            reraise=True,
-            before_sleep=self._before_sleep,
-        )
-        async for attempt in retrying:
-            with attempt:
-                return await operation()
-        raise RuntimeError("auth refresh resilience stopped unexpectedly")
-
-    def _before_sleep(self, state: RetryCallState) -> None:
-        exception = state.outcome.exception() if state.outcome is not None else None
-        code = getattr(exception, "code", None)
-        retry_class = "auth_required" if code == "AUTH_REQUIRED" else "storage_or_upstream"
-        delay = state.next_action.sleep if state.next_action is not None else 0.0
-        self._dependencies.log_event_fn(
-            self._dependencies.logger,
-            logging.WARNING,
-            "enji_auth_auto_refresh_retry",
-            {
-                "profile": "AUTH_REFRESH",
-                "attempt": state.attempt_number,
-                "delay_seconds": delay,
-                "retry_class": retry_class,
-                "code": code,
-                "status_code": getattr(exception, "status_code", None),
-            },
-        )
 
 
 async def _auto_refresh_loop(
@@ -132,102 +86,259 @@ async def _auto_refresh_loop(
     dependencies: AutoRefreshLoopDependencies,
 ) -> None:
     async with dependencies.client_factory() as client:
-        resilience = AuthSessionResilience(refresh_settings, dependencies)
-        changes = dependencies.credential_changes_fn(auth_file)
-        change_task = asyncio.ensure_future(anext(changes))
-        try:
-            while True:
-                try:
-                    sleep_seconds = dependencies.sleep_seconds_fn(
-                        auth_file=auth_file,
-                        refresh_settings=refresh_settings,
-                        load_stored_auth_fn=dependencies.load_sleep_seconds_stored_auth_fn,
-                        cookie_refresh_sleep_seconds_fn=dependencies.cookie_refresh_sleep_seconds_fn,
-                    )
-                except (OSError, ValueError) as exc:
+        retry_count = 0
+        while True:
+            loaded = dependencies.load_auth_fn(auth_file)
+            auth = _cookie_auth_or_none(loaded)
+            expected_revision = _auth_revision(loaded)
+            if auth is None:
+                _log_unscheduled_credential(dependencies, loaded)
+                await _wait_for_credential_change(
+                    auth_file=auth_file,
+                    expected_revision=expected_revision,
+                    timeout_seconds=refresh_settings.fallback_seconds,
+                    poll_seconds=refresh_settings.revision_poll_seconds,
+                    dependencies=dependencies,
+                )
+                continue
+
+            try:
+                sleep_seconds = dependencies.cookie_refresh_sleep_seconds_fn(
+                    stored_auth=auth, now=datetime.now(UTC), settings=refresh_settings
+                )
+            except (OSError, ValueError) as exc:
+                dependencies.log_event_fn(
+                    dependencies.logger,
+                    logging.ERROR,
+                    "enji_auth_auto_refresh_schedule_failed",
+                    {"error_type": type(exc).__name__},
+                )
+                await _wait_for_credential_change(
+                    auth_file=auth_file,
+                    expected_revision=expected_revision,
+                    timeout_seconds=refresh_settings.fallback_seconds,
+                    poll_seconds=refresh_settings.revision_poll_seconds,
+                    dependencies=dependencies,
+                )
+                continue
+
+            dependencies.log_event_fn(
+                dependencies.logger,
+                logging.INFO,
+                "enji_auth_auto_refresh_scheduled",
+                {"sleep_seconds": sleep_seconds, "auth_file": str(auth_file)},
+            )
+            changed = await _wait_for_credential_change(
+                auth_file=auth_file,
+                expected_revision=expected_revision,
+                timeout_seconds=sleep_seconds,
+                poll_seconds=refresh_settings.revision_poll_seconds,
+                dependencies=dependencies,
+            )
+            if changed:
+                retry_count = 0
+                continue
+
+            # The wait only gives a schedule permission.  Re-read the durable
+            # typed state immediately before the POST so a bearer import,
+            # removal, or malformed write can never dispatch cookie refresh.
+            current = dependencies.load_auth_fn(auth_file)
+            current_auth = _cookie_auth_or_none(current)
+            if current_auth is None or current_auth["revision"] != expected_revision:
+                retry_count = 0
+                continue
+
+            try:
+                await dependencies.refresh_cookie_auth_fn(auth_file, current_auth, client)
+            except PreDispatchLocalError as exc:
+                if retry_count >= refresh_settings.pre_dispatch_retry_limit:
                     dependencies.log_event_fn(
                         dependencies.logger,
                         logging.ERROR,
-                        "enji_auth_auto_refresh_schedule_failed",
-                        {"error_type": type(exc).__name__, "retry_seconds": refresh_settings.retry_seconds},
+                        "enji_auth_auto_refresh_pre_dispatch_retry_exhausted",
+                        {"error_type": type(exc.__cause__).__name__},
                     )
-                    if await _wait_for_credential_change(
-                        change_task, refresh_settings.retry_seconds, dependencies.sleep_fn
-                    ):
-                        change_task = asyncio.ensure_future(anext(changes))
+                    retry_count = 0
+                    await _wait_for_credential_change(
+                        auth_file=auth_file,
+                        expected_revision=expected_revision,
+                        timeout_seconds=refresh_settings.fallback_seconds,
+                        poll_seconds=refresh_settings.revision_poll_seconds,
+                        dependencies=dependencies,
+                    )
                     continue
+                retry_count += 1
+                retry_seconds = _pre_dispatch_retry_seconds(refresh_settings, retry_count, dependencies.random_fn)
                 dependencies.log_event_fn(
                     dependencies.logger,
-                    logging.INFO,
-                    "enji_auth_auto_refresh_scheduled",
-                    {"sleep_seconds": sleep_seconds, "auth_file": str(auth_file)},
+                    logging.WARNING,
+                    "enji_auth_auto_refresh_pre_dispatch_retry",
+                    {
+                        "attempt": retry_count,
+                        "delay_seconds": retry_seconds,
+                        "error_type": type(exc.__cause__).__name__,
+                    },
                 )
-                if await _wait_for_credential_change(change_task, sleep_seconds, dependencies.sleep_fn):
-                    change_task = asyncio.ensure_future(anext(changes))
-                    continue
-                refreshed_auth = await resilience.refresh(
-                    lambda: dependencies.refresh_stored_cookie_auth_fn(auth_file, client)
+                if await _wait_for_credential_change(
+                    auth_file=auth_file,
+                    expected_revision=expected_revision,
+                    timeout_seconds=retry_seconds,
+                    poll_seconds=refresh_settings.revision_poll_seconds,
+                    dependencies=dependencies,
+                ):
+                    retry_count = 0
+                continue
+            except TerminalRevisionRequiredError as exc:
+                retry_count = 0
+                await _wait_until_revision_changes(
+                    auth_file=auth_file,
+                    source_revision=exc.source_revision,
+                    refresh_settings=refresh_settings,
+                    dependencies=dependencies,
                 )
-                expires_at = dependencies.cookie_access_expires_at_fn(refreshed_auth)
-                dependencies.log_event_fn(
-                    dependencies.logger,
-                    logging.INFO,
-                    "enji_auth_auto_refresh_succeeded",
-                    {"access_expires_at": expires_at.isoformat() if expires_at is not None else None},
-                )
-        finally:
-            change_task.cancel()
-            await asyncio.gather(change_task, return_exceptions=True)
-            await changes.aclose()
+                continue
+            retry_count = 0
+
+
+async def _wait_until_revision_changes(
+    *,
+    auth_file: Path,
+    source_revision: str,
+    refresh_settings: AutoRefreshSettingsLike,
+    dependencies: AutoRefreshLoopDependencies,
+) -> None:
+    while not await _wait_for_credential_change(
+        auth_file=auth_file,
+        expected_revision=source_revision,
+        timeout_seconds=refresh_settings.fallback_seconds,
+        poll_seconds=refresh_settings.revision_poll_seconds,
+        dependencies=dependencies,
+    ):
+        pass
 
 
 async def _wait_for_credential_change(
-    change_task: asyncio.Future[None],
-    timeout_seconds: float,
-    sleep_fn: Callable[[float], Awaitable[None]],
-) -> bool:
-    sleep_task = asyncio.ensure_future(sleep_fn(timeout_seconds))
-    try:
-        done, _pending = await asyncio.wait({change_task, sleep_task}, return_when=asyncio.FIRST_COMPLETED)
-        if change_task not in done:
-            sleep_task.result()
-            return False
-        change_task.result()
-        return True
-    finally:
-        if not sleep_task.done():
-            sleep_task.cancel()
-            await asyncio.gather(sleep_task, return_exceptions=True)
-
-
-def _is_resilience_retryable(exc: BaseException) -> bool:
-    return isinstance(exc, Exception)
-
-
-def _auto_refresh_sleep_seconds(
     *,
     auth_file: Path,
-    refresh_settings: AutoRefreshSettingsLike,
-    load_stored_auth_fn: Callable[[Path], StoredAuth | None],
-    cookie_refresh_sleep_seconds_fn: Callable[..., int],
-) -> int:
-    stored_auth = load_stored_auth_fn(auth_file)
-    if stored_auth is None:
-        return refresh_settings.fallback_seconds
-    return cookie_refresh_sleep_seconds_fn(stored_auth, datetime.now(UTC), settings=refresh_settings)
+    expected_revision: str | None,
+    timeout_seconds: float,
+    poll_seconds: float,
+    dependencies: AutoRefreshLoopDependencies,
+) -> bool:
+    """Wait monotonically for a watcher wake-up or a changed durable revision.
+
+    The watcher is purposely disposable: a watcher error is logged and this
+    wait continues by bounded revision polling, which also covers missed
+    bind-mount events.
+    """
+
+    changes = dependencies.credential_changes_fn(auth_file)
+    watcher_task = asyncio.create_task(anext(changes))
+    deadline = dependencies.monotonic_fn() + timeout_seconds
+    try:
+        while True:
+            if dependencies.revision_reader(auth_file) != expected_revision:
+                return True
+            remaining_seconds = deadline - dependencies.monotonic_fn()
+            if remaining_seconds <= 0:
+                return False
+            interval = min(poll_seconds, remaining_seconds)
+            sleep_task = asyncio.ensure_future(dependencies.sleep_fn(interval))
+            waitables: set[asyncio.Task[object]] = {sleep_task}
+            if watcher_task is not None:
+                waitables.add(watcher_task)
+            try:
+                done, _pending = await asyncio.wait(waitables, return_when=asyncio.FIRST_COMPLETED)
+                if watcher_task is not None and watcher_task in done:
+                    if _watcher_changed(watcher_task, dependencies):
+                        return True
+                    watcher_task = None
+                if sleep_task in done:
+                    sleep_task.result()
+            finally:
+                if not sleep_task.done():
+                    sleep_task.cancel()
+                    await asyncio.gather(sleep_task, return_exceptions=True)
+    finally:
+        if watcher_task is not None and not watcher_task.done():
+            watcher_task.cancel()
+            await asyncio.gather(watcher_task, return_exceptions=True)
+        await changes.aclose()
+
+
+def _watcher_changed(watcher_task: asyncio.Task[None], dependencies: AutoRefreshLoopDependencies) -> bool:
+    try:
+        watcher_task.result()
+    except asyncio.CancelledError:
+        raise
+    except (OSError, RuntimeError, StopAsyncIteration, ValueError) as exc:
+        # An external filesystem watcher has no correctness authority.  Its
+        # full exception taxonomy is intentionally contained at this boundary.
+        dependencies.log_event_fn(
+            dependencies.logger,
+            logging.WARNING,
+            "enji_auth_credential_watcher_failed",
+            {"error_type": type(exc).__name__},
+        )
+        return False
+    return True
+
+
+def _pre_dispatch_retry_seconds(
+    settings: AutoRefreshSettingsLike,
+    retry_count: int,
+    random_fn: Callable[[], float],
+) -> float:
+    exponential_seconds = float(settings.pre_dispatch_retry_initial_seconds) * (2.0 ** (retry_count - 1))
+    jitter_seconds = float(settings.pre_dispatch_retry_jitter_seconds) * random_fn()
+    return min(float(settings.pre_dispatch_retry_max_seconds), exponential_seconds + jitter_seconds)
+
+
+def _cookie_auth_or_none(loaded: AuthLoadResult) -> StoredAuth | None:
+    if isinstance(loaded, AuthLoaded) and loaded.auth["credential"]["type"] == "cookie":
+        return loaded.auth
+    return None
+
+
+def _auth_revision(loaded: AuthLoadResult) -> str | None:
+    if isinstance(loaded, AuthLoaded):
+        return loaded.auth["revision"]
+    return None
+
+
+def _log_unscheduled_credential(dependencies: AutoRefreshLoopDependencies, loaded: AuthLoadResult) -> None:
+    """Record a stable typed reason without leaking storage details or secrets."""
+
+    match loaded:
+        case AuthLoaded(auth=auth):
+            fields: dict[str, object] = {"credential_type": auth["credential"]["type"]}
+        case AuthAbsent():
+            fields = {"code": "AUTH_REQUIRED"}
+        case AuthCorrupt():
+            fields = {"code": "AUTH_CORRUPT"}
+        case AuthUnsupported():
+            fields = {"code": "AUTH_UNSUPPORTED"}
+        case AuthIoFailure():
+            fields = {"code": "AUTH_IO_FAILURE"}
+        case AuthClockAnomaly():
+            fields = {"code": "AUTH_CLOCK_ANOMALY"}
+        case _ as impossible:
+            raise AssertionError(f"unexpected auth load result: {type(impossible).__name__}")
+    dependencies.log_event_fn(
+        dependencies.logger,
+        logging.INFO,
+        "enji_auth_auto_refresh_observing_credential",
+        fields,
+    )
 
 
 def start_auto_refresh_task(
     *,
     auth_file: Path,
     refresh_settings: AutoRefreshSettingsLike,
-    credential_cookie_type: str,
     dependencies: AutoRefreshTaskDependencies,
 ) -> asyncio.Task[None] | None:
     if not refresh_settings.enabled:
-        return None
-    stored_auth = dependencies.load_stored_auth_fn(auth_file)
-    if stored_auth is not None and stored_auth["credential"]["type"] != credential_cookie_type:
         return None
     return asyncio.create_task(
         dependencies.auto_refresh_loop_fn(

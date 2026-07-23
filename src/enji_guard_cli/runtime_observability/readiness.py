@@ -1,11 +1,15 @@
 import json
 from dataclasses import asdict, dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
 from enji_guard_cli.atomic_json import write_atomic_json
 from enji_guard_cli.settings import ReadinessSettings, default_settings
+
+# Small allowance for producer/consumer wall-clock skew.  A state farther ahead
+# is not fresh: its age cannot be trusted until the clock anomaly is resolved.
+READINESS_CLOCK_ANOMALY_TOLERANCE = timedelta(seconds=5)
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +21,7 @@ class BackendReadinessProbe:
     failure_status_code: int | None = None
     credential_type: str | None = None
     elapsed_ms: int | None = None
+    bypass_grace: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +35,7 @@ class BackendReadinessState:
     failure_status_code: int | None
     credential_type: str | None
     consecutive_failures: int
+    bypass_grace: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +76,7 @@ def backend_readiness_state_after_probe(
             failure_status_code=None,
             credential_type=probe.credential_type,
             consecutive_failures=0,
+            bypass_grace=False,
         )
     return BackendReadinessState(
         ready=False,
@@ -81,6 +88,7 @@ def backend_readiness_state_after_probe(
         failure_status_code=probe.failure_status_code,
         credential_type=probe.credential_type,
         consecutive_failures=previous.consecutive_failures + 1,
+        bypass_grace=probe.bypass_grace,
     )
 
 
@@ -95,6 +103,7 @@ def backend_readiness_starting_state(*, checked_at: datetime) -> BackendReadines
         failure_status_code=None,
         credential_type=None,
         consecutive_failures=0,
+        bypass_grace=False,
     )
 
 
@@ -138,13 +147,28 @@ def _unavailable_state_verdict(
     if checked_at is None:
         return ReadinessVerdict(ready=False, reason="backend readiness state is invalid", state=state)
     current_time = now if now is not None else datetime.now(UTC)
-    age_seconds = int((current_time.astimezone(UTC) - checked_at).total_seconds())
+    current_time = current_time.astimezone(UTC)
+    reason = _readiness_unavailable_reason(state, settings, checked_at, current_time)
+    return None if reason is None else ReadinessVerdict(ready=False, reason=reason, state=state)
+
+
+def _readiness_unavailable_reason(
+    state: BackendReadinessState,
+    settings: ReadinessSettings,
+    checked_at: datetime,
+    current_time: datetime,
+) -> str | None:
+    if checked_at > current_time + READINESS_CLOCK_ANOMALY_TOLERANCE:
+        return "backend readiness state has a clock anomaly"
+    age_seconds = int((current_time - checked_at).total_seconds())
     if age_seconds > settings.state_stale_after_seconds:
-        return ReadinessVerdict(ready=False, reason="backend readiness state is stale", state=state)
+        return "backend readiness state is stale"
+    if state.bypass_grace:
+        return "backend readiness has a terminal auth failure"
     if state.last_success_at is None:
-        return ReadinessVerdict(ready=False, reason="backend readiness has not succeeded yet", state=state)
+        return "backend readiness has not succeeded yet"
     if state.consecutive_failures >= settings.failure_threshold:
-        return ReadinessVerdict(ready=False, reason="backend readiness failure threshold reached", state=state)
+        return "backend readiness failure threshold reached"
     return None
 
 
@@ -180,6 +204,7 @@ def _backend_readiness_state_from_payload(payload: dict[str, object]) -> Backend
         failure_status_code=_optional_int(payload.get("failure_status_code")),
         credential_type=_optional_str(payload.get("credential_type")),
         consecutive_failures=consecutive_failures,
+        bypass_grace=_optional_bool(payload.get("bypass_grace")),
     )
 
 
@@ -201,3 +226,7 @@ def _optional_str(value: object) -> str | None:
 
 def _optional_int(value: object) -> int | None:
     return value if isinstance(value, int) else None
+
+
+def _optional_bool(value: object) -> bool:
+    return value if isinstance(value, bool) else False
