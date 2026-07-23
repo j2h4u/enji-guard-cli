@@ -61,12 +61,31 @@ from enji_guard_cli.settings import (
 )
 from enji_guard_cli.version import version_text
 
-app = typer.Typer(help="Agent-oriented Enji Guard portfolio and audit CLI.")
+ROOT_HELP = """Agent-oriented Enji Guard portfolio and audit CLI.
+
+Mental model:
+- status REPO: one fresh snapshot for readiness, freshness, and running audits.
+- audit summary REPO: compact metadata for already available reports.
+- audit read REPO AUDIT: read one report body.
+- wait REPO: block until audits finish; do not use short timeouts as refresh.
+
+For "are audits ready?", run status REPO first and stop there unless it shows a
+real anomaly.
+"""
+
+AUDIT_HELP = """Read and run repository audits.
+
+Use status REPO as the first readiness check. audit summary and audit read are
+for available reports. wait is a real blocking wait after status, not a refresh
+mechanism.
+"""
+
+app = typer.Typer(help=ROOT_HELP, invoke_without_command=True)
 auth_app = typer.Typer(help="Manage Enji authentication.")
 project_app = typer.Typer(help="Manage projects and project repositories.")
 repo_app = typer.Typer(help="Manage connected repositories.")
 recon_app = typer.Typer(help="Run baseline repository discovery (separate from audits).")
-audit_app = typer.Typer(help="Read and run repository audits.")
+audit_app = typer.Typer(help=AUDIT_HELP)
 portfolio_app = typer.Typer(help="Read portfolio status.")
 schedule_app = typer.Typer(help="Manage automatic audit schedules.")
 autofix_app = typer.Typer(help="Manage curated improvement jobs.")
@@ -128,6 +147,9 @@ def main(
     auth_file: Annotated[Path | None, typer.Option("--auth-file", hidden=True)] = None,
 ) -> None:
     del version
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit
     _close_cached_application()
     _state["project"] = project
     _state["json"] = json_output
@@ -630,7 +652,7 @@ def audit_summary(
     )
 
 
-@audit_app.command("status")
+@audit_app.command("status", help="Get one fresh repository audit snapshot. This is the first check for readiness.")
 def audit_status(
     repo: str,
     project: Annotated[str | None, typer.Option("--project")] = None,
@@ -643,7 +665,7 @@ def audit_status(
     )
 
 
-@audit_app.command("wait")
+@audit_app.command("wait", help="Block until repository audits finish. Do not use short timeouts as refresh.")
 def audit_wait(
     repo: str,
     project: Annotated[str | None, typer.Option("--project")] = None,
@@ -723,7 +745,7 @@ def run(
     )
 
 
-@app.command("status")
+@app.command("status", help="Show portfolio status, or one repository audit snapshot when REPO is provided.")
 def status(
     repo: Annotated[str | None, typer.Argument()] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
@@ -744,7 +766,7 @@ def status(
     )
 
 
-@app.command("wait")
+@app.command("wait", help="Block until repository audits finish. Do not use short timeouts as refresh.")
 def wait(
     repo: str,
     project: Annotated[str | None, typer.Option("--project")] = None,
