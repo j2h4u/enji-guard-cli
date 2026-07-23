@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.10](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.9...v2.2.10) (2026-07-23)
+
+
+### Fixes
+
+* **auth:** persist only auth cookies ([34144e1](https://github.com/j2h4u/enji-guard-cli/commit/34144e167f937d1b3c091f68a3a502ce9710a011))
+
 ## [2.2.9](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.8...v2.2.9) (2026-07-23)
 
 
