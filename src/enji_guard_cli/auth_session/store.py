@@ -269,6 +269,8 @@ def load_auth(path: Path, *, now: datetime | None = None) -> AuthLoadResult:
         return AuthAbsent()
     except OSError as exc:
         return AuthIoFailure("read credential", exc)
+    except UnicodeDecodeError:
+        return AuthCorrupt("credential file is not valid UTF-8")
     try:
         loaded = cast(object, json.loads(raw_text))
     except json.JSONDecodeError as exc:
@@ -284,6 +286,8 @@ def load_journal(auth_path: Path) -> JournalLoadResult:
         return JournalAbsent()
     except OSError as exc:
         return JournalIoFailure("read refresh journal", exc)
+    except UnicodeDecodeError:
+        return JournalCorrupt("refresh journal file is not valid UTF-8")
     try:
         loaded = cast(object, json.loads(raw_text))
     except json.JSONDecodeError as exc:
@@ -301,6 +305,8 @@ def load_outbox(auth_path: Path) -> OutcomeOutboxLoadResult:
         return OutcomeOutboxAbsent()
     except OSError as exc:
         return OutcomeOutboxIoFailure("read outcome outbox", exc)
+    except UnicodeDecodeError:
+        return OutcomeOutboxCorrupt("outcome outbox file is not valid UTF-8")
     try:
         loaded = cast(object, json.loads(raw_text))
     except json.JSONDecodeError as exc:

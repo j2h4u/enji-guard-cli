@@ -46,6 +46,7 @@ from enji_guard_cli.auth_session.store import (
     JournalLoaded,
     JournalLoadResult,
     OutcomeOutboxAbsent,
+    OutcomeOutboxCorrupt,
     OutcomeOutboxLoaded,
     OutcomeOutboxRecord,
     StoredAuth,
@@ -129,6 +130,38 @@ def test_auth_and_journal_loads_classify_absent_corrupt_unsupported_and_io(
     monkeypatch.setattr(Path, "read_text", fail_read)
     assert isinstance(load_auth(auth_path), AuthIoFailure)
     assert isinstance(load_journal(auth_path), JournalIoFailure)
+
+
+@pytest.mark.parametrize(
+    ("target", "loader", "expected_type", "expected_detail"),
+    [
+        ("auth", load_auth, AuthCorrupt, "credential file is not valid UTF-8"),
+        ("journal", load_journal, JournalCorrupt, "refresh journal file is not valid UTF-8"),
+        ("outbox", load_outbox, OutcomeOutboxCorrupt, "outcome outbox file is not valid UTF-8"),
+    ],
+)
+def test_typed_loaders_classify_invalid_utf8_without_exposing_file_contents(
+    tmp_path: Path,
+    target: str,
+    loader: object,
+    expected_type: type[object],
+    expected_detail: str,
+) -> None:
+    auth_path = tmp_path / "PATH_SENTINEL" / "auth.json"
+    path = {
+        "auth": auth_path,
+        "journal": pending_rotation_path(auth_path),
+        "outbox": pending_outcome_path(auth_path),
+    }[target]
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"\xffSECRET_BYTES_SENTINEL")
+
+    loaded = loader(auth_path)  # type: ignore[operator]
+
+    assert isinstance(loaded, expected_type)
+    assert loaded.detail == expected_detail  # type: ignore[union-attr]
+    assert "SECRET_BYTES_SENTINEL" not in loaded.detail  # type: ignore[union-attr]
+    assert "PATH_SENTINEL" not in loaded.detail  # type: ignore[union-attr]
 
 
 @pytest.mark.parametrize(
