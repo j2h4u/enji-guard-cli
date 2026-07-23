@@ -29,6 +29,7 @@ from enji_guard_cli.audit.email import EmailPreferencesUpdate
 from enji_guard_cli.audit.email import list_for_targets as list_email_for_targets
 from enji_guard_cli.audit.email import set_for_targets as set_email_for_targets
 from enji_guard_cli.audit.errors import AuditMalformedError, AuditNotFoundError, AuditUpstreamError
+from enji_guard_cli.audit.lifecycle import is_active_run
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.observation import AuditRepositoryObserver
 from enji_guard_cli.audit.ports import (
@@ -264,14 +265,14 @@ class Application:
     ) -> tuple[AuditStatus, tuple[AuditRun, ...]]:
         definitions = catalog if catalog is not None else self.audit_catalog()
         observation = self._audit_repository_observer().observe(repo_id)
-        active_runs = observation.active_runs
+        projected_runs = observation.active_runs
         return build_status(
             repo_id,
             definitions,
             observation.task_links,
-            active_runs,
+            projected_runs,
             observation.rerun_state,
-        ), active_runs
+        ), tuple(run for run in projected_runs if is_active_run(run))
 
     def audit_start(
         self, repo: str, project: str | None = None, selectors: list[str] | None = None, *, all_audits: bool = False
