@@ -102,7 +102,7 @@ def _start_one_audit[TCreateRequest](
     action_key = audit.action_key
     current_sha = state.rerun_state.current_head_sha
     last_sha = state.rerun_state.audited_head_shas.get(action_key)
-    matching = active_runs_for_action(state.active_runs, action_key)
+    matching = _current_head_active_runs(active_runs_for_action(state.active_runs, action_key), current_sha)
     if matching:
         representative = representative_projection(matching)
         task_id, task_status = _active_run_task(representative)
@@ -144,6 +144,12 @@ def _start_one_audit[TCreateRequest](
 
 def out_of_date(current: str | None, audited: str | None) -> bool | None:
     return None if current is None or audited is None else current != audited
+
+
+def _current_head_active_runs(active_runs: tuple[AuditRun, ...], current_sha: str | None) -> tuple[AuditRun, ...]:
+    if current_sha is None:
+        return active_runs
+    return tuple(run for run in active_runs if run.current_head_sha in {None, current_sha})
 
 
 def skipped_audit_payload(audit: str, action_key: str, active_runs: tuple[AuditRun, ...]) -> AuditRunSkippedPayload:
