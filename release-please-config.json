@@ -24,29 +24,32 @@
           "section": "Reverts"
         },
         {
+          "type": "build",
+          "section": "Build"
+        },
+        {
           "type": "chore",
-          "section": "Maintenance",
-          "hidden": true
+          "section": "Maintenance"
         },
         {
           "type": "ci",
-          "section": "CI",
-          "hidden": true
+          "section": "CI"
         },
         {
           "type": "docs",
-          "section": "Documentation",
-          "hidden": true
+          "section": "Documentation"
         },
         {
           "type": "refactor",
-          "section": "Refactoring",
-          "hidden": true
+          "section": "Refactoring"
+        },
+        {
+          "type": "style",
+          "section": "Style"
         },
         {
           "type": "test",
-          "section": "Tests",
-          "hidden": true
+          "section": "Tests"
         }
       ]
     }
