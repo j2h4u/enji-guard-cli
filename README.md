@@ -443,8 +443,10 @@ just docker-up
 The current FastMCP streamable-HTTP default endpoint is:
 
 ```text
-http://127.0.0.1:8001/mcp
+http://127.0.0.1:18080/mcp
 ```
+
+Override the published loopback port with `ENJI_GUARD_MCP_HOST_PORT`.
 
 The Docker service starts a background cookie refresh loop. Keep
 `~/.config/enji-guard` writable by the container user.

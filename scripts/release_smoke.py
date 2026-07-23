@@ -32,7 +32,7 @@ class DockerSmokeSettings:
     repo: str
     project: str | None = None
     container: str = "enji-guard-cli"
-    mcp_url: str = "http://127.0.0.1:8001/mcp"
+    mcp_url: str = "http://127.0.0.1:18080/mcp"
     timeout_seconds: float = 15.0
     recreate: bool = False
     auth_persistence: bool = False
@@ -475,7 +475,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--project", help="Exact project selector.")
     parser.add_argument("--container", default="enji-guard-cli")
-    parser.add_argument("--mcp-url", default="http://127.0.0.1:8001/mcp")
+    parser.add_argument("--mcp-url", default="http://127.0.0.1:18080/mcp")
     parser.add_argument("--timeout", type=float, default=15.0)
     parser.add_argument("--compose-file", default="docker-compose.yml")
     parser.add_argument("--recreate", action="store_true")
