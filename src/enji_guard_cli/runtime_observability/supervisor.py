@@ -263,9 +263,7 @@ async def _backend_readiness_loop(
             except (OSError, RuntimeError, ValueError) as exc:
                 state = _state_after_crash(settings, state, exc)
             try:
-                credential_changed = await _wait_for_readiness_trigger(
-                    change_task, settings.heartbeat_interval_seconds
-                )
+                credential_changed = await _wait_for_readiness_trigger(change_task, settings.heartbeat_interval_seconds)
             except Exception as exc:  # noqa: BLE001 - the watcher must not stop service siblings.
                 _log_credential_watcher_failure(exc)
                 await _close_credential_watcher(change_task, credential_changes)
@@ -290,9 +288,7 @@ def _start_credential_watcher(
         return None, None
 
 
-async def _wait_for_readiness_trigger(
-    change_task: asyncio.Task[None] | None, interval_seconds: int
-) -> bool:
+async def _wait_for_readiness_trigger(change_task: asyncio.Task[None] | None, interval_seconds: int) -> bool:
     if change_task is None:
         await asyncio.sleep(interval_seconds)
         return False
