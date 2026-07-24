@@ -217,8 +217,28 @@ jobs:
     needs: [pr-title, changes, quality, test, crap, docker-build]
     steps:
       - name: Check required jobs
+        env:
+          # pr-title is the only job that is skipped by design (push events).
+          PR_TITLE_RESULT: ${{ needs.pr-title.result }}
+          REQUIRED_RESULTS: >-
+            changes:${{ needs.changes.result }}
+            quality:${{ needs.quality.result }}
+            test:${{ needs.test.result }}
+            crap:${{ needs.crap.result }}
+            docker-build:${{ needs.docker-build.result }}
         run: |
-          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] || \
-             [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
-            exit 1
-          fi
+          status=0
+          for entry in ${REQUIRED_RESULTS}; do
+            if [ "${entry#*:}" != "success" ]; then
+              echo "::error::job ${entry%%:*} concluded ${entry#*:}"
+              status=1
+            fi
+          done
+          case "${PR_TITLE_RESULT}" in
+            success | skipped) ;;
+            *)
+              echo "::error::job pr-title concluded ${PR_TITLE_RESULT}"
+              status=1
+              ;;
+          esac
+          exit "${status}"
