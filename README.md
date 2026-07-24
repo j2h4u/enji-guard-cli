@@ -420,6 +420,33 @@ docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --
 
 Pass `--json` when a command output is consumed by automation.
 
+### Exit Codes
+
+The exit status is a stable contract; automation should branch on it instead of
+parsing text.
+
+| Code | Meaning | Typical error code |
+|------|---------|--------------------|
+| `0` | Success. | — |
+| `1` | Operator or upstream failure that is not authentication or a missing target. | `VALIDATION`, `CONFIRMATION_REQUIRED`, `ABORTED`, `UPSTREAM`, `STORAGE`, `UNREADY` |
+| `2` | Command-line usage error, raised by the parser before anything runs. | — |
+| `3` | Credentials are missing, expired, corrupt, or unusable. | `AUTH_*` |
+| `4` | The named repository, project, audit, or selector does not exist. | `NOT_FOUND`, `BAD_SELECTOR` |
+
+Errors always go to stderr. Without `--json` they are one `CODE: message` line;
+with `--json` they are a `{"code", "message"}` object, so stdout stays either
+valid JSON or empty:
+
+```console
+$ enji-guard --json status github@github.com:j2h4u/enji-guard-cli
+{
+  "code": "AUTH_REQUIRED",
+  "message": "auth file does not exist. Credential file: ~/.config/enji-guard/auth.json. ..."
+}
+$ echo $?
+3
+```
+
 Use the global `--project NAME_OR_ID` filter when a command must be scoped to
 one Enji project.
 `repo move` uses global `--project` as source project or selector
