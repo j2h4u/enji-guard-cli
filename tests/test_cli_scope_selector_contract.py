@@ -130,7 +130,7 @@ def test_batch_commands_document_their_repo_option(group: str, command: str) -> 
     group_command = root.commands[group]
     assert isinstance(group_command, TyperGroup)
     params = {option: param for param in group_command.commands[command].params for option in param.opts}
-    assert params["--repo"].help
+    assert getattr(params["--repo"], "help", None)
 
 
 @pytest.mark.parametrize("command", [["status"], ["audit", "start"], ["audit", "status"], ["recon", "start"]])

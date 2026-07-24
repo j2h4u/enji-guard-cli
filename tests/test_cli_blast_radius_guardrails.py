@@ -3,6 +3,7 @@
 import importlib
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from enji_guard_cli.application import ApplicationResult, AutofixWriteScope
@@ -54,9 +55,7 @@ def application(monkeypatch: pytest.MonkeyPatch) -> _RecordingApplication:
 
 
 @pytest.mark.parametrize("command", BATCH_WRITES)
-def test_all_projects_without_confirmation_is_refused(
-    application: _RecordingApplication, command: list[str]
-) -> None:
+def test_all_projects_without_confirmation_is_refused(application: _RecordingApplication, command: list[str]) -> None:
     result = CliRunner().invoke(app, [*command, "--all-projects"])
 
     assert result.exit_code == 1
@@ -93,7 +92,7 @@ def test_interactive_operator_is_prompted_and_can_decline(
     application: _RecordingApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(cli_module, "_is_interactive", lambda: True)
-    monkeypatch.setattr(cli_module.typer, "confirm", lambda _message: False)
+    monkeypatch.setattr(typer, "confirm", lambda _message: False)
 
     result = CliRunner().invoke(app, ["email", "set", "--manual", "on", "--all-projects"])
 
@@ -102,11 +101,9 @@ def test_interactive_operator_is_prompted_and_can_decline(
     assert application.scopes == []
 
 
-def test_interactive_operator_can_accept(
-    application: _RecordingApplication, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_interactive_operator_can_accept(application: _RecordingApplication, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli_module, "_is_interactive", lambda: True)
-    monkeypatch.setattr(cli_module.typer, "confirm", lambda _message: True)
+    monkeypatch.setattr(typer, "confirm", lambda _message: True)
 
     result = CliRunner().invoke(app, ["email", "set", "--manual", "on", "--all-projects"])
 
