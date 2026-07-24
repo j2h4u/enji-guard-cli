@@ -28,7 +28,10 @@ packages = ["src/enji_guard_cli"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "--strict-config --strict-markers -W error"
+addopts = "--strict-config --strict-markers -W error -m 'not docker'"
+markers = [
+    "docker: packaging-policy tests that shell out to `docker compose`; excluded by default, run via `just docker-tests`",
+]
 tmp_path_retention_policy = "failed"
 tmp_path_retention_count = 1
 xfail_strict = true

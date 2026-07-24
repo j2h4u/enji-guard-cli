@@ -68,9 +68,13 @@ fix:
 # Static quality gate.
 check: fmt-check lint preview-complexity-lint print-lint typecheck typecheck-tests import-contracts actionlint openapi-contract compile dead-code dependency-lint
 
-# Unit tests.
+# Unit tests.  Docker-marked packaging tests are excluded by default addopts.
 unit:
     uv run pytest -q -n auto
+
+# Packaging-policy tests that need a reachable Docker daemon.
+docker-tests:
+    uv run pytest -q -m docker
 
 # Test coverage report.
 coverage:
@@ -122,7 +126,7 @@ dev-reload:
     docker compose -f docker-compose.yml -f docker-compose.dev.yml restart enji-guard-cli
 
 # Full local gate for agents before claiming completion.
-verify: check crap-check unit docker-build
+verify: check crap-check unit docker-tests docker-build
 
 # Show release, release PR, workflow, and published image status.
 release-status:
