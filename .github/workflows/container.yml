@@ -182,7 +182,7 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
-          image-ref: ${{ env.IMAGE_NAME }}:latest
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ steps.release-metadata.outputs.source-sha }}
           scanners: vuln
           severity: MEDIUM,HIGH,CRITICAL
           exit-code: "1"
