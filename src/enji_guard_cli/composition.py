@@ -1,5 +1,7 @@
 """Dependency wiring for product delivery surfaces."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from enji_guard_cli.application import Application
@@ -55,9 +57,18 @@ def create_application(auth_file: Path | None = None) -> Application:
         raise
 
 
-def create_mcp_query_facade(auth_file: Path | None = None) -> McpQueryFacade:
-    """Build the curated read-only MCP query surface."""
-    return McpQueryFacade(create_application(auth_file))
+@contextmanager
+def mcp_query_facade(auth_file: Path | None = None) -> Iterator[McpQueryFacade]:
+    """Own the curated read-only MCP query surface for the caller's scope.
+
+    The facade is narrow by design, so the application underneath it has no
+    other handle; binding it to a scope keeps its pooled client closeable.
+    """
+    application = create_application(auth_file)
+    try:
+        yield McpQueryFacade(application)
+    finally:
+        application.close()
 
 
-__all__ = ["create_application", "create_mcp_query_facade"]
+__all__ = ["create_application", "mcp_query_facade"]
