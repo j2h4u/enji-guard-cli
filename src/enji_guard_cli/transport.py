@@ -179,12 +179,24 @@ class HttpxEnjiHttpClient:
     async def __aexit__(self, *_: object) -> None:
         await asyncio.to_thread(self.close)
 
+    @property
+    def is_closed(self) -> bool:
+        """Whether the underlying connection pool has been released."""
+        return self._client.is_closed
+
     def close(self) -> None:
         """Release the connection pool; safe to call repeatedly."""
         if self._owned_client:
             self._client.close()
 
     async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+        # ``asyncio.to_thread`` is not cancellable.  Cancelling the awaiting task
+        # raises CancelledError here promptly (so caller-side cancellation
+        # bookkeeping still runs), but the socket keeps running in the executor
+        # thread until ``request.timeout_seconds`` elapses.  Because
+        # ``asyncio.run`` waits on its default executor during shutdown, a
+        # supervisor shutdown can be delayed by at most one request timeout.
+        # That is the accepted price for deleting the owner-loop bridge.
         return await asyncio.to_thread(self.request_blocking, request)
 
     def request_blocking(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
