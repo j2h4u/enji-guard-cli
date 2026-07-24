@@ -37,7 +37,8 @@ from enji_guard_cli.enji_gateway.http import (
 )
 from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse
 
-CONTRACT_PATH = Path("contracts/enji-openapi.json")
+ROOT = Path(__file__).resolve().parents[1]
+CONTRACT_PATH = ROOT / "contracts" / "enji-openapi.json"
 HTTP_METHODS = frozenset({"get", "put", "post", "patch", "delete", "head", "options", "trace"})
 AUTH_PORT = GatewayCredentialReader()
 
