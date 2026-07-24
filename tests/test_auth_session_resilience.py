@@ -96,7 +96,7 @@ def test_retryable_profiles_retry_5xx_and_rate_limit_responses(
             jitter_seconds=0,
             respect_retry_after_header=True,
         )
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as raw_client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as raw_client:
             client = HttpxEnjiHttpClient(raw_client, retry_config=config)
             response = await client.request(
                 EnjiHttpRequest(
@@ -124,7 +124,7 @@ def test_non_replayable_profiles_do_not_auto_retry_status_responses(profile: Ret
 
     async def run() -> None:
         config = RetryConfig(total=3, backoff_factor=0, jitter_seconds=0)
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as raw_client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as raw_client:
             response = await HttpxEnjiHttpClient(raw_client, retry_config=config).request(
                 EnjiHttpRequest(
                     method="POST",
