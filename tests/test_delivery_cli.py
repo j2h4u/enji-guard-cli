@@ -97,7 +97,7 @@ def test_audit_read_and_summary_are_public_commands() -> None:
     assert isinstance(root, TyperGroup)
     audit = root.commands["audit"]
     assert isinstance(audit, TyperGroup)
-    assert set(audit.commands) >= {"read", "summary", "start", "wait"}
+    assert set(audit.commands) >= {"read", "summary", "start"}
     runner = CliRunner()
     # Keep invocation as a reachability smoke check; command membership is the contract.
     assert runner.invoke(app, ["audit", "read", "--help"]).exit_code == 0
@@ -329,8 +329,6 @@ def test_project_settings_and_access_use_typed_application_methods(monkeypatch: 
     "arguments",
     [
         ["--project", "Pets", "status", "--sort", "weakest", "--json"],
-        ["--project", "Pets", "portfolio", "status", "--sort", "weakest", "--json"],
-        ["--project", "Pets", "repo", "list", "--sort", "weakest", "--json"],
     ],
 )
 def test_portfolio_commands_use_compact_overview(monkeypatch: pytest.MonkeyPatch, arguments: list[str]) -> None:

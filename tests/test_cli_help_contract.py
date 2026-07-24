@@ -36,7 +36,7 @@ def test_health_help_points_probes_at_the_ready_mode() -> None:
     assert "healthchecks" in rendered
 
 
-@pytest.mark.parametrize("path", [["status"], ["portfolio", "status"], ["repo", "list"]])
+@pytest.mark.parametrize("path", [["status"]])
 def test_sort_help_lists_every_legal_value(path: list[str]) -> None:
     result = CliRunner().invoke(app, [*path, "--help"])
 

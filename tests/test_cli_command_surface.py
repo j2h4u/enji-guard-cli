@@ -38,13 +38,28 @@ def test_every_command_is_documented(command: tuple[str, ...]) -> None:
         assert part in documented, f"{' '.join(command)} is missing from the README command surface"
 
 
-@pytest.mark.parametrize("command", [["repo", "status"], ["recon", "status"]])
-def test_removed_duplicate_snapshot_commands_stay_removed(command: list[str]) -> None:
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["repo", "status"],
+        ["recon", "status"],
+        ["audit", "status"],
+        ["audit", "wait"],
+        ["portfolio", "status"],
+        ["repo", "list"],
+    ],
+)
+def test_removed_duplicate_commands_stay_removed(command: list[str]) -> None:
     assert tuple(command) not in _surface()
     assert CliRunner().invoke(app, [*command, "github@github.com:owner/name"]).exit_code == 2
 
 
-def test_single_snapshot_command_outside_the_audit_group() -> None:
+def test_exactly_one_repository_snapshot_command() -> None:
+    """``status`` is the only snapshot; ``auth status`` reports credentials, not audits."""
     snapshots = [command for command in _surface() if command[-1] == "status"]
 
-    assert sorted(snapshots) == [("audit", "status"), ("auth", "status"), ("portfolio", "status"), ("status",)]
+    assert sorted(snapshots) == [("auth", "status"), ("status",)]
+
+
+def test_exactly_one_blocking_wait_command() -> None:
+    assert [command for command in _surface() if command[-1] == "wait"] == [("wait",)]

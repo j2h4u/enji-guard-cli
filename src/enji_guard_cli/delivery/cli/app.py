@@ -88,7 +88,6 @@ project_app = typer.Typer(help="Manage projects and project repositories.")
 repo_app = typer.Typer(help="Manage connected repositories.")
 recon_app = typer.Typer(help="Run baseline repository discovery (separate from audits).")
 audit_app = typer.Typer(help=AUDIT_HELP)
-portfolio_app = typer.Typer(help="Read portfolio status.")
 schedule_app = typer.Typer(help="Manage automatic audit schedules.")
 autofix_app = typer.Typer(help="Manage curated improvement jobs.")
 email_app = typer.Typer(help="Manage audit completion email preferences.")
@@ -101,7 +100,6 @@ for group, name in (
     (repo_app, "repo"),
     (recon_app, "recon"),
     (audit_app, "audit"),
-    (portfolio_app, "portfolio"),
     (schedule_app, "schedule"),
     (autofix_app, "improvement-jobs"),
     (email_app, "email"),
@@ -182,7 +180,6 @@ for _group_name, _group in (
     ("repo", repo_app),
     ("recon", recon_app),
     ("audit", audit_app),
-    ("portfolio", portfolio_app),
     ("schedule", schedule_app),
     ("improvement-jobs", autofix_app),
     ("email", email_app),
@@ -576,18 +573,6 @@ def project_settings(
     )
 
 
-@repo_app.command("list")
-def repo_list(
-    sort: Annotated[str, typer.Option("--sort", help=SORT_HELP)] = "default",
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().portfolio_overview(_selected_project(), _repository_sort(sort)),
-        _json_output(json_output),
-        PORTFOLIO,
-    )
-
-
 @repo_app.command("resolve")
 def repo_resolve(
     repo: str,
@@ -732,47 +717,6 @@ def audit_summary(
     )
 
 
-@audit_app.command("status", help="Get one fresh repository audit snapshot. This is the first check for readiness.")
-def audit_status(
-    repo: str,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().repository_status(repo, _selected_project(project)),
-        _json_output(json_output),
-        REPOSITORY_STATUS,
-    )
-
-
-@audit_app.command("wait", help="Block until repository audits finish. Do not use short timeouts as refresh.")
-def audit_wait(
-    repo: str,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    timeout: Annotated[str, typer.Option("--timeout")] = default_settings().audit_wait.timeout_text,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().audit_wait(
-            repo, project=_selected_project(project), timeout_seconds=_parse_duration(timeout)
-        ),
-        _json_output(json_output),
-        AUDIT_WAIT,
-    )
-
-
-@portfolio_app.command("status")
-def portfolio_status(
-    sort: Annotated[str, typer.Option("--sort", help=SORT_HELP)] = "default",
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().portfolio_overview(_selected_project(), _repository_sort(sort)),
-        _json_output(json_output),
-        PORTFOLIO,
-    )
-
-
 @app.command(
     "health",
     help=(
@@ -861,7 +805,13 @@ def wait(
     timeout: Annotated[str, typer.Option("--timeout")] = default_settings().audit_wait.timeout_text,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    audit_wait(repo, project, timeout, json_output)
+    _run(
+        lambda: _application().audit_wait(
+            repo, project=_selected_project(project), timeout_seconds=_parse_duration(timeout)
+        ),
+        _json_output(json_output),
+        AUDIT_WAIT,
+    )
 
 
 @schedule_app.command("list")

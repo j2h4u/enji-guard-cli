@@ -14,12 +14,12 @@ def test_full_operator_tree_and_report_break() -> None:
     assert "report" not in commands
 
 
-def test_audit_help_exposes_read_summary_start_wait() -> None:
+def test_audit_help_exposes_read_summary_start() -> None:
     root = get_command(app)
     assert isinstance(root, TyperGroup)
     audit = root.commands["audit"]
     assert isinstance(audit, TyperGroup)
-    assert set(audit.commands) >= {"read", "summary", "start", "wait"}
+    assert set(audit.commands) >= {"read", "summary", "start"}
     runner = CliRunner()
     # Reachability only; command membership above is the stable contract.
     assert runner.invoke(app, ["audit", "--help"]).exit_code == 0

@@ -199,11 +199,10 @@ For triage across all visible repositories:
 
 ```bash
 docker exec -i enji-guard-cli enji-guard status --sort weakest
-docker exec -i enji-guard-cli enji-guard repo list --sort latest-audit
 ```
 
-These portfolio-wide commands return the compact overview: project and
-repository identity, scores, recon/connection state, and active runs. They do
+`status` without a `REPO` returns the compact portfolio overview: project and
+repository identity, scores, recon/connection state, and active runs. It does
 not fetch every audit status for every repository. Use `status REPO` for the
 detailed status of one repository, `audit summary REPO` for compact audit
 triage, and `audit read REPO` for audit findings. Add `--json` only when the
@@ -438,19 +437,20 @@ options.
 | `run` | Run the long-lived MCP service (used by the container entrypoint). |
 | `auth import-bearer\|import-cookie --stdin`, `auth status` | Credential bootstrap and credential state. |
 | `project list\|create\|rename\|delete\|settings` | Project administration; `delete` requires `--yes`. |
-| `repo add\|remove\|move\|resolve\|list` | Repository administration; `repo list` is the portfolio table. |
+| `repo add\|remove\|move\|resolve` | Repository administration; `remove` requires `--yes`. |
 | `recon start REPO` | Baseline discovery run. |
 | `audit start\|read\|summary REPO` | Run audits, read bodies, read compact metadata. |
-| `audit status REPO`, `audit wait REPO` | Audit-group entry points for the snapshot and the blocking wait. |
-| `portfolio status` | Portfolio table, same output as `repo list`. |
 | `schedule list\|set\|auto-time\|timezone` | Automatic audit schedules. |
 | `improvement-jobs list\|set` | Curated autofix jobs. |
 | `email list\|set` | Audit completion email preferences. |
 | `language show\|set` | Account-wide audit language. |
 | `gitlab credentials\|projects` | GitLab credential and project discovery. |
 
-`status REPO` is the canonical single-repository snapshot. There is exactly one
-snapshot command outside the `audit` group; `repo` and `recon` do not repeat it.
+Each capability has exactly one command. `status` is the only snapshot — with
+`REPO` for one repository, without it for the portfolio table — and `wait` is
+the only blocking wait. The `audit`, `repo`, and `recon` groups do not repeat
+either of them, and there is no `portfolio` group; `auth status` reports
+credential state, which is a different subject.
 
 ### Exit Codes
 
