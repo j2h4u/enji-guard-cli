@@ -604,6 +604,14 @@ def _audit_selectors(audits: list[str] | None) -> list[str]:
     return [item.removeprefix("audit.") for item in (audits or [])]
 
 
+def _explicit_audit_selectors(audits: list[str] | None, *, all_audits: bool, as_json: bool) -> list[str]:
+    """Reject a selector list combined with --all instead of letting --all win."""
+    selectors = _audit_selectors(audits)
+    if all_audits and selectors:
+        raise _fail("VALIDATION", "pass audit selectors or --all, not both", as_json=as_json)
+    return selectors
+
+
 @audit_app.command("start")
 def audit_start(
     repo: str,
@@ -612,11 +620,12 @@ def audit_start(
     all_audits: Annotated[bool, typer.Option("--all", help="Start every published audit.")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    selectors = _explicit_audit_selectors(audits, all_audits=all_audits, as_json=_json_output(json_output))
     _run(
         lambda: _application().audit_start(
             repo,
             _selected_project(project),
-            _audit_selectors(audits),
+            selectors,
             all_audits=all_audits,
         ),
         _json_output(json_output),
@@ -629,13 +638,14 @@ def audit_read(
     repo: str,
     audits: Annotated[list[str] | None, typer.Argument(help="Audit selector suffixes.")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
-    all_audits: Annotated[bool, typer.Option("--all")] = False,
+    all_audits: Annotated[bool, typer.Option("--all", help="Read every published audit.")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    selectors = _explicit_audit_selectors(audits, all_audits=all_audits, as_json=_json_output(json_output))
     _run(
         lambda: _application().audit_read(
             repo,
-            _audit_selectors(audits),
+            selectors,
             project=_selected_project(project),
             all_audits=all_audits,
         ),
@@ -647,17 +657,15 @@ def audit_read(
 @audit_app.command("summary")
 def audit_summary(
     repo: str,
-    audits: Annotated[list[str] | None, typer.Argument(help="Optional audit selector suffixes.")] = None,
+    audits: Annotated[
+        list[str] | None,
+        typer.Argument(help="Optional audit selector suffixes; omit to summarize every published audit."),
+    ] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
-    all_audits: Annotated[bool, typer.Option("--all")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    selectors = _audit_selectors(audits)
-    if all_audits and selectors:
-        raise _fail("VALIDATION", "pass audit selectors or --all, not both", as_json=_json_output(json_output))
-    selected = [] if all_audits else selectors
     _run(
-        lambda: _application().audit_summary(repo, selected, project=_selected_project(project)),
+        lambda: _application().audit_summary(repo, _audit_selectors(audits), project=_selected_project(project)),
         _json_output(json_output),
         AUDIT_SUMMARY,
     )
