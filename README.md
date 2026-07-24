@@ -38,6 +38,10 @@ it runs: an interactive terminal is prompted, and every non-interactive caller
 (agents, MCP, CI, and any `--json` invocation, which never prompts) must pass
 `--yes`. Without it the command exits `1` with `CONFIRMATION_REQUIRED` and
 changes nothing.
+The two irreversible single-target deletions, `project delete` and `repo
+remove`, are confirmed the same way and with the same `--yes` flag: a project
+cannot be un-deleted, and a detached repository loses its accumulated audit
+history, so neither is recoverable by re-running an inverse command.
 Mutating commands are designed for agent retries: repeated calls should report
 `unchanged`, `already_present`, `already_running`, or equivalent state instead
 of duplicating upstream work.
@@ -395,12 +399,12 @@ docker exec -i enji-guard-cli enji-guard access
 docker exec -i enji-guard-cli enji-guard project list
 docker exec -i enji-guard-cli enji-guard project create Pets
 docker exec -i enji-guard-cli enji-guard project rename Pets Friends
-docker exec -i enji-guard-cli enji-guard project delete Pets
+docker exec -i enji-guard-cli enji-guard project delete Pets --yes
 docker exec -i enji-guard-cli enji-guard language show
 docker exec -i enji-guard-cli enji-guard language set ru
 docker exec -i enji-guard-cli enji-guard repo add github@github.com:j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard repo add gitlab@gitlab.example:group/subgroup/service --repo-access-credential-id "$ENJI_GITLAB_CREDENTIAL_ID"
-docker exec -i enji-guard-cli enji-guard repo remove github@github.com:j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard repo remove github@github.com:j2h4u/enji-guard-cli --yes
 docker exec -i enji-guard-cli enji-guard repo resolve github@github.com:j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard repo move github@github.com:j2h4u/enji-guard-cli --to-project Friends
 docker exec -i enji-guard-cli enji-guard status github@github.com:j2h4u/enji-guard-cli
@@ -433,7 +437,7 @@ options.
 | `access` | Account plan and limits. |
 | `run` | Run the long-lived MCP service (used by the container entrypoint). |
 | `auth import-bearer\|import-cookie --stdin`, `auth status` | Credential bootstrap and credential state. |
-| `project list\|create\|rename\|delete\|settings` | Project administration. |
+| `project list\|create\|rename\|delete\|settings` | Project administration; `delete` requires `--yes`. |
 | `repo add\|remove\|move\|resolve\|list` | Repository administration; `repo list` is the portfolio table. |
 | `recon start REPO` | Baseline discovery run. |
 | `audit start\|read\|summary REPO` | Run audits, read bodies, read compact metadata. |

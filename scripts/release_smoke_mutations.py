@@ -98,7 +98,7 @@ def _run_mutation_body(settings: DockerSmokeSettings, name: str, reporter: Repor
 def _cleanup_project(settings: DockerSmokeSettings, name: str, reporter: Reporter) -> str | None:
     cleanup_error: str | None = None
     try:
-        deleted = _project_mutation(settings, ("project", "delete", name, "--json"), "project cleanup delete")
+        deleted = _project_mutation(settings, ("project", "delete", name, "--yes", "--json"), "project cleanup delete")
         if deleted.get("state") != "deleted":
             raise SmokeFailure("project cleanup delete did not report deleted")
         reporter.pass_("project cleanup delete")
@@ -106,7 +106,7 @@ def _cleanup_project(settings: DockerSmokeSettings, name: str, reporter: Reporte
         cleanup_error = str(exc) or "command failed"
         reporter.fail("project cleanup", cleanup_error)
     try:
-        repeated = _project_mutation(settings, ("project", "delete", name, "--json"), "repeat cleanup delete")
+        repeated = _project_mutation(settings, ("project", "delete", name, "--yes", "--json"), "repeat cleanup delete")
         if repeated.get("state") != "already_absent":
             raise SmokeFailure("repeat cleanup delete did not report already_absent")
         reporter.pass_("project cleanup repeat (idempotent)")

@@ -392,6 +392,25 @@ def _is_interactive() -> bool:
     return sys.stdin.isatty()
 
 
+CONFIRM_HELP = "Confirm this irreversible deletion without prompting; required when not a TTY."
+
+
+def _confirm_deletion(warning: str, *, as_json: bool, assume_yes: bool) -> None:
+    """Gate an irreversible single-target deletion behind the ``--yes`` contract.
+
+    Same rule as the ``--all-projects`` blast radius: a human on a TTY is asked,
+    while agents, MCP, CI, and any ``--json`` caller are never prompted and must
+    pass ``--yes``, so a non-interactive run fails fast instead of hanging on a
+    prompt nobody can answer.
+    """
+    if assume_yes:
+        return
+    if as_json or not _is_interactive():
+        raise _fail("CONFIRMATION_REQUIRED", f"{warning}; re-run with --yes to confirm", as_json=as_json)
+    if not typer.confirm(f"{warning}. Continue?"):
+        raise _fail("ABORTED", "no change was made", as_json=as_json)
+
+
 REPO_SCOPE_HELP = "Write to one repository; mutually exclusive with --all-repos and --all-projects."
 
 REPO_FILTER_HELP = "Read one repository; omit to read every repository in scope."
@@ -532,7 +551,16 @@ def project_rename(project: str, name: str, json_output: Annotated[bool, typer.O
 
 
 @project_app.command("delete")
-def project_delete(project: str, json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
+def project_delete(
+    project: str,
+    yes: Annotated[bool, typer.Option("--yes", help=CONFIRM_HELP)] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    _confirm_deletion(
+        f"project {project} is deleted permanently and cannot be restored",
+        as_json=_json_output(json_output),
+        assume_yes=yes,
+    )
     _run(lambda: _application().delete_project(project), _json_output(json_output), FIELDS_PRESENTATION)
 
 
@@ -591,8 +619,14 @@ def repo_add(
 def repo_remove(
     repo: str,
     project: Annotated[str | None, typer.Option("--project")] = None,
+    yes: Annotated[bool, typer.Option("--yes", help=CONFIRM_HELP)] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    _confirm_deletion(
+        f"{repo} is detached and its accumulated audit history stops being reachable",
+        as_json=_json_output(json_output),
+        assume_yes=yes,
+    )
     _run(
         lambda: _application().remove_repository(repo, _selected_project(project)),
         _json_output(json_output),

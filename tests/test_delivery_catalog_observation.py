@@ -88,7 +88,7 @@ def test_application_keeps_catalog_observation_isolated_per_execution() -> None:
     ("args", "operation"),
     [
         (("audit", "status", "repo-1"), "cli audit status"),
-        (("repo", "remove", "repo-1"), "cli repo remove"),
+        (("repo", "remove", "repo-1", "--yes"), "cli repo remove"),
         (("repo", "move", "repo-1", "--to-project", "project-2"), "cli repo move"),
         (("repo", "resolve", "repo-1"), "cli repo resolve"),
         (("portfolio", "status"), "cli portfolio status"),
