@@ -88,7 +88,6 @@ project_app = typer.Typer(help="Manage projects and project repositories.")
 repo_app = typer.Typer(help="Manage connected repositories.")
 recon_app = typer.Typer(help="Run baseline repository discovery (separate from audits).")
 audit_app = typer.Typer(help=AUDIT_HELP)
-portfolio_app = typer.Typer(help="Read portfolio status.")
 schedule_app = typer.Typer(help="Manage automatic audit schedules.")
 autofix_app = typer.Typer(help="Manage curated improvement jobs.")
 email_app = typer.Typer(help="Manage audit completion email preferences.")
@@ -101,7 +100,6 @@ for group, name in (
     (repo_app, "repo"),
     (recon_app, "recon"),
     (audit_app, "audit"),
-    (portfolio_app, "portfolio"),
     (schedule_app, "schedule"),
     (autofix_app, "improvement-jobs"),
     (email_app, "email"),
@@ -182,7 +180,6 @@ for _group_name, _group in (
     ("repo", repo_app),
     ("recon", recon_app),
     ("audit", audit_app),
-    ("portfolio", portfolio_app),
     ("schedule", schedule_app),
     ("improvement-jobs", autofix_app),
     ("email", email_app),
@@ -392,6 +389,25 @@ def _is_interactive() -> bool:
     return sys.stdin.isatty()
 
 
+CONFIRM_HELP = "Confirm this irreversible deletion without prompting; required when not a TTY."
+
+
+def _confirm_deletion(warning: str, *, as_json: bool, assume_yes: bool) -> None:
+    """Gate an irreversible single-target deletion behind the ``--yes`` contract.
+
+    Same rule as the ``--all-projects`` blast radius: a human on a TTY is asked,
+    while agents, MCP, CI, and any ``--json`` caller are never prompted and must
+    pass ``--yes``, so a non-interactive run fails fast instead of hanging on a
+    prompt nobody can answer.
+    """
+    if assume_yes:
+        return
+    if as_json or not _is_interactive():
+        raise _fail("CONFIRMATION_REQUIRED", f"{warning}; re-run with --yes to confirm", as_json=as_json)
+    if not typer.confirm(f"{warning}. Continue?"):
+        raise _fail("ABORTED", "no change was made", as_json=as_json)
+
+
 REPO_SCOPE_HELP = "Write to one repository; mutually exclusive with --all-repos and --all-projects."
 
 REPO_FILTER_HELP = "Read one repository; omit to read every repository in scope."
@@ -532,7 +548,16 @@ def project_rename(project: str, name: str, json_output: Annotated[bool, typer.O
 
 
 @project_app.command("delete")
-def project_delete(project: str, json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
+def project_delete(
+    project: str,
+    yes: Annotated[bool, typer.Option("--yes", help=CONFIRM_HELP)] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    _confirm_deletion(
+        f"project {project} is deleted permanently and cannot be restored",
+        as_json=_json_output(json_output),
+        assume_yes=yes,
+    )
     _run(lambda: _application().delete_project(project), _json_output(json_output), FIELDS_PRESENTATION)
 
 
@@ -545,18 +570,6 @@ def project_settings(
         lambda: _application().project_settings(_selected_project(project)),
         _json_output(json_output),
         PROJECT_SETTINGS,
-    )
-
-
-@repo_app.command("list")
-def repo_list(
-    sort: Annotated[str, typer.Option("--sort", help=SORT_HELP)] = "default",
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().portfolio_overview(_selected_project(), _repository_sort(sort)),
-        _json_output(json_output),
-        PORTFOLIO,
     )
 
 
@@ -591,8 +604,14 @@ def repo_add(
 def repo_remove(
     repo: str,
     project: Annotated[str | None, typer.Option("--project")] = None,
+    yes: Annotated[bool, typer.Option("--yes", help=CONFIRM_HELP)] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    _confirm_deletion(
+        f"{repo} is detached and its accumulated audit history stops being reachable",
+        as_json=_json_output(json_output),
+        assume_yes=yes,
+    )
     _run(
         lambda: _application().remove_repository(repo, _selected_project(project)),
         _json_output(json_output),
@@ -698,47 +717,6 @@ def audit_summary(
     )
 
 
-@audit_app.command("status", help="Get one fresh repository audit snapshot. This is the first check for readiness.")
-def audit_status(
-    repo: str,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().repository_status(repo, _selected_project(project)),
-        _json_output(json_output),
-        REPOSITORY_STATUS,
-    )
-
-
-@audit_app.command("wait", help="Block until repository audits finish. Do not use short timeouts as refresh.")
-def audit_wait(
-    repo: str,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    timeout: Annotated[str, typer.Option("--timeout")] = default_settings().audit_wait.timeout_text,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().audit_wait(
-            repo, project=_selected_project(project), timeout_seconds=_parse_duration(timeout)
-        ),
-        _json_output(json_output),
-        AUDIT_WAIT,
-    )
-
-
-@portfolio_app.command("status")
-def portfolio_status(
-    sort: Annotated[str, typer.Option("--sort", help=SORT_HELP)] = "default",
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().portfolio_overview(_selected_project(), _repository_sort(sort)),
-        _json_output(json_output),
-        PORTFOLIO,
-    )
-
-
 @app.command(
     "health",
     help=(
@@ -827,7 +805,13 @@ def wait(
     timeout: Annotated[str, typer.Option("--timeout")] = default_settings().audit_wait.timeout_text,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    audit_wait(repo, project, timeout, json_output)
+    _run(
+        lambda: _application().audit_wait(
+            repo, project=_selected_project(project), timeout_seconds=_parse_duration(timeout)
+        ),
+        _json_output(json_output),
+        AUDIT_WAIT,
+    )
 
 
 @schedule_app.command("list")
