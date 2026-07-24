@@ -13,12 +13,18 @@ import httpx
 from tenacity import AsyncRetrying, RetryCallState, retry_if_exception, stop_after_attempt
 from tenacity.wait import wait_base
 
-from enji_guard_cli.settings import default_settings
+from enji_guard_cli.settings import (
+    DEFAULT_TRANSPORT_RETRY_BACKOFF_FACTOR,
+    DEFAULT_TRANSPORT_RETRY_JITTER_SECONDS,
+    DEFAULT_TRANSPORT_RETRY_MAX_DELAY_SECONDS,
+    DEFAULT_TRANSPORT_RETRY_TOTAL,
+    DEFAULT_TRANSPORT_RETRYABLE_STATUS_CODES,
+    DEFAULT_TRANSPORT_TIMEOUT_SECONDS,
+)
 from enji_guard_cli.transport_types import RetryProfile
 
 RATE_LIMIT_STATUS_CODE = 429
 _LOGGER = logging.getLogger(__name__)
-_TRANSPORT_SETTINGS = default_settings().transport
 
 type EnjiJsonScalar = None | bool | int | float | str
 type EnjiJsonValue = EnjiJsonScalar | list[EnjiJsonValue] | dict[str, EnjiJsonValue]
@@ -26,12 +32,12 @@ type EnjiJsonValue = EnjiJsonScalar | list[EnjiJsonValue] | dict[str, EnjiJsonVa
 
 @dataclass(frozen=True, slots=True)
 class RetryConfig:
-    total: int = _TRANSPORT_SETTINGS.retry.total
-    backoff_factor: float = _TRANSPORT_SETTINGS.retry.backoff_factor
-    max_delay_seconds: float = _TRANSPORT_SETTINGS.retry.max_delay_seconds
-    jitter_seconds: float = _TRANSPORT_SETTINGS.retry.jitter_seconds
-    status_forcelist: tuple[int, ...] = _TRANSPORT_SETTINGS.retry.retryable_status_codes
-    respect_retry_after_header: bool = _TRANSPORT_SETTINGS.retry.respect_retry_after_header
+    total: int = DEFAULT_TRANSPORT_RETRY_TOTAL
+    backoff_factor: float = DEFAULT_TRANSPORT_RETRY_BACKOFF_FACTOR
+    max_delay_seconds: float = DEFAULT_TRANSPORT_RETRY_MAX_DELAY_SECONDS
+    jitter_seconds: float = DEFAULT_TRANSPORT_RETRY_JITTER_SECONDS
+    status_forcelist: tuple[int, ...] = DEFAULT_TRANSPORT_RETRYABLE_STATUS_CODES
+    respect_retry_after_header: bool = True
 
     def build(self) -> Self:
         """Keep a small policy object for callers; execution is owned by Tenacity below."""
@@ -46,7 +52,7 @@ class EnjiHttpRequest:
     headers: Mapping[str, str]
     profile: RetryProfile = RetryProfile.READ
     json_body: EnjiJsonValue | None = None
-    timeout_seconds: float = _TRANSPORT_SETTINGS.timeout_seconds
+    timeout_seconds: float = DEFAULT_TRANSPORT_TIMEOUT_SECONDS
 
 
 @dataclass(frozen=True, slots=True)
