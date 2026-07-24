@@ -197,10 +197,13 @@ def test_container_publish_scans_loaded_candidate_before_push() -> None:
 
     assert build < scan < publish
     assert "load: true" in candidate_build
+    assert "push: false" in candidate_build
     assert "tags: ${{ steps.image-tags.outputs.tags }}" in candidate_build
+    assert "docker push" not in workflow[:scan]
+    assert "push: true" not in workflow[:scan]
     assert len(scan_step) == 1
     assert "scan-type: image" in scan_step[0]
-    assert "image-ref: ${{ env.IMAGE_NAME }}:latest" in scan_step[0]
+    assert "image-ref: ${{ env.IMAGE_NAME }}:sha-${{ steps.release-metadata.outputs.source-sha }}" in scan_step[0]
     assert 'exit-code: "1"' in scan_step[0]
     assert "ignore-unfixed: true" in scan_step[0]
 
