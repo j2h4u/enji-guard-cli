@@ -56,10 +56,15 @@ jobs:
           EVENT_NAME: ${{ inputs.release_tag != '' && 'release' || github.event_name }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
+          # CI skips quality/test/crap/docker-build on a docs-only diff yet still
+          # concludes success, so the workflow_run path must re-apply the same
+          # docs-only policy instead of forcing a publish: otherwise a README-only
+          # commit republishes an image nothing ever tested.
+          base_sha="$(git rev-parse --verify --quiet "${HEAD_SHA}^" || true)"
           python3 scripts/classify_changed_files.py \
             --event-name "${EVENT_NAME}" \
+            --base-sha "${base_sha}" \
             --head-sha "${HEAD_SHA}" \
-            --force-event workflow_run \
             --force-event release \
             --force-event workflow_dispatch \
             --output-key requires-image-publish
