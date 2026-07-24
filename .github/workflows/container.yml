@@ -5,20 +5,25 @@ on:
     workflows: ["CI"]
     branches: [main]
     types: [completed]
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      release_tag:
+        description: "Release tag to publish, for example v0.2.0."
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       release_tag:
         description: "Existing release tag to publish, for example v0.2.0."
         required: false
+        type: string
 
 permissions:
   contents: read
   packages: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.inputs.release_tag || github.event.release.tag_name || github.event.workflow_run.head_sha || github.sha }}
+  group: ${{ github.workflow }}-${{ inputs.release_tag || github.event.workflow_run.head_sha || github.sha }}
   cancel-in-progress: true
 
 env:
@@ -48,7 +53,7 @@ jobs:
       - name: Classify changed files
         id: classify
         env:
-          EVENT_NAME: ${{ github.event_name }}
+          EVENT_NAME: ${{ inputs.release_tag != '' && 'release' || github.event_name }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           python3 scripts/classify_changed_files.py \
@@ -73,7 +78,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-          ref: ${{ github.event.inputs.release_tag || github.event.release.tag_name || github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ inputs.release_tag || github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
@@ -98,10 +103,9 @@ jobs:
       - name: Resolve release metadata
         id: release-metadata
         env:
-          INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
-          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          release_tag="${INPUT_RELEASE_TAG:-${EVENT_RELEASE_TAG}}"
+          release_tag="${INPUT_RELEASE_TAG}"
           source_sha="$(git rev-parse HEAD)"
           if [ -z "${release_tag}" ]; then
             release_tag="$(git tag --points-at "${source_sha}" --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n 1)"
