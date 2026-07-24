@@ -30,6 +30,12 @@ class AuditCatalogObservation:
         return self.result.changes
 
 
+class AuditCatalogObservationPort(Protocol):
+    """Observation seam applied to every live catalog fetch."""
+
+    def observe(self, result: AuditCatalogResult) -> AuditCatalogResult: ...
+
+
 class AuditCatalogSnapshotRepository(Protocol):
     """Persistence port for the Audit catalog baseline."""
 
@@ -169,6 +175,7 @@ def _action_from_snapshot(action_key: str, payload: dict[str, object]) -> AuditC
 
 __all__ = [
     "AuditCatalogObservation",
+    "AuditCatalogObservationPort",
     "AuditCatalogObserver",
     "AuditCatalogSnapshotRepository",
     "FileAuditCatalogSnapshotRepository",

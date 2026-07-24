@@ -15,14 +15,12 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
+from application_builder import ApplicationStubs
 from enji_guard_cli.application import Application
-from enji_guard_cli.audit.ports import AuditGatewayPort
-from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.composition import create_application
 from enji_guard_cli.enji_gateway.shared_client import create_shared_http_client
 from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.models import AccessInfo, AccessLimits
-from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
 from enji_guard_cli.runtime_observability import supervisor as supervisor_module
 from enji_guard_cli.runtime_observability.auth_coordinator import RuntimeAuthCoordinatorAdapter
 from enji_guard_cli.settings import FanoutSettings, default_settings
@@ -293,12 +291,7 @@ def test_cli_callback_closes_cached_application_on_success_and_failure(
     failure: bool,
 ) -> None:
     lifecycle = _Lifecycle()
-    application = Application(
-        cast(AuditGatewayPort, object()),
-        cast(PortfolioGatewayPort, _AccessGateway(failure=failure)),
-        cast(AuthSessionService, object()),
-        lifecycle=lifecycle,
-    )
+    application = ApplicationStubs(portfolio_gateway=_AccessGateway(failure=failure), lifecycle=lifecycle).build()
     monkeypatch.setattr(cli_module, "create_application", lambda _auth_file: application)
     cli_module._state["application"] = None
 

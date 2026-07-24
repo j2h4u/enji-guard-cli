@@ -1,8 +1,4 @@
-from typing import cast
-
-from enji_guard_cli.application import Application
-from enji_guard_cli.audit.ports import AuditGatewayPort
-from enji_guard_cli.auth_session.service import AuthSessionService
+from application_builder import ApplicationStubs
 from enji_guard_cli.portfolio.models import (
     AccessInfo,
     AccessLimits,
@@ -13,7 +9,6 @@ from enji_guard_cli.portfolio.models import (
     RepositoryProvider,
     RepositoryRef,
 )
-from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
 
 
 class _Portfolio:
@@ -44,9 +39,7 @@ class _Portfolio:
 
 def test_project_settings_keeps_language_account_wide() -> None:
     portfolio = _Portfolio()
-    app = Application(
-        cast(AuditGatewayPort, object()), cast(PortfolioGatewayPort, portfolio), cast(AuthSessionService, object())
-    )
+    app = ApplicationStubs(portfolio_gateway=portfolio).build()
 
     settings = app.project_settings("pets")
 
@@ -57,8 +50,6 @@ def test_project_settings_keeps_language_account_wide() -> None:
 
 def test_access_is_typed_and_gateway_backed() -> None:
     portfolio = _Portfolio()
-    app = Application(
-        cast(AuditGatewayPort, object()), cast(PortfolioGatewayPort, portfolio), cast(AuthSessionService, object())
-    )
+    app = ApplicationStubs(portfolio_gateway=portfolio).build()
 
     assert app.access() == AccessInfo("pro", True, AccessLimits(can_use_schedules=True))

@@ -4,11 +4,12 @@ import importlib
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, cast
+from typing import cast
 
 import pytest
 from typer.testing import CliRunner
 
+from application_builder import ApplicationStubs
 from enji_guard_cli.application import Application
 from enji_guard_cli.audit.ports import AuditCatalogChange, AuditCatalogResult
 from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION
@@ -30,11 +31,7 @@ def test_run_emits_catalog_changes_from_the_command_application(
         def catalog(self) -> AuditCatalogResult:
             return AuditCatalogResult(actions=(), changes=(change,))
 
-    application = Application(
-        audit_gateway=cast(Any, CatalogGateway()),
-        portfolio_gateway=cast(Any, None),
-        auth=cast(Any, None),
-    )
+    application = ApplicationStubs(audit_gateway=CatalogGateway()).build()
     constructions = 0
 
     def application_factory(_auth_file: object = None) -> Application:
@@ -63,11 +60,7 @@ def test_application_keeps_catalog_observation_isolated_per_execution() -> None:
             change = AuditCatalogChange(kind="changed", action_key=action_key, changed_fields=("title",))
             return AuditCatalogResult(actions=(), changes=(change,))
 
-    application = Application(
-        audit_gateway=cast(Any, CatalogGateway()),
-        portfolio_gateway=cast(Any, None),
-        auth=cast(Any, None),
-    )
+    application = ApplicationStubs(audit_gateway=CatalogGateway()).build()
 
     def execute() -> tuple[str, str]:
         def read_catalog() -> str:

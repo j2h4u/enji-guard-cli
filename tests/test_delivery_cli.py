@@ -9,8 +9,8 @@ from typer.core import TyperGroup
 from typer.main import get_command
 from typer.testing import CliRunner
 
+from application_builder import ApplicationStubs
 from enji_guard_cli.application import (
-    Application,
     ApplicationAuthError,
     ApplicationCommandError,
     ApplicationResult,
@@ -26,14 +26,12 @@ from enji_guard_cli.audit.ports import (
     AuditAutofixJob,
     AuditAutofixUpdate,
     AuditFreshness,
-    AuditGatewayPort,
     AuditNewerRun,
     AuditSchedule,
     AuditScheduleUpdate,
     AuditStatus,
     AuditStatusItem,
 )
-from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.delivery.cli.app import _command_exit_code, _json, _run, app
 from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION, render_fields
 from enji_guard_cli.delivery.cli.presenters import operation_text
@@ -46,7 +44,7 @@ from enji_guard_cli.gitlab.models import (
     GitLabScope,
 )
 from enji_guard_cli.portfolio.models import ProjectRef, RepositoryIdentity, RepositoryProvider, RepositoryRef
-from enji_guard_cli.portfolio.ports import PortfolioAuditStatus, PortfolioGatewayPort
+from enji_guard_cli.portfolio.ports import PortfolioAuditStatus
 from enji_guard_cli.portfolio.status import PortfolioOverview, ProjectOverview, RepositoryOverview, RepositoryStatus
 from enji_guard_cli.runtime_observability.supervisor import RuntimeServiceOptions
 
@@ -777,11 +775,7 @@ def test_run_maps_current_application_errors_to_cli_contract(
     rendered: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    application = Application(
-        audit_gateway=cast(AuditGatewayPort, object()),
-        portfolio_gateway=cast(PortfolioGatewayPort, object()),
-        auth=cast(AuthSessionService, object()),
-    )
+    application = ApplicationStubs().build()
     monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: application)
 
     def fail() -> object:

@@ -2,10 +2,8 @@ from typing import cast
 
 import pytest
 
-from enji_guard_cli.application import Application
-from enji_guard_cli.audit.ports import AuditGatewayPort
+from application_builder import ApplicationStubs
 from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
-from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.enji_gateway import PortfolioGateway
 from enji_guard_cli.enji_gateway.ports import GatewayClient
 from enji_guard_cli.json_types import JsonObjectPayload
@@ -44,11 +42,7 @@ def test_project_detail_composes_live_collections_into_audit_project(
 
     monkeypatch.setattr(module, "_project_detail", lambda *_args, **_kwargs: payload)
     gateway = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=GatewayCredentialReader())
-    application = Application(
-        audit_gateway=cast(AuditGatewayPort, _AuditGateway()),
-        portfolio_gateway=gateway,
-        auth=cast(AuthSessionService, _Auth()),
-    )
+    application = ApplicationStubs(audit_gateway=_AuditGateway(), portfolio_gateway=gateway, auth=_Auth()).build()
 
     project = application._audit_project("project-1")
 

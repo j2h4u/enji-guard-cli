@@ -25,7 +25,7 @@ from enji_guard_cli.audit.artifacts import (
 from enji_guard_cli.audit.autofixes import definitions as autofix_definitions
 from enji_guard_cli.audit.autofixes import select as select_autofixes
 from enji_guard_cli.audit.autofixes import set_one
-from enji_guard_cli.audit.catalog_observation import AuditCatalogObserver
+from enji_guard_cli.audit.catalog_observation import AuditCatalogObservationPort
 from enji_guard_cli.audit.email import EmailPreferencesUpdate
 from enji_guard_cli.audit.email import list_for_targets as list_email_for_targets
 from enji_guard_cli.audit.email import set_for_targets as set_email_for_targets
@@ -87,7 +87,7 @@ from enji_guard_cli.portfolio.projects import rename_project as rename_project_u
 from enji_guard_cli.portfolio.recon import recon_after_add
 from enji_guard_cli.portfolio.recon import start_recon as start_recon_use_case
 from enji_guard_cli.portfolio.repositories import add_repository, move_repository, remove_repository
-from enji_guard_cli.portfolio.selectors import GatewayPortfolioTargetService, GatewaySelectorResolver
+from enji_guard_cli.portfolio.selectors import GatewaySelectorResolver
 from enji_guard_cli.portfolio.status import (
     PortfolioOverview,
     RepositoryStatus,
@@ -174,13 +174,13 @@ class Application:
     audit_gateway: AuditGatewayPort
     portfolio_gateway: PortfolioGatewayPort
     auth: AuthSessionService
-    ledger: AuditLedgerPort | None = None
-    catalog_observer: AuditCatalogObserver | None = None
-    target_service: PortfolioTargetService | None = None
-    runtime_auth: RuntimeAuthCoordinator | None = None
+    ledger: AuditLedgerPort
+    catalog_observer: AuditCatalogObservationPort
+    target_service: PortfolioTargetService
+    runtime_auth: RuntimeAuthCoordinator
+    gitlab_gateway: GitLabDiscoveryPort
+    lifecycle: ApplicationLifecyclePort
     fanout: BoundedFanout = field(default_factory=lambda: BoundedFanout(default_settings().fanout))
-    lifecycle: ApplicationLifecyclePort | None = None
-    gitlab_gateway: GitLabDiscoveryPort | None = None
     _catalog_result: ContextVar[AuditCatalogResult | None] = field(default_factory=_catalog_result_context, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
 
@@ -189,8 +189,7 @@ class Application:
         if self._closed:
             return
         self._closed = True
-        if self.lifecycle is not None:
-            self.lifecycle.close()
+        self.lifecycle.close()
 
     def execute(self, action: Callable[[], object]) -> ApplicationResult:
         """Execute one delivery action and translate context failures."""
@@ -262,17 +261,10 @@ class Application:
         except AuthError as exc:
             raise ApplicationAuthError(exc.code, exc.message) from exc
 
-    def runtime_auth_port(self) -> RuntimeAuthCoordinator:
-        if self.runtime_auth is None:
-            raise RuntimeError("runtime auth is not configured")
-        return self.runtime_auth
-
     # Catalog and Audit -------------------------------------------------
     def catalog(self) -> AuditCatalogResult:
         """Fetch the live catalog once; ``changes`` is the typed observation hook."""
-        result = self.audit_gateway.catalog()
-        if self.catalog_observer is not None:
-            result = self.catalog_observer.observe(result)
+        result = self.catalog_observer.observe(self.audit_gateway.catalog())
         self._catalog_result.set(result)
         return result
 
@@ -381,8 +373,6 @@ class Application:
         limit: int = 50,
         offset: int = 0,
     ) -> GitLabCredentialsResult:
-        if self.gitlab_gateway is None:
-            raise RuntimeError("GitLab discovery is not configured")
         return self.gitlab_gateway.list_credentials(
             scope_type=scope_type,
             scope_owner=scope_owner,
@@ -391,8 +381,6 @@ class Application:
         )
 
     def gitlab_projects(self, query: GitLabProjectsQuery) -> GitLabProjectsResult:
-        if self.gitlab_gateway is None:
-            raise RuntimeError("GitLab discovery is not configured")
         return self.gitlab_gateway.discover_projects(query)
 
     def create_project(self, name: str) -> OperationResult:
@@ -576,21 +564,16 @@ class Application:
 
     # Internal composition helpers ------------------------------------
     def _resolve_repository(self, selector: str, project: str | None) -> RepositoryRef:
-        resolver = self.target_service or GatewaySelectorResolver(self.portfolio_gateway)
-        return resolver.resolve_repository(selector, project=project)
+        return self.target_service.resolve_repository(selector, project=project)
 
     def _targets(self, repo: str | None, project: str | None) -> tuple[RepositoryRef, ...]:
-        resolver = self.target_service
-        if resolver is not None:
-            return resolver.targets(repo, project)
-        return GatewayPortfolioTargetService(self.portfolio_gateway, self.fanout).targets(repo, project)
+        return self.target_service.targets(repo, project)
 
     def _write_targets(
         self, repo: str | None, project: str | None, scope: AutofixWriteScope | None
     ) -> tuple[RepositoryRef, ...]:
         resolved = scope or AutofixWriteScope()
-        resolver = self.target_service or GatewayPortfolioTargetService(self.portfolio_gateway, self.fanout)
-        return resolver.write_targets(
+        return self.target_service.write_targets(
             repo,
             project,
             all_repos=resolved.all_repos,

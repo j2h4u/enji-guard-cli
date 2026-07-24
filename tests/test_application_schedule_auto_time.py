@@ -1,13 +1,10 @@
-from typing import cast
-
 import pytest
 
+from application_builder import ApplicationStubs
 from enji_guard_cli.application import Application
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
-from enji_guard_cli.audit.ports import AuditGatewayPort, AuditSchedule
-from enji_guard_cli.auth_session.service import AuthSessionService
+from enji_guard_cli.audit.ports import AuditSchedule
 from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvider, RepositoryRef
-from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
 
 
 class _AuditGateway:
@@ -29,11 +26,7 @@ def test_schedule_auto_time_skips_write_when_already_auto(
 ) -> None:
     current = AuditSchedule("audit.security", True, "workdays", None, 1, "00:00", "auto", "UTC")
     gateway = _AuditGateway(current)
-    application = Application(
-        audit_gateway=cast(AuditGatewayPort, gateway),
-        portfolio_gateway=cast(PortfolioGatewayPort, object()),
-        auth=cast(AuthSessionService, object()),
-    )
+    application = ApplicationStubs(audit_gateway=gateway).build()
     monkeypatch.setattr(
         Application,
         "_write_targets",

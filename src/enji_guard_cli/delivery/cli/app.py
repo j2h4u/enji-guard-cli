@@ -770,7 +770,7 @@ def run(
     application = _application()
     run_service(
         options=RuntimeServiceOptions(transport=transport, host=host, port=port, mount_path=mount_path),
-        runtime_auth=application.runtime_auth_port(),
+        runtime_auth=application.runtime_auth,
         mcp_server_factory=lambda host, port: create_mcp_server(host, port, queries=McpQueryFacade(application)),
         mcp_server_runner=run_mcp_server_async,
         settings=default_settings(),
