@@ -130,6 +130,10 @@ sigterm = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+precision = 2
+# Ratchet only.  Measured 84.13% (branch coverage on) at the time this
+# floor was introduced; raise it as coverage improves, never lower it.
+fail_under = 83
 
 [tool.importlinter]
 root_package = "enji_guard_cli"
