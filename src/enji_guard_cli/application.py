@@ -41,7 +41,6 @@ from enji_guard_cli.audit.ports import (
     AuditGatewayPort,
     AuditLedgerPort,
     AuditRepository,
-    AuditRun,
     AuditRunResult,
     AuditSchedule,
     AuditScheduleUpdate,
@@ -272,21 +271,15 @@ class Application:
         return parse_catalog_result(self.catalog())
 
     def audit_status(self, repo_id: str, *, catalog: AuditCatalog | None = None) -> AuditStatus:
-        return self._audit_status_with_runs(repo_id, catalog=catalog)[0]
+        return self.audit_recon(catalog).status(repo_id).summary
 
-    def _audit_status_with_runs(
-        self, repo_id: str, *, catalog: AuditCatalog | None = None
-    ) -> tuple[AuditStatus, tuple[AuditRun, ...]]:
-        definitions = catalog if catalog is not None else self.audit_catalog()
-        observation = self._audit_repository_observer().observe(repo_id)
-        projected_runs = observation.active_runs
-        return build_status(
-            repo_id,
-            definitions,
-            observation.task_links,
-            projected_runs,
-            observation.rerun_state,
-        ), tuple(run for run in projected_runs if is_active_run(run))
+    def audit_recon(self, catalog: AuditCatalog | None = None) -> AuditReconService:
+        """Build the Audit-side implementation of the ports Portfolio depends on."""
+        return AuditReconService(
+            catalog if catalog is not None else self.audit_catalog(),
+            self._audit_repository_observer(),
+            self._audit_start_service(),
+        )
 
     def audit_start(
         self, repo: str, project: str | None = None, selectors: list[str] | None = None, *, all_audits: bool = False
@@ -403,9 +396,8 @@ class Application:
         )
         if result.repository is not None:
             catalog = self.audit_catalog()
-            recon = recon_after_add(
-                result.repository, audits=_AuditStatusReader(self, catalog), starter=_AuditStarter(self, catalog)
-            )
+            recon_ports = self.audit_recon(catalog)
+            recon = recon_after_add(result.repository, audits=recon_ports, starter=recon_ports)
             return OperationResult(
                 result.state,
                 project=result.project,
@@ -427,9 +419,8 @@ class Application:
     def recon_start(self, repo: str, project: str | None = None) -> object:
         target = self._resolve_repository(repo, project)
         catalog = self.audit_catalog()
-        return start_recon_use_case(
-            target, audits=_AuditStatusReader(self, catalog), starter=_AuditStarter(self, catalog)
-        )
+        recon_ports = self.audit_recon(catalog)
+        return start_recon_use_case(target, audits=recon_ports, starter=recon_ports)
 
     def portfolio_overview(self, project: str | None = None, sort: RepositorySortName = "default") -> PortfolioOverview:
         return assemble_overview(gateway=self.portfolio_gateway, fanout=self.fanout, project=project, sort=sort)
@@ -440,7 +431,7 @@ class Application:
             repo,
             project,
             gateway=self.portfolio_gateway,
-            audits=_AuditStatusReader(self, catalog),
+            audits=self.audit_recon(catalog),
             fanout=self.fanout,
         )
 
@@ -615,29 +606,37 @@ class Application:
         return AuditStartService(self.audit_gateway, self.ledger, self._audit_project)
 
 
-class _AuditStatusReader(AuditStatusReader):
-    def __init__(self, application: Application, catalog: AuditCatalog | None = None) -> None:
-        self.application = application
-        self.catalog = catalog
+@dataclass(frozen=True, slots=True)
+class AuditReconService(AuditStatusReader, AuditStartPort):
+    """Audit-side implementation of the two ports Portfolio recon declares.
+
+    It is built from Audit collaborators and one frozen catalog, so Portfolio
+    use-cases depend on a typed port rather than on the application facade.
+    """
+
+    catalog: AuditCatalog
+    observer: AuditRepositoryObserver
+    start_service: AuditStartService
 
     def status(self, repo_id: str) -> PortfolioAuditStatus:
-        status, active_runs = self.application._audit_status_with_runs(repo_id, catalog=self.catalog)
-        return PortfolioAuditStatus.from_audit_status(status, active_runs=cast(tuple, active_runs))
+        observation = self.observer.observe(repo_id)
+        status = build_status(
+            repo_id,
+            self.catalog,
+            observation.task_links,
+            observation.active_runs,
+            observation.rerun_state,
+        )
+        active_runs = tuple(run for run in observation.active_runs if is_active_run(run))
+        return PortfolioAuditStatus.from_audit_status(status, active_runs=active_runs)
 
-
-class _AuditStarter(AuditStartPort):
-    def __init__(self, application: Application, catalog: AuditCatalog | None = None) -> None:
-        self.application = application
-        self.catalog = catalog
-
-    def start(self, repo_id: str, project_id: str, action_key: str):
-        catalog = self.catalog or self.application.audit_catalog()
-        audit = _audit_for_action(catalog, action_key)
-        result = cast(
+    def start(self, repo_id: str, project_id: str, action_key: str) -> AuditRunResult:
+        audit = _audit_for_action(self.catalog, action_key)
+        results = cast(
             list[dict[str, object]],
-            self.application._audit_start_service().start(repo_id, project_id, (audit,), catalog)["results"],
-        )[0]
-        return _run_result(result)
+            self.start_service.start(repo_id, project_id, (audit,), self.catalog)["results"],
+        )
+        return _run_result(results[0])
 
 
 def _audit_for_action(catalog: AuditCatalog, action_key: str) -> AuditDefinition:
@@ -649,8 +648,7 @@ def _audit_for_action(catalog: AuditCatalog, action_key: str) -> AuditDefinition
     return audit
 
 
-def _run_result(result: dict[str, object]):
-
+def _run_result(result: dict[str, object]) -> AuditRunResult:
     return AuditRunResult(cast(str | None, result.get("task_id")), cast(str | None, result.get("status")))
 
 
@@ -670,6 +668,7 @@ __all__ = [
     "ApplicationCommandError",
     "ApplicationResult",
     "AuditAutofixUpdate",
+    "AuditReconService",
     "AuditScheduleUpdate",
     "AutofixListing",
     "AutofixListingItem",
