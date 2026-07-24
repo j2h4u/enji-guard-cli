@@ -28,7 +28,10 @@ packages = ["src/enji_guard_cli"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "--strict-config --strict-markers -W error"
+addopts = "--strict-config --strict-markers -W error -m 'not docker'"
+markers = [
+    "docker: packaging-policy tests that shell out to `docker compose`; excluded by default, run via `just docker-tests`",
+]
 tmp_path_retention_policy = "failed"
 tmp_path_retention_count = 1
 xfail_strict = true
@@ -127,6 +130,10 @@ sigterm = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+precision = 2
+# Ratchet only.  Measured 84.13% (branch coverage on) at the time this
+# floor was introduced; raise it as coverage improves, never lower it.
+fail_under = 83
 
 [tool.importlinter]
 root_package = "enji_guard_cli"

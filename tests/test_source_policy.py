@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_IMAGE_REF = "ghcr.io/j2h4u/enji-guard-cli@sha256:" + "0" * 64
 COMPOSE_PACKAGE_VERSION = "1.2.3+local.test"
@@ -71,6 +73,7 @@ def _compose_config(path: Path, *, host_port: str | None = None) -> dict[str, ob
     return cast(dict[str, object], json.loads(result.stdout))
 
 
+@pytest.mark.docker
 def test_local_compose_requires_build_provenance() -> None:
     environment = os.environ.copy()
     environment.pop("PACKAGE_VERSION", None)
@@ -100,6 +103,7 @@ def test_local_compose_requires_build_provenance() -> None:
     assert any(variable in build.stderr for variable in ("PACKAGE_VERSION", "SOURCE_COMMIT"))
 
 
+@pytest.mark.docker
 def test_local_compose_passes_non_placeholder_build_provenance() -> None:
     compose = _compose_config(ROOT / "docker-compose.yml")
     services = cast(dict[str, object], compose["services"])
@@ -133,6 +137,7 @@ def test_dockerfile_rejects_placeholder_build_provenance() -> None:
     assert "SOURCE_COMMIT must be a Git object id" in dockerfile
 
 
+@pytest.mark.docker
 def test_local_and_ghcr_compose_critical_settings_stay_in_sync() -> None:
     local = _compose_common_service_fields(ROOT / "docker-compose.yml")
     ghcr = _compose_common_service_fields(ROOT / "deploy" / "docker-compose.ghcr.yml")
@@ -140,6 +145,7 @@ def test_local_and_ghcr_compose_critical_settings_stay_in_sync() -> None:
     assert local == ghcr
 
 
+@pytest.mark.docker
 def test_compose_publishes_mcp_on_configurable_nonconflicting_host_port() -> None:
     for path in (ROOT / "docker-compose.yml", ROOT / "deploy" / "docker-compose.ghcr.yml"):
         compose = _compose_config(path)
@@ -161,6 +167,7 @@ def test_compose_publishes_mcp_on_configurable_nonconflicting_host_port() -> Non
         ]
 
 
+@pytest.mark.docker
 def test_ghcr_compose_declares_stable_project_name() -> None:
     compose = _compose_config(ROOT / "deploy" / "docker-compose.ghcr.yml")
 
