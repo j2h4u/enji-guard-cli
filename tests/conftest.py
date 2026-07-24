@@ -4,6 +4,7 @@ import functools
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,29 @@ def _docker_daemon_available() -> bool:
 def pytest_runtest_setup(item: pytest.Item) -> None:
     if item.get_closest_marker("docker") is not None and not _docker_daemon_available():
         pytest.skip("requires a reachable Docker daemon")
+
+
+@pytest.fixture(autouse=True)
+def restored_telemetry_globals() -> Iterator[None]:
+    """Undo `configure_logging` side effects on module globals.
+
+    `runtime_observability.telemetry` keeps `_ACTIVE_SINK` and
+    `_ACTIVE_PROVENANCE` as module state. Tests that call
+    `configure_logging(...)` otherwise leak that state into whichever
+    test the xdist scheduler happens to run next.
+    """
+    from enji_guard_cli.runtime_observability import telemetry
+
+    active_sink = telemetry._ACTIVE_SINK
+    active_provenance = telemetry._ACTIVE_PROVENANCE
+    try:
+        yield
+    finally:
+        leaked_sink = telemetry._ACTIVE_SINK
+        if leaked_sink is not None and leaked_sink is not active_sink:
+            leaked_sink.close()
+        telemetry._ACTIVE_SINK = active_sink
+        telemetry._ACTIVE_PROVENANCE = active_provenance
 
 
 @pytest.fixture(autouse=True)
