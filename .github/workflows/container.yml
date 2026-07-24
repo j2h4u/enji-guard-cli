@@ -161,54 +161,71 @@ jobs:
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
-      # The candidate is pushed under a throwaway digest-bearing tag so that
-      # buildx can attach provenance and SBOM attestations, then scanned by
-      # digest. Only a digest that passed Trivy is promoted to the tags that
-      # consumers pull, so the scan still gates publication.
-      - name: Build and push candidate image
-        id: build
+      # Nothing unscanned may reach the registry, so the candidate is only
+      # loaded into the local daemon. Trivy scans that local image and the push
+      # happens afterwards; provenance and SBOM are attested against the digest
+      # the registry assigns once the scanned image has been published.
+      - name: Build candidate image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: Dockerfile
-          push: true
-          tags: ${{ env.IMAGE_NAME }}:candidate-${{ steps.release-metadata.outputs.source-sha }}
-          provenance: mode=max
-          sbom: true
+          load: true
+          push: false
+          tags: ${{ steps.image-tags.outputs.tags }}
           build-args: |
             PACKAGE_VERSION=${{ steps.package-version.outputs.version }}
             SOURCE_COMMIT=${{ steps.release-metadata.outputs.source-sha }}
 
       - name: Verify candidate runtime contract
         env:
-          CANDIDATE: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          CANDIDATE: ${{ env.IMAGE_NAME }}:sha-${{ steps.release-metadata.outputs.source-sha }}
         run: |
-          docker pull "${CANDIDATE}"
           uv run --locked python -m scripts.release_contract --image "${CANDIDATE}"
 
       - name: Scan candidate image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
-          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ steps.release-metadata.outputs.source-sha }}
           scanners: vuln
           severity: MEDIUM,HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
 
+      - name: Generate candidate SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ env.IMAGE_NAME }}:sha-${{ steps.release-metadata.outputs.source-sha }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Publish tested image
+        id: publish
+        env:
+          IMAGE_TAGS: ${{ steps.image-tags.outputs.tags }}
+          SOURCE_SHA: ${{ steps.release-metadata.outputs.source-sha }}
+        run: |
+          while IFS= read -r tag; do
+            [ -n "${tag}" ] || continue
+            docker push "${tag}"
+          done <<< "${IMAGE_TAGS}"
+          digest="$(docker buildx imagetools inspect "${IMAGE_NAME}:sha-${SOURCE_SHA}" --format '{{.Manifest.Digest}}')"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+
       - name: Attest build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-name: ${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.publish.outputs.digest }}
           push-to-registry: true
 
-      - name: Promote scanned digest to published tags
-        env:
-          IMAGE_TAGS: ${{ steps.image-tags.outputs.tags }}
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          while IFS= read -r tag; do
-            [ -n "${tag}" ] || continue
-            docker buildx imagetools create --tag "${tag}" "${IMAGE_NAME}@${DIGEST}"
-          done <<< "${IMAGE_TAGS}"
+      - name: Attest SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
