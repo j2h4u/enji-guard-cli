@@ -429,7 +429,7 @@ options.
 |---------|---------|
 | `status [REPO]` | Portfolio overview, or one repository audit snapshot when `REPO` is given. |
 | `wait REPO` | Block until the repository's audits finish. |
-| `health [--ready]` | Process liveness; `--ready` additionally probes the MCP listener and cached backend readiness. |
+| `health [--ready]` | Process liveness only; `--ready` probes the MCP listener and cached backend readiness. Healthchecks, probes, and CI gates must use `health --ready`, because bare `health` cannot fail while the process runs. |
 | `access` | Account plan and limits. |
 | `run` | Run the long-lived MCP service (used by the container entrypoint). |
 | `auth import-bearer\|import-cookie --stdin`, `auth status` | Credential bootstrap and credential state. |

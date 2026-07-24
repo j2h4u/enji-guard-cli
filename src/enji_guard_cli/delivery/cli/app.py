@@ -19,6 +19,7 @@ from typing import Annotated, Literal, cast
 import typer
 
 from enji_guard_cli.application import (
+    AUDIT_SCHEDULE_FREQUENCIES,
     Application,
     ApplicationCatalogChange,
     ApplicationCommandError,
@@ -56,6 +57,7 @@ from enji_guard_cli.settings import (
     DEFAULT_HTTP_HOST,
     DEFAULT_HTTP_PORT,
     DEFAULT_MCP_TRANSPORT,
+    REPOSITORY_SORT_NAMES,
     RepositorySortName,
     default_settings,
 )
@@ -214,10 +216,20 @@ def _fail(code: str, message: str, *, as_json: bool, exit_code: int = 1) -> type
     return typer.Exit(exit_code)
 
 
+SORT_HELP = f"Repository order: {', '.join(sorted(REPOSITORY_SORT_NAMES))}."
+
+FREQUENCY_HELP = f"Run cadence: {', '.join(sorted(AUDIT_SCHEDULE_FREQUENCIES))}."
+
+TIMEZONE_HELP = "IANA timezone stored with each subscription, such as Asia/Almaty."
+
+ENABLED_HELP = "Turn the subscription on or off."
+
+
 def _repository_sort(value: str) -> RepositorySortName:
-    allowed = {"default", "name", "weakest", "overall", "latest-audit"}
-    if value not in allowed:
-        raise typer.BadParameter(f"sort must be one of: {', '.join(sorted(allowed))}", param_hint="--sort")
+    if value not in REPOSITORY_SORT_NAMES:
+        raise typer.BadParameter(
+            f"sort must be one of: {', '.join(sorted(REPOSITORY_SORT_NAMES))}", param_hint="--sort"
+        )
     return cast(RepositorySortName, value)
 
 
@@ -372,9 +384,7 @@ def _validate_http_bind(host: str, transport: str, *, allow_external_host: bool)
     )
 
 
-ALL_PROJECTS_WARNING = (
-    "--all-projects rewrites this setting for every repository in every project of the account"
-)
+ALL_PROJECTS_WARNING = "--all-projects rewrites this setting for every repository in every project of the account"
 
 
 def _is_interactive() -> bool:
@@ -540,7 +550,7 @@ def project_settings(
 
 @repo_app.command("list")
 def repo_list(
-    sort: Annotated[str, typer.Option("--sort")] = "default",
+    sort: Annotated[str, typer.Option("--sort", help=SORT_HELP)] = "default",
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
@@ -719,7 +729,7 @@ def audit_wait(
 
 @portfolio_app.command("status")
 def portfolio_status(
-    sort: Annotated[str, typer.Option("--sort")] = "default",
+    sort: Annotated[str, typer.Option("--sort", help=SORT_HELP)] = "default",
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
@@ -729,7 +739,14 @@ def portfolio_status(
     )
 
 
-@app.command("health")
+@app.command(
+    "health",
+    help=(
+        "Report process liveness. Pass --ready for the real dependency check: "
+        "it probes the MCP listener and the cached backend readiness state, and "
+        "is what container healthchecks and monitors must use."
+    ),
+)
 def health(
     ready: Annotated[bool, typer.Option("--ready", help="Check MCP listener and cached backend readiness.")] = False,
     host: Annotated[str, typer.Option("--host")] = DEFAULT_HTTP_HOST,
@@ -753,12 +770,15 @@ def health(
     _emit({"status": "ready"}, _json_output(json_output))
 
 
-@app.command("access")
+@app.command("access", help="Show the account plan, limits, and entitlements.")
 def access(json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
     _run(lambda: _application().access(), _json_output(json_output), FIELDS_PRESENTATION)
 
 
-@app.command("run")
+@app.command(
+    "run",
+    help="Run the long-lived MCP service. This is the container entrypoint, not an operator command.",
+)
 def run(
     transport: Annotated[
         Literal["stdio", "sse", "streamable-http"], typer.Option("--transport")
@@ -783,7 +803,7 @@ def run(
 def status(
     repo: Annotated[str | None, typer.Argument()] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
-    sort: Annotated[str, typer.Option("--sort")] = "default",
+    sort: Annotated[str, typer.Option("--sort", help=SORT_HELP)] = "default",
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     if repo is not None:
@@ -833,9 +853,9 @@ def schedule_set(  # noqa: PLR0913
         bool, typer.Option("--all-projects", help="Every repository in every project; requires --yes when not a TTY.")
     ] = False,
     yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
-    enabled: Annotated[Literal["on", "off"] | None, typer.Option("--enabled")] = None,
-    frequency: Annotated[str | None, typer.Option("--frequency")] = None,
-    timezone: Annotated[str | None, typer.Option("--timezone")] = None,
+    enabled: Annotated[Literal["on", "off"] | None, typer.Option("--enabled", help=ENABLED_HELP)] = None,
+    frequency: Annotated[str | None, typer.Option("--frequency", help=FREQUENCY_HELP)] = None,
+    timezone: Annotated[str | None, typer.Option("--timezone", help=TIMEZONE_HELP)] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
@@ -875,7 +895,7 @@ def schedule_auto_time(  # noqa: PLR0913
 @schedule_app.command("timezone")
 def schedule_timezone(  # noqa: PLR0913
     *,
-    timezone: str,
+    timezone: Annotated[str, typer.Argument(help=TIMEZONE_HELP)],
     repo: Annotated[str | None, typer.Option("--repo", help=REPO_SCOPE_HELP)] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
@@ -913,15 +933,15 @@ def autofix_set(  # noqa: PLR0913
     repo: Annotated[str | None, typer.Option("--repo", help=REPO_SCOPE_HELP)] = None,
     autofixes: Annotated[list[str] | None, typer.Argument(help="Autofix selectors.")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
-    all_autofixes: Annotated[bool, typer.Option("--all")] = False,
+    all_autofixes: Annotated[bool, typer.Option("--all", help="Every supported autofix selector.")] = False,
     all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
     all_projects: Annotated[
         bool, typer.Option("--all-projects", help="Every repository in every project; requires --yes when not a TTY.")
     ] = False,
     yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
-    enabled: Annotated[Literal["on", "off"] | None, typer.Option("--enabled")] = None,
-    frequency: Annotated[str | None, typer.Option("--frequency")] = None,
-    timezone: Annotated[str | None, typer.Option("--timezone")] = None,
+    enabled: Annotated[Literal["on", "off"] | None, typer.Option("--enabled", help=ENABLED_HELP)] = None,
+    frequency: Annotated[str | None, typer.Option("--frequency", help=FREQUENCY_HELP)] = None,
+    timezone: Annotated[str | None, typer.Option("--timezone", help=TIMEZONE_HELP)] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     selectors = ["__all__"] if all_autofixes else (autofixes or [])
@@ -963,8 +983,12 @@ def email_set(  # noqa: PLR0913
         bool, typer.Option("--all-projects", help="Every repository in every project; requires --yes when not a TTY.")
     ] = False,
     yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
-    manual: Annotated[Literal["on", "off"] | None, typer.Option("--manual")] = None,
-    scheduled: Annotated[Literal["on", "off"] | None, typer.Option("--scheduled")] = None,
+    manual: Annotated[
+        Literal["on", "off"] | None, typer.Option("--manual", help="Email on manually started audit runs.")
+    ] = None,
+    scheduled: Annotated[
+        Literal["on", "off"] | None, typer.Option("--scheduled", help="Email on scheduled audit runs.")
+    ] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
