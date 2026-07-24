@@ -3,6 +3,7 @@
 import json
 import socket
 from pathlib import Path
+from typing import cast
 
 import pytest
 from typer.testing import CliRunner
@@ -11,9 +12,9 @@ from enji_guard_cli.delivery.cli.app import app
 
 
 def _error_envelope(stderr: str) -> dict[str, object]:
-    payload = json.loads(stderr)
+    payload = cast(object, json.loads(stderr))
     assert isinstance(payload, dict)
-    return payload
+    return cast(dict[str, object], payload)
 
 
 def test_json_auth_failure_emits_error_envelope(tmp_path: Path) -> None:

@@ -50,7 +50,7 @@ from enji_guard_cli.audit.ports import (
     AuditWaitResult,
     MalformedAuditSnapshotError,
 )
-from enji_guard_cli.audit.schedules import auto_time_for_targets, list_for_targets, set_for_targets
+from enji_guard_cli.audit.schedules import CADENCES, auto_time_for_targets, list_for_targets, set_for_targets
 from enji_guard_cli.audit.start import AuditStartService
 from enji_guard_cli.audit.status import build_status
 from enji_guard_cli.audit.wait import AuditWaitDependencies, wait_for_completion
@@ -96,6 +96,9 @@ from enji_guard_cli.portfolio.status import (
 )
 from enji_guard_cli.runtime_observability.ports import RuntimeAuthCoordinator
 from enji_guard_cli.settings import RepositorySortName, default_settings
+
+AUDIT_SCHEDULE_FREQUENCIES: frozenset[str] = CADENCES
+"""Legal schedule/autofix cadences, re-exported so delivery need not import Audit."""
 
 
 class ApplicationAuthError(Exception):
@@ -677,6 +680,7 @@ def _exit_code_for_error(code: str) -> int:
 
 
 __all__ = [
+    "AUDIT_SCHEDULE_FREQUENCIES",
     "Application",
     "ApplicationAuthError",
     "ApplicationCatalogChange",
