@@ -28,6 +28,11 @@ transport vocabulary is not part of the user-facing model.
 Mutating batch commands require explicit scope. Use a `REPO` argument for one
 repository, `--all-repos` with `--project NAME_OR_ID` for every repository in
 one project, or `--all-projects` for every repository in every project.
+`--all-projects` is the only unbounded write scope, so it is confirmed before
+it runs: an interactive terminal is prompted, and every non-interactive caller
+(agents, MCP, CI, and any `--json` invocation, which never prompts) must pass
+`--yes`. Without it the command exits `1` with `CONFIRMATION_REQUIRED` and
+changes nothing.
 Mutating commands are designed for agent retries: repeated calls should report
 `unchanged`, `already_present`, `already_running`, or equivalent state instead
 of duplicating upstream work.

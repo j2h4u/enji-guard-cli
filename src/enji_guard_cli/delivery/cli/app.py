@@ -372,9 +372,36 @@ def _validate_http_bind(host: str, transport: str, *, allow_external_host: bool)
     )
 
 
-def _scope(all_repos: bool, all_projects: bool, *, as_json: bool = False) -> AutofixWriteScope:
+ALL_PROJECTS_WARNING = (
+    "--all-projects rewrites this setting for every repository in every project of the account"
+)
+
+
+def _is_interactive() -> bool:
+    """Report whether a human can answer a prompt on this stdin."""
+    return sys.stdin.isatty()
+
+
+def _scope(
+    all_repos: bool, all_projects: bool, *, as_json: bool = False, assume_yes: bool = False
+) -> AutofixWriteScope:
+    """Validate write scope and gate the unbounded --all-projects blast radius.
+
+    Interactive operators are asked to confirm; agents, MCP, CI, and any
+    ``--json`` caller are never prompted and must pass ``--yes`` instead, so a
+    non-TTY invocation can fail fast rather than block on a hidden prompt.
+    """
     if all_repos and all_projects:
         raise _fail("VALIDATION", "pass --all-repos or --all-projects, not both", as_json=as_json)
+    if all_projects and not assume_yes:
+        if as_json or not _is_interactive():
+            raise _fail(
+                "CONFIRMATION_REQUIRED",
+                f"{ALL_PROJECTS_WARNING}; re-run with --yes to confirm",
+                as_json=as_json,
+            )
+        if not typer.confirm(f"{ALL_PROJECTS_WARNING}. Continue?"):
+            raise _fail("ABORTED", "no change was made", as_json=as_json)
     return AutofixWriteScope(all_repos=all_repos, all_projects=all_projects)
 
 
@@ -812,13 +839,16 @@ def schedule_set(  # noqa: PLR0913
     repo: str | None = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
-    all_projects: Annotated[bool, typer.Option("--all-projects")] = False,
+    all_projects: Annotated[
+        bool, typer.Option("--all-projects", help="Every repository in every project; requires --yes when not a TTY.")
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
     enabled: Annotated[Literal["on", "off"] | None, typer.Option("--enabled")] = None,
     frequency: Annotated[str | None, typer.Option("--frequency")] = None,
     timezone: Annotated[str | None, typer.Option("--timezone")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output))
+    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output), assume_yes=yes)
     update = AuditScheduleUpdate(enabled=_switch(enabled), cadence=frequency, timezone=timezone)
     _run(
         lambda: _application().set_schedules(
@@ -833,14 +863,18 @@ def schedule_set(  # noqa: PLR0913
 
 
 @schedule_app.command("auto-time")
-def schedule_auto_time(
+def schedule_auto_time(  # noqa: PLR0913
+    *,
     repo: str | None = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
-    all_projects: Annotated[bool, typer.Option("--all-projects")] = False,
+    all_projects: Annotated[
+        bool, typer.Option("--all-projects", help="Every repository in every project; requires --yes when not a TTY.")
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output))
+    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output), assume_yes=yes)
     _run(
         lambda: _application().schedule_auto_time(repo, _selected_project(project), scope=scope),
         _json_output(json_output),
@@ -855,10 +889,13 @@ def schedule_timezone(  # noqa: PLR0913
     repo: str | None = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
-    all_projects: Annotated[bool, typer.Option("--all-projects")] = False,
+    all_projects: Annotated[
+        bool, typer.Option("--all-projects", help="Every repository in every project; requires --yes when not a TTY.")
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output))
+    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output), assume_yes=yes)
     update = AuditScheduleUpdate(timezone=timezone)
     _run(
         lambda: _application().set_schedules(repo, _selected_project(project), update, scope=scope),
@@ -888,14 +925,17 @@ def autofix_set(  # noqa: PLR0913
     project: Annotated[str | None, typer.Option("--project")] = None,
     all_autofixes: Annotated[bool, typer.Option("--all")] = False,
     all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
-    all_projects: Annotated[bool, typer.Option("--all-projects")] = False,
+    all_projects: Annotated[
+        bool, typer.Option("--all-projects", help="Every repository in every project; requires --yes when not a TTY.")
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
     enabled: Annotated[Literal["on", "off"] | None, typer.Option("--enabled")] = None,
     frequency: Annotated[str | None, typer.Option("--frequency")] = None,
     timezone: Annotated[str | None, typer.Option("--timezone")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     selectors = ["__all__"] if all_autofixes else (autofixes or [])
-    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output))
+    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output), assume_yes=yes)
     update = AuditAutofixUpdate(enabled=_switch(enabled), frequency=frequency, timezone=timezone)
     _run(
         lambda: _application().set_autofixes(
@@ -929,12 +969,15 @@ def email_set(  # noqa: PLR0913
     repo: str | None = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
-    all_projects: Annotated[bool, typer.Option("--all-projects")] = False,
+    all_projects: Annotated[
+        bool, typer.Option("--all-projects", help="Every repository in every project; requires --yes when not a TTY.")
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
     manual: Annotated[Literal["on", "off"] | None, typer.Option("--manual")] = None,
     scheduled: Annotated[Literal["on", "off"] | None, typer.Option("--scheduled")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output))
+    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output), assume_yes=yes)
     update = EmailPreferencesUpdate(_switch(manual), _switch(scheduled))
     _run(
         lambda: _application().set_email_preferences(repo, _selected_project(project), update, scope=scope),
