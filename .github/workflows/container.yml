@@ -119,14 +119,21 @@ jobs:
           RELEASE_TAG: ${{ steps.release-metadata.outputs.release-tag }}
           SOURCE_SHA: ${{ steps.release-metadata.outputs.source-sha }}
         run: |
+          tags=("${IMAGE_NAME}:sha-${SOURCE_SHA}")
+          if [[ "${RELEASE_TAG}" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            tags+=("${IMAGE_NAME}:${RELEASE_TAG}" "${IMAGE_NAME}:${RELEASE_TAG#v}")
+            newest_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n 1)"
+            if [ "${RELEASE_TAG}" = "${newest_tag}" ]; then
+              tags+=("${IMAGE_NAME}:latest")
+            else
+              echo "::notice::${RELEASE_TAG} is older than ${newest_tag}; leaving :latest untouched"
+            fi
+          else
+            echo "::notice::no release tag for ${SOURCE_SHA}; publishing the sha tag only"
+          fi
           {
             echo "tags<<EOF"
-            echo "${IMAGE_NAME}:latest"
-            echo "${IMAGE_NAME}:sha-${SOURCE_SHA}"
-            if [[ "${RELEASE_TAG}" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
-              echo "${IMAGE_NAME}:${RELEASE_TAG}"
-              echo "${IMAGE_NAME}:${RELEASE_TAG#v}"
-            fi
+            printf '%s\n' "${tags[@]}"
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
