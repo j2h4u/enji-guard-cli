@@ -382,8 +382,20 @@ def _is_interactive() -> bool:
     return sys.stdin.isatty()
 
 
+REPO_SCOPE_HELP = "Write to one repository; mutually exclusive with --all-repos and --all-projects."
+
+REPO_FILTER_HELP = "Read one repository; omit to read every repository in scope."
+
+SCOPE_REQUIRED = "pass --repo REPO, --all-repos with --project, or --all-projects"
+
+
 def _scope(
-    all_repos: bool, all_projects: bool, *, as_json: bool = False, assume_yes: bool = False
+    all_repos: bool,
+    all_projects: bool,
+    *,
+    repo: str | None = None,
+    as_json: bool = False,
+    assume_yes: bool = False,
 ) -> AutofixWriteScope:
     """Validate write scope and gate the unbounded --all-projects blast radius.
 
@@ -393,6 +405,10 @@ def _scope(
     """
     if all_repos and all_projects:
         raise _fail("VALIDATION", "pass --all-repos or --all-projects, not both", as_json=as_json)
+    if repo is not None and (all_repos or all_projects):
+        raise _fail("VALIDATION", "--repo cannot be combined with --all-repos or --all-projects", as_json=as_json)
+    if repo is None and not all_repos and not all_projects:
+        raise _fail("VALIDATION", SCOPE_REQUIRED, as_json=as_json)
     if all_projects and not assume_yes:
         if as_json or not _is_interactive():
             raise _fail(
@@ -822,7 +838,7 @@ def wait(
 
 @schedule_app.command("list")
 def schedule_list(
-    repo: str | None = None,
+    repo: Annotated[str | None, typer.Option("--repo", help=REPO_FILTER_HELP)] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -836,7 +852,7 @@ def schedule_list(
 @schedule_app.command("set")
 def schedule_set(  # noqa: PLR0913
     *,
-    repo: str | None = None,
+    repo: Annotated[str | None, typer.Option("--repo", help=REPO_SCOPE_HELP)] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
     all_projects: Annotated[
@@ -848,7 +864,7 @@ def schedule_set(  # noqa: PLR0913
     timezone: Annotated[str | None, typer.Option("--timezone")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output), assume_yes=yes)
+    scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
     update = AuditScheduleUpdate(enabled=_switch(enabled), cadence=frequency, timezone=timezone)
     _run(
         lambda: _application().set_schedules(
@@ -865,7 +881,7 @@ def schedule_set(  # noqa: PLR0913
 @schedule_app.command("auto-time")
 def schedule_auto_time(  # noqa: PLR0913
     *,
-    repo: str | None = None,
+    repo: Annotated[str | None, typer.Option("--repo", help=REPO_SCOPE_HELP)] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
     all_projects: Annotated[
@@ -874,7 +890,7 @@ def schedule_auto_time(  # noqa: PLR0913
     yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output), assume_yes=yes)
+    scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
     _run(
         lambda: _application().schedule_auto_time(repo, _selected_project(project), scope=scope),
         _json_output(json_output),
@@ -886,7 +902,7 @@ def schedule_auto_time(  # noqa: PLR0913
 def schedule_timezone(  # noqa: PLR0913
     *,
     timezone: str,
-    repo: str | None = None,
+    repo: Annotated[str | None, typer.Option("--repo", help=REPO_SCOPE_HELP)] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
     all_projects: Annotated[
@@ -895,7 +911,7 @@ def schedule_timezone(  # noqa: PLR0913
     yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output), assume_yes=yes)
+    scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
     update = AuditScheduleUpdate(timezone=timezone)
     _run(
         lambda: _application().set_schedules(repo, _selected_project(project), update, scope=scope),
@@ -906,7 +922,7 @@ def schedule_timezone(  # noqa: PLR0913
 
 @autofix_app.command("list")
 def autofix_list(
-    repo: str | None = None,
+    repo: Annotated[str | None, typer.Option("--repo", help=REPO_FILTER_HELP)] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -920,7 +936,7 @@ def autofix_list(
 @autofix_app.command("set")
 def autofix_set(  # noqa: PLR0913
     *,
-    repo: str | None = None,
+    repo: Annotated[str | None, typer.Option("--repo", help=REPO_SCOPE_HELP)] = None,
     autofixes: Annotated[list[str] | None, typer.Argument(help="Autofix selectors.")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     all_autofixes: Annotated[bool, typer.Option("--all")] = False,
@@ -935,7 +951,7 @@ def autofix_set(  # noqa: PLR0913
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     selectors = ["__all__"] if all_autofixes else (autofixes or [])
-    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output), assume_yes=yes)
+    scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
     update = AuditAutofixUpdate(enabled=_switch(enabled), frequency=frequency, timezone=timezone)
     _run(
         lambda: _application().set_autofixes(
@@ -952,7 +968,7 @@ def autofix_set(  # noqa: PLR0913
 
 @email_app.command("list")
 def email_list(
-    repo: str | None = None,
+    repo: Annotated[str | None, typer.Option("--repo", help=REPO_FILTER_HELP)] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -966,7 +982,7 @@ def email_list(
 @email_app.command("set")
 def email_set(  # noqa: PLR0913
     *,
-    repo: str | None = None,
+    repo: Annotated[str | None, typer.Option("--repo", help=REPO_SCOPE_HELP)] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
     all_projects: Annotated[
@@ -977,7 +993,7 @@ def email_set(  # noqa: PLR0913
     scheduled: Annotated[Literal["on", "off"] | None, typer.Option("--scheduled")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output), assume_yes=yes)
+    scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
     update = EmailPreferencesUpdate(_switch(manual), _switch(scheduled))
     _run(
         lambda: _application().set_email_preferences(repo, _selected_project(project), update, scope=scope),
