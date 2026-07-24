@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol, cast
 
 from enji_guard_cli.audit import parse_catalog_result
@@ -196,9 +197,9 @@ class Application:
         try:
             payload = action()
         except EnjiApiError as exc:
-            raise ApplicationCommandError(exc.code, exc.message, _exit_code_for_error(exc.code)) from exc
+            raise self._command_error(exc.code, exc.message) from exc
         except ApplicationAuthError as exc:
-            raise ApplicationCommandError(exc.code, exc.message, _exit_code_for_error(exc.code)) from exc
+            raise self._command_error(exc.code, exc.message) from exc
         except (AuditArtifactUnavailableError, AuditNotFoundError, PortfolioNotFoundError) as exc:
             raise ApplicationCommandError("NOT_FOUND", str(exc), 4) from exc
         except (
@@ -220,6 +221,24 @@ class Application:
             tuple(
                 ApplicationCatalogChange(change.action_key, change.changed_fields, change.kind) for change in changes
             ),
+        )
+
+    def _command_error(self, code: str, message: str) -> ApplicationCommandError:
+        """Translate one context failure, making credential failures actionable."""
+        if code.startswith("AUTH_"):
+            message = f"{message}. {self._auth_remediation()}"
+        return ApplicationCommandError(code, message, _exit_code_for_error(code))
+
+    def _auth_remediation(self) -> str:
+        """Name the credential file and the exact commands that repair first run."""
+        auth_file = getattr(self.auth, "auth_file", None)
+        location = str(auth_file) if isinstance(auth_file, Path) else "~/.config/enji-guard/auth.json"
+        return (
+            f"Credential file: {location}. "
+            "First run: mkdir -p ~/.config/enji-guard/logs && chmod 700 ~/.config/enji-guard, then import a "
+            "credential with: printf '%s' \"$ENJI_API_TOKEN\" | enji-guard auth import-bearer --stdin "
+            "(cookie auth: enji-guard auth import-cookie --stdin). "
+            "Verify with: enji-guard auth status"
         )
 
     def import_cookie(self, raw_cookie: str) -> ImportCredentialPayload:

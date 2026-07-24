@@ -201,6 +201,19 @@ def _json_output(local: bool = False) -> bool:
     return local or _state["json"] is True
 
 
+def _fail(code: str, message: str, *, as_json: bool, exit_code: int = 1) -> typer.Exit:
+    """Render one operator error on stderr and return the matching exit request.
+
+    ``--json`` callers get a stable ``{"code", "message"}`` envelope so that no
+    automation has to regex-parse the human ``CODE: message`` line.
+    """
+    if as_json:
+        typer.echo(json.dumps({"code": code, "message": message}, indent=2, sort_keys=True), err=True)
+    else:
+        typer.echo(f"{code}: {message}", err=True)
+    return typer.Exit(exit_code)
+
+
 def _repository_sort(value: str) -> RepositorySortName:
     allowed = {"default", "name", "weakest", "overall", "latest-audit"}
     if value not in allowed:
@@ -279,8 +292,7 @@ def _run[PayloadT](
             ),
         )
     except ApplicationCommandError as exc:
-        typer.echo(f"{exc.code}: {exc.message}", err=True)
-        raise typer.Exit(exc.exit_code) from None
+        raise _fail(exc.code, exc.message, as_json=as_json, exit_code=exc.exit_code) from None
     payload = cast(PayloadT, result.payload)
     if as_json:
         rendered = presentation.json(payload)
@@ -353,18 +365,16 @@ def _is_loopback_host(host: str) -> bool:
 def _validate_http_bind(host: str, transport: str, *, allow_external_host: bool) -> None:
     if transport == "stdio" or allow_external_host or _is_loopback_host(host):
         return
-    typer.echo(
-        "VALIDATION: HTTP MCP transports may only bind to loopback by default; "
-        "pass --allow-external-host to bind externally",
-        err=True,
+    raise _fail(
+        "VALIDATION",
+        "HTTP MCP transports may only bind to loopback by default; pass --allow-external-host to bind externally",
+        as_json=_json_output(),
     )
-    raise typer.Exit(1)
 
 
-def _scope(all_repos: bool, all_projects: bool) -> AutofixWriteScope:
+def _scope(all_repos: bool, all_projects: bool, *, as_json: bool = False) -> AutofixWriteScope:
     if all_repos and all_projects:
-        typer.echo("VALIDATION: pass --all-repos or --all-projects, not both", err=True)
-        raise typer.Exit(1)
+        raise _fail("VALIDATION", "pass --all-repos or --all-projects, not both", as_json=as_json)
     return AutofixWriteScope(all_repos=all_repos, all_projects=all_projects)
 
 
@@ -375,8 +385,9 @@ def auth_import_cookie(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     if not stdin:
-        typer.echo("VALIDATION: use --stdin to avoid storing cookies in shell history", err=True)
-        raise typer.Exit(1)
+        raise _fail(
+            "VALIDATION", "use --stdin to avoid storing cookies in shell history", as_json=_json_output(json_output)
+        )
     raw_cookie = sys.stdin.read()
     _run(lambda: _application(auth_file).import_cookie(raw_cookie), _json_output(json_output), FIELDS_PRESENTATION)
 
@@ -388,8 +399,9 @@ def auth_import_bearer(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     if not stdin:
-        typer.echo("VALIDATION: use --stdin to avoid storing tokens in shell history", err=True)
-        raise typer.Exit(1)
+        raise _fail(
+            "VALIDATION", "use --stdin to avoid storing tokens in shell history", as_json=_json_output(json_output)
+        )
     raw_token = sys.stdin.read()
     _run(lambda: _application(auth_file).import_bearer(raw_token), _json_output(json_output), FIELDS_PRESENTATION)
 
@@ -592,6 +604,14 @@ def _audit_selectors(audits: list[str] | None) -> list[str]:
     return [item.removeprefix("audit.") for item in (audits or [])]
 
 
+def _explicit_audit_selectors(audits: list[str] | None, *, all_audits: bool, as_json: bool) -> list[str]:
+    """Reject a selector list combined with --all instead of letting --all win."""
+    selectors = _audit_selectors(audits)
+    if all_audits and selectors:
+        raise _fail("VALIDATION", "pass audit selectors or --all, not both", as_json=as_json)
+    return selectors
+
+
 @audit_app.command("start")
 def audit_start(
     repo: str,
@@ -600,11 +620,12 @@ def audit_start(
     all_audits: Annotated[bool, typer.Option("--all", help="Start every published audit.")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    selectors = _explicit_audit_selectors(audits, all_audits=all_audits, as_json=_json_output(json_output))
     _run(
         lambda: _application().audit_start(
             repo,
             _selected_project(project),
-            _audit_selectors(audits),
+            selectors,
             all_audits=all_audits,
         ),
         _json_output(json_output),
@@ -617,13 +638,14 @@ def audit_read(
     repo: str,
     audits: Annotated[list[str] | None, typer.Argument(help="Audit selector suffixes.")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
-    all_audits: Annotated[bool, typer.Option("--all")] = False,
+    all_audits: Annotated[bool, typer.Option("--all", help="Read every published audit.")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    selectors = _explicit_audit_selectors(audits, all_audits=all_audits, as_json=_json_output(json_output))
     _run(
         lambda: _application().audit_read(
             repo,
-            _audit_selectors(audits),
+            selectors,
             project=_selected_project(project),
             all_audits=all_audits,
         ),
@@ -635,18 +657,15 @@ def audit_read(
 @audit_app.command("summary")
 def audit_summary(
     repo: str,
-    audits: Annotated[list[str] | None, typer.Argument(help="Optional audit selector suffixes.")] = None,
+    audits: Annotated[
+        list[str] | None,
+        typer.Argument(help="Optional audit selector suffixes; omit to summarize every published audit."),
+    ] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
-    all_audits: Annotated[bool, typer.Option("--all")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    selectors = _audit_selectors(audits)
-    if all_audits and selectors:
-        typer.echo("VALIDATION: pass audit selectors or --all, not both", err=True)
-        raise typer.Exit(1)
-    selected = [] if all_audits else selectors
     _run(
-        lambda: _application().audit_summary(repo, selected, project=_selected_project(project)),
+        lambda: _application().audit_summary(repo, _audit_selectors(audits), project=_selected_project(project)),
         _json_output(json_output),
         AUDIT_SUMMARY,
     )
@@ -707,15 +726,13 @@ def health(
         with socket.create_connection((host, port), timeout=default_settings().service.local_readiness_timeout_seconds):
             pass
     except OSError as exc:
-        typer.echo(f"UNREADY: MCP listener is not ready: {exc}", err=True)
-        raise typer.Exit(1) from None
+        raise _fail("UNREADY", f"MCP listener is not ready: {exc}", as_json=_json_output(json_output)) from None
     verdict = readiness_verdict()
     if not verdict.ready:
         reason = verdict.reason or "backend readiness failed"
         if verdict.state is not None and verdict.state.failure_code is not None:
             reason = f"{reason}: {verdict.state.failure_code}"
-        typer.echo(f"UNREADY: {reason}", err=True)
-        raise typer.Exit(1)
+        raise _fail("UNREADY", reason, as_json=_json_output(json_output))
     _emit({"status": "ready"}, _json_output(json_output))
 
 
@@ -801,7 +818,7 @@ def schedule_set(  # noqa: PLR0913
     timezone: Annotated[str | None, typer.Option("--timezone")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    scope = _scope(all_repos, all_projects)
+    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output))
     update = AuditScheduleUpdate(enabled=_switch(enabled), cadence=frequency, timezone=timezone)
     _run(
         lambda: _application().set_schedules(
@@ -823,7 +840,7 @@ def schedule_auto_time(
     all_projects: Annotated[bool, typer.Option("--all-projects")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    scope = _scope(all_repos, all_projects)
+    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output))
     _run(
         lambda: _application().schedule_auto_time(repo, _selected_project(project), scope=scope),
         _json_output(json_output),
@@ -841,7 +858,7 @@ def schedule_timezone(  # noqa: PLR0913
     all_projects: Annotated[bool, typer.Option("--all-projects")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    scope = _scope(all_repos, all_projects)
+    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output))
     update = AuditScheduleUpdate(timezone=timezone)
     _run(
         lambda: _application().set_schedules(repo, _selected_project(project), update, scope=scope),
@@ -878,7 +895,7 @@ def autofix_set(  # noqa: PLR0913
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     selectors = ["__all__"] if all_autofixes else (autofixes or [])
-    scope = _scope(all_repos, all_projects)
+    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output))
     update = AuditAutofixUpdate(enabled=_switch(enabled), frequency=frequency, timezone=timezone)
     _run(
         lambda: _application().set_autofixes(
@@ -917,7 +934,7 @@ def email_set(  # noqa: PLR0913
     scheduled: Annotated[Literal["on", "off"] | None, typer.Option("--scheduled")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    scope = _scope(all_repos, all_projects)
+    scope = _scope(all_repos, all_projects, as_json=_json_output(json_output))
     update = EmailPreferencesUpdate(_switch(manual), _switch(scheduled))
     _run(
         lambda: _application().set_email_preferences(repo, _selected_project(project), update, scope=scope),
