@@ -133,7 +133,7 @@ def test_batch_commands_document_their_repo_option(group: str, command: str) -> 
     assert params["--repo"].help
 
 
-@pytest.mark.parametrize("command", [["status"], ["audit", "start"], ["repo", "status"], ["recon", "start"]])
+@pytest.mark.parametrize("command", [["status"], ["audit", "start"], ["audit", "status"], ["recon", "start"]])
 def test_single_repository_commands_keep_repo_positional(command: list[str]) -> None:
     result = CliRunner().invoke(app, [*command, "--help"])
 

@@ -420,6 +420,34 @@ docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --
 
 Pass `--json` when a command output is consumed by automation.
 
+### Full Command Surface
+
+Every command the CLI exposes; `enji-guard COMMAND --help` is authoritative for
+options.
+
+| Command | Purpose |
+|---------|---------|
+| `status [REPO]` | Portfolio overview, or one repository audit snapshot when `REPO` is given. |
+| `wait REPO` | Block until the repository's audits finish. |
+| `health [--ready]` | Process liveness; `--ready` additionally probes the MCP listener and cached backend readiness. |
+| `access` | Account plan and limits. |
+| `run` | Run the long-lived MCP service (used by the container entrypoint). |
+| `auth import-bearer\|import-cookie --stdin`, `auth status` | Credential bootstrap and credential state. |
+| `project list\|create\|rename\|delete\|settings` | Project administration. |
+| `repo add\|remove\|move\|resolve\|list` | Repository administration; `repo list` is the portfolio table. |
+| `recon start REPO` | Baseline discovery run. |
+| `audit start\|read\|summary REPO` | Run audits, read bodies, read compact metadata. |
+| `audit status REPO`, `audit wait REPO` | Audit-group entry points for the snapshot and the blocking wait. |
+| `portfolio status` | Portfolio table, same output as `repo list`. |
+| `schedule list\|set\|auto-time\|timezone` | Automatic audit schedules. |
+| `improvement-jobs list\|set` | Curated autofix jobs. |
+| `email list\|set` | Audit completion email preferences. |
+| `language show\|set` | Account-wide audit language. |
+| `gitlab credentials\|projects` | GitLab credential and project discovery. |
+
+`status REPO` is the canonical single-repository snapshot. There is exactly one
+snapshot command outside the `audit` group; `repo` and `recon` do not repeat it.
+
 ### Exit Codes
 
 The exit status is a stable contract; automation should branch on it instead of

@@ -604,19 +604,6 @@ def repo_move(
     )
 
 
-@repo_app.command("status")
-def repo_status(
-    repo: str,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().repository_status(repo, _selected_project(project)),
-        _json_output(json_output),
-        REPOSITORY_STATUS,
-    )
-
-
 @recon_app.command("start")
 def recon_start(
     repo: str,
@@ -627,19 +614,6 @@ def recon_start(
         lambda: _application().recon_start(repo, _selected_project(project)),
         _json_output(json_output),
         FIELDS_PRESENTATION,
-    )
-
-
-@recon_app.command("status")
-def recon_status(
-    repo: str,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().repository_status(repo, _selected_project(project)),
-        _json_output(json_output),
-        REPOSITORY_STATUS,
     )
 
 
