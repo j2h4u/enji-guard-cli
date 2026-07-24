@@ -81,6 +81,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -159,39 +161,54 @@ jobs:
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
-      - name: Build candidate image
+      # The candidate is pushed under a throwaway digest-bearing tag so that
+      # buildx can attach provenance and SBOM attestations, then scanned by
+      # digest. Only a digest that passed Trivy is promoted to the tags that
+      # consumers pull, so the scan still gates publication.
+      - name: Build and push candidate image
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: Dockerfile
-          load: true
-          push: false
-          tags: ${{ steps.image-tags.outputs.tags }}
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:candidate-${{ steps.release-metadata.outputs.source-sha }}
+          provenance: mode=max
+          sbom: true
           build-args: |
             PACKAGE_VERSION=${{ steps.package-version.outputs.version }}
             SOURCE_COMMIT=${{ steps.release-metadata.outputs.source-sha }}
 
       - name: Verify candidate runtime contract
         env:
-          IMAGE_TAGS: ${{ steps.image-tags.outputs.tags }}
+          CANDIDATE: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
         run: |
-          candidate="$(printf '%s\n' "${IMAGE_TAGS}" | head -n 1)"
-          uv run --locked python -m scripts.release_contract --image "${candidate}"
+          docker pull "${CANDIDATE}"
+          uv run --locked python -m scripts.release_contract --image "${CANDIDATE}"
 
       - name: Scan candidate image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
-          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ steps.release-metadata.outputs.source-sha }}
+          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
           scanners: vuln
           severity: MEDIUM,HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
 
-      - name: Publish tested image
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Promote scanned digest to published tags
         env:
           IMAGE_TAGS: ${{ steps.image-tags.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           while IFS= read -r tag; do
-            [ -n "${tag}" ] && docker push "${tag}"
+            [ -n "${tag}" ] || continue
+            docker buildx imagetools create --tag "${tag}" "${IMAGE_NAME}@${DIGEST}"
           done <<< "${IMAGE_TAGS}"
