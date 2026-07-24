@@ -780,7 +780,7 @@ def test_auth_status_uses_stored_credential_headers(tmp_path: Path) -> None:
         )
 
     async def run_status() -> AuthStatusPayload:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             return await auth_status_async(auth_file, HttpxEnjiHttpClient(client))
 
     status = run_auth_status(run_status)
@@ -799,7 +799,7 @@ def test_auth_status_returns_rate_limit_payload(tmp_path: Path) -> None:
         return httpx.Response(429, headers={"Retry-After": "7"}, request=request)
 
     async def run_status() -> AuthStatusPayload:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             return await auth_status_async(auth_file, HttpxEnjiHttpClient(client))
 
     status = run_auth_status(run_status)
@@ -820,7 +820,7 @@ def test_auth_status_does_not_refresh_or_replay_on_invalid_cookie(tmp_path: Path
         return httpx.Response(401, json={"error": {"code": "AUTH_INVALID"}}, request=request)
 
     async def run_status() -> AuthStatusPayload:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             return await auth_status_async(auth_file, HttpxEnjiHttpClient(client))
 
     status = run_auth_status(run_status)
@@ -840,7 +840,7 @@ def test_backend_readiness_probe_does_not_refresh_on_auth_invalid(tmp_path: Path
         return httpx.Response(401, json={"error": {"code": "AUTH_INVALID"}}, request=request)
 
     async def run_probe() -> AuthBackendReadinessResult:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             return await backend_readiness_probe_async(auth_file, HttpxEnjiHttpClient(client))
 
     probe = asyncio.run(run_probe())
@@ -874,7 +874,7 @@ def test_refresh_auth_updates_rotated_access_and_refresh_cookies(tmp_path: Path)
         )
 
     async def run_refresh() -> RuntimeStoredAuth:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             return await _refresh_stored_cookie_auth(auth_file, HttpxEnjiHttpClient(client))
 
     rotated = asyncio.run(run_refresh())
@@ -905,7 +905,7 @@ def test_refresh_auth_rejects_success_response_without_refresh_cookie(tmp_path: 
         )
 
     async def run_refresh() -> RuntimeStoredAuth:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             return await _refresh_stored_cookie_auth(auth_file, HttpxEnjiHttpClient(client))
 
     with pytest.raises(EnjiHttpError) as exc_info:
@@ -934,7 +934,7 @@ def test_refresh_auth_marks_transient_response_unknown_without_persisting_cookie
         )
 
     async def run_refresh() -> RuntimeStoredAuth:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             return await _refresh_stored_cookie_auth(auth_file, HttpxEnjiHttpClient(client))
 
     with pytest.raises(EnjiHttpError) as exc_info:
@@ -958,7 +958,7 @@ def test_refresh_auth_does_not_persist_incomplete_transient_cookie_rotation(tmp_
         )
 
     async def run_refresh() -> RuntimeStoredAuth:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             return await _refresh_stored_cookie_auth(auth_file, HttpxEnjiHttpClient(client))
 
     with pytest.raises(EnjiHttpError) as exc_info:
@@ -985,7 +985,7 @@ def test_refresh_auth_does_not_persist_deleting_auth_cookie_from_transient_error
         )
 
     async def run_refresh() -> RuntimeStoredAuth:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             return await _refresh_stored_cookie_auth(auth_file, HttpxEnjiHttpClient(client))
 
     with pytest.raises(EnjiHttpError) as exc_info:
@@ -1013,7 +1013,7 @@ def test_refresh_auth_rejects_deleting_auth_cookie_from_success_response(tmp_pat
         )
 
     async def run_refresh() -> RuntimeStoredAuth:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             return await _refresh_stored_cookie_auth(auth_file, HttpxEnjiHttpClient(client))
 
     with pytest.raises(EnjiHttpError) as exc_info:
@@ -1042,7 +1042,7 @@ def test_refresh_auth_does_not_persist_cookies_from_auth_failure(tmp_path: Path,
         )
 
     async def run_refresh() -> RuntimeStoredAuth:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             return await _refresh_stored_cookie_auth(
                 auth_file,
                 HttpxEnjiHttpClient(client),
@@ -1186,8 +1186,8 @@ def test_auto_refresh_transport_factory_forwards_injected_redacted_events(monkey
     monkeypatch.setattr(auto_refresh_module, "start_auto_refresh_task", fake_start_auto_refresh_task)
     monkeypatch.setattr(
         transport_module,
-        "_new_async_client",
-        lambda _limits: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        "_new_client",
+        lambda _limits: httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
     assert start_auto_refresh_task(event_sink=event_sink) is None

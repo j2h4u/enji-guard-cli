@@ -10,7 +10,7 @@ from enji_guard_cli.audit.ledger import FileAuditLedger
 from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.enji_gateway import AuditGateway, GitLabGateway, PortfolioGateway
-from enji_guard_cli.enji_gateway.pooled_client import PooledEnjiHttpClient
+from enji_guard_cli.enji_gateway.shared_client import create_shared_http_client
 from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.mcp_facade import McpQueryFacade
 from enji_guard_cli.portfolio.selectors import GatewayPortfolioTargetService
@@ -28,32 +28,32 @@ def create_application(auth_file: Path | None = None) -> Application:
         lookup_grace_seconds=settings.active_run_ledger.lookup_grace_seconds,
     )
     credential_reader = GatewayCredentialReader(auth_file, settings=settings)
-    pooled_client = PooledEnjiHttpClient(settings, event_sink=log_event)
+    http_client = create_shared_http_client(settings, event_sink=log_event)
     runtime_auth = RuntimeAuthCoordinatorAdapter(
         auth_file,
         settings=settings,
         event_sink=log_event,
         outcome_sink=persist_event,
-        client=pooled_client,
+        client=http_client,
     )
-    auth_service = AuthSessionService(auth_file, pooled_client, settings=settings)
+    auth_service = AuthSessionService(auth_file, http_client, settings=settings)
     fanout = BoundedFanout(settings.fanout)
     try:
-        portfolio_gateway = PortfolioGateway(auth_file, pooled_client, auth_port=credential_reader)
+        portfolio_gateway = PortfolioGateway(auth_file, http_client, auth_port=credential_reader)
         return Application(
-            audit_gateway=AuditGateway(auth_file, pooled_client, auth_port=credential_reader),
+            audit_gateway=AuditGateway(auth_file, http_client, auth_port=credential_reader),
             portfolio_gateway=portfolio_gateway,
-            gitlab_gateway=GitLabGateway(auth_file, pooled_client, auth_port=credential_reader),
+            gitlab_gateway=GitLabGateway(auth_file, http_client, auth_port=credential_reader),
             auth=auth_service,
             ledger=ledger,
             catalog_observer=AuditCatalogObserver(settings.audit_catalog.state_file),
             target_service=GatewayPortfolioTargetService(portfolio_gateway, fanout),
             runtime_auth=runtime_auth,
             fanout=fanout,
-            lifecycle=pooled_client,
+            lifecycle=http_client,
         )
     except BaseException:
-        pooled_client.close()
+        http_client.close()
         raise
 
 

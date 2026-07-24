@@ -23,7 +23,7 @@ from enji_guard_cli.transport import (
 
 def test_httpx_enji_http_client_returns_response_body() -> None:
     async def run() -> None:
-        async with httpx.AsyncClient(
+        with httpx.Client(
             transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"ok": True}, request=request))
         ) as client:
             response = await HttpxEnjiHttpClient(client).request(
@@ -53,7 +53,7 @@ def test_httpx_enji_http_client_logs_sanitized_request_metadata(capsys: pytest.C
     )
 
     async def run() -> None:
-        async with httpx.AsyncClient(
+        with httpx.Client(
             transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"ok": True}, request=request))
         ) as client:
             await HttpxEnjiHttpClient(client, event_sink=log_event).request(
@@ -85,7 +85,7 @@ def test_httpx_enji_http_client_wraps_transport_errors() -> None:
         raise httpx.ConnectError("boom", request=request)
 
     async def run() -> None:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             try:
                 await HttpxEnjiHttpClient(client).request(
                     EnjiHttpRequest(
