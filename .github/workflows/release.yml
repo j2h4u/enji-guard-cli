@@ -17,8 +17,27 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      release-created: ${{ steps.release.outputs.release_created }}
+      tag-name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # release-please runs with the default GITHUB_TOKEN, so the release it
+  # publishes cannot trigger another workflow. Call the container workflow
+  # directly instead of relying on a `release: published` trigger.
+  publish-container:
+    needs: [release-please]
+    if: needs.release-please.outputs.release-created == 'true'
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/container.yml
+    with:
+      release_tag: ${{ needs.release-please.outputs.tag-name }}

@@ -5,20 +5,24 @@ on:
     workflows: ["CI"]
     branches: [main]
     types: [completed]
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      release_tag:
+        description: "Release tag to publish, for example v0.2.0."
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       release_tag:
         description: "Existing release tag to publish, for example v0.2.0."
         required: false
+        type: string
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.inputs.release_tag || github.event.release.tag_name || github.event.workflow_run.head_sha || github.sha }}
+  group: ${{ github.workflow }}-${{ inputs.release_tag || github.event.workflow_run.head_sha || github.sha }}
   cancel-in-progress: true
 
 env:
@@ -43,18 +47,24 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Classify changed files
         id: classify
         env:
-          EVENT_NAME: ${{ github.event_name }}
+          EVENT_NAME: ${{ inputs.release_tag != '' && 'release' || github.event_name }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
+          # CI skips quality/test/crap/docker-build on a docs-only diff yet still
+          # concludes success, so the workflow_run path must re-apply the same
+          # docs-only policy instead of forcing a publish: otherwise a README-only
+          # commit republishes an image nothing ever tested.
+          base_sha="$(git rev-parse --verify --quiet "${HEAD_SHA}^" || true)"
           python3 scripts/classify_changed_files.py \
             --event-name "${EVENT_NAME}" \
+            --base-sha "${base_sha}" \
             --head-sha "${HEAD_SHA}" \
-            --force-event workflow_run \
             --force-event release \
             --force-event workflow_dispatch \
             --output-key requires-image-publish
@@ -68,11 +78,18 @@ jobs:
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.release_tag || github.event.release.tag_name || github.event.workflow_run.head_sha || github.sha }}
+          fetch-tags: true
+          persist-credentials: false
+          ref: ${{ inputs.release_tag || github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
@@ -97,10 +114,9 @@ jobs:
       - name: Resolve release metadata
         id: release-metadata
         env:
-          INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
-          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          release_tag="${INPUT_RELEASE_TAG:-${EVENT_RELEASE_TAG}}"
+          release_tag="${INPUT_RELEASE_TAG}"
           source_sha="$(git rev-parse HEAD)"
           if [ -z "${release_tag}" ]; then
             release_tag="$(git tag --points-at "${source_sha}" --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n 1)"
@@ -114,14 +130,21 @@ jobs:
           RELEASE_TAG: ${{ steps.release-metadata.outputs.release-tag }}
           SOURCE_SHA: ${{ steps.release-metadata.outputs.source-sha }}
         run: |
+          tags=("${IMAGE_NAME}:sha-${SOURCE_SHA}")
+          if [[ "${RELEASE_TAG}" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            tags+=("${IMAGE_NAME}:${RELEASE_TAG}" "${IMAGE_NAME}:${RELEASE_TAG#v}")
+            newest_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n 1)"
+            if [ "${RELEASE_TAG}" = "${newest_tag}" ]; then
+              tags+=("${IMAGE_NAME}:latest")
+            else
+              echo "::notice::${RELEASE_TAG} is older than ${newest_tag}; leaving :latest untouched"
+            fi
+          else
+            echo "::notice::no release tag for ${SOURCE_SHA}; publishing the sha tag only"
+          fi
           {
             echo "tags<<EOF"
-            echo "${IMAGE_NAME}:latest"
-            echo "${IMAGE_NAME}:sha-${SOURCE_SHA}"
-            if [[ "${RELEASE_TAG}" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
-              echo "${IMAGE_NAME}:${RELEASE_TAG}"
-              echo "${IMAGE_NAME}:${RELEASE_TAG#v}"
-            fi
+            printf '%s\n' "${tags[@]}"
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
@@ -138,39 +161,54 @@ jobs:
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
-      - name: Build candidate image
+      # The candidate is pushed under a throwaway digest-bearing tag so that
+      # buildx can attach provenance and SBOM attestations, then scanned by
+      # digest. Only a digest that passed Trivy is promoted to the tags that
+      # consumers pull, so the scan still gates publication.
+      - name: Build and push candidate image
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: Dockerfile
-          load: true
-          push: false
-          tags: ${{ steps.image-tags.outputs.tags }}
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:candidate-${{ steps.release-metadata.outputs.source-sha }}
+          provenance: mode=max
+          sbom: true
           build-args: |
             PACKAGE_VERSION=${{ steps.package-version.outputs.version }}
             SOURCE_COMMIT=${{ steps.release-metadata.outputs.source-sha }}
 
       - name: Verify candidate runtime contract
         env:
-          IMAGE_TAGS: ${{ steps.image-tags.outputs.tags }}
+          CANDIDATE: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
         run: |
-          candidate="$(printf '%s\n' "${IMAGE_TAGS}" | head -n 1)"
-          uv run --locked python -m scripts.release_contract --image "${candidate}"
+          docker pull "${CANDIDATE}"
+          uv run --locked python -m scripts.release_contract --image "${CANDIDATE}"
 
       - name: Scan candidate image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
-          image-ref: ${{ env.IMAGE_NAME }}:latest
+          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
           scanners: vuln
           severity: MEDIUM,HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
 
-      - name: Publish tested image
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Promote scanned digest to published tags
         env:
           IMAGE_TAGS: ${{ steps.image-tags.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           while IFS= read -r tag; do
-            [ -n "${tag}" ] && docker push "${tag}"
+            [ -n "${tag}" ] || continue
+            docker buildx imagetools create --tag "${tag}" "${IMAGE_NAME}@${DIGEST}"
           done <<< "${IMAGE_TAGS}"
