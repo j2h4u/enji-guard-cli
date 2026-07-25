@@ -233,6 +233,12 @@ def _application(auth_file: Path | None = None) -> Application:
     cached = _state["application"]
     if isinstance(cached, Application) and _state["application_auth_file"] == selected:
         return cached
+    # A single invocation can ask for two different credential files: ``_run``
+    # resolves the global one while the command action passes the subcommand's
+    # ``--auth-file``.  The cache holds exactly one application, so the one being
+    # displaced must be closed here or its pooled client is orphaned --
+    # ``_close_cached_application`` would only ever see the survivor.
+    _close_cached_application()
     application = create_application(selected)
     _state["application"] = application
     _state["application_auth_file"] = selected

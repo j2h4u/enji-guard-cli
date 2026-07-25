@@ -18,7 +18,7 @@ from typer.testing import CliRunner
 import enji_guard_cli.composition as composition_module
 import enji_guard_cli.delivery.mcp.server as server_module
 from enji_guard_cli.composition import mcp_query_facade
-from enji_guard_cli.delivery.cli.app import app
+from enji_guard_cli.delivery.cli.app import _application, _close_cached_application, _state, app
 from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
 from enji_guard_cli.mcp_facade import McpQueryFacade
 from enji_guard_cli.runtime_observability.auth_coordinator import RuntimeAuthCoordinatorAdapter
@@ -250,3 +250,30 @@ def test_the_credential_pool_is_released_when_the_supervisor_fails(
     assert result.exit_code != 0
     assert captured_client[0].is_closed is True
 
+
+def test_switching_auth_file_closes_the_displaced_application(tmp_path: Path) -> None:
+    """The CLI cache holds one application; the displaced one must be closed.
+
+    A single invocation legitimately asks twice: `_run` resolves the global
+    `--auth-file` while the command action passes the subcommand's own. Before
+    the fix the second call overwrote the cache silently and the first pooled
+    client was orphaned, because the close-on-exit callback only ever sees the
+    survivor.
+    """
+    _close_cached_application()
+    _state["auth_file"] = None
+    try:
+        first = _application(tmp_path / "one.json")
+        first_client = first.runner.lifecycle
+        assert isinstance(first_client, HttpxEnjiHttpClient)
+        assert first_client.is_closed is False
+
+        second = _application(tmp_path / "two.json")
+
+        assert second is not first
+        assert first_client.is_closed is True
+        second_client = second.runner.lifecycle
+        assert isinstance(second_client, HttpxEnjiHttpClient)
+        assert second_client.is_closed is False
+    finally:
+        _close_cached_application()
