@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from difflib import get_close_matches
 from typing import Protocol
 
 from enji_guard_cli.fanout import BoundedFanout
@@ -16,6 +17,8 @@ _HOST_PORT_PARTS = 2
 _HOST_PORT_PARTS_WITH_LOCATOR = 3
 _MIN_PORT = 1
 _MAX_PORT = 65535
+_MAX_LISTED_REPOSITORIES = 3
+_SUGGESTION_CUTOFF = 0.6
 
 
 def project_matches(project: ProjectRef, selector: str) -> bool:
@@ -40,6 +43,8 @@ def resolve_project(projects: Sequence[ProjectRef], selector: str | None = None)
 
 
 def repository_matches(repository: RepositoryRef, selector: str) -> bool:
+    """Exact match: the Enji repo id, or a full ``provider@host:locator`` selector."""
+
     normalized = selector.casefold()
     if repository.repo_id.casefold() == normalized:
         return True
@@ -49,6 +54,15 @@ def repository_matches(repository: RepositoryRef, selector: str) -> bool:
         return False
 
 
+def repository_locator_matches(repository: RepositoryRef, selector: str) -> bool:
+    """Loose match on the bare provider locator that ``status`` prints, such as ``owner/name``."""
+
+    identity = repository.identity
+    value = selector.strip()
+    normalized = value.casefold() if identity.provider is RepositoryProvider.GITHUB else value
+    return identity.canonical_locator == normalized
+
+
 def resolve_repository(targets: Sequence[RepositoryRef], selector: str, *, project: str | None = None) -> RepositoryRef:
     scoped = [
         target
@@ -56,9 +70,15 @@ def resolve_repository(targets: Sequence[RepositoryRef], selector: str, *, proje
         if project is None
         or project.casefold() in {target.project_id.casefold(), (target.project_name or "").casefold()}
     ]
+    # Exact identifiers win outright; the bare locator is only consulted when
+    # nothing matched exactly, so a loose match can never shadow a precise one.
     matches = [target for target in scoped if repository_matches(target, selector)]
     if not matches:
-        raise PortfolioNotFoundError(f"repo selector matched no repos: {selector}")
+        matches = [target for target in scoped if repository_locator_matches(target, selector)]
+    if not matches:
+        raise PortfolioNotFoundError(
+            f"repo selector matched no repos: {selector}. {_repository_hint(scoped, selector, project)}"
+        )
     if len(matches) > 1:
         candidates = ", ".join(repository_candidate(target) for target in matches)
         raise ValueError(f"repo selector is ambiguous: {selector}. candidates: {candidates}")
@@ -179,6 +199,31 @@ def validated_project_name(name: str) -> str:
     if not value:
         raise ValueError("project name must not be empty")
     return value
+
+
+def _repository_hint(scoped: Sequence[RepositoryRef], selector: str, project: str | None) -> str:
+    """Suggest only genuinely close repositories; otherwise say how to list them."""
+
+    listing = "run `status`" if project is None else f"run `status --project {project}`"
+    if not scoped:
+        return f"no repositories in scope; {listing} to list them"
+    # Only human-meaningful strings are fuzzy-matched.  Repo ids are opaque
+    # identifiers, so textual similarity to one is noise, not a suggestion.
+    suggestions: dict[str, str] = {}
+    for target in sorted(scoped, key=lambda item: (repository_label(item), item.repo_id)):
+        candidate = repository_candidate(target)
+        suggestions.setdefault(target.identity.locator.casefold(), candidate)
+        suggestions.setdefault(repository_label(target).casefold(), candidate)
+    close = get_close_matches(
+        selector.strip().casefold(),
+        sorted(suggestions),
+        n=_MAX_LISTED_REPOSITORIES,
+        cutoff=_SUGGESTION_CUTOFF,
+    )
+    listed = list(dict.fromkeys(suggestions[match] for match in close))
+    if not listed:
+        return f"no close match; {listing} to list them"
+    return f"did you mean: {', '.join(listed[:_MAX_LISTED_REPOSITORIES])}"
 
 
 def _project_candidates(projects: Sequence[ProjectRef]) -> str:
