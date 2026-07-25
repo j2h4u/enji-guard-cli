@@ -37,15 +37,6 @@ RAW_GATEWAY_MODULES = frozenset(
         "enji_guard_cli.transport",
     }
 )
-MCP_DELIVERY_ROOT = ROOT / "src" / "enji_guard_cli" / "delivery" / "mcp"
-MCP_FORBIDDEN_MODULES = frozenset(
-    {
-        "enji_guard_cli.application",
-        "enji_guard_cli.audit",
-        "enji_guard_cli.portfolio",
-        "enji_guard_cli.enji_gateway",
-    }
-)
 PRODUCT_SOURCE_ROOTS = (
     ROOT / "src" / "enji_guard_cli" / "audit",
     ROOT / "src" / "enji_guard_cli" / "portfolio",
@@ -313,31 +304,6 @@ def test_product_source_does_not_import_raw_gateway_implementations() -> None:
                 if any(imported == module or imported.startswith(f"{module}.") for module in RAW_GATEWAY_MODULES):
                     violations.append(f"{path.relative_to(ROOT)}:{getattr(node, 'lineno', 0)}: {imported}")
     assert violations == [], "raw gateway imports leaked into product code:\n" + "\n".join(violations)
-
-
-def test_mcp_delivery_reaches_the_product_only_through_its_narrow_facade() -> None:
-    """MCP delivery must name no domain module directly.
-
-    An import-linter contract cannot express this honestly: the chain
-    ``delivery.mcp -> composition -> application`` is real and intentional,
-    because composition is what wires the read-only surface.  Allowing indirect
-    imports would reduce the contract to a spelling check, and forbidding them
-    would fail on that intended chain.  What genuinely matters is that no
-    module under ``delivery/mcp`` names a domain module itself, so that every
-    MCP call goes through :class:`McpQueryFacade`'s two curated scenarios.
-    """
-    assert MCP_DELIVERY_ROOT.is_dir(), f"MCP delivery root no longer exists: {MCP_DELIVERY_ROOT}"
-    sources = tuple(sorted(MCP_DELIVERY_ROOT.rglob("*.py")))
-    assert sources, "MCP delivery has no source files to check"
-
-    violations: list[str] = []
-    for path in sources:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            for imported in _imported_modules(node):
-                if any(imported == module or imported.startswith(f"{module}.") for module in MCP_FORBIDDEN_MODULES):
-                    violations.append(f"{path.relative_to(ROOT)}:{getattr(node, 'lineno', 0)}: {imported}")
-    assert violations == [], "MCP delivery reached past its facade:\n" + "\n".join(violations)
 
 
 def _product_python_files() -> tuple[Path, ...]:

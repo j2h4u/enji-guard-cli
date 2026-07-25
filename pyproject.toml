@@ -241,6 +241,24 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
+# `allow_indirect_imports` is deliberate: the chain
+# delivery.mcp -> composition -> application is real and intended, because
+# composition is what wires the read-only surface.  What must never happen is
+# MCP delivery naming a domain module itself and calling past the two curated
+# scenarios of McpQueryFacade.
+id = "mcp-delivery-uses-its-narrow-facade"
+name = "MCP delivery names no domain module directly"
+type = "forbidden"
+source_modules = ["enji_guard_cli.delivery.mcp"]
+forbidden_modules = [
+    "enji_guard_cli.application",
+    "enji_guard_cli.audit",
+    "enji_guard_cli.portfolio",
+    "enji_guard_cli.enji_gateway",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
 id = "fanout-owns-concurrency"
 name = "Only orchestration layers may use the shared fanout policy"
 type = "protected"
