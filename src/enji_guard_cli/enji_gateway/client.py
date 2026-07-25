@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import quote, urlencode
 
-from enji_guard_cli.auth_session.models import StoredAuth
+from enji_guard_cli.auth_session import StoredAuth
 from enji_guard_cli.enji_gateway.contract import EnjiEndpointSpec, HttpMethod
 from enji_guard_cli.enji_gateway.ports import GatewayCredentialError, GatewayCredentialReader
 from enji_guard_cli.errors import EnjiApiError

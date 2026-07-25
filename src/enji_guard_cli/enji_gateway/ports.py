@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Protocol
 
-from enji_guard_cli.auth_session.models import StoredAuth
+from enji_guard_cli.auth_session import StoredAuth
 from enji_guard_cli.transport import EnjiHttpClient
 
 type GatewayAuthFile = Path | None
