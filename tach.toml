@@ -1,0 +1,86 @@
+# Module boundaries, enforced by tach (https://github.com/tach-org/tach).
+#
+# Running in parallel with import-linter during migration.  tach expresses two
+# things import-linter cannot: `[[interfaces]]`, which pins the public surface
+# of a module by symbol name and would have caught the re-export laundering
+# that once kept a contract green while MCP composed the whole mutating
+# application; and `cannot_depend_on`/`visibility`, which state a rule from the
+# depended-upon side.  Once parity is reached, import-linter goes.
+#
+# DECLARED DEBT.  `auth_session` must not depend on `enji_gateway`: credentials
+# are the lower-level concept and the gateway is what consumes them.  Today
+# auth_session/adapters.py still imports enji_gateway.ports, so that edge is
+# marked `deprecated` -- allowed, but reported by name and line on every run,
+# so it reads as a to-do list rather than as an approved edge.  When the last
+# warning is gone the edge is deleted and the rule becomes hard.  At that point
+# `forbid_circular_dependencies = true` can be turned on; it fails today.
+
+source_roots = ["src"]
+
+[[modules]]
+path = "enji_guard_cli.audit"
+depends_on = ["enji_guard_cli.settings", "enji_guard_cli.atomic_json", "enji_guard_cli.fanout"]
+
+[[modules]]
+path = "enji_guard_cli.portfolio"
+depends_on = ["enji_guard_cli.audit", "enji_guard_cli.settings", "enji_guard_cli.fanout"]
+
+[[modules]]
+path = "enji_guard_cli.gitlab"
+depends_on = ["enji_guard_cli.portfolio"]
+
+[[modules]]
+path = "enji_guard_cli.application"
+depends_on = ["enji_guard_cli.runtime_observability", "enji_guard_cli.portfolio", "enji_guard_cli.settings", "enji_guard_cli.audit", "enji_guard_cli.gitlab", "enji_guard_cli.auth_session", "enji_guard_cli.fanout"]
+
+[[modules]]
+path = "enji_guard_cli.delivery.cli"
+depends_on = ["enji_guard_cli.gitlab", "enji_guard_cli.settings", "enji_guard_cli.runtime_observability", "enji_guard_cli.version", "enji_guard_cli.portfolio", "enji_guard_cli.composition", "enji_guard_cli.application", "enji_guard_cli.delivery.mcp", "enji_guard_cli.audit"]
+
+[[modules]]
+path = "enji_guard_cli.delivery.mcp"
+depends_on = ["enji_guard_cli.runtime_observability", "enji_guard_cli.composition", "enji_guard_cli.settings", "enji_guard_cli.mcp_facade"]
+
+[[modules]]
+path = "enji_guard_cli.enji_gateway"
+depends_on = ["enji_guard_cli.settings", "enji_guard_cli.audit", "enji_guard_cli.transport_types", "enji_guard_cli.portfolio", "enji_guard_cli.gitlab", "enji_guard_cli.transport", "enji_guard_cli.auth_session"]
+
+[[modules]]
+path = "enji_guard_cli.auth_session"
+depends_on = ["enji_guard_cli.settings", { path = "enji_guard_cli.enji_gateway", deprecated = true }, "enji_guard_cli.transport", "enji_guard_cli.transport_types", "enji_guard_cli.atomic_json"]
+
+[[modules]]
+path = "enji_guard_cli.runtime_observability"
+depends_on = ["enji_guard_cli.atomic_json", "enji_guard_cli.auth_session", "enji_guard_cli.settings"]
+
+[[modules]]
+path = "enji_guard_cli.transport"
+depends_on = ["enji_guard_cli.settings", "enji_guard_cli.transport_types"]
+
+[[modules]]
+path = "enji_guard_cli.composition"
+depends_on = ["enji_guard_cli.auth_session", "enji_guard_cli.portfolio", "enji_guard_cli.mcp_facade", "enji_guard_cli.application", "enji_guard_cli.enji_gateway", "enji_guard_cli.audit", "enji_guard_cli.fanout", "enji_guard_cli.settings", "enji_guard_cli.runtime_observability"]
+
+[[modules]]
+path = "enji_guard_cli.mcp_facade"
+depends_on = ["enji_guard_cli.application", "enji_guard_cli.settings"]
+
+[[modules]]
+path = "enji_guard_cli.settings"
+depends_on = []
+
+[[modules]]
+path = "enji_guard_cli.fanout"
+depends_on = ["enji_guard_cli.settings"]
+
+[[modules]]
+path = "enji_guard_cli.atomic_json"
+depends_on = []
+
+[[modules]]
+path = "enji_guard_cli.version"
+depends_on = []
+
+[[modules]]
+path = "enji_guard_cli.transport_types"
+depends_on = []
