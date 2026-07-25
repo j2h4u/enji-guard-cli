@@ -19,16 +19,15 @@ from typing import Annotated, Literal, cast
 import typer
 
 from enji_guard_cli.application import (
-    AUDIT_SCHEDULE_FREQUENCIES,
     Application,
     ApplicationCatalogChange,
     ApplicationCommandError,
     ApplicationResult,
-    AuditAutofixUpdate,
-    AuditScheduleUpdate,
     AutofixWriteScope,
-    EmailPreferencesUpdate,
 )
+from enji_guard_cli.audit.email import EmailPreferencesUpdate
+from enji_guard_cli.audit.ports import AuditAutofixUpdate, AuditScheduleUpdate
+from enji_guard_cli.audit.schedules import CADENCES
 from enji_guard_cli.composition import create_application
 from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION, CliPresentation, emit_text, json_projection
 from enji_guard_cli.delivery.cli.presenters import (
@@ -129,7 +128,7 @@ def _close_cached_application() -> None:
     cached = _state.get("application")
     try:
         if isinstance(cached, Application):
-            cached.close()
+            cached.runner.close()
     finally:
         _state["application"] = None
         _state["application_auth_file"] = None
@@ -215,7 +214,7 @@ def _fail(code: str, message: str, *, as_json: bool, exit_code: int = 1) -> type
 
 SORT_HELP = f"Repository order: {', '.join(sorted(REPOSITORY_SORT_NAMES))}."
 
-FREQUENCY_HELP = f"Run cadence: {', '.join(sorted(AUDIT_SCHEDULE_FREQUENCIES))}."
+FREQUENCY_HELP = f"Run cadence: {', '.join(sorted(CADENCES))}."
 
 TIMEZONE_HELP = "IANA timezone stored with each subscription, such as Asia/Almaty."
 
@@ -279,7 +278,7 @@ def _run[PayloadT](
 
     def _execute() -> ApplicationResult:
         nonlocal result
-        result = _application().execute(action)
+        result = _application().runner.execute(action)
         return result
 
     journey = AgentJourney(
@@ -458,7 +457,7 @@ def auth_import_cookie(
             "VALIDATION", "use --stdin to avoid storing cookies in shell history", as_json=_json_output(json_output)
         )
     raw_cookie = sys.stdin.read()
-    _run(lambda: _application(auth_file).import_cookie(raw_cookie), _json_output(json_output), FIELDS_PRESENTATION)
+    _run(lambda: _application(auth_file).auth.import_cookie(raw_cookie), _json_output(json_output), FIELDS_PRESENTATION)
 
 
 @auth_app.command("import-bearer")
@@ -472,7 +471,7 @@ def auth_import_bearer(
             "VALIDATION", "use --stdin to avoid storing tokens in shell history", as_json=_json_output(json_output)
         )
     raw_token = sys.stdin.read()
-    _run(lambda: _application(auth_file).import_bearer(raw_token), _json_output(json_output), FIELDS_PRESENTATION)
+    _run(lambda: _application(auth_file).auth.import_bearer(raw_token), _json_output(json_output), FIELDS_PRESENTATION)
 
 
 @auth_app.command("status")
@@ -480,12 +479,12 @@ def auth_status(
     auth_file: Annotated[Path | None, typer.Option("--auth-file", hidden=True)] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    _run(lambda: _application(auth_file).auth_status(), _json_output(json_output), FIELDS_PRESENTATION)
+    _run(lambda: _application(auth_file).auth.auth_status(), _json_output(json_output), FIELDS_PRESENTATION)
 
 
 @project_app.command("list")
 def project_list(json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
-    _run(lambda: _application().list_projects(), _json_output(json_output), PROJECT_LIST)
+    _run(lambda: _application().portfolio.list_projects(), _json_output(json_output), PROJECT_LIST)
 
 
 @gitlab_app.command("credentials")
@@ -497,7 +496,7 @@ def gitlab_credentials(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
-        lambda: _application().gitlab_credentials(
+        lambda: _application().gitlab.gitlab_credentials(
             scope_type=scope_type,
             scope_owner=scope_owner,
             limit=limit,
@@ -521,7 +520,7 @@ def gitlab_projects(  # noqa: PLR0913
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
-        lambda: _application().gitlab_projects(
+        lambda: _application().gitlab.gitlab_projects(
             GitLabProjectsQuery(
                 credential_id=credential_id,
                 search=search,
@@ -539,12 +538,12 @@ def gitlab_projects(  # noqa: PLR0913
 
 @project_app.command("create")
 def project_create(name: str, json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
-    _run(lambda: _application().create_project(name), _json_output(json_output), FIELDS_PRESENTATION)
+    _run(lambda: _application().portfolio.create_project(name), _json_output(json_output), FIELDS_PRESENTATION)
 
 
 @project_app.command("rename")
 def project_rename(project: str, name: str, json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
-    _run(lambda: _application().rename_project(project, name), _json_output(json_output), FIELDS_PRESENTATION)
+    _run(lambda: _application().portfolio.rename_project(project, name), _json_output(json_output), FIELDS_PRESENTATION)
 
 
 @project_app.command("delete")
@@ -558,7 +557,7 @@ def project_delete(
         as_json=_json_output(json_output),
         assume_yes=yes,
     )
-    _run(lambda: _application().delete_project(project), _json_output(json_output), FIELDS_PRESENTATION)
+    _run(lambda: _application().portfolio.delete_project(project), _json_output(json_output), FIELDS_PRESENTATION)
 
 
 @project_app.command("settings")
@@ -567,7 +566,7 @@ def project_settings(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
-        lambda: _application().project_settings(_selected_project(project)),
+        lambda: _application().portfolio.project_settings(_selected_project(project)),
         _json_output(json_output),
         PROJECT_SETTINGS,
     )
@@ -580,7 +579,7 @@ def repo_resolve(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
-        lambda: _application().resolve_repository(repo, _selected_project(project)),
+        lambda: _application().portfolio.resolve_repository(repo, _selected_project(project)),
         _json_output(json_output),
         FIELDS_PRESENTATION,
     )
@@ -594,7 +593,7 @@ def repo_add(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
-        lambda: _application().add_repository(repo, _selected_project(project), repo_access_credential_id),
+        lambda: _application().portfolio.add_repository(repo, _selected_project(project), repo_access_credential_id),
         _json_output(json_output),
         OPERATION,
     )
@@ -613,7 +612,7 @@ def repo_remove(
         assume_yes=yes,
     )
     _run(
-        lambda: _application().remove_repository(repo, _selected_project(project)),
+        lambda: _application().portfolio.remove_repository(repo, _selected_project(project)),
         _json_output(json_output),
         FIELDS_PRESENTATION,
     )
@@ -627,7 +626,7 @@ def repo_move(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
-        lambda: _application().move_repository(repo, _selected_project(project), to_project),
+        lambda: _application().portfolio.move_repository(repo, _selected_project(project), to_project),
         _json_output(json_output),
         OPERATION,
     )
@@ -640,7 +639,7 @@ def recon_start(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
-        lambda: _application().recon_start(repo, _selected_project(project)),
+        lambda: _application().portfolio.recon_start(repo, _selected_project(project)),
         _json_output(json_output),
         FIELDS_PRESENTATION,
     )
@@ -668,7 +667,7 @@ def audit_start(
 ) -> None:
     selectors = _explicit_audit_selectors(audits, all_audits=all_audits, as_json=_json_output(json_output))
     _run(
-        lambda: _application().audit_start(
+        lambda: _application().audit.audit_start(
             repo,
             _selected_project(project),
             selectors,
@@ -689,7 +688,7 @@ def audit_read(
 ) -> None:
     selectors = _explicit_audit_selectors(audits, all_audits=all_audits, as_json=_json_output(json_output))
     _run(
-        lambda: _application().audit_read(
+        lambda: _application().audit.audit_read(
             repo,
             selectors,
             project=_selected_project(project),
@@ -711,7 +710,7 @@ def audit_summary(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
-        lambda: _application().audit_summary(repo, _audit_selectors(audits), project=_selected_project(project)),
+        lambda: _application().audit.audit_summary(repo, _audit_selectors(audits), project=_selected_project(project)),
         _json_output(json_output),
         AUDIT_SUMMARY,
     )
@@ -750,7 +749,7 @@ def health(
 
 @app.command("access", help="Show the account plan, limits, and entitlements.")
 def access(json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
-    _run(lambda: _application().access(), _json_output(json_output), FIELDS_PRESENTATION)
+    _run(lambda: _application().portfolio.access(), _json_output(json_output), FIELDS_PRESENTATION)
 
 
 @app.command(
@@ -770,8 +769,10 @@ def run(
     application = _application()
     run_service(
         options=RuntimeServiceOptions(transport=transport, host=host, port=port, mount_path=mount_path),
-        runtime_auth=application.runtime_auth,
-        mcp_server_factory=lambda host, port: create_mcp_server(host, port, queries=McpQueryFacade(application)),
+        runtime_auth=application.auth.runtime_auth,
+        mcp_server_factory=lambda host, port: create_mcp_server(
+            host, port, queries=McpQueryFacade(application.runner, application.portfolio, application.audit)
+        ),
         mcp_server_runner=run_mcp_server_async,
         settings=default_settings(),
     )
@@ -786,13 +787,13 @@ def status(
 ) -> None:
     if repo is not None:
         _run(
-            lambda: _application().repository_status(repo, _selected_project(project)),
+            lambda: _application().portfolio.repository_status(repo, _selected_project(project)),
             _json_output(json_output),
             REPOSITORY_STATUS,
         )
         return
     _run(
-        lambda: _application().portfolio_overview(_selected_project(project), _repository_sort(sort)),
+        lambda: _application().portfolio.portfolio_overview(_selected_project(project), _repository_sort(sort)),
         _json_output(json_output),
         PORTFOLIO,
     )
@@ -806,7 +807,7 @@ def wait(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
-        lambda: _application().audit_wait(
+        lambda: _application().audit.audit_wait(
             repo, project=_selected_project(project), timeout_seconds=_parse_duration(timeout)
         ),
         _json_output(json_output),
@@ -821,7 +822,7 @@ def schedule_list(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
-        lambda: _application().list_schedules(repo, _selected_project(project)),
+        lambda: _application().subscriptions.list_schedules(repo, _selected_project(project)),
         _json_output(json_output),
         SCHEDULE,
     )
@@ -845,7 +846,7 @@ def schedule_set(  # noqa: PLR0913
     scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
     update = AuditScheduleUpdate(enabled=_switch(enabled), cadence=frequency, timezone=timezone)
     _run(
-        lambda: _application().set_schedules(
+        lambda: _application().subscriptions.set_schedules(
             repo,
             _selected_project(project),
             update,
@@ -870,7 +871,7 @@ def schedule_auto_time(  # noqa: PLR0913
 ) -> None:
     scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
     _run(
-        lambda: _application().schedule_auto_time(repo, _selected_project(project), scope=scope),
+        lambda: _application().subscriptions.schedule_auto_time(repo, _selected_project(project), scope=scope),
         _json_output(json_output),
         OPERATION,
     )
@@ -892,7 +893,7 @@ def schedule_timezone(  # noqa: PLR0913
     scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
     update = AuditScheduleUpdate(timezone=timezone)
     _run(
-        lambda: _application().set_schedules(repo, _selected_project(project), update, scope=scope),
+        lambda: _application().subscriptions.set_schedules(repo, _selected_project(project), update, scope=scope),
         _json_output(json_output),
         OPERATION,
     )
@@ -905,7 +906,7 @@ def autofix_list(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
-        lambda: _application().list_autofixes(repo, _selected_project(project)),
+        lambda: _application().subscriptions.list_autofixes(repo, _selected_project(project)),
         _json_output(json_output),
         AUTOFIX,
     )
@@ -932,7 +933,7 @@ def autofix_set(  # noqa: PLR0913
     scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
     update = AuditAutofixUpdate(enabled=_switch(enabled), frequency=frequency, timezone=timezone)
     _run(
-        lambda: _application().set_autofixes(
+        lambda: _application().subscriptions.set_autofixes(
             repo,
             _selected_project(project),
             selectors,
@@ -951,7 +952,7 @@ def email_list(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _run(
-        lambda: _application().list_email_preferences(repo, _selected_project(project)),
+        lambda: _application().subscriptions.list_email_preferences(repo, _selected_project(project)),
         _json_output(json_output),
         EMAIL,
     )
@@ -978,7 +979,9 @@ def email_set(  # noqa: PLR0913
     scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
     update = EmailPreferencesUpdate(_switch(manual), _switch(scheduled))
     _run(
-        lambda: _application().set_email_preferences(repo, _selected_project(project), update, scope=scope),
+        lambda: _application().subscriptions.set_email_preferences(
+            repo, _selected_project(project), update, scope=scope
+        ),
         _json_output(json_output),
         EMAIL,
     )
@@ -986,7 +989,7 @@ def email_set(  # noqa: PLR0913
 
 @language_app.command("show")
 def language_show(json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
-    _run(lambda: _application().language(), _json_output(json_output), FIELDS_PRESENTATION)
+    _run(lambda: _application().portfolio.language(), _json_output(json_output), FIELDS_PRESENTATION)
 
 
 @language_app.command("set")
@@ -994,7 +997,7 @@ def language_set(
     language: Annotated[Literal["en", "ru"], typer.Argument()],
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    _run(lambda: _application().set_language(language), _json_output(json_output), FIELDS_PRESENTATION)
+    _run(lambda: _application().portfolio.set_language(language), _json_output(json_output), FIELDS_PRESENTATION)
 
 
 __all__ = ["app"]

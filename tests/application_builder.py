@@ -1,20 +1,37 @@
-"""Explicit test construction of the application facade.
+"""Explicit test construction of the application facades.
 
-Every collaborator the facade needs is required in production, so tests supply
-one too.  This builder keeps the stub-only collaborators in a single place
-instead of repeating them at every construction site.
+Every collaborator a facade needs is required in production, so tests supply
+one too.  This module keeps the stub-only collaborators and the CLI's facade
+routing in a single place instead of repeating them at every call site.
 """
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import cast
 
-from enji_guard_cli.application import Application, ApplicationLifecyclePort
+from enji_guard_cli.application import (
+    Application,
+    ApplicationLifecyclePort,
+    ApplicationRunner,
+    AuditCatalogService,
+    AuditFacade,
+    AuditProjectSource,
+    AuthFacade,
+    CatalogObservationScope,
+    GitLabFacade,
+    PortfolioFacade,
+    SubscriptionsFacade,
+)
 from enji_guard_cli.audit.catalog_observation import AuditCatalogObservationPort
 from enji_guard_cli.audit.ports import AuditCatalogResult, AuditGatewayPort, AuditLedgerPort, AuditRun
 from enji_guard_cli.auth_session.service import AuthSessionService
+from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.gitlab.ports import GitLabDiscoveryPort
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort, PortfolioTargetService
 from enji_guard_cli.runtime_observability.ports import RuntimeAuthCoordinator
+from enji_guard_cli.settings import default_settings
+
+DEFAULT_CREDENTIAL_LOCATION = Path("/tmp/enji-guard-test/auth.json")
 
 
 class UnobservedCatalog:
@@ -43,7 +60,7 @@ class RecordingLifecycle:
 
 @dataclass(frozen=True, slots=True)
 class ApplicationStubs:
-    """Collaborators for one facade under test; unset ones stay inert stubs."""
+    """Collaborators for one facade tree under test; unset ones stay inert."""
 
     audit_gateway: object = field(default_factory=object)
     portfolio_gateway: object = field(default_factory=object)
@@ -56,14 +73,71 @@ class ApplicationStubs:
     lifecycle: object = field(default_factory=RecordingLifecycle)
 
     def build(self) -> Application:
-        return Application(
-            audit_gateway=cast(AuditGatewayPort, self.audit_gateway),
-            portfolio_gateway=cast(PortfolioGatewayPort, self.portfolio_gateway),
-            auth=cast(AuthSessionService, self.auth),
+        """Wire the same facade tree production composition wires."""
+        audit_gateway = cast(AuditGatewayPort, self.audit_gateway)
+        portfolio_gateway = cast(PortfolioGatewayPort, self.portfolio_gateway)
+        targets = cast(PortfolioTargetService, self.target_service)
+        fanout = BoundedFanout(default_settings().fanout)
+        scope = CatalogObservationScope()
+        catalog = AuditCatalogService(audit_gateway, cast(AuditCatalogObservationPort, self.catalog_observer), scope)
+        audit = AuditFacade(
+            catalog=catalog,
+            gateway=audit_gateway,
             ledger=cast(AuditLedgerPort, self.ledger),
-            catalog_observer=cast(AuditCatalogObservationPort, self.catalog_observer),
-            target_service=cast(PortfolioTargetService, self.target_service),
-            runtime_auth=cast(RuntimeAuthCoordinator, self.runtime_auth),
-            gitlab_gateway=cast(GitLabDiscoveryPort, self.gitlab_gateway),
-            lifecycle=cast(ApplicationLifecyclePort, self.lifecycle),
+            targets=targets,
+            project_source=AuditProjectSource(portfolio_gateway),
+            fanout=fanout,
         )
+        return Application(
+            runner=ApplicationRunner(
+                scope, cast(ApplicationLifecyclePort, self.lifecycle), DEFAULT_CREDENTIAL_LOCATION
+            ),
+            catalog=catalog,
+            auth=AuthFacade(cast(AuthSessionService, self.auth), cast(RuntimeAuthCoordinator, self.runtime_auth)),
+            audit=audit,
+            subscriptions=SubscriptionsFacade(catalog=catalog, gateway=audit_gateway, targets=targets, fanout=fanout),
+            portfolio=PortfolioFacade(
+                gateway=portfolio_gateway, targets=targets, catalog=catalog, audits=audit, fanout=fanout
+            ),
+            gitlab=GitLabFacade(cast(GitLabDiscoveryPort, self.gitlab_gateway)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FacadeRouter:
+    """Serve one flat CLI fake under every facade attribute the CLI reads.
+
+    CLI command handlers name the facade they use (``.audit``, ``.portfolio``,
+    ...).  A CLI test cares about which method was called, not which facade
+    owns it, so one recording fake answers for all of them.
+    """
+
+    target: object
+
+    @property
+    def runner(self) -> object:
+        return self.target
+
+    @property
+    def catalog(self) -> object:
+        return self.target
+
+    @property
+    def auth(self) -> object:
+        return self.target
+
+    @property
+    def audit(self) -> object:
+        return self.target
+
+    @property
+    def subscriptions(self) -> object:
+        return self.target
+
+    @property
+    def portfolio(self) -> object:
+        return self.target
+
+    @property
+    def gitlab(self) -> object:
+        return self.target

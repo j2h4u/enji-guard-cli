@@ -44,4 +44,8 @@ def create_shared_http_client(
     )
 
 
-__all__ = ["create_shared_http_client"]
+type SharedHttpClient = HttpxEnjiHttpClient
+"""The one pooled client composition owns and closes."""
+
+
+__all__ = ["SharedHttpClient", "create_shared_http_client"]

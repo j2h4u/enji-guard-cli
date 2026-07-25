@@ -2,7 +2,7 @@ from typing import cast
 
 import pytest
 
-from application_builder import ApplicationStubs
+from enji_guard_cli.application import AuditProjectSource
 from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
 from enji_guard_cli.enji_gateway import PortfolioGateway
 from enji_guard_cli.enji_gateway.ports import GatewayClient
@@ -42,9 +42,7 @@ def test_project_detail_composes_live_collections_into_audit_project(
 
     monkeypatch.setattr(module, "_project_detail", lambda *_args, **_kwargs: payload)
     gateway = PortfolioGateway(client=cast(GatewayClient, object()), auth_port=GatewayCredentialReader())
-    application = ApplicationStubs(audit_gateway=_AuditGateway(), portfolio_gateway=gateway, auth=_Auth()).build()
-
-    project = application._audit_project("project-1")
+    project = AuditProjectSource(gateway)("project-1")
 
     assert project.project_id == "project-1"
     assert project.repositories[0].repo_id == "repo-1"

@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from enji_guard_cli.application import ApplicationCommandError, ApplicationResult, _exit_code_for_error
+from application_builder import FacadeRouter
+from enji_guard_cli.application import ApplicationCommandError, ApplicationResult, exit_code_for_error
 from enji_guard_cli.delivery.cli.app import app
 
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
@@ -39,7 +40,7 @@ class _FailingApplication:
     ],
 )
 def test_error_codes_map_to_documented_exit_codes(code: str, expected: int) -> None:
-    assert _exit_code_for_error(code) == expected
+    assert exit_code_for_error(code) == expected
 
 
 @pytest.mark.parametrize(
@@ -47,8 +48,8 @@ def test_error_codes_map_to_documented_exit_codes(code: str, expected: int) -> N
     [("AUTH_REQUIRED", 3), ("NOT_FOUND", 4), ("UPSTREAM", 1)],
 )
 def test_cli_propagates_the_application_exit_code(monkeypatch: pytest.MonkeyPatch, code: str, expected: int) -> None:
-    error = ApplicationCommandError(code, "failed", _exit_code_for_error(code))
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: _FailingApplication(error))
+    error = ApplicationCommandError(code, "failed", exit_code_for_error(code))
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(_FailingApplication(error)))
 
     result = CliRunner().invoke(app, ["status", "github@github.com:owner/name"])
 

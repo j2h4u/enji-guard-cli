@@ -43,7 +43,7 @@ def test_run_emits_catalog_changes_from_the_command_application(
     monkeypatch.setitem(cli_module._state, "application", None)
     monkeypatch.setitem(cli_module._state, "application_auth_file", None)
 
-    cli_module._run(lambda: cli_module._application().catalog(), True, FIELDS_PRESENTATION)
+    cli_module._run(lambda: cli_module._application().catalog.catalog(), True, FIELDS_PRESENTATION)
 
     assert constructions == 1
     output = capsys.readouterr().out
@@ -64,11 +64,11 @@ def test_application_keeps_catalog_observation_isolated_per_execution() -> None:
 
     def execute() -> tuple[str, str]:
         def read_catalog() -> str:
-            action_key = application.catalog().changes[0].action_key
+            action_key = application.catalog.catalog().changes[0].action_key
             barrier.wait()
             return action_key
 
-        result = application.execute(read_catalog)
+        result = application.runner.execute(read_catalog)
         return cast(str, result.payload), result.catalog_changes[0].action_key
 
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="catalog") as pool:

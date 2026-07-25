@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from enji_guard_cli.application import Application, ApplicationResult
+from enji_guard_cli.application import ApplicationResult, ApplicationRunner, AuditFacade, PortfolioFacade
 from enji_guard_cli.settings import RepositorySortName
 
 type McpQueryResult = ApplicationResult
@@ -12,13 +12,15 @@ type McpQueryResult = ApplicationResult
 class McpQueryFacade:
     """Expose only the two curated MCP query scenarios."""
 
-    _application: Application
+    _runner: ApplicationRunner
+    _portfolio: PortfolioFacade
+    _audit: AuditFacade
 
     def portfolio_overview(self, project: str | None, sort: RepositorySortName) -> ApplicationResult:
-        return self._application.execute(lambda: self._application.portfolio_overview(project, sort))
+        return self._runner.execute(lambda: self._portfolio.portfolio_overview(project, sort))
 
     def repository_audits(self, repo: str, project: str | None) -> ApplicationResult:
-        return self._application.execute(lambda: self._application.audit_read(repo, project=project, all_audits=True))
+        return self._runner.execute(lambda: self._audit.audit_read(repo, project=project, all_audits=True))
 
 
 __all__ = ["McpQueryFacade", "McpQueryResult"]

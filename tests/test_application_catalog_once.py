@@ -1,6 +1,6 @@
 import pytest
 
-from enji_guard_cli.application import _audit_for_action
+from enji_guard_cli.application.audit import audit_for_action
 from enji_guard_cli.audit.catalog import parse_catalog_result
 from enji_guard_cli.audit.errors import AuditNotFoundError
 from enji_guard_cli.audit.ports import AuditCatalogAction, AuditCatalogResult
@@ -22,4 +22,4 @@ def test_removed_audit_action_raises_a_typed_not_found_error() -> None:
     catalog = parse_catalog_result(AuditCatalogResult(actions=(recon,), autofixes=()))
 
     with pytest.raises(AuditNotFoundError, match=r"audit\.removed"):
-        _audit_for_action(catalog, "audit.removed")
+        audit_for_action(catalog, "audit.removed")

@@ -22,7 +22,7 @@ from enji_guard_cli.transport import EnjiHttpRequest, HttpxEnjiHttpClient
 
 def _owned_http_client(queries: McpQueryFacade) -> HttpxEnjiHttpClient:
     """The pooled client the composed application owns and must release."""
-    client = queries._application.lifecycle
+    client = queries._runner.lifecycle
     assert isinstance(client, HttpxEnjiHttpClient)
     return client
 
@@ -37,7 +37,7 @@ async def _running_lifespan(server: FastMCP) -> AsyncIterator[None]:
 
 def test_scoped_query_facade_closes_its_application_and_pool(tmp_path: Path) -> None:
     with mcp_query_facade(tmp_path / "auth.json") as queries:
-        application = queries._application
+        runner = queries._runner
         client = _owned_http_client(queries)
         assert client.is_closed is False
 
@@ -54,7 +54,7 @@ def test_scoped_query_facade_closes_its_application_and_pool(tmp_path: Path) -> 
             )
         )
     with pytest.raises(RuntimeError, match="application is closed"):
-        application.execute(lambda: None)
+        runner.execute(lambda: None)
 
 
 def test_creating_the_server_composes_nothing_before_the_lifespan_runs(

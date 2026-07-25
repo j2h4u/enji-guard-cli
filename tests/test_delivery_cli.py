@@ -9,7 +9,7 @@ from typer.core import TyperGroup
 from typer.main import get_command
 from typer.testing import CliRunner
 
-from application_builder import ApplicationStubs
+from application_builder import ApplicationStubs, FacadeRouter
 from enji_guard_cli.application import (
     ApplicationAuthError,
     ApplicationCommandError,
@@ -230,7 +230,7 @@ class _FakeApplication:
 
 def test_audit_start_calls_typed_application_and_emits_json(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
     result = CliRunner().invoke(app, ["audit", "start", "org/repo", "security", "--project", "Pets", "--json"])
     assert result.exit_code == 0
     assert result.exception is None
@@ -281,7 +281,7 @@ def test_gitlab_projects_maps_all_query_options_and_emits_result(monkeypatch: py
             return payload
 
     fake = FakeGitLabApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
 
     result = CliRunner().invoke(
         app,
@@ -315,7 +315,7 @@ def test_gitlab_projects_maps_all_query_options_and_emits_result(monkeypatch: py
 
 def test_project_settings_and_access_use_typed_application_methods(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
     settings = CliRunner().invoke(app, ["project", "settings", "--project", "Pets", "--json"])
     access = CliRunner().invoke(app, ["access", "--json"])
     assert settings.exit_code == 0
@@ -331,7 +331,7 @@ def test_project_settings_and_access_use_typed_application_methods(monkeypatch: 
 )
 def test_portfolio_commands_use_compact_overview(monkeypatch: pytest.MonkeyPatch, arguments: list[str]) -> None:
     fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
 
     result = CliRunner().invoke(app, arguments)
 
@@ -341,7 +341,7 @@ def test_portfolio_commands_use_compact_overview(monkeypatch: pytest.MonkeyPatch
 
 def test_status_for_one_repository_keeps_detailed_status(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
 
     result = CliRunner().invoke(app, ["--project", "Pets", "status", "github@github.com:acme/cat", "--json"])
 
@@ -374,7 +374,7 @@ def test_portfolio_text_is_compact_and_scenario_oriented(monkeypatch: pytest.Mon
         ),
     )
     monkeypatch.setattr(fake, "portfolio_overview", lambda project, sort: overview)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
 
     result = CliRunner().invoke(app, ["status"])
 
@@ -395,7 +395,7 @@ def test_repository_status_text_is_compact_and_does_not_dump_json(monkeypatch: p
         ),
     )
     monkeypatch.setattr(fake, "repository_status", lambda repo, project: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
 
     result = CliRunner().invoke(app, ["status", "github@github.com:acme/cat"])
 
@@ -416,7 +416,7 @@ def test_audit_summary_is_compact_in_text_and_json(monkeypatch: pytest.MonkeyPat
         ),
     )
     monkeypatch.setattr(fake, "audit_summary", lambda repo, selectors, project=None: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
 
     text_result = CliRunner().invoke(app, ["audit", "summary", "github@github.com:acme/cat"])
     json_result = CliRunner().invoke(app, ["audit", "summary", "github@github.com:acme/cat", "--json"])
@@ -449,7 +449,7 @@ def test_audit_read_renders_markdown_for_humans_and_equivalent_json(monkeypatch:
         ),
     )
     monkeypatch.setattr(fake, "audit_read", lambda repo, selectors, project=None, all_audits=False: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
 
     text_result = CliRunner().invoke(app, ["audit", "read", "github@github.com:acme/cat", "security"])
     json_result = CliRunner().invoke(app, ["audit", "read", "github@github.com:acme/cat", "security", "--json"])
@@ -523,7 +523,7 @@ def test_schedule_list_is_one_summary_line_per_repository(monkeypatch: pytest.Mo
         ),
     )
     monkeypatch.setattr(fake, "list_schedules", lambda repo, project: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
 
     text_result = CliRunner().invoke(app, ["schedule", "list"])
     json_result = CliRunner().invoke(app, ["schedule", "list", "--json"])
@@ -568,7 +568,7 @@ def test_improvement_jobs_list_is_one_summary_line_per_repository(monkeypatch: p
     )
     payload = (AutofixListing(repository, (AutofixListingItem(definition, job),)),)
     monkeypatch.setattr(fake, "list_autofixes", lambda repo, project: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
 
     result = CliRunner().invoke(app, ["improvement-jobs", "list"])
 
@@ -631,7 +631,7 @@ def test_improvement_jobs_text_preserves_mixed_dimensions_and_states(
         ),
     )
     monkeypatch.setattr(fake, "list_autofixes", lambda repo, project: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
 
     result = CliRunner().invoke(app, ["improvement-jobs", "list"])
 
@@ -658,7 +658,7 @@ def test_improvement_jobs_text_does_not_report_unknown_enabled_state_as_disabled
     job = AuditAutofixJob("improvement.test-writing", "default", "test-writing", None, True)
     payload = (AutofixListing(repository, (AutofixListingItem(definition, job),)),)
     monkeypatch.setattr(fake, "list_autofixes", lambda repo, project: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
 
     result = CliRunner().invoke(app, ["improvement-jobs", "list"])
 
@@ -682,7 +682,7 @@ def test_schedule_list_groups_restricted_window_days_by_selector(monkeypatch: py
         ),
     )
     monkeypatch.setattr(fake, "list_schedules", lambda repo, project: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
 
     result = CliRunner().invoke(app, ["schedule", "list"])
 
@@ -692,7 +692,7 @@ def test_schedule_list_groups_restricted_window_days_by_selector(monkeypatch: py
 
 def test_batch_write_options_are_forwarded_with_explicit_scope(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
     result = CliRunner().invoke(
         app,
         ["--project", "Pets", "schedule", "set", "--all-repos", "--enabled", "on", "--frequency", "daily"],
@@ -710,7 +710,7 @@ def test_autofix_write_options_are_forwarded_with_canonical_keyword_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
 
     result = CliRunner().invoke(
         app,
@@ -741,7 +741,7 @@ def test_autofix_write_options_are_forwarded_with_canonical_keyword_names(
 
 def test_batch_write_rejects_ambiguous_scope_before_application(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
     result = CliRunner().invoke(app, ["email", "set", "--all-repos", "--all-projects", "--manual", "on"])
     assert result.exit_code == 1
     assert "pass --all-repos or --all-projects" in result.stderr
@@ -750,7 +750,7 @@ def test_batch_write_rejects_ambiguous_scope_before_application(monkeypatch: pyt
 
 def test_auth_import_bearer_requires_stdin_and_never_prints_credential(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
     missing = CliRunner().invoke(app, ["auth", "import-bearer"])
     assert missing.exit_code == 1
     assert "use --stdin" in missing.stderr

@@ -7,6 +7,7 @@ from typer.core import TyperGroup
 from typer.main import get_command
 from typer.testing import CliRunner
 
+from application_builder import FacadeRouter
 from enji_guard_cli.application import ApplicationResult
 from enji_guard_cli.delivery.cli.app import app
 
@@ -49,7 +50,7 @@ class _RecordingApplication:
 @pytest.fixture
 def application(monkeypatch: pytest.MonkeyPatch) -> _RecordingApplication:
     fake = _RecordingApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(fake))
     return fake
 
 

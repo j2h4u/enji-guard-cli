@@ -5,22 +5,14 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
-from enji_guard_cli.application import (
-    AuditRead,
-    AuditSummary,
-    AutofixListing,
-    AutofixListingItem,
-    ProjectSettings,
-    RepositoryRef,
-    RepositoryStatus,
-    ScheduleListing,
-)
+from enji_guard_cli.application import AutofixListing, AutofixListingItem, ScheduleListing
+from enji_guard_cli.audit.artifacts import AuditRead, AuditSummary
 from enji_guard_cli.audit.ports import AuditWaitResult
 from enji_guard_cli.delivery.cli.audit_presenter import render_audit_read
 from enji_guard_cli.delivery.cli.presentation import CliPresentation, json_projection
 from enji_guard_cli.gitlab.models import GitLabCredentialsResult, GitLabProjectsResult
-from enji_guard_cli.portfolio.models import ProjectRef
-from enji_guard_cli.portfolio.status import PortfolioOverview
+from enji_guard_cli.portfolio.models import ProjectRef, ProjectSettings, RepositoryRef
+from enji_guard_cli.portfolio.status import PortfolioOverview, RepositoryStatus
 
 
 def repository_label(repository: RepositoryRef) -> str:

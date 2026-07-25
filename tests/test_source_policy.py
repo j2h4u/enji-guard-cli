@@ -40,8 +40,9 @@ RAW_GATEWAY_MODULES = frozenset(
 PRODUCT_SOURCE_ROOTS = (
     ROOT / "src" / "enji_guard_cli" / "audit",
     ROOT / "src" / "enji_guard_cli" / "portfolio",
-    ROOT / "src" / "enji_guard_cli" / "application.py",
+    ROOT / "src" / "enji_guard_cli" / "application",
     ROOT / "src" / "enji_guard_cli" / "delivery",
+    ROOT / "src" / "enji_guard_cli" / "mcp_facade.py",
 )
 SETUP_UV_ACTION = "astral-sh/setup-uv@"
 TRIVY_ACTION = "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25"
@@ -237,6 +238,7 @@ def test_product_source_does_not_import_raw_gateway_implementations() -> None:
 def _product_python_files() -> tuple[Path, ...]:
     paths: list[Path] = []
     for root in PRODUCT_SOURCE_ROOTS:
+        assert root.exists(), f"product source root no longer exists: {root}"
         if root.is_file():
             paths.append(root)
         else:

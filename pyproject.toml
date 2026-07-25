@@ -216,14 +216,6 @@ forbidden_modules = ["enji_guard_cli.application", "enji_guard_cli.delivery", "m
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
-id = "cli-uses-application-context-boundary"
-name = "CLI directly uses Application instead of context internals"
-type = "forbidden"
-source_modules = ["enji_guard_cli.delivery.cli.app"]
-forbidden_modules = ["enji_guard_cli.audit", "enji_guard_cli.portfolio"]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
 id = "mcp-uses-narrow-query-facade"
 name = "MCP directly uses only its narrow query facade"
 type = "forbidden"

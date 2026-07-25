@@ -5,7 +5,7 @@ from typer.core import TyperGroup
 from typer.main import get_command
 from typer.testing import CliRunner
 
-from enji_guard_cli.application import AUDIT_SCHEDULE_FREQUENCIES
+from enji_guard_cli.audit.schedules import CADENCES
 from enji_guard_cli.delivery.cli.app import _repository_sort, app
 from enji_guard_cli.settings import REPOSITORY_SORT_NAMES
 
@@ -67,7 +67,7 @@ def test_frequency_help_lists_every_legal_cadence(path: list[str]) -> None:
 
     assert result.exit_code == 0
     rendered = " ".join(result.stdout.split())
-    for cadence in AUDIT_SCHEDULE_FREQUENCIES:
+    for cadence in CADENCES:
         assert cadence in rendered
     assert "IANA timezone" in rendered
     assert "Turn the subscription on or off" in rendered

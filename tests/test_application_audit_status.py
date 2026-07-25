@@ -58,6 +58,6 @@ class _AuditGateway:
 def test_application_exposes_only_active_runs_in_repository_status() -> None:
     app = ApplicationStubs(audit_gateway=_AuditGateway()).build()
 
-    status = app.audit_recon().status("repo-1")
+    status = app.audit.recon(app.catalog.audits()).status("repo-1")
 
     assert [run.task_id for run in status.active_runs] == ["running"]

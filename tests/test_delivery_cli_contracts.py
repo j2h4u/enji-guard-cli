@@ -26,16 +26,13 @@ def test_audit_help_exposes_read_summary_start() -> None:
 
 
 def test_application_surface_is_typed() -> None:
-    from enji_guard_cli.application import Application
+    from enji_guard_cli.application import AuditFacade, PortfolioFacade, SubscriptionsFacade
 
-    for method in (
-        "audit_start",
-        "audit_read",
-        "audit_summary",
-        "audit_wait",
-        "set_schedules",
-        "set_autofixes",
-        "set_email_preferences",
-        "set_language",
-    ):
-        assert callable(getattr(Application, method, None))
+    surface = {
+        AuditFacade: ("audit_start", "audit_read", "audit_summary", "audit_wait"),
+        SubscriptionsFacade: ("set_schedules", "set_autofixes", "set_email_preferences"),
+        PortfolioFacade: ("set_language",),
+    }
+    for facade, methods in surface.items():
+        for method in methods:
+            assert callable(getattr(facade, method, None))

@@ -227,13 +227,13 @@ def test_composition_injects_one_client_into_both_gateways_and_application_lifec
 
     application = create_application(tmp_path / "auth.json")
     assert len(client_instances) == 1
-    assert cast(Gateway, application.audit_gateway).client is client_instances[0]
-    assert cast(Gateway, application.portfolio_gateway).client is client_instances[0]
+    assert cast(Gateway, application.audit.gateway).client is client_instances[0]
+    assert cast(Gateway, application.portfolio.gateway).client is client_instances[0]
     assert client_instances[0].event_sink is composition_module.log_event
-    assert application.auth.client is client_instances[0]
-    assert isinstance(application.runtime_auth, RuntimeAuthCoordinatorAdapter)
-    assert application.runtime_auth.client is client_instances[0]
-    assert application.lifecycle is client_instances[0]
+    assert application.auth.session.client is client_instances[0]
+    assert isinstance(application.auth.runtime_auth, RuntimeAuthCoordinatorAdapter)
+    assert application.auth.runtime_auth.client is client_instances[0]
+    assert application.runner.lifecycle is client_instances[0]
 
 
 def test_composition_closes_pool_when_gateway_construction_fails(

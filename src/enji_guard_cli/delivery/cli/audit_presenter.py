@@ -1,6 +1,6 @@
 """Pure human-text presenters for Audit delivery DTOs."""
 
-from enji_guard_cli.application import AuditRead
+from enji_guard_cli.audit.artifacts import AuditRead
 
 
 def render_audit_read(read: AuditRead) -> str:
