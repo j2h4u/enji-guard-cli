@@ -417,7 +417,7 @@ docker exec -i enji-guard-cli enji-guard --project Pets schedule list
 docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos --enabled on --frequency workdays --timezone Asia/Almaty
 docker exec -i enji-guard-cli enji-guard --project Pets schedule auto-time --all-repos
 docker exec -i enji-guard-cli enji-guard improvement-jobs list --repo github@github.com:j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard improvement-jobs set --repo github@github.com:j2h4u/enji-guard-cli security vuln-fix --enabled on
+docker exec -i enji-guard-cli enji-guard improvement-jobs set --repo github@github.com:j2h4u/enji-guard-cli vuln-fix --enabled on
 docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --scheduled off
 ```
 

@@ -33,8 +33,11 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
   `improvement-jobs` list/set operations on the operator CLI. The temporary
   relationships are security/vuln-fix, tests/test-writing, and
   dependency-hygiene/dependency-update; pentest is separate. MCP remains
-  read-only, and explicit `REPO`, `--all-repos` with `--project`, or
-  `--all-projects` scope is required for batch writes.
+  read-only, and explicit `--repo REPO`, `--all-repos` with `--project`, or
+  `--all-projects` scope is required for batch writes. On the command line the
+  selector is the kind alone (`vuln-fix`), not the `audit/kind` pair.
+  `--all-projects` is the only unbounded scope and, like `project delete` and
+  `repo remove`, requires `--yes` from any non-TTY or `--json` caller.
 - Keep schedule timezone stored per schedule, run the container with the host
   timezone, and use `schedule auto-time` to restore Enji-assigned run times.
 - Audit schedules use `audit-auto-runs/{actionKey}` with the exact action key
