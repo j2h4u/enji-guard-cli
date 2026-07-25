@@ -300,7 +300,7 @@ def _run[PayloadT](
             ),
         )
     except ApplicationCommandError as exc:
-        raise _fail(exc.code, exc.message, as_json=as_json, exit_code=exc.exit_code) from None
+        raise _fail(exc.code, _operator_message(exc), as_json=as_json, exit_code=exc.exit_code) from None
     payload = cast(PayloadT, result.payload)
     if as_json:
         rendered = presentation.json(payload)
@@ -326,6 +326,35 @@ def _with_catalog_changes(payload: object, changes: list[ApplicationCatalogChang
     if isinstance(payload, (list, tuple)):
         return {"items": payload, "audit_catalog": audit_catalog}
     return {"value": payload, "audit_catalog": audit_catalog}
+
+
+def _operator_message(exc: ApplicationCommandError) -> str:
+    """Render one command failure for an operator terminal.
+
+    Credential failures are a dead end without the file path and the exact
+    import commands, so the CLI — and only the CLI — appends them here.  MCP
+    renders the same error without any host path or shell instruction.
+    """
+    if not exc.code.startswith("AUTH_"):
+        return exc.message
+    return f"{exc.message}. {_auth_remediation(_selected_credential_location())}"
+
+
+def _selected_credential_location() -> Path:
+    """Resolve the credential file this invocation asked for."""
+    selected = cast(Path | None, _state["auth_file"])
+    return selected if selected is not None else default_settings().auth.auth_file
+
+
+def _auth_remediation(credential_location: Path) -> str:
+    """Name the credential file and the exact commands that repair first run."""
+    return (
+        f"Credential file: {credential_location}. "
+        "First run: mkdir -p ~/.config/enji-guard/logs && chmod 700 ~/.config/enji-guard, then import a "
+        "credential with: printf '%s' \"$ENJI_API_TOKEN\" | enji-guard auth import-bearer --stdin "
+        "(cookie auth: enji-guard auth import-cookie --stdin). "
+        "Verify with: enji-guard auth status"
+    )
 
 
 def _command_exit_code(exc: Exception) -> int:
