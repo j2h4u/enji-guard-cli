@@ -7,6 +7,19 @@ surfaces depend on the facades they actually use.
 """
 
 from enji_guard_cli.application.audit import AuditFacade, AuditReconFactory, AuditReconService
+from enji_guard_cli.application.audit_views import (
+    AuditArtifactView,
+    AuditCurrentHeadView,
+    AuditFreshnessView,
+    AuditNewerRunView,
+    AuditReadItemView,
+    AuditReadView,
+    AuditStatusItemView,
+    AuditStatusView,
+    AuditSummaryItemView,
+    AuditSummaryView,
+    AuditWaitView,
+)
 from enji_guard_cli.application.auth import AuthFacade
 from enji_guard_cli.application.catalog import AuditCatalogService
 from enji_guard_cli.application.errors import ApplicationAuthError, ApplicationCommandError, exit_code_for_error
@@ -31,6 +44,7 @@ from enji_guard_cli.application.gitlab import (
 from enji_guard_cli.application.portfolio import PortfolioFacade
 from enji_guard_cli.application.projects import AuditProjectSource
 from enji_guard_cli.application.subscriptions import (
+    AUDIT_CADENCES,
     AutofixListing,
     AutofixListingItem,
     AutofixWriteScope,
@@ -40,6 +54,7 @@ from enji_guard_cli.application.subscriptions import (
 from enji_guard_cli.application.views import RepositoryIdentityView
 
 __all__ = [
+    "AUDIT_CADENCES",
     "Application",
     "ApplicationAuthError",
     "ApplicationCatalogChange",
@@ -47,11 +62,22 @@ __all__ = [
     "ApplicationLifecyclePort",
     "ApplicationResult",
     "ApplicationRunner",
+    "AuditArtifactView",
     "AuditCatalogService",
+    "AuditCurrentHeadView",
     "AuditFacade",
+    "AuditFreshnessView",
+    "AuditNewerRunView",
     "AuditProjectSource",
+    "AuditReadItemView",
+    "AuditReadView",
     "AuditReconFactory",
     "AuditReconService",
+    "AuditStatusItemView",
+    "AuditStatusView",
+    "AuditSummaryItemView",
+    "AuditSummaryView",
+    "AuditWaitView",
     "AuthFacade",
     "AutofixListing",
     "AutofixListingItem",

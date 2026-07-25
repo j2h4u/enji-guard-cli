@@ -6,14 +6,15 @@ import json
 from collections.abc import Mapping
 
 from enji_guard_cli.application import (
+    AuditReadView,
+    AuditSummaryView,
+    AuditWaitView,
     AutofixListing,
     AutofixListingItem,
     GitLabCredentialsView,
     GitLabProjectsView,
     ScheduleListing,
 )
-from enji_guard_cli.audit.artifacts import AuditRead, AuditSummary
-from enji_guard_cli.audit.ports import AuditWaitResult
 from enji_guard_cli.delivery.cli.audit_presenter import render_audit_read
 from enji_guard_cli.delivery.cli.presentation import CliPresentation, json_projection
 from enji_guard_cli.portfolio.models import ProjectRef, ProjectSettings, RepositoryRef
@@ -77,7 +78,7 @@ def repository_status_text(payload: tuple[RepositoryStatus, ...]) -> str:
     return "\n".join(lines)
 
 
-def audit_summary_text(payload: AuditSummary) -> str:
+def audit_summary_text(payload: AuditSummaryView) -> str:
     lines = [f"repository: {payload.repo_id}"]
     for item in payload.audits:
         selector = item.audit_key.removeprefix("audit.")
@@ -102,11 +103,11 @@ def audit_summary_text(payload: AuditSummary) -> str:
     return "\n".join(lines)
 
 
-def audit_read_text(payload: AuditRead) -> str:
+def audit_read_text(payload: AuditReadView) -> str:
     return render_audit_read(payload)
 
 
-def audit_wait_text(payload: AuditWaitResult) -> str:
+def audit_wait_text(payload: AuditWaitView) -> str:
     return f"repository: {payload.repo_id}\nstatus: {payload.status}\nreason: {payload.reason}\nelapsed_seconds: {payload.elapsed_seconds}"
 
 

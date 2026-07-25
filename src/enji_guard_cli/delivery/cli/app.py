@@ -19,15 +19,13 @@ from typing import Annotated, Literal, cast
 import typer
 
 from enji_guard_cli.application import (
+    AUDIT_CADENCES,
     Application,
     ApplicationCatalogChange,
     ApplicationCommandError,
     ApplicationResult,
     AutofixWriteScope,
 )
-from enji_guard_cli.audit.email import EmailPreferencesUpdate
-from enji_guard_cli.audit.ports import AuditAutofixUpdate, AuditScheduleUpdate
-from enji_guard_cli.audit.schedules import CADENCES
 from enji_guard_cli.composition import create_application, runtime_auth_service
 from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION, CliPresentation, emit_text, json_projection
 from enji_guard_cli.delivery.cli.presenters import (
@@ -212,7 +210,7 @@ def _fail(code: str, message: str, *, as_json: bool, exit_code: int = 1) -> type
 
 SORT_HELP = f"Repository order: {', '.join(sorted(REPOSITORY_SORT_NAMES))}."
 
-FREQUENCY_HELP = f"Run cadence: {', '.join(sorted(CADENCES))}."
+FREQUENCY_HELP = f"Run cadence: {', '.join(AUDIT_CADENCES)}."
 
 TIMEZONE_HELP = "IANA timezone stored with each subscription, such as Asia/Almaty."
 
@@ -880,12 +878,13 @@ def schedule_set(  # noqa: PLR0913
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
-    update = AuditScheduleUpdate(enabled=_switch(enabled), cadence=frequency, timezone=timezone)
     _run(
         lambda: _application().subscriptions.set_schedules(
             repo,
             _selected_project(project),
-            update,
+            enabled=_switch(enabled),
+            cadence=frequency,
+            timezone=timezone,
             scope=scope,
         ),
         _json_output(json_output),
@@ -927,9 +926,10 @@ def schedule_timezone(  # noqa: PLR0913
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
-    update = AuditScheduleUpdate(timezone=timezone)
     _run(
-        lambda: _application().subscriptions.set_schedules(repo, _selected_project(project), update, scope=scope),
+        lambda: _application().subscriptions.set_schedules(
+            repo, _selected_project(project), timezone=timezone, scope=scope
+        ),
         _json_output(json_output),
         OPERATION,
     )
@@ -967,13 +967,14 @@ def autofix_set(  # noqa: PLR0913
 ) -> None:
     selectors = ["__all__"] if all_autofixes else (autofixes or [])
     scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
-    update = AuditAutofixUpdate(enabled=_switch(enabled), frequency=frequency, timezone=timezone)
     _run(
         lambda: _application().subscriptions.set_autofixes(
             repo,
             _selected_project(project),
             selectors,
-            update,
+            enabled=_switch(enabled),
+            frequency=frequency,
+            timezone=timezone,
             scope=scope,
         ),
         _json_output(json_output),
@@ -1013,10 +1014,9 @@ def email_set(  # noqa: PLR0913
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
-    update = EmailPreferencesUpdate(_switch(manual), _switch(scheduled))
     _run(
         lambda: _application().subscriptions.set_email_preferences(
-            repo, _selected_project(project), update, scope=scope
+            repo, _selected_project(project), manual=_switch(manual), scheduled=_switch(scheduled), scope=scope
         ),
         _json_output(json_output),
         EMAIL,

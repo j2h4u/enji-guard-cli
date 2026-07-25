@@ -17,10 +17,17 @@ from enji_guard_cli.audit.ports import (
     AuditSchedule,
     AuditScheduleUpdate,
 )
-from enji_guard_cli.audit.schedules import auto_time_for_targets, list_for_targets, set_for_targets
+from enji_guard_cli.audit.schedules import CADENCES, auto_time_for_targets, list_for_targets, set_for_targets
 from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.models import RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioTargetService
+
+AUDIT_CADENCES: tuple[str, ...] = tuple(sorted(CADENCES))
+"""Run cadences an operator may ask for, in the order help text lists them.
+
+Published here so a delivery surface can build its ``--frequency`` help
+without reading an audit module.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,15 +70,19 @@ class SubscriptionsFacade:
         by_repo_id = {result.repo_id: result.schedules for result in results}
         return tuple(ScheduleListing(target, by_repo_id[target.repo_id]) for target in targets)
 
-    def set_schedules(
+    def set_schedules(  # noqa: PLR0913
         self,
         repo: str | None,
         project: str | None,
-        update: AuditScheduleUpdate,
         *,
+        enabled: bool | None = None,
+        cadence: str | None = None,
+        timezone: str | None = None,
         scope: AutofixWriteScope | None = None,
     ) -> tuple[object, ...]:
+        """Apply one schedule change, given the operator's raw argv values."""
         keys = self._published_keys()
+        update = AuditScheduleUpdate(enabled=enabled, cadence=cadence, timezone=timezone)
         return set_for_targets(self._write_targets(repo, project, scope), keys, update, self.gateway)
 
     def schedule_auto_time(
@@ -97,15 +108,19 @@ class SubscriptionsFacade:
 
         return self.fanout.map(targets, read_target)
 
-    def set_autofixes(
+    def set_autofixes(  # noqa: PLR0913
         self,
         repo: str | None,
         project: str | None,
         selectors: list[str],
-        update: AuditAutofixUpdate,
         *,
+        enabled: bool | None = None,
+        frequency: str | None = None,
+        timezone: str | None = None,
         scope: AutofixWriteScope | None = None,
     ) -> tuple[object, ...]:
+        """Apply one improvement-job change, given the operator's argv values."""
+        update = AuditAutofixUpdate(enabled=enabled, frequency=frequency, timezone=timezone)
         selected = select_autofixes(selectors, autofix_definitions(self.catalog.catalog()))
         result: list[object] = []
         for target in self._write_targets(repo, project, scope):
@@ -129,11 +144,14 @@ class SubscriptionsFacade:
         self,
         repo: str | None,
         project: str | None,
-        update: EmailPreferencesUpdate,
         *,
+        manual: bool | None = None,
+        scheduled: bool | None = None,
         scope: AutofixWriteScope | None = None,
     ) -> tuple[object, ...]:
+        """Apply one completion-email change, given the operator's argv values."""
         keys = self._published_keys()
+        update = EmailPreferencesUpdate(manual=manual, scheduled=scheduled)
         return set_email_for_targets(self._write_targets(repo, project, scope), keys, update, self.gateway)
 
     def _published_keys(self) -> tuple[str, ...]:
@@ -175,6 +193,7 @@ def _index_autofix_jobs(jobs: tuple[AuditAutofixJob, ...]) -> dict[str, AuditAut
 
 
 __all__ = [
+    "AUDIT_CADENCES",
     "AutofixListing",
     "AutofixListingItem",
     "AutofixWriteScope",
