@@ -26,6 +26,22 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
 
 
 @pytest.fixture(autouse=True)
+def plain_cli_rendering(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Render CLI output without colour, at a stable width.
+
+    Typer renders help through rich, which injects ANSI sequences *inside* an
+    option name once colour is on -- so `"--ready" in rendered` is false even
+    though the flag is there.  GitHub Actions sets `FORCE_COLOR`, which is why
+    the help assertions passed locally and failed only in CI.  Pin the
+    presentation instead of teaching every assertion to strip escapes.
+    """
+    for variable in ("FORCE_COLOR", "CLICOLOR_FORCE", "TERM"):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("COLUMNS", "120")
+
+
+@pytest.fixture(autouse=True)
 def restored_telemetry_globals() -> Iterator[None]:
     """Undo `configure_logging` side effects on module globals.
 
