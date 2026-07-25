@@ -203,6 +203,18 @@ def test_release_publishes_only_after_ci_succeeds_on_the_commit() -> None:
     assert re.search(r"^\s*needs: \[release-please, wait-for-ci\]$", release, re.MULTILINE)
 
 
+def test_docker_marked_policy_tests_run_in_ci() -> None:
+    # pyproject's addopts deselect the `docker` marker, so `just unit` skips
+    # these.  docker-build is the only CI job with a daemon; if it stops
+    # invoking them the packaging policy silently becomes local-only.
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    marked = [item for item in _source_files_marked_docker() if item]
+
+    assert marked
+    assert "-m docker" in (ROOT / "Justfile").read_text(encoding="utf-8")
+    assert "run: just docker-tests" in ci
+
+
 def test_publishing_workflows_are_not_cancellable() -> None:
     # A cancellation between the first registry push and the attestation steps
     # leaves promoted tags live with no provenance and no rollback.
@@ -308,6 +320,15 @@ def _product_python_files() -> tuple[Path, ...]:
 def _action_steps(workflow: str, action: str) -> tuple[str, ...]:
     pattern = re.compile(rf"(?m)^ +(?:- +)?uses: {re.escape(action)}[^\n]*\n(?:^ {{8,}}\S[^\n]*\n?)*")
     return tuple(match.group(0) for match in pattern.finditer(workflow))
+
+
+def _source_files_marked_docker() -> tuple[str, ...]:
+    """Return the test files that carry at least one `docker` marker."""
+    return tuple(
+        path.name
+        for path in sorted((ROOT / "tests").glob("test_*.py"))
+        if "@pytest.mark.docker" in path.read_text(encoding="utf-8")
+    )
 
 
 def _workflow_triggers(workflow: str) -> tuple[str, ...]:
