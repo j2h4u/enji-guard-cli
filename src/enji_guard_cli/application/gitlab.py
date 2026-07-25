@@ -2,8 +2,12 @@
 
 from dataclasses import dataclass
 
-from enji_guard_cli.gitlab.models import GitLabCredentialsResult, GitLabProjectsQuery, GitLabProjectsResult
-from enji_guard_cli.gitlab.ports import GitLabDiscoveryPort
+from enji_guard_cli.gitlab import (
+    GitLabCredentialsResult,
+    GitLabDiscoveryPort,
+    GitLabProjectsQuery,
+    GitLabProjectsResult,
+)
 
 
 @dataclass(frozen=True, slots=True)

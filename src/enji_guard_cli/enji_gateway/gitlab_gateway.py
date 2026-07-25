@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 from enji_guard_cli.enji_gateway import http
 from enji_guard_cli.enji_gateway.ports import GatewayCredentialReader
-from enji_guard_cli.gitlab.models import (
+from enji_guard_cli.gitlab import (
     GitLabCredential,
     GitLabCredentialPage,
     GitLabCredentialsResult,
