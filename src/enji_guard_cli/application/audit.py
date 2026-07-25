@@ -5,9 +5,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, cast
 
+from enji_guard_cli.application.audit_views import (
+    AuditReadView,
+    AuditSummaryView,
+    AuditWaitView,
+    read_view,
+    summary_view,
+    wait_view,
+)
 from enji_guard_cli.application.catalog import AuditCatalogService
 from enji_guard_cli.application.projects import AuditProjectSource
-from enji_guard_cli.audit.artifacts import AuditRead, AuditSummary, summarize_artifacts
+from enji_guard_cli.audit.artifacts import AuditRead, summarize_artifacts
 from enji_guard_cli.audit.errors import AuditNotFoundError
 from enji_guard_cli.audit.lifecycle import is_active_run
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
@@ -19,7 +27,6 @@ from enji_guard_cli.audit.ports import (
     AuditStartOutcome,
     AuditStatus,
     AuditWaitOptions,
-    AuditWaitResult,
 )
 from enji_guard_cli.audit.start import AuditStartService
 from enji_guard_cli.audit.status import build_status
@@ -110,16 +117,16 @@ class AuditFacade:
 
     def audit_read(
         self, repo: str, selectors: list[str] | None = None, *, project: str | None = None, all_audits: bool = False
-    ) -> AuditRead:
+    ) -> AuditReadView:
         target = self.targets.resolve_repository(repo, project=project)
         items = read_for_repo(
             target.repo_id, selectors or [], all_audits=all_audits, dependencies=self._workflow_dependencies()
         )
-        return AuditRead(target.repo_id, items)
+        return read_view(AuditRead(target.repo_id, items))
 
     def audit_summary(
         self, repo: str, selectors: list[str] | None = None, *, project: str | None = None
-    ) -> AuditSummary:
+    ) -> AuditSummaryView:
         target = self.targets.resolve_repository(repo, project=project)
         items = read_for_repo(
             target.repo_id,
@@ -127,7 +134,7 @@ class AuditFacade:
             all_audits=not bool(selectors),
             dependencies=self._workflow_dependencies(),
         )
-        return summarize_artifacts(target.repo_id, items)
+        return summary_view(summarize_artifacts(target.repo_id, items))
 
     def audit_wait(
         self,
@@ -135,8 +142,8 @@ class AuditFacade:
         *,
         project: str | None = None,
         timeout_seconds: float | None = None,
-        heartbeat: Callable[[AuditWaitResult], None] | None = None,
-    ) -> AuditWaitResult:
+        heartbeat: Callable[[AuditWaitView], None] | None = None,
+    ) -> AuditWaitView:
         target = self.targets.resolve_repository(repo, project=project)
         settings = default_settings().audit_wait
         options = AuditWaitOptions(
@@ -145,13 +152,16 @@ class AuditFacade:
             settings.heartbeat_seconds,
         )
         catalog = self.catalog.audits()
-        return wait_for_completion(
-            target.repo_id,
-            options=options,
-            heartbeat=heartbeat,
-            dependencies=AuditWaitDependencies(
-                lambda repo_id: self.audit_status(repo_id, catalog=catalog), time.monotonic, time.sleep
-            ),
+        beat = None if heartbeat is None else lambda result: heartbeat(wait_view(result))
+        return wait_view(
+            wait_for_completion(
+                target.repo_id,
+                options=options,
+                heartbeat=beat,
+                dependencies=AuditWaitDependencies(
+                    lambda repo_id: self.audit_status(repo_id, catalog=catalog), time.monotonic, time.sleep
+                ),
+            )
         )
 
     def _workflow_dependencies(self) -> AuditWorkflowDependencies:

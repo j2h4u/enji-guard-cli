@@ -5,25 +5,34 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
-from enji_guard_cli.application import AutofixListing, AutofixListingItem, ScheduleListing
-from enji_guard_cli.audit.artifacts import AuditRead, AuditSummary
-from enji_guard_cli.audit.ports import AuditWaitResult
+from enji_guard_cli.application import (
+    AuditReadView,
+    AuditSummaryView,
+    AuditWaitView,
+    AutofixListing,
+    AutofixListingItem,
+    GitLabCredentialsView,
+    GitLabProjectsView,
+    PortfolioOverviewView,
+    ProjectRefView,
+    ProjectSettingsView,
+    RepositoryRefView,
+    RepositoryStatusView,
+    ScheduleListing,
+)
 from enji_guard_cli.delivery.cli.audit_presenter import render_audit_read
 from enji_guard_cli.delivery.cli.presentation import CliPresentation, json_projection
-from enji_guard_cli.gitlab.models import GitLabCredentialsResult, GitLabProjectsResult
-from enji_guard_cli.portfolio.models import ProjectRef, ProjectSettings, RepositoryRef
-from enji_guard_cli.portfolio.status import PortfolioOverview, RepositoryStatus
 
 
-def repository_label(repository: RepositoryRef) -> str:
-    return f"{repository.identity.provider.value}@{repository.identity.host}:{repository.identity.locator}"
+def repository_label(repository: RepositoryRefView) -> str:
+    return repository.selector
 
 
 def state_label(value: bool | None) -> str:
     return "ready" if value is True else "pending" if value is False else "unknown"
 
 
-def portfolio_text(payload: PortfolioOverview) -> str:
+def portfolio_text(payload: PortfolioOverviewView) -> str:
     lines = [f"observed_at: {payload.observed_at}"]
     if not payload.projects:
         return "\n".join([*lines, "No projects found."])
@@ -42,7 +51,7 @@ def portfolio_text(payload: PortfolioOverview) -> str:
     return "\n".join(lines)
 
 
-def repository_status_text(payload: tuple[RepositoryStatus, ...]) -> str:
+def repository_status_text(payload: tuple[RepositoryStatusView, ...]) -> str:
     lines: list[str] = []
     for index, status in enumerate(payload):
         if index:
@@ -72,7 +81,7 @@ def repository_status_text(payload: tuple[RepositoryStatus, ...]) -> str:
     return "\n".join(lines)
 
 
-def audit_summary_text(payload: AuditSummary) -> str:
+def audit_summary_text(payload: AuditSummaryView) -> str:
     lines = [f"repository: {payload.repo_id}"]
     for item in payload.audits:
         selector = item.audit_key.removeprefix("audit.")
@@ -97,19 +106,19 @@ def audit_summary_text(payload: AuditSummary) -> str:
     return "\n".join(lines)
 
 
-def audit_read_text(payload: AuditRead) -> str:
+def audit_read_text(payload: AuditReadView) -> str:
     return render_audit_read(payload)
 
 
-def audit_wait_text(payload: AuditWaitResult) -> str:
+def audit_wait_text(payload: AuditWaitView) -> str:
     return f"repository: {payload.repo_id}\nstatus: {payload.status}\nreason: {payload.reason}\nelapsed_seconds: {payload.elapsed_seconds}"
 
 
-def project_list_text(payload: tuple[ProjectRef, ...]) -> str:
+def project_list_text(payload: tuple[ProjectRefView, ...]) -> str:
     return "\n".join(f"{item.project_id}\t{item.name or '-'}" for item in payload) or "No projects found."
 
 
-def project_settings_text(payload: ProjectSettings) -> str:
+def project_settings_text(payload: ProjectSettingsView) -> str:
     lines = [
         f"project: {payload.project.name or payload.project.project_id}",
         f"language: {payload.account_preferences.language or '-'}",
@@ -238,7 +247,7 @@ def _autofix_dimensions(configured: list[AutofixListingItem], selectors: list[st
     return " ".join(item for item in dimensions if item is not None)
 
 
-def gitlab_credentials_text(payload: GitLabCredentialsResult) -> str:
+def gitlab_credentials_text(payload: GitLabCredentialsView) -> str:
     lines = [
         f"scope: {payload.scope.scope_type or '-'}:{payload.scope.scope_owner or '-'}",
         f"credentials: {len(payload.credentials)} total={payload.pagination.total}",
@@ -249,7 +258,7 @@ def gitlab_credentials_text(payload: GitLabCredentialsResult) -> str:
     return "\n".join(lines)
 
 
-def gitlab_projects_text(payload: GitLabProjectsResult) -> str:
+def gitlab_projects_text(payload: GitLabProjectsView) -> str:
     lines = [f"credential: {payload.credential.id} ({payload.credential.name})", f"projects: {len(payload.projects)}"]
     lines.extend(f"  {item.path_with_namespace}  {item.web_url or '-'}" for item in payload.projects)
     return "\n".join(lines)

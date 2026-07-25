@@ -349,3 +349,38 @@ def _imported_modules(node: ast.AST) -> tuple[str, ...]:
             return tuple(f"{node.module}.{alias.name}" for alias in node.names)
         return (node.module,)
     return ()
+
+
+def test_application_seam_re_exports_no_domain_type() -> None:
+    """The application seam must publish its own types, never launder domain ones.
+
+    `tach` cannot catch this: once a domain type is re-exported from
+    `application/__init__`, every delivery import of it becomes legal while the
+    coupling stays exactly where it was.  This asserts the property directly --
+    every name the seam publishes is defined inside `enji_guard_cli.application`.
+    """
+    import enji_guard_cli.application as seam
+
+    laundered: dict[str, str] = {}
+    for name in seam.__all__:
+        published = cast(object, getattr(seam, name))
+        module = getattr(published, "__module__", None)
+        if isinstance(module, str) and not module.startswith("enji_guard_cli.application"):
+            laundered[name] = module
+
+    assert laundered == {}, f"application/__init__ re-exports types defined elsewhere: {laundered}"
+
+
+def test_delivery_names_no_bounded_context() -> None:
+    """Delivery renders what the application hands it, in the application's words."""
+    offenders = sorted(
+        f"{path.relative_to(ROOT)}:{node.lineno}"
+        for path in (ROOT / "src" / "enji_guard_cli" / "delivery").rglob("*.py")
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.ImportFrom)
+        and (node.module or "").startswith(
+            ("enji_guard_cli.audit", "enji_guard_cli.portfolio", "enji_guard_cli.gitlab")
+        )
+    )
+
+    assert offenders == []

@@ -4,12 +4,21 @@ from dataclasses import dataclass
 
 from enji_guard_cli.application.audit import AuditReconFactory
 from enji_guard_cli.application.catalog import AuditCatalogService
+from enji_guard_cli.application.portfolio_views import (
+    PortfolioOverviewView,
+    ProjectRefView,
+    ProjectSettingsView,
+    RepositoryStatusView,
+    overview_view,
+    project_ref_view,
+    project_settings_view,
+    repository_status_view,
+)
 from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.models import (
     AccessInfo,
     AccountPreferences,
     OperationResult,
-    ProjectRef,
     ProjectSettings,
     RepositoryRef,
 )
@@ -20,7 +29,7 @@ from enji_guard_cli.portfolio.projects import rename_project as rename_project_u
 from enji_guard_cli.portfolio.recon import recon_after_add
 from enji_guard_cli.portfolio.recon import start_recon as start_recon_use_case
 from enji_guard_cli.portfolio.repositories import add_repository, move_repository, remove_repository
-from enji_guard_cli.portfolio.status import PortfolioOverview, RepositoryStatus, assemble_overview, status_for_repo
+from enji_guard_cli.portfolio.status import assemble_overview, status_for_repo
 from enji_guard_cli.settings import RepositorySortName
 
 
@@ -34,8 +43,8 @@ class PortfolioFacade:
     audits: AuditReconFactory
     fanout: BoundedFanout
 
-    def list_projects(self) -> tuple[ProjectRef, ...]:
-        return self.gateway.list_projects()
+    def list_projects(self) -> tuple[ProjectRefView, ...]:
+        return tuple(project_ref_view(item) for item in self.gateway.list_projects())
 
     def create_project(self, name: str) -> OperationResult:
         return create_project_use_case(name, gateway=self.gateway)
@@ -78,12 +87,15 @@ class PortfolioFacade:
         recon_ports = self.audits.recon(self.catalog.audits())
         return start_recon_use_case(target, audits=recon_ports, starter=recon_ports)
 
-    def portfolio_overview(self, project: str | None = None, sort: RepositorySortName = "default") -> PortfolioOverview:
-        return assemble_overview(gateway=self.gateway, fanout=self.fanout, project=project, sort=sort)
+    def portfolio_overview(
+        self, project: str | None = None, sort: RepositorySortName = "default"
+    ) -> PortfolioOverviewView:
+        return overview_view(assemble_overview(gateway=self.gateway, fanout=self.fanout, project=project, sort=sort))
 
-    def repository_status(self, repo: str, project: str | None = None) -> tuple[RepositoryStatus, ...]:
+    def repository_status(self, repo: str, project: str | None = None) -> tuple[RepositoryStatusView, ...]:
         audits = self.audits.recon(self.catalog.audits())
-        return status_for_repo(repo, project, gateway=self.gateway, audits=audits, fanout=self.fanout)
+        statuses = status_for_repo(repo, project, gateway=self.gateway, audits=audits, fanout=self.fanout)
+        return tuple(repository_status_view(item) for item in statuses)
 
     def language(self) -> AccountPreferences:
         return self.gateway.get_preferences()
@@ -91,14 +103,16 @@ class PortfolioFacade:
     def set_language(self, language: str) -> AccountPreferences:
         return self.gateway.set_preferences(AccountPreferences(language))
 
-    def project_settings(self, project: str | None = None) -> ProjectSettings:
+    def project_settings(self, project: str | None = None) -> ProjectSettingsView:
         """Return project membership plus account preferences exactly once."""
         selected = self.targets.resolve_project(project)
         detail = self.gateway.project_detail(selected.project_id)
-        return ProjectSettings(
-            project=detail.project,
-            repositories=detail.repositories,
-            account_preferences=self.gateway.get_preferences(),
+        return project_settings_view(
+            ProjectSettings(
+                project=detail.project,
+                repositories=detail.repositories,
+                account_preferences=self.gateway.get_preferences(),
+            )
         )
 
     def access(self) -> AccessInfo:

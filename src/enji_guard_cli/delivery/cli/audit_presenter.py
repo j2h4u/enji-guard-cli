@@ -1,9 +1,9 @@
 """Pure human-text presenters for Audit delivery DTOs."""
 
-from enji_guard_cli.audit.artifacts import AuditRead
+from enji_guard_cli.application import AuditReadView
 
 
-def render_audit_read(read: AuditRead) -> str:
+def render_audit_read(read: AuditReadView) -> str:
     """Render full audit artifacts as readable Markdown-oriented text."""
 
     sections = [f"repository: {read.repo_id}"]

@@ -1,17 +1,18 @@
 # Architecture cleanup: the work order behind a red `tach`
 
-`tach.toml` declares the **ideal** module graph, not the current one.  Running
-`just module-boundaries` therefore fails on purpose.  This document is the
-complete inventory of those failures: what breaks, why the code got that way,
-and the concrete change that fixes it.
+`tach.toml` declared the **ideal** module graph, not the current one, and
+`just module-boundaries` failed on purpose.  This document was the complete
+inventory of those failures: what broke, why the code got that way, and the
+concrete change that fixed it.
 
-`just module-boundaries` is **not** part of `just check`.  `import-linter`
-(contracts in `pyproject.toml`) stays the enforced gate until this document is
-empty; at that point `module-boundaries` joins `check` and the import-linter
-contracts are deleted.
+**All four fixes have landed.  `just module-boundaries` reports
+"All modules validated!" — 0 failures.**  The baseline was **41 failures** —
+23 interface, 18 layer/visibility.
 
-Baseline for this inventory was **41 failures** — 23 interface, 18 layer/visibility.
-Fixes 1, 2 and 3 have landed; **19 failures remain**, all of them Fix 4.
+Remaining follow-up: `module-boundaries` can now join `just check`, and the 11
+`import-linter` contracts in `pyproject.toml` can be deleted — they are fully
+subsumed. Both are deliberately left as a separate change so that this one is
+pure refactoring with no gate movement.
 
 ## The declared layers
 
@@ -146,17 +147,45 @@ production code changes beyond the import lines.
 
 ---
 
-## Fix 4 — get the domain out of `delivery.cli`
+## ~~Fix 4 — get the domain out of `delivery.cli`~~ — DONE
 
-**Size: large.  This is the real work.  Do it after Fixes 2 and 3 so that
-`application`'s seam is already the habitual place to look.**
+**Size: large.  This was the real work.**  Landed as three commits, in the
+order 4c, 4a, 4b — 4c is the same shape at a third the size and was used to
+settle the design before applying it consistently.
+
+**How it was fixed.**  Each facade now takes the operator's argv values as
+primitives and returns application-owned *view* DTOs, mapped from the domain
+objects.  The views live in `application/views.py` (shared primitives),
+`application/audit_views.py`, `application/portfolio_views.py` and
+`application/gitlab.py`.  They are new types, never aliases, subclasses or
+re-exports of domain types.
+
+View field names deliberately mirror the domain objects, because those names
+*are* the operator-visible `--json` contract — `json_projection` walks
+dataclasses with `asdict`, so a structurally identical view serialises
+byte-identically.  Convenience properties (`readable`, `active`, `stale`,
+`failed`, `selector`) are presentation helpers only; `asdict` ignores them, so
+they never reach JSON.
+
+`tests/test_source_policy.py` gained two ratchets for the property `tach`
+cannot express: `test_application_seam_re_exports_no_domain_type` asserts every
+name in `application.__all__` is defined under `enji_guard_cli.application`,
+and `test_delivery_names_no_bounded_context` asserts `delivery/` imports no
+`audit`/`portfolio`/`gitlab` module.
+
+**One user-visible change, unavoidable:** `guard wait` renders its status line
+by interpolating the status object's `repr`, so that line now reads
+`AuditStatusView(...)` rather than `AuditStatus(...)`.  Field names and values
+are identical, and `--json` is byte-identical.  Everything else — command
+names, flags, human output, `--json`, `--help`, exit codes and error text — is
+unchanged.
 
 Sixteen layer/visibility failures, all one problem: the CLI types its
 presenters and its Typer options against domain objects, so every domain
 rename is a CLI change and the "application layer owns the operator
 vocabulary" claim is fiction.
 
-### 4a — `audit` types in the CLI (8 failures)
+### ~~4a — `audit` types in the CLI (8 failures)~~ — DONE
 
 ```
 [FAIL] src/enji_guard_cli/delivery/cli/app.py:28: Cannot use 'enji_guard_cli.audit.email.EmailPreferencesUpdate'. Module 'enji_guard_cli.delivery.cli' cannot depend on 'enji_guard_cli.audit'.
@@ -197,7 +226,7 @@ vocabulary" claim is fiction.
   returns nothing, *and* `application/__init__.py` names no `Audit*` type that
   is defined under `audit/`.
 
-### 4b — `portfolio` types in the CLI (5 failures)
+### ~~4b — `portfolio` types in the CLI (5 failures)~~ — DONE
 
 ```
 [FAIL] src/enji_guard_cli/delivery/cli/presenters.py:14: Cannot use 'enji_guard_cli.portfolio.models.ProjectRef'. Module 'enji_guard_cli.delivery.cli' cannot depend on 'enji_guard_cli.portfolio'.
@@ -217,7 +246,7 @@ against portfolio domain objects.
 `ProjectSettingsView`) built from the domain objects.  Same anti-laundering
 rule as 4a.
 
-### 4c — `gitlab` types in the CLI (3 failures)
+### ~~4c — `gitlab` types in the CLI (3 failures)~~ — DONE
 
 ```
 [FAIL] src/enji_guard_cli/delivery/cli/app.py:49: Cannot use 'enji_guard_cli.gitlab.models.GitLabProjectsQuery'. Module 'enji_guard_cli.delivery.cli' cannot depend on 'enji_guard_cli.gitlab'.
@@ -242,12 +271,13 @@ a good rehearsal for 4a and 4b — it is the same shape at one third the size.
 | 1 — invert `auth_session -> enji_gateway` | 4 | medium | — | done |
 | 2 — `auth_session` package seam | 6 | small | — | done |
 | 3 — `gitlab` package seam | 12 (+3 via Fix 4) | small | — | done |
-| 4c — `gitlab` out of the CLI | 3 | medium | 3 | open |
-| 4b — `portfolio` out of the CLI | 5 | large | — | open |
-| 4a — `audit` out of the CLI | 8 | large | — | open |
-| | **41** (22 cleared, **19 remaining**) | | | |
+| 4c — `gitlab` out of the CLI | 6 (3 layer + 3 interface) | medium | 3 | done |
+| 4a — `audit` out of the CLI | 8 | large | — | done |
+| 4b — `portfolio` out of the CLI | 5 | large | — | done |
+| | **41** (**41 cleared, 0 remaining**) | | | |
 
-Recommended order was 2, 3, 1, 4c, 4b, 4a.  Remaining: 4c, 4b, 4a.
+Order actually taken: 2, 3, 1, then 4c → 4a → 4b.  Running count across the
+three Fix 4 commits: 19 → 13 → 5 → **0**.
 
 ---
 
