@@ -181,17 +181,26 @@ class AuditGateway(AuditGatewayPort):
         )
 
     def start_audit_run(self, request: AuditRunRequest) -> AuditRunResult:
-        payload = _start_audit_run(
-            AuditRunCreate(
-                repo_id=request.repo_id,
-                project_id=request.project_id,
-                action_key=request.action_key,
-                fleet_task_body=_fleet_task_body(request.action_key, request.task_body),
-            ),
-            self._auth_file,
-            self._client,
-            auth_port=self._auth_port,
-        )
+        try:
+            payload = _start_audit_run(
+                AuditRunCreate(
+                    repo_id=request.repo_id,
+                    project_id=request.project_id,
+                    action_key=request.action_key,
+                    fleet_task_body=_fleet_task_body(request.action_key, request.task_body),
+                ),
+                self._auth_file,
+                self._client,
+                auth_port=self._auth_port,
+            )
+        except EnjiApiError as exc:
+            # Auth is a session-wide condition with its own remediation, so it
+            # keeps travelling as-is instead of becoming one refused audit.
+            if exc.code.startswith("AUTH_"):
+                raise
+            if exc.response_malformed:
+                raise AuditMalformedError(f"start payload for {request.action_key} is malformed") from exc
+            raise AuditUpstreamError(f"start refused for {request.action_key}: {exc.message}") from exc
         task = _object(payload.get("task"))
         return AuditRunResult(
             task_id=_optional_str(task.get("id")),
