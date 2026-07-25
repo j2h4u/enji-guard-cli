@@ -6,17 +6,21 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
+# Never cancellable: this workflow cuts releases and publishes containers, and
+# a second push to main must not abort an in-flight one.  Queue instead.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       release-created: ${{ steps.release.outputs.release_created }}
       tag-name: ${{ steps.release.outputs.tag_name }}
@@ -27,12 +31,113 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      # In manifest mode release-please emits per-package outputs prefixed with
+      # the package path, and unprefixed ones only for the root path ".", which
+      # is the single package release-please-config.json declares.  If that ever
+      # stops holding, `release_created` and `tag_name` just go empty: the
+      # release still happens, but the container is published with the sha tag
+      # alone while :latest and :X.Y.Z silently keep pointing at the previous
+      # version, and nothing reports a failure.
+      #
+      # `releases_created` and `paths_released` are the two outputs the action
+      # sets unconditionally, so they can distinguish "no release this run" from
+      # "the output names moved".  Fail loudly on the latter.
+      - name: Verify release-please emitted the expected outputs
+        env:
+          RELEASES_CREATED: ${{ steps.release.outputs.releases_created }}
+          PATHS_RELEASED: ${{ steps.release.outputs.paths_released }}
+          RELEASE_CREATED: ${{ steps.release.outputs.release_created }}
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
+        run: |
+          fail() {
+            echo "::error::${1}"
+            echo "::error::releases_created='${RELEASES_CREATED}' paths_released='${PATHS_RELEASED}'" \
+                 "release_created='${RELEASE_CREATED}' tag_name='${TAG_NAME}'"
+            exit 1
+          }
+
+          if [ -z "${RELEASES_CREATED}" ]; then
+            fail "release-please emitted no 'releases_created' output; its output names have changed"
+          fi
+
+          case "${RELEASES_CREATED}" in
+            true)
+              case "${PATHS_RELEASED}" in
+                *'"."'*) ;;
+                *) fail "the root package '.' is missing from paths_released; unprefixed outputs are no longer emitted" ;;
+              esac
+              [ "${RELEASE_CREATED}" = "true" ] || fail "a release exists for '.' but release_created is not true"
+              [ -n "${TAG_NAME}" ] || fail "a release exists for '.' but tag_name is empty"
+              echo "release ${TAG_NAME} created; the container workflow will publish its version tags"
+              ;;
+            false)
+              [ -z "${RELEASE_CREATED}" ] || fail "no release was created yet release_created is set"
+              echo "no release on this commit; the container workflow will publish the sha tag only"
+              ;;
+            *)
+              fail "unexpected releases_created value"
+              ;;
+          esac
+
+  # Nothing may be published from a commit whose CI has not passed.  The
+  # container workflow has no trigger of its own, so this poll is the only gate
+  # in front of it and replaces the `workflow_run` conclusion check that the
+  # container workflow used to perform for itself.
+  wait-for-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Wait for CI to conclude on this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          deadline="$(( $(date +%s) + 2400 ))"
+          while :; do
+            state="$(gh api \
+              "repos/${REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${HEAD_SHA}&per_page=100" \
+              --jq 'if (.workflow_runs | length) == 0 then "pending" else
+                      (.workflow_runs | sort_by(.run_number) | last
+                       | if .status != "completed" then "pending"
+                         elif .conclusion == "success" then "success"
+                         else "failed with " + (.conclusion // "null") + " at " + .html_url
+                         end)
+                    end')"
+            case "${state}" in
+              success)
+                echo "CI succeeded for ${HEAD_SHA}"
+                exit 0
+                ;;
+              pending)
+                ;;
+              *)
+                echo "::error::CI ${state}"
+                exit 1
+                ;;
+            esac
+            if [ "$(date +%s)" -ge "${deadline}" ]; then
+              echo "::error::timed out waiting for CI on ${HEAD_SHA}"
+              exit 1
+            fi
+            sleep 20
+          done
+
   # release-please runs with the default GITHUB_TOKEN, so the release it
-  # publishes cannot trigger another workflow. Call the container workflow
-  # directly instead of relying on a `release: published` trigger.
+  # publishes cannot trigger another workflow.  This workflow therefore calls
+  # the container workflow directly and is its single entry point: a second
+  # publishing path for the same commit would build a second, different digest
+  # and the two runs would race for `:latest` and for the tag that the
+  # attestation subject is resolved from.
+  #
+  # An empty release_tag means "no release on this commit"; the container
+  # workflow then publishes the immutable sha tag only and leaves `:latest` and
+  # the version tags pointing where they already point.
   publish-container:
-    needs: [release-please]
-    if: needs.release-please.outputs.release-created == 'true'
+    needs: [release-please, wait-for-ci]
     permissions:
       contents: read
       packages: write
