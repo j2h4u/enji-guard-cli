@@ -196,17 +196,41 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
 
+      # Only the immutable sha tag is pushed here.  It is the tag nobody
+      # consumes by name, so if anything below fails the blast radius is one
+      # orphaned, already-scanned sha tag while :latest and :X.Y.Z keep pointing
+      # at the previous release.  The mutable tags are promoted further down,
+      # after the attestations exist.
       - name: Publish tested image
         id: publish
         env:
-          IMAGE_TAGS: ${{ steps.image-tags.outputs.tags }}
           SOURCE_SHA: ${{ steps.release-metadata.outputs.source-sha }}
         run: |
-          while IFS= read -r tag; do
-            [ -n "${tag}" ] || continue
-            docker push "${tag}"
-          done <<< "${IMAGE_TAGS}"
-          digest="$(docker buildx imagetools inspect "${IMAGE_NAME}:sha-${SOURCE_SHA}" --format '{{.Manifest.Digest}}')"
+          candidate="${IMAGE_NAME}:sha-${SOURCE_SHA}"
+          docker push "${candidate}" | tee push.log
+
+          # Prefer the digest the registry reported during this push.  Reading
+          # it back with imagetools is only a fallback, because a transient
+          # registry error there used to abort the job after the push had
+          # already made the image public and before anything was attested.
+          digest="$(sed -n 's/.*[[:space:]]digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' push.log | tail -n 1)"
+          if [ -z "${digest}" ]; then
+            digest="$(docker buildx imagetools inspect "${candidate}" --format '{{.Manifest.Digest}}')"
+          fi
+          if [ -z "${digest}" ]; then
+            echo "::error::could not resolve the digest of ${candidate}"
+            exit 1
+          fi
+
+          # The attestation subject must be the image this run built and
+          # scanned, not whatever the registry currently serves under the tag.
+          # A RepoDigest on the local image proves the two are the same blob.
+          if ! docker image inspect "${candidate}" \
+              --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+              | grep -qxF "${IMAGE_NAME}@${digest}"; then
+            echo "::error::${digest} is not a digest of the locally scanned ${candidate}"
+            exit 1
+          fi
           echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
 
       - name: Attest build provenance
@@ -223,3 +247,18 @@ jobs:
           subject-digest: ${{ steps.publish.outputs.digest }}
           sbom-path: sbom.spdx.json
           push-to-registry: true
+
+      # Registry-side retagging of an already-attested digest.  Nothing is
+      # rebuilt or re-uploaded, so every promoted tag resolves to exactly the
+      # manifest that was scanned above and attested immediately after.
+      - name: Promote attested tags
+        env:
+          IMAGE_TAGS: ${{ steps.image-tags.outputs.tags }}
+          SOURCE_SHA: ${{ steps.release-metadata.outputs.source-sha }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          while IFS= read -r tag; do
+            [ -n "${tag}" ] || continue
+            [ "${tag}" != "${IMAGE_NAME}:sha-${SOURCE_SHA}" ] || continue
+            docker buildx imagetools create --tag "${tag}" "${IMAGE_NAME}@${DIGEST}"
+          done <<< "${IMAGE_TAGS}"

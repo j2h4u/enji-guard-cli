@@ -44,6 +44,7 @@ PRODUCT_SOURCE_ROOTS = (
     ROOT / "src" / "enji_guard_cli" / "delivery",
     ROOT / "src" / "enji_guard_cli" / "mcp_facade.py",
 )
+BUILD_PUSH_ACTION = "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
 SETUP_UV_ACTION = "astral-sh/setup-uv@"
 TRIVY_ACTION = "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25"
 UV_VERSION = "0.11.17"
@@ -229,6 +230,7 @@ def test_container_publish_scans_loaded_candidate_before_push() -> None:
     scan = workflow.index("- name: Scan candidate image")
     publish = workflow.index("- name: Publish tested image")
     scan_step = _action_steps(workflow, TRIVY_ACTION)
+    build_steps = _action_steps(workflow, BUILD_PUSH_ACTION)
     candidate_build = workflow[build:scan]
 
     assert build < scan < publish
@@ -236,12 +238,41 @@ def test_container_publish_scans_loaded_candidate_before_push() -> None:
     assert "push: false" in candidate_build
     assert "tags: ${{ steps.image-tags.outputs.tags }}" in candidate_build
     assert "docker push" not in workflow[:scan]
-    assert "push: true" not in workflow[:scan]
     assert len(scan_step) == 1
     assert "scan-type: image" in scan_step[0]
     assert "image-ref: ${{ env.IMAGE_NAME }}:sha-${{ steps.release-metadata.outputs.source-sha }}" in scan_step[0]
     assert 'exit-code: "1"' in scan_step[0]
     assert "ignore-unfixed: true" in scan_step[0]
+
+    # Ordering alone would not notice a second builder added after the scan, so
+    # pin that the workflow builds exactly once and that no build anywhere in it
+    # is allowed to push.  Every byte that reaches GHCR must come from the one
+    # image Trivy looked at.
+    assert len(build_steps) == 1
+    assert "push: true" not in workflow
+    assert all("push: false" in step and "load: true" in step for step in build_steps)
+
+
+def test_container_publish_attests_before_promoting_mutable_tags() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "container.yml").read_text(encoding="utf-8")
+    publish = workflow.index("- name: Publish tested image")
+    provenance = workflow.index("- name: Attest build provenance")
+    sbom = workflow.index("- name: Attest SBOM")
+    promote = workflow.index("- name: Promote attested tags")
+
+    # The publish step may push the immutable sha tag only.  :latest and the
+    # version tags are promoted after the attestations exist, so a failure
+    # between the two leaves the tags colleagues actually pull untouched.
+    assert publish < provenance < sbom < promote
+    assert workflow.count("docker push") == 1
+    assert 'docker push "${candidate}"' in workflow[publish:provenance]
+    assert "docker buildx imagetools create" not in workflow[:sbom]
+
+    # The attested subject must be provably the scanned image, not whatever the
+    # registry happens to serve under the tag by the time it is read back.
+    assert ".RepoDigests" in workflow[publish:provenance]
+    for subject in (workflow[provenance:sbom], workflow[sbom:promote]):
+        assert "subject-digest: ${{ steps.publish.outputs.digest }}" in subject
 
 
 def test_audit_schedule_domain_has_no_improvement_job_fallback() -> None:
