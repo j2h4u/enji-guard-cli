@@ -202,6 +202,16 @@ def test_release_publishes_only_after_ci_succeeds_on_the_commit() -> None:
     assert re.search(r"^\s*needs: \[release-please, wait-for-ci\]$", release, re.MULTILINE)
 
 
+def test_publishing_workflows_are_not_cancellable() -> None:
+    # A cancellation between the first registry push and the attestation steps
+    # leaves promoted tags live with no provenance and no rollback.
+    for name in ("container.yml", "release.yml"):
+        workflow = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+
+        assert "cancel-in-progress: false" in workflow, name
+        assert "cancel-in-progress: true" not in workflow, name
+
+
 def test_setup_uv_installs_the_dockerfile_version() -> None:
     workflows = tuple(sorted((ROOT / ".github" / "workflows").glob("*.yml")))
     setup_uv_steps = [

@@ -24,9 +24,12 @@ on:
 permissions:
   contents: read
 
+# Never cancellable: a cancellation landing between the first push and the
+# attestation steps leaves promoted tags in GHCR with no provenance and no
+# rollback.  Queue instead, and let the publish run to its end.
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.release_tag || github.sha }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
