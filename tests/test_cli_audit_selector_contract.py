@@ -76,7 +76,9 @@ def test_audit_summary_without_selectors_summarizes_everything(audit_gateway: Re
     result = CliRunner().invoke(app, ["audit", "summary", REPO])
 
     assert result.exit_code == 0
-    assert audit_gateway.listed_reports == [("r1", "vulns"), ("r1", "tests")]
+    # The metric groups are read concurrently, so only the set of reads is a
+    # guarantee; asserting the completion order made this test flaky.
+    assert sorted(audit_gateway.listed_reports) == [("r1", "tests"), ("r1", "vulns")]
 
 
 def test_audit_summary_with_one_selector_reads_only_that_metric_group(
