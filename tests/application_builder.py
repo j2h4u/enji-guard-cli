@@ -616,38 +616,3 @@ def recording_application(
         auth=auth or RecordingAuthSession(),
         gitlab_gateway=gitlab if gitlab is not None else object(),
     ).build()
-
-
-@dataclass(frozen=True, slots=True)
-class FacadeRouter:
-    """Serve one flat CLI fake under every facade attribute the CLI reads."""
-
-    target: object
-
-    @property
-    def runner(self) -> object:
-        return self.target
-
-    @property
-    def catalog(self) -> object:
-        return self.target
-
-    @property
-    def auth(self) -> object:
-        return self.target
-
-    @property
-    def audit(self) -> object:
-        return self.target
-
-    @property
-    def subscriptions(self) -> object:
-        return self.target
-
-    @property
-    def portfolio(self) -> object:
-        return self.target
-
-    @property
-    def gitlab(self) -> object:
-        return self.target
