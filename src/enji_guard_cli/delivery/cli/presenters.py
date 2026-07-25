@@ -13,23 +13,26 @@ from enji_guard_cli.application import (
     AutofixListingItem,
     GitLabCredentialsView,
     GitLabProjectsView,
+    PortfolioOverviewView,
+    ProjectRefView,
+    ProjectSettingsView,
+    RepositoryRefView,
+    RepositoryStatusView,
     ScheduleListing,
 )
 from enji_guard_cli.delivery.cli.audit_presenter import render_audit_read
 from enji_guard_cli.delivery.cli.presentation import CliPresentation, json_projection
-from enji_guard_cli.portfolio.models import ProjectRef, ProjectSettings, RepositoryRef
-from enji_guard_cli.portfolio.status import PortfolioOverview, RepositoryStatus
 
 
-def repository_label(repository: RepositoryRef) -> str:
-    return f"{repository.identity.provider.value}@{repository.identity.host}:{repository.identity.locator}"
+def repository_label(repository: RepositoryRefView) -> str:
+    return repository.selector
 
 
 def state_label(value: bool | None) -> str:
     return "ready" if value is True else "pending" if value is False else "unknown"
 
 
-def portfolio_text(payload: PortfolioOverview) -> str:
+def portfolio_text(payload: PortfolioOverviewView) -> str:
     lines = [f"observed_at: {payload.observed_at}"]
     if not payload.projects:
         return "\n".join([*lines, "No projects found."])
@@ -48,7 +51,7 @@ def portfolio_text(payload: PortfolioOverview) -> str:
     return "\n".join(lines)
 
 
-def repository_status_text(payload: tuple[RepositoryStatus, ...]) -> str:
+def repository_status_text(payload: tuple[RepositoryStatusView, ...]) -> str:
     lines: list[str] = []
     for index, status in enumerate(payload):
         if index:
@@ -111,11 +114,11 @@ def audit_wait_text(payload: AuditWaitView) -> str:
     return f"repository: {payload.repo_id}\nstatus: {payload.status}\nreason: {payload.reason}\nelapsed_seconds: {payload.elapsed_seconds}"
 
 
-def project_list_text(payload: tuple[ProjectRef, ...]) -> str:
+def project_list_text(payload: tuple[ProjectRefView, ...]) -> str:
     return "\n".join(f"{item.project_id}\t{item.name or '-'}" for item in payload) or "No projects found."
 
 
-def project_settings_text(payload: ProjectSettings) -> str:
+def project_settings_text(payload: ProjectSettingsView) -> str:
     lines = [
         f"project: {payload.project.name or payload.project.project_id}",
         f"language: {payload.account_preferences.language or '-'}",

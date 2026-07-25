@@ -14,6 +14,7 @@ from enji_guard_cli.application.audit_views import (
     AuditNewerRunView,
     AuditReadItemView,
     AuditReadView,
+    AuditRunView,
     AuditStatusItemView,
     AuditStatusView,
     AuditSummaryItemView,
@@ -42,6 +43,18 @@ from enji_guard_cli.application.gitlab import (
     GitLabScopeView,
 )
 from enji_guard_cli.application.portfolio import PortfolioFacade
+from enji_guard_cli.application.portfolio_views import (
+    AccountPreferencesView,
+    PortfolioActiveRunView,
+    PortfolioAuditStatusView,
+    PortfolioOverviewView,
+    ProjectOverviewView,
+    ProjectRefView,
+    ProjectSettingsView,
+    RepositoryOverviewView,
+    RepositoryRefView,
+    RepositoryStatusView,
+)
 from enji_guard_cli.application.projects import AuditProjectSource
 from enji_guard_cli.application.subscriptions import (
     AUDIT_CADENCES,
@@ -55,6 +68,7 @@ from enji_guard_cli.application.views import RepositoryIdentityView
 
 __all__ = [
     "AUDIT_CADENCES",
+    "AccountPreferencesView",
     "Application",
     "ApplicationAuthError",
     "ApplicationCatalogChange",
@@ -73,6 +87,7 @@ __all__ = [
     "AuditReadView",
     "AuditReconFactory",
     "AuditReconService",
+    "AuditRunView",
     "AuditStatusItemView",
     "AuditStatusView",
     "AuditSummaryItemView",
@@ -91,8 +106,17 @@ __all__ = [
     "GitLabProjectView",
     "GitLabProjectsView",
     "GitLabScopeView",
+    "PortfolioActiveRunView",
+    "PortfolioAuditStatusView",
     "PortfolioFacade",
+    "PortfolioOverviewView",
+    "ProjectOverviewView",
+    "ProjectRefView",
+    "ProjectSettingsView",
     "RepositoryIdentityView",
+    "RepositoryOverviewView",
+    "RepositoryRefView",
+    "RepositoryStatusView",
     "ScheduleListing",
     "SubscriptionsFacade",
     "exit_code_for_error",

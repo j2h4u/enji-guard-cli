@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from enji_guard_cli.application.catalog import AuditCatalogService
+from enji_guard_cli.application.portfolio_views import RepositoryRefView, repository_ref_view
 from enji_guard_cli.audit.autofixes import definitions as autofix_definitions
 from enji_guard_cli.audit.autofixes import select as select_autofixes
 from enji_guard_cli.audit.autofixes import set_one
@@ -32,7 +33,7 @@ without reading an audit module.
 
 @dataclass(frozen=True, slots=True)
 class ScheduleListing:
-    repository: RepositoryRef
+    repository: RepositoryRefView
     schedules: tuple[AuditSchedule, ...]
 
 
@@ -44,7 +45,7 @@ class AutofixListingItem:
 
 @dataclass(frozen=True, slots=True)
 class AutofixListing:
-    repository: RepositoryRef
+    repository: RepositoryRefView
     items: tuple[AutofixListingItem, ...]
 
 
@@ -68,7 +69,7 @@ class SubscriptionsFacade:
         targets = self.targets.targets(repo, project)
         results = list_for_targets(targets, keys, self.gateway, self.fanout)
         by_repo_id = {result.repo_id: result.schedules for result in results}
-        return tuple(ScheduleListing(target, by_repo_id[target.repo_id]) for target in targets)
+        return tuple(ScheduleListing(repository_ref_view(target), by_repo_id[target.repo_id]) for target in targets)
 
     def set_schedules(  # noqa: PLR0913
         self,
@@ -104,7 +105,7 @@ class SubscriptionsFacade:
                 )
                 for definition in definitions
             )
-            return AutofixListing(target, items)
+            return AutofixListing(repository_ref_view(target), items)
 
         return self.fanout.map(targets, read_target)
 

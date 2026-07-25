@@ -21,6 +21,7 @@ from enji_guard_cli.audit.ports import (
     AuditCurrentHeadStatus,
     AuditFreshness,
     AuditNewerRun,
+    AuditRun,
     AuditStatus,
     AuditStatusItem,
     AuditWaitResult,
@@ -107,6 +108,23 @@ class AuditStatusView:
 
 
 @dataclass(frozen=True, slots=True)
+class AuditRunView:
+    """One audit run as the operator sees it."""
+
+    task_id: str | None
+    action_key: str | None
+    status: str | None
+    created_at: str | None
+    started_at: str | None
+    completed_at: str | None
+    projection_source: str | None
+    projection_status_source: str | None
+    expires_at: str | None
+    current_head_sha: str | None
+    last_audited_head_sha: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class AuditArtifactView:
     """One completed audit report, body included."""
 
@@ -173,6 +191,22 @@ class AuditWaitView:
     timed_out: bool
     reason: Literal["complete", "waiting", "failed", "missing", "timeout"]
     elapsed_seconds: int
+
+
+def run_view(run: AuditRun) -> AuditRunView:
+    return AuditRunView(
+        task_id=run.task_id,
+        action_key=run.action_key,
+        status=run.status,
+        created_at=run.created_at,
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        projection_source=run.projection_source,
+        projection_status_source=run.projection_status_source,
+        expires_at=run.expires_at,
+        current_head_sha=run.current_head_sha,
+        last_audited_head_sha=run.last_audited_head_sha,
+    )
 
 
 def freshness_view(freshness: AuditFreshness) -> AuditFreshnessView:
@@ -297,6 +331,7 @@ __all__ = [
     "AuditNewerRunView",
     "AuditReadItemView",
     "AuditReadView",
+    "AuditRunView",
     "AuditStatusItemView",
     "AuditStatusView",
     "AuditSummaryItemView",
@@ -304,6 +339,7 @@ __all__ = [
     "AuditWaitView",
     "freshness_view",
     "read_view",
+    "run_view",
     "status_view",
     "summary_view",
     "wait_view",

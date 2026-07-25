@@ -2,6 +2,11 @@ from typing import cast
 
 from application_builder import ApplicationStubs
 from enji_guard_cli.application import Application
+from enji_guard_cli.application.portfolio_views import (
+    account_preferences_view,
+    project_ref_view,
+    repository_ref_view,
+)
 from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.models import (
     AccessInfo,
@@ -56,9 +61,13 @@ def test_project_settings_keeps_language_account_wide() -> None:
 
     settings = app.portfolio.project_settings("pets")
 
-    assert settings.project == portfolio.project
-    assert settings.repositories == (portfolio.repository,)
-    assert settings.account_preferences == AccountPreferences("en")
+    # The facade answers in application-owned views, so the assertion is that
+    # the domain objects were *mapped* faithfully -- not that they were handed
+    # through.  Comparing to the domain object here would only pass if the
+    # boundary had been laundered away.
+    assert settings.project == project_ref_view(portfolio.project)
+    assert settings.repositories == (repository_ref_view(portfolio.repository),)
+    assert settings.account_preferences == account_preferences_view(AccountPreferences("en"))
 
 
 def test_access_is_typed_and_gateway_backed() -> None:
