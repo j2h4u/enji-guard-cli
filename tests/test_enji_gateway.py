@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
@@ -464,3 +465,49 @@ def test_audit_gateway_reads_snapshot(gateway_harness: _GatewayHarness) -> None:
     assert gateway_harness.calls == [
         ("snapshot", ("repo-1", "audit.security", gateway_harness.auth_file, gateway_harness.client, "task-1"))
     ]
+
+
+def _raise_upstream(status_code: int | None) -> Callable[..., JsonObjectPayload]:
+    def _fail(*_: object, **__: object) -> JsonObjectPayload:
+        raise EnjiApiError("BAD_GATEWAY", "Bad Gateway", status_code=status_code)
+
+    return _fail
+
+
+def test_audit_gateway_start_carries_the_upstream_http_status(
+    gateway_harness: _GatewayHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import enji_guard_cli.enji_gateway.audit_gateway as gateway_module
+
+    monkeypatch.setattr(gateway_module, "_start_audit_run", _raise_upstream(502))
+
+    with pytest.raises(AuditUpstreamError) as excinfo:
+        gateway_harness.gateway.start_audit_run(gateway_harness.request)
+
+    assert str(excinfo.value) == "start refused for audit.security: upstream returned HTTP 502: Bad Gateway"
+
+
+def test_audit_gateway_start_omits_a_missing_upstream_http_status(
+    gateway_harness: _GatewayHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import enji_guard_cli.enji_gateway.audit_gateway as gateway_module
+
+    monkeypatch.setattr(gateway_module, "_start_audit_run", _raise_upstream(None))
+
+    with pytest.raises(AuditUpstreamError) as excinfo:
+        gateway_harness.gateway.start_audit_run(gateway_harness.request)
+
+    assert str(excinfo.value) == "start refused for audit.security: Bad Gateway"
+
+
+def test_audit_gateway_task_detail_carries_the_upstream_http_status(
+    gateway_harness: _GatewayHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import enji_guard_cli.enji_gateway.audit_gateway as gateway_module
+
+    monkeypatch.setattr(gateway_module, "_task_detail", _raise_upstream(502))
+
+    with pytest.raises(AuditUpstreamError) as excinfo:
+        gateway_harness.gateway.task_detail("task-1")
+
+    assert str(excinfo.value) == "task detail lookup failed for task-1: upstream returned HTTP 502: Bad Gateway"

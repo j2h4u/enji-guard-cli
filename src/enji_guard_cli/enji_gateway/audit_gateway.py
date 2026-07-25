@@ -82,6 +82,14 @@ from enji_guard_cli.json_types import JsonValue
 HTTP_NOT_FOUND = 404
 
 
+def _upstream_reason(exc: EnjiApiError) -> str:
+    """Keep the HTTP status visible so a transient 5xx reads apart from a considered refusal."""
+
+    if exc.status_code is None:
+        return exc.message
+    return f"upstream returned HTTP {exc.status_code}: {exc.message}"
+
+
 class AuditGateway(AuditGatewayPort):
     """Delegate Audit endpoint access to the existing Enji API adapter."""
 
@@ -156,7 +164,7 @@ class AuditGateway(AuditGatewayPort):
                 raise AuditNotFoundError(task_id) from exc
             if exc.response_malformed:
                 raise AuditMalformedError(f"task detail payload for {task_id} is malformed") from exc
-            raise AuditUpstreamError(f"task detail lookup failed for {task_id}: {exc.message}") from exc
+            raise AuditUpstreamError(f"task detail lookup failed for {task_id}: {_upstream_reason(exc)}") from exc
         task = payload
         returned_task_id = _optional_str(task.get("id"))
         if returned_task_id is not None and returned_task_id != task_id:
@@ -201,7 +209,7 @@ class AuditGateway(AuditGatewayPort):
                 raise
             if exc.response_malformed:
                 raise AuditMalformedError(f"start payload for {request.action_key} is malformed") from exc
-            raise AuditUpstreamError(f"start refused for {request.action_key}: {exc.message}") from exc
+            raise AuditUpstreamError(f"start refused for {request.action_key}: {_upstream_reason(exc)}") from exc
         task = _object(payload.get("task"))
         return AuditRunResult(
             task_id=_optional_str(task.get("id")),
