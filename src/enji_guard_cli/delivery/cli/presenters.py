@@ -5,12 +5,17 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
-from enji_guard_cli.application import AutofixListing, AutofixListingItem, ScheduleListing
+from enji_guard_cli.application import (
+    AutofixListing,
+    AutofixListingItem,
+    GitLabCredentialsView,
+    GitLabProjectsView,
+    ScheduleListing,
+)
 from enji_guard_cli.audit.artifacts import AuditRead, AuditSummary
 from enji_guard_cli.audit.ports import AuditWaitResult
 from enji_guard_cli.delivery.cli.audit_presenter import render_audit_read
 from enji_guard_cli.delivery.cli.presentation import CliPresentation, json_projection
-from enji_guard_cli.gitlab.models import GitLabCredentialsResult, GitLabProjectsResult
 from enji_guard_cli.portfolio.models import ProjectRef, ProjectSettings, RepositoryRef
 from enji_guard_cli.portfolio.status import PortfolioOverview, RepositoryStatus
 
@@ -238,7 +243,7 @@ def _autofix_dimensions(configured: list[AutofixListingItem], selectors: list[st
     return " ".join(item for item in dimensions if item is not None)
 
 
-def gitlab_credentials_text(payload: GitLabCredentialsResult) -> str:
+def gitlab_credentials_text(payload: GitLabCredentialsView) -> str:
     lines = [
         f"scope: {payload.scope.scope_type or '-'}:{payload.scope.scope_owner or '-'}",
         f"credentials: {len(payload.credentials)} total={payload.pagination.total}",
@@ -249,7 +254,7 @@ def gitlab_credentials_text(payload: GitLabCredentialsResult) -> str:
     return "\n".join(lines)
 
 
-def gitlab_projects_text(payload: GitLabProjectsResult) -> str:
+def gitlab_projects_text(payload: GitLabProjectsView) -> str:
     lines = [f"credential: {payload.credential.id} ({payload.credential.name})", f"projects: {len(payload.projects)}"]
     lines.extend(f"  {item.path_with_namespace}  {item.web_url or '-'}" for item in payload.projects)
     return "\n".join(lines)

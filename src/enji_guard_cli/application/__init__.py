@@ -18,7 +18,16 @@ from enji_guard_cli.application.execution import (
     CatalogObservationScope,
 )
 from enji_guard_cli.application.facade import Application
-from enji_guard_cli.application.gitlab import GitLabFacade
+from enji_guard_cli.application.gitlab import (
+    GitLabCredentialPageView,
+    GitLabCredentialsView,
+    GitLabCredentialView,
+    GitLabFacade,
+    GitLabProjectPageView,
+    GitLabProjectsView,
+    GitLabProjectView,
+    GitLabScopeView,
+)
 from enji_guard_cli.application.portfolio import PortfolioFacade
 from enji_guard_cli.application.projects import AuditProjectSource
 from enji_guard_cli.application.subscriptions import (
@@ -28,6 +37,7 @@ from enji_guard_cli.application.subscriptions import (
     ScheduleListing,
     SubscriptionsFacade,
 )
+from enji_guard_cli.application.views import RepositoryIdentityView
 
 __all__ = [
     "Application",
@@ -47,8 +57,16 @@ __all__ = [
     "AutofixListingItem",
     "AutofixWriteScope",
     "CatalogObservationScope",
+    "GitLabCredentialPageView",
+    "GitLabCredentialView",
+    "GitLabCredentialsView",
     "GitLabFacade",
+    "GitLabProjectPageView",
+    "GitLabProjectView",
+    "GitLabProjectsView",
+    "GitLabScopeView",
     "PortfolioFacade",
+    "RepositoryIdentityView",
     "ScheduleListing",
     "SubscriptionsFacade",
     "exit_code_for_error",

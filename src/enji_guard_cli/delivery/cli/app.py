@@ -46,7 +46,6 @@ from enji_guard_cli.delivery.cli.presenters import (
     SCHEDULE,
 )
 from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
-from enji_guard_cli.gitlab.models import GitLabProjectsQuery
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.readiness import readiness_verdict
 from enji_guard_cli.runtime_observability.supervisor import RuntimeServiceOptions, run_service
@@ -555,15 +554,13 @@ def gitlab_projects(  # noqa: PLR0913
 ) -> None:
     _run(
         lambda: _application().gitlab.gitlab_projects(
-            GitLabProjectsQuery(
-                credential_id=credential_id,
-                search=search,
-                page=page,
-                per_page=per_page,
-                all_pages=all_pages,
-                scope_type=scope_type,
-                scope_owner=scope_owner,
-            )
+            credential_id=credential_id,
+            search=search,
+            page=page,
+            per_page=per_page,
+            all_pages=all_pages,
+            scope_type=scope_type,
+            scope_owner=scope_owner,
         ),
         _json_output(json_output),
         GITLAB_PROJECTS,
