@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from typing import Literal
 
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition
+from enji_guard_cli.audit.errors import (
+    AuditActionUnusableError,
+    AuditMalformedError,
+    AuditUpstreamError,
+)
 from enji_guard_cli.audit.lifecycle import (
     active_runs_for_action,
     representative_projection,
@@ -44,7 +49,6 @@ class StartAuditDependencies[TCreateRequest]:
     current_repo_active_runs: CurrentRepoActiveRuns
     record_started_run: RecordAuditRunStart
     task_identity: TaskIdentity
-    start_error: type[Exception] = Exception
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,30 +120,32 @@ def _start_one_audit[TCreateRequest](
             == "running"
             else "queued"
         )
-        return _batch_result_item(action_key, action_key, run_state, (current_sha, last_sha), (task_id, task_status))
+        return _batch_result_item(action_key, run_state, (current_sha, last_sha), (task_id, task_status))
     if out_of_date(current_sha, last_sha) is False:
-        return _batch_result_item(action_key, action_key, "up_to_date", (current_sha, last_sha))
+        return _batch_result_item(action_key, "up_to_date", (current_sha, last_sha))
+    # Two narrow catches, deliberately not one.  Only failures that mean "this
+    # one audit could not be started" become a ``failed`` item; a repository
+    # that cannot carry any run, and any programming error, propagate so the
+    # operator sees a real failure rather than a silent per-audit outcome on a
+    # billable operation.
+    try:
+        body = audit_run_task_body(
+            AuditRunTaskContext(context.project_id, context.repo_id, action_key, state.project, context.catalog),
+            runbook=dependencies.runbook,
+        )
+    except AuditActionUnusableError as exc:
+        return _batch_result_item(action_key, "failed", (current_sha, last_sha), reason=str(exc))
     try:
         response = dependencies.start_audit_run(
-            dependencies.make_audit_run_create(
-                context.repo_id,
-                context.project_id,
-                action_key,
-                audit_run_task_body(
-                    AuditRunTaskContext(
-                        context.project_id, context.repo_id, action_key, state.project, context.catalog
-                    ),
-                    runbook=dependencies.runbook,
-                ),
-            )
+            dependencies.make_audit_run_create(context.repo_id, context.project_id, action_key, body)
         )
-    except dependencies.start_error:
-        return _batch_result_item(action_key, action_key, "failed", (current_sha, last_sha))
+    except (AuditUpstreamError, AuditMalformedError) as exc:
+        return _batch_result_item(action_key, "failed", (current_sha, last_sha), reason=str(exc))
     task_id, task_status = dependencies.task_identity(response)
     dependencies.record_started_run(
         AuditRunStart(context.repo_id, context.project_id, action_key, task_id, task_status, current_sha, last_sha)
     )
-    return _batch_result_item(action_key, action_key, "started", (current_sha, last_sha), (task_id, task_status))
+    return _batch_result_item(action_key, "started", (current_sha, last_sha), (task_id, task_status))
 
 
 def out_of_date(current: str | None, audited: str | None) -> bool | None:
@@ -167,21 +173,23 @@ def _active_run_task(run: AuditRun) -> tuple[str | None, str | None]:
 
 
 def _batch_result_item(
-    audit: str,
     action_key: str,
     state: Literal["started", "queued", "already_running", "up_to_date", "failed"],
     head_hashes: tuple[str | None, str | None],
     task: tuple[str | None, str | None] = (None, None),
+    reason: str | None = None,
 ) -> AuditRunBatchResultItem:
     current, audited = head_hashes
     task_id, task_status = task
     item: AuditRunBatchResultItem = {
-        "audit": audit,
+        "audit": action_key,
         "action_key": action_key,
         "state": state,
         "current_head_sha": current,
         "last_audited_head_sha": audited,
     }
+    if reason is not None:
+        item["reason"] = reason
     if task_id is not None:
         item["task_id"] = task_id
     if task_status is not None:
@@ -199,7 +207,7 @@ def audit_run_task_body(context: AuditRunTaskContext, *, runbook: Runbook) -> Au
         None,
     )
     if action is None or not isinstance(action.runbook_id, str) or not action.runbook_id.strip():
-        raise ValueError(f"catalog does not contain runbook for action key: {context.action_key}")
+        raise AuditActionUnusableError(f"catalog does not contain runbook for action key: {context.action_key}")
     return task_for_repo(
         AuditTaskContext(
             project=context.project,

@@ -329,6 +329,7 @@ class RecordingAuditGateway:
         task_links: Mapping[str, tuple[AuditTaskLink, ...]] | None = None,
         active_runs: Mapping[str, tuple[AuditRun, ...]] | None = None,
         rerun_state: AuditRerunState | None = None,
+        start_failure: Exception | None = None,
     ) -> None:
         self.catalog_result = catalog
         self.schedules = dict(schedules or {})
@@ -339,6 +340,7 @@ class RecordingAuditGateway:
         self.task_links_by_repo = dict(task_links or {})
         self.active_runs_by_repo = dict(active_runs or {})
         self.state = rerun_state or AuditRerunState("head", None, True, None, {})
+        self.start_failure = start_failure
         self.catalog_calls = 0
         self.started: list[AuditRunRequest] = []
         self.listed_reports: list[tuple[str, str]] = []
@@ -370,6 +372,8 @@ class RecordingAuditGateway:
 
     def start_audit_run(self, request: AuditRunRequest) -> AuditRunResult:
         self.started.append(request)
+        if self.start_failure is not None:
+            raise self.start_failure
         return AuditRunResult(f"task-{len(self.started)}", "queued")
 
     def list_audit_reports(self, repo_id: str, metric_group: str) -> tuple[AuditReportRef, ...]:
