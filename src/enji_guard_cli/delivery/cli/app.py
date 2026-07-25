@@ -84,7 +84,7 @@ mechanism.
 app = typer.Typer(help=ROOT_HELP, invoke_without_command=True)
 auth_app = typer.Typer(help="Manage Enji authentication.")
 project_app = typer.Typer(help="Manage projects and project repositories.")
-repo_app = typer.Typer(help="Manage connected repositories.")
+repo_app = typer.Typer(help="Manage connected repositories. To read them, use 'status' (all) or 'status REPO' (one).")
 recon_app = typer.Typer(help="Run baseline repository discovery (separate from audits).")
 audit_app = typer.Typer(help=AUDIT_HELP)
 schedule_app = typer.Typer(help="Manage automatic audit schedules.")
