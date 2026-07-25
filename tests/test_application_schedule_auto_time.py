@@ -1,15 +1,7 @@
-from application_builder import ApplicationStubs
+from application_builder import ApplicationStubs, RecordingTargetService, WriteTargetsCall, repository
 from enji_guard_cli.audit.ports import AuditCatalogAction, AuditCatalogResult, AuditSchedule
-from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvider, RepositoryRef
 
-_REPOSITORY = RepositoryRef(
-    "repo-1",
-    "project-1",
-    "Pets",
-    RepositoryIdentity(RepositoryProvider.GITHUB, "acme/cat", "github.com"),
-    web_url="https://example.test/repository",
-    provider_repo_id="provider-test",
-)
+_REPOSITORY = repository("acme/cat", repo_id="repo-1")
 
 
 class _AuditGateway:
@@ -34,17 +26,14 @@ class _AuditGateway:
         return schedule
 
 
-class _TargetService:
-    def write_targets(self, *_args: object, **_kwargs: object) -> tuple[RepositoryRef, ...]:
-        return (_REPOSITORY,)
-
-
 def test_schedule_auto_time_skips_write_when_already_auto() -> None:
     current = AuditSchedule("audit.security", True, "workdays", None, 1, "00:00", "auto", "UTC")
     gateway = _AuditGateway(current)
-    application = ApplicationStubs(audit_gateway=gateway, target_service=_TargetService()).build()
+    targets = RecordingTargetService((_REPOSITORY,))
+    application = ApplicationStubs(audit_gateway=gateway, target_service=targets).build()
 
     result = application.subscriptions.schedule_auto_time("repo-1")
 
     assert result == (current,)
     assert gateway.set_calls == 0
+    assert targets.write_targets_calls == [WriteTargetsCall("repo-1", None, False, False, "mutation")]

@@ -48,6 +48,8 @@ from enji_guard_cli.delivery.cli.presenters import operation_text
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.gitlab.models import (
     GitLabCredential,
+    GitLabCredentialPage,
+    GitLabCredentialsResult,
     GitLabProjectPage,
     GitLabProjectsQuery,
     GitLabProjectsResult,
@@ -77,6 +79,26 @@ def _audit(selector: str, title: str) -> AuditCatalogAction:
 
 
 SECURITY_ONLY = _catalog(_audit("security", "Security"))
+
+GITLAB_PROJECTS_RESULT = GitLabProjectsResult(
+    scope=GitLabScope(scope_type="group", scope_owner="acme"),
+    credential=GitLabCredential(
+        id="cred-42",
+        name="automation",
+        credential_type="cookie",
+        provider="gitlab",
+        scope_type="group",
+        scope_owner="acme",
+        status="ready",
+        last_error=None,
+        expires_at=None,
+        git_host="gitlab.com",
+        api_base_url="https://gitlab.com/api/v4",
+        gitlab_health_reason=None,
+    ),
+    projects=(),
+    pagination=GitLabProjectPage(page=3, per_page=17, next_page=None),
+)
 
 
 class Ports:
@@ -207,26 +229,7 @@ def test_gitlab_projects_maps_all_query_options_and_emits_result(monkeypatch: py
         scope_type="group",
         scope_owner="acme",
     )
-    payload = GitLabProjectsResult(
-        scope=GitLabScope(scope_type="group", scope_owner="acme"),
-        credential=GitLabCredential(
-            id="cred-42",
-            name="automation",
-            credential_type="cookie",
-            provider="gitlab",
-            scope_type="group",
-            scope_owner="acme",
-            status="ready",
-            last_error=None,
-            expires_at=None,
-            git_host="gitlab.com",
-            api_base_url="https://gitlab.com/api/v4",
-            gitlab_health_reason=None,
-        ),
-        projects=(),
-        pagination=GitLabProjectPage(page=3, per_page=17, next_page=None),
-    )
-    gitlab = RecordingGitLabGateway(projects=payload)
+    gitlab = RecordingGitLabGateway(projects=GITLAB_PROJECTS_RESULT)
     Ports(gitlab=gitlab).install(monkeypatch)
 
     result = CliRunner().invoke(
@@ -725,16 +728,68 @@ def test_auth_import_bearer_requires_stdin_and_never_prints_credential(ports: Po
     assert ports.auth.imported_tokens == ["Bearer secret-token\n"]
 
 
-def test_auth_failures_are_translated_into_the_application_vocabulary(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_auth_import_cookie_requires_stdin_and_hands_the_raw_header_to_the_store(ports: Ports) -> None:
+    missing = CliRunner().invoke(app, ["auth", "import-cookie"])
+    assert missing.exit_code == 1
+    assert "use --stdin" in missing.stderr
+    assert ports.auth.imported_cookies == []
+
+    result = CliRunner().invoke(app, ["auth", "import-cookie", "--stdin", "--json"], input="session=secret-value\n")
+    assert result.exit_code == 0
+    assert "secret-value" not in result.stdout
+    assert ports.auth.imported_cookies == ["session=secret-value\n"]
+
+
+@pytest.mark.parametrize(
+    ("command", "stdin"),
+    [
+        (["auth", "status"], None),
+        (["auth", "import-cookie", "--stdin"], "session=x"),
+        (["auth", "import-bearer", "--stdin"], "token"),
+    ],
+)
+def test_auth_failures_are_translated_into_the_application_vocabulary(
+    monkeypatch: pytest.MonkeyPatch, command: list[str], stdin: str | None
+) -> None:
     """A credential-store failure must not reach delivery as an auth-library error."""
     auth = RecordingAuthSession(failure=AuthError("AUTH_CORRUPT", "credential file is unreadable"))
     Ports(auth=auth).install(monkeypatch)
 
-    result = CliRunner().invoke(app, ["auth", "status"])
+    result = CliRunner().invoke(app, command, input=stdin)
 
     assert result.exit_code == 3
     assert result.stderr.startswith("AUTH_CORRUPT: credential file is unreadable")
-    assert auth.status_calls == 1
+
+
+def test_gitlab_credentials_forwards_every_paging_and_scope_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    credentials = GitLabCredentialsResult(
+        scope=GitLabScope(scope_type="group", scope_owner="acme"),
+        credentials=(),
+        pagination=GitLabCredentialPage(limit=7, offset=14, total=0),
+    )
+    gitlab = RecordingGitLabGateway(projects=GITLAB_PROJECTS_RESULT, credentials=credentials)
+    Ports(gitlab=gitlab).install(monkeypatch)
+
+    result = CliRunner().invoke(
+        app,
+        ["gitlab", "credentials", "--scope-type", "group", "--scope-owner", "acme", "--limit", "7", "--offset", "14"],
+    )
+
+    assert result.exit_code == 0
+    assert gitlab.credential_queries == [("group", "acme", 7, 14)]
+
+
+def test_wait_returns_immediately_when_every_audit_is_complete(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``wait`` is a real blocking wait, so a complete repository must not poll."""
+    Ports(audit=_readable_security_gateway()).install(monkeypatch)
+
+    result = CliRunner().invoke(app, ["wait", REPO, "--timeout", "1s", "--json"])
+
+    assert result.exit_code == 0
+    payload = cast(dict[str, object], json.loads(result.stdout))
+    assert payload["reason"] == "complete"
+    assert payload["complete"] is True
+    assert payload["timed_out"] is False
 
 
 @pytest.mark.parametrize(
