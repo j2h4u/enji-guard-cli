@@ -392,7 +392,7 @@ class AuditWaitResult:
     status: AuditStatus
     complete: bool
     timed_out: bool
-    reason: Literal["complete", "waiting", "failed", "missing", "stale", "timeout"]
+    reason: Literal["complete", "waiting", "failed", "missing", "timeout"]
     elapsed_seconds: int
 
 
