@@ -128,4 +128,29 @@ def mcp_query_facade(auth_file: Path | None = None) -> Iterator[McpQueryFacade]:
         surface.runner.close()
 
 
-__all__ = ["create_application", "mcp_query_facade"]
+@contextmanager
+def runtime_auth_service(auth_file: Path | None = None) -> Iterator[RuntimeAuthCoordinatorAdapter]:
+    """Own only the credential coordinator the long-lived service supervises.
+
+    The service needs startup reconciliation and a background refresh loop, and
+    nothing else from the operator application.  Composing just the coordinator
+    keeps the mutating facades — auth import, GitLab discovery, subscription
+    writes — out of a process whose only client-facing surface is read-only MCP.
+    Its pooled client is independent of the one the MCP lifespan composes, so
+    the two shut down on their own schedules.
+    """
+    settings = default_settings()
+    http_client = create_shared_http_client(settings, event_sink=log_event)
+    try:
+        yield RuntimeAuthCoordinatorAdapter(
+            auth_file,
+            settings=settings,
+            event_sink=log_event,
+            outcome_sink=persist_event,
+            client=http_client,
+        )
+    finally:
+        http_client.close()
+
+
+__all__ = ["create_application", "mcp_query_facade", "runtime_auth_service"]
