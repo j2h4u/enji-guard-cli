@@ -592,6 +592,28 @@ class RecordingGitLabGateway:
         return self.projects_result
 
 
+def recording_application(
+    *,
+    audit: RecordingAuditGateway | None = None,
+    portfolio: RecordingPortfolioGateway | None = None,
+    targets: RecordingTargetService | None = None,
+    auth: RecordingAuthSession | None = None,
+    gitlab: RecordingGitLabGateway | None = None,
+) -> Application:
+    """Build the real facade tree over recording ports.
+
+    A CLI command reaches several ports even when the test only cares about
+    one, so unnamed ports get a recording default rather than an inert stub.
+    """
+    return ApplicationStubs(
+        audit_gateway=audit or RecordingAuditGateway(),
+        portfolio_gateway=portfolio or RecordingPortfolioGateway((ProjectDetail(PETS, (REPOSITORY,)),)),
+        target_service=targets or RecordingTargetService(),
+        auth=auth or RecordingAuthSession(),
+        gitlab_gateway=gitlab if gitlab is not None else object(),
+    ).build()
+
+
 @dataclass(frozen=True, slots=True)
 class FacadeRouter:
     """Serve one flat CLI fake under every facade attribute the CLI reads."""

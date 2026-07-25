@@ -6,24 +6,14 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from application_builder import FacadeRouter
-from enji_guard_cli.application import ApplicationCommandError, ApplicationResult, exit_code_for_error
+from application_builder import RecordingPortfolioGateway, recording_application
+from enji_guard_cli.application import exit_code_for_error
 from enji_guard_cli.delivery.cli.app import app
+from enji_guard_cli.errors import EnjiApiError
 
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
 
 README = Path(__file__).resolve().parent.parent / "README.md"
-
-
-class _FailingApplication:
-    def __init__(self, error: ApplicationCommandError) -> None:
-        self.error = error
-
-    def execute(self, _action: object) -> ApplicationResult:
-        raise self.error
-
-    def repository_status(self, *_args: object, **_kwargs: object) -> object:
-        return ()
 
 
 @pytest.mark.parametrize(
@@ -48,13 +38,18 @@ def test_error_codes_map_to_documented_exit_codes(code: str, expected: int) -> N
     [("AUTH_REQUIRED", 3), ("NOT_FOUND", 4), ("UPSTREAM", 1)],
 )
 def test_cli_propagates_the_application_exit_code(monkeypatch: pytest.MonkeyPatch, code: str, expected: int) -> None:
-    error = ApplicationCommandError(code, "failed", exit_code_for_error(code))
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: FacadeRouter(_FailingApplication(error)))
+    """An upstream failure raised by the port keeps its code all the way out.
+
+    The failure enters at the Portfolio gateway, so the real facade, the real
+    application runner, and the CLI all take part in the translation.
+    """
+    application = recording_application(portfolio=RecordingPortfolioGateway(failure=EnjiApiError(code, "failed")))
+    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: application)
 
     result = CliRunner().invoke(app, ["status", "github@github.com:owner/name"])
 
     assert result.exit_code == expected
-    assert result.stderr.startswith(f"{code}: ")
+    assert result.stderr.startswith(f"{code}: failed")
 
 
 def test_success_exits_zero() -> None:
