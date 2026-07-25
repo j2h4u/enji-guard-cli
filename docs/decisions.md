@@ -160,8 +160,27 @@ agents can orient quickly before making changes.
   of raw gateway implementations; the anti-corruption boundary remains the
   explicit owner of transport and wire translation.
 - **Shared transport lifecycle**: operator gateways share one pooled
-  `httpx.AsyncClient` owned by a dedicated event-loop thread. Synchronous
-  delivery calls bridge to that loop, and the application lifecycle closes the
-  pool idempotently after each CLI invocation. Pool limits and graceful MCP
-  shutdown timeout are frozen hierarchical settings rather than module-level
-  tuning constants.
+  synchronous `httpx.Client`, which owns the connection pool and is safe to
+  share across threads. The blocking call is exposed to asyncio callers through
+  `asyncio.to_thread`, because the service supervisor awaits the same client
+  from a live event loop that also drives the MCP server and the auth-refresh
+  and readiness loops, and that loop must stay responsive. The application
+  lifecycle closes the client idempotently after each CLI invocation. Pool
+  limits and graceful MCP shutdown timeout are frozen hierarchical settings
+  rather than module-level tuning constants.
+
+  This replaced an earlier design in which a single `httpx.AsyncClient` lived on
+  a dedicated owner-thread event loop and synchronous callers bridged to it via
+  `run_coroutine_threadsafe`. That design was chosen when a synchronous
+  collapse would have touched application, delivery, MCP, fanout, and the test
+  ports at once. It bought connection reuse across a repository wave, which the
+  current design also provides, but it serialized all HTTP protocol work
+  through one thread and required roughly 160 lines of self-deadlock avoidance.
+  Measured on the batch-read path, the current design is faster at every batch
+  size and latency regime tested and equal at the slowest, and both designs
+  reuse 100% of their connections on a second wave inside the keepalive window.
+
+  Known trade-off: `asyncio.to_thread` is not cancellable, so cancelling a
+  request delivers `CancelledError` to the awaiter promptly while the in-flight
+  socket runs to its timeout. Shutdown can therefore be delayed by up to one
+  request timeout.
