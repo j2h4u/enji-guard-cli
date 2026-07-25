@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
+from enji_guard_cli.auth_session import CredentialReader
 from enji_guard_cli.enji_gateway import http
-from enji_guard_cli.enji_gateway.ports import GatewayCredentialReader
 from enji_guard_cli.gitlab import (
     GitLabCredential,
     GitLabCredentialPage,
@@ -31,9 +31,9 @@ class GitLabGateway:
 
     auth_file: Path | None = None
     client: EnjiHttpClient | None = None
-    auth_port: GatewayCredentialReader | None = None
+    auth_port: CredentialReader | None = None
 
-    def _auth_port(self) -> GatewayCredentialReader:
+    def _auth_port(self) -> CredentialReader:
         if self.auth_port is None:
             raise RuntimeError("GitLab gateway auth port is not configured")
         return self.auth_port

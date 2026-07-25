@@ -9,6 +9,23 @@ from enji_guard_cli.auth_session.models import AuthSessionStatus, StoredAuth
 from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse
 
 
+class CredentialError(Exception):
+    """Typed read-only credential failure raised by credential readers."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class CredentialReader(Protocol):
+    """Read-only credential capabilities required by credential consumers."""
+
+    def load(self, auth_file: Path | None = None) -> StoredAuth: ...
+
+    def headers(self, stored_auth: StoredAuth) -> dict[str, str]: ...
+
+
 class AuthHttpClient(Protocol):
     """HTTP capability consumed by Auth Session without a runtime dependency."""
 
@@ -52,4 +69,6 @@ __all__ = [
     "AuthOutcomeSink",
     "AuthSessionPort",
     "AuthStorePort",
+    "CredentialError",
+    "CredentialReader",
 ]

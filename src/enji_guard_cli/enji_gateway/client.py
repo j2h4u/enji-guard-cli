@@ -5,9 +5,8 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import quote, urlencode
 
-from enji_guard_cli.auth_session import StoredAuth
+from enji_guard_cli.auth_session import CredentialError, CredentialReader, StoredAuth
 from enji_guard_cli.enji_gateway.contract import EnjiEndpointSpec, HttpMethod
-from enji_guard_cli.enji_gateway.ports import GatewayCredentialError, GatewayCredentialReader
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.settings import default_settings
@@ -40,7 +39,7 @@ class EnjiApiSession:
     base_url: str
     headers: dict[str, str]
     stored_auth: StoredAuth
-    auth_port: GatewayCredentialReader
+    auth_port: CredentialReader
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,13 +84,13 @@ class ApiEndpoint[T]:
 def load_api_session(
     auth_file: Path | None = None,
     *,
-    auth_port: GatewayCredentialReader,
+    auth_port: CredentialReader,
 ) -> EnjiApiSession:
     port = auth_port
     target = auth_file if auth_file is not None else default_settings().auth.auth_file
     try:
         stored_auth = port.load(target)
-    except GatewayCredentialError as exc:
+    except CredentialError as exc:
         raise EnjiApiError(exc.code, exc.message) from exc
 
     return EnjiApiSession(
@@ -103,7 +102,7 @@ def load_api_session(
     )
 
 
-def api_headers(stored_auth: StoredAuth, auth_port: GatewayCredentialReader) -> dict[str, str]:
+def api_headers(stored_auth: StoredAuth, auth_port: CredentialReader) -> dict[str, str]:
     return {**auth_port.headers(stored_auth), "Origin": default_settings().auth.guard_origin}
 
 
@@ -112,7 +111,7 @@ def run_api_request[T](
     client: EnjiHttpClient | None,
     spec: ApiRequestSpec[T],
     *,
-    auth_port: GatewayCredentialReader,
+    auth_port: CredentialReader,
 ) -> T:
     return asyncio.run(run_api_request_async(auth_file, client, spec, auth_port=auth_port))
 
@@ -122,7 +121,7 @@ async def run_api_request_async[T](
     client: EnjiHttpClient | None,
     spec: ApiRequestSpec[T],
     *,
-    auth_port: GatewayCredentialReader,
+    auth_port: CredentialReader,
 ) -> T:
     try:
         session = load_api_session(auth_file, auth_port=auth_port)
@@ -145,7 +144,7 @@ def run_api_no_content(
     client: EnjiHttpClient | None,
     spec: ApiRequestSpec[JsonObjectPayload],
     *,
-    auth_port: GatewayCredentialReader,
+    auth_port: CredentialReader,
 ) -> JsonObjectPayload:
     return asyncio.run(run_api_no_content_async(auth_file, client, spec, auth_port=auth_port))
 
@@ -155,7 +154,7 @@ async def run_api_no_content_async(
     client: EnjiHttpClient | None,
     spec: ApiRequestSpec[JsonObjectPayload],
     *,
-    auth_port: GatewayCredentialReader,
+    auth_port: CredentialReader,
 ) -> JsonObjectPayload:
     try:
         session = load_api_session(auth_file, auth_port=auth_port)

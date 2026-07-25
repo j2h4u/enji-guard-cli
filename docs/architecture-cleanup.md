@@ -10,7 +10,8 @@ and the concrete change that fixes it.
 empty; at that point `module-boundaries` joins `check` and the import-linter
 contracts are deleted.
 
-Baseline for this inventory: **41 failures** — 23 interface, 18 layer/visibility.
+Baseline for this inventory was **41 failures** — 23 interface, 18 layer/visibility.
+Fixes 1, 2 and 3 have landed; **19 failures remain**, all of them Fix 4.
 
 ## The declared layers
 
@@ -38,7 +39,7 @@ the server in-process.
 
 ---
 
-## Fix 1 — invert `auth_session -> enji_gateway`
+## ~~Fix 1 — invert `auth_session -> enji_gateway`~~ — DONE
 
 **Size: medium.  Do this first: it is the only cycle, and it is the reason
 `forbid_circular_dependencies` cannot be trusted until it lands.**
@@ -84,7 +85,7 @@ graph is acyclic.  It is on as a ratchet: it makes it impossible to ever
 
 ---
 
-## Fix 2 — import `auth_session` through its package seam
+## ~~Fix 2 — import `auth_session` through its package seam~~ — DONE
 
 **Size: small.  Independent of everything else.**
 
@@ -109,7 +110,7 @@ five import statements to `from enji_guard_cli.auth_session import ...`.
 
 ---
 
-## Fix 3 — import `gitlab` through its package seam
+## ~~Fix 3 — import `gitlab` through its package seam~~ — DONE
 
 **Size: small.  Independent; do it with Fix 2.**
 
@@ -236,17 +237,17 @@ a good rehearsal for 4a and 4b — it is the same shape at one third the size.
 
 ## Summary
 
-| Fix | Failures cleared | Size | Depends on |
-|---|---|---|---|
-| 1 — invert `auth_session -> enji_gateway` | 4 | medium | — |
-| 2 — `auth_session` package seam | 6 | small | — |
-| 3 — `gitlab` package seam | 12 (+3 via Fix 4) | small | — |
-| 4c — `gitlab` out of the CLI | 3 | medium | 3 |
-| 4b — `portfolio` out of the CLI | 5 | large | — |
-| 4a — `audit` out of the CLI | 8 | large | — |
-| | **41** | | |
+| Fix | Failures cleared | Size | Depends on | Status |
+|---|---|---|---|---|
+| 1 — invert `auth_session -> enji_gateway` | 4 | medium | — | done |
+| 2 — `auth_session` package seam | 6 | small | — | done |
+| 3 — `gitlab` package seam | 12 (+3 via Fix 4) | small | — | done |
+| 4c — `gitlab` out of the CLI | 3 | medium | 3 | open |
+| 4b — `portfolio` out of the CLI | 5 | large | — | open |
+| 4a — `audit` out of the CLI | 8 | large | — | open |
+| | **41** (22 cleared, **19 remaining**) | | | |
 
-Recommended order: 2, 3, 1, 4c, 4b, 4a.
+Recommended order was 2, 3, 1, 4c, 4b, 4a.  Remaining: 4c, 4b, 4a.
 
 ---
 

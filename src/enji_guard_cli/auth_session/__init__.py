@@ -9,7 +9,7 @@ from enji_guard_cli.auth_session.models import (
     ImportCredentialPayload,
     StoredAuth,
 )
-from enji_guard_cli.auth_session.ports import AuthSessionPort
+from enji_guard_cli.auth_session.ports import AuthSessionPort, CredentialError, CredentialReader
 from enji_guard_cli.auth_session.service import (
     AuthSessionService,
     auth_status,
@@ -25,6 +25,8 @@ __all__ = [
     "AuthSessionService",
     "AuthSessionStatus",
     "AuthStatusPayload",
+    "CredentialError",
+    "CredentialReader",
     "CredentialType",
     "ImportCredentialPayload",
     "StoredAuth",

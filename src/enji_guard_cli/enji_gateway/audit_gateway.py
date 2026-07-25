@@ -25,6 +25,7 @@ from enji_guard_cli.audit.ports import (
     AuditTaskLink,
     AuditTaskLinksResult,
 )
+from enji_guard_cli.auth_session import CredentialReader
 from enji_guard_cli.enji_gateway.http import (
     AuditRunCreate,
 )
@@ -73,7 +74,7 @@ from enji_guard_cli.enji_gateway.http import (
 from enji_guard_cli.enji_gateway.http import (
     task_detail as _task_detail,
 )
-from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayClient, GatewayCredentialReader
+from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayClient
 from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot, audit_report_refs_from_payload
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonValue
@@ -89,7 +90,7 @@ class AuditGateway(AuditGatewayPort):
         auth_file: GatewayAuthFile = None,
         client: GatewayClient = None,
         *,
-        auth_port: GatewayCredentialReader,
+        auth_port: CredentialReader,
     ) -> None:
         self._auth_file = auth_file
         self._client = client
