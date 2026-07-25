@@ -26,18 +26,13 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
 
 
 @pytest.fixture(autouse=True)
-def plain_cli_rendering(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Render CLI output without colour, at a stable width.
+def stable_cli_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Render CLI help at a fixed width so rich cannot wrap a token in half.
 
-    Typer renders help through rich, which injects ANSI sequences *inside* an
-    option name once colour is on -- so `"--ready" in rendered` is false even
-    though the flag is there.  GitHub Actions sets `FORCE_COLOR`, which is why
-    the help assertions passed locally and failed only in CI.  Pin the
-    presentation instead of teaching every assertion to strip escapes.
+    Colour is NOT normalised here: rich builds its console when Typer is
+    imported, before any fixture runs, so environment changes come too late.
+    Assertions strip the escapes themselves via `tests/cli_output.rendered`.
     """
-    for variable in ("FORCE_COLOR", "CLICOLOR_FORCE", "TERM"):
-        monkeypatch.delenv(variable, raising=False)
-    monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.setenv("COLUMNS", "120")
 
 

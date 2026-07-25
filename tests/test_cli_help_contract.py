@@ -5,6 +5,7 @@ from typer.core import TyperGroup
 from typer.main import get_command
 from typer.testing import CliRunner
 
+from cli_output import rendered as _rendered
 from enji_guard_cli.audit.schedules import CADENCES
 from enji_guard_cli.delivery.cli.app import _repository_sort, app
 from enji_guard_cli.settings import REPOSITORY_SORT_NAMES
@@ -31,7 +32,7 @@ def test_health_help_points_probes_at_the_ready_mode() -> None:
     result = CliRunner().invoke(app, ["health", "--help"])
 
     assert result.exit_code == 0
-    rendered = " ".join(result.stdout.split())
+    rendered = _rendered(result.stdout)
     assert "--ready" in rendered
     assert "healthchecks" in rendered
 
@@ -41,7 +42,7 @@ def test_sort_help_lists_every_legal_value(path: list[str]) -> None:
     result = CliRunner().invoke(app, [*path, "--help"])
 
     assert result.exit_code == 0
-    rendered = " ".join(result.stdout.split())
+    rendered = _rendered(result.stdout)
     for value in REPOSITORY_SORT_NAMES:
         assert value in rendered
 
@@ -50,7 +51,7 @@ def test_sort_rejection_message_matches_the_documented_values() -> None:
     result = CliRunner().invoke(app, ["status", "--sort", "nope"])
 
     assert result.exit_code == 2
-    rendered = " ".join(result.stderr.replace("\u2502", " ").split())
+    rendered = _rendered(result.stderr)
     assert "sort must be one of" in rendered
     for value in REPOSITORY_SORT_NAMES:
         assert value in rendered
@@ -66,7 +67,7 @@ def test_frequency_help_lists_every_legal_cadence(path: list[str]) -> None:
     result = CliRunner().invoke(app, [*path, "--help"])
 
     assert result.exit_code == 0
-    rendered = " ".join(result.stdout.split())
+    rendered = _rendered(result.stdout)
     for cadence in CADENCES:
         assert cadence in rendered
     assert "IANA timezone" in rendered

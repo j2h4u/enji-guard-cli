@@ -28,6 +28,7 @@ from application_builder import (
     recording_application,
     repository,
 )
+from cli_output import rendered as _rendered
 from enji_guard_cli.application import ApplicationAuthError, ApplicationCommandError
 from enji_guard_cli.audit.ports import (
     AuditArtifact,
@@ -141,7 +142,7 @@ def test_operator_command_tree_uses_audit_vocabulary() -> None:
     result = CliRunner().invoke(app, ["--help"])
     assert result.exit_code == 0
     for command in ("auth", "project", "repo", "recon", "audit", "schedule", "improvement-jobs", "email", "language"):
-        assert command in result.stdout
+        assert command in _rendered(result.stdout)
 
 
 def test_root_without_arguments_shows_agent_mental_model() -> None:
@@ -157,9 +158,10 @@ def test_root_without_arguments_shows_agent_mental_model() -> None:
 def test_audit_help_warns_that_wait_is_not_refresh() -> None:
     result = CliRunner().invoke(app, ["audit", "--help"])
     assert result.exit_code == 0
-    assert "Use status REPO as the first readiness check" in result.stdout
-    assert "wait is a real blocking wait" in result.stdout
-    assert "not a" in result.stdout
+    help_text = _rendered(result.stdout)
+    assert "Use status REPO as the first readiness check" in help_text
+    assert "wait is a real blocking wait" in help_text
+    assert "not a" in help_text
     assert "refresh" in result.stdout
 
 

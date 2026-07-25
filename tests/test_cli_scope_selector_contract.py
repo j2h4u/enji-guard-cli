@@ -21,6 +21,7 @@ from application_builder import (
     recording_application,
     repository,
 )
+from cli_output import rendered as _rendered
 from enji_guard_cli.audit.ports import AuditAutofixJob
 from enji_guard_cli.delivery.cli.app import app
 
@@ -151,8 +152,9 @@ def test_single_repository_commands_keep_repo_positional(command: list[str]) -> 
     result = CliRunner().invoke(app, [*command, "--help"])
 
     assert result.exit_code == 0
-    assert "[OPTIONS]" in result.stdout
-    assert "--repo" not in result.stdout
+    help_text = _rendered(result.stdout)
+    assert "[OPTIONS]" in help_text
+    assert "--repo" not in help_text
 
 
 def test_batch_write_scope_stays_mutually_exclusive(targets: RecordingTargetService) -> None:
