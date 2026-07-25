@@ -175,13 +175,31 @@ def test_ghcr_compose_declares_stable_project_name() -> None:
     assert compose["name"] == "enji-guard-cli"
 
 
-def test_container_publish_workflow_run_requires_trusted_source() -> None:
-    workflow = (ROOT / ".github" / "workflows" / "container.yml").read_text(encoding="utf-8")
+def test_container_publish_has_exactly_one_entry_point() -> None:
+    # Two publishing runs for one commit build two different digests and race
+    # for :latest and for the tag the attestation subject is resolved from, so
+    # the container workflow must stay reachable only through release.yml (plus
+    # the manual workflow_dispatch escape hatch).
+    container = (ROOT / ".github" / "workflows" / "container.yml").read_text(encoding="utf-8")
 
-    assert "github.event.workflow_run.event == 'push'" in workflow
-    assert "github.event.workflow_run.head_branch == 'main'" in workflow
-    assert "github.event.workflow_run.head_repository.full_name == github.repository" in workflow
-    assert "github.event.workflow_run.conclusion == 'success'" in workflow
+    assert _workflow_triggers(container) == ("workflow_call", "workflow_dispatch")
+    assert "workflow_run" not in container
+
+    callers = [
+        path
+        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        if "uses: ./.github/workflows/container.yml" in path.read_text(encoding="utf-8")
+    ]
+
+    assert [path.name for path in callers] == ["release.yml"]
+
+
+def test_release_publishes_only_after_ci_succeeds_on_the_commit() -> None:
+    release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    assert _workflow_triggers(release) == ("push", "workflow_dispatch")
+    assert "actions/workflows/ci.yml/runs?head_sha=" in release
+    assert re.search(r"^\s*needs: \[release-please, wait-for-ci\]$", release, re.MULTILINE)
 
 
 def test_setup_uv_installs_the_dockerfile_version() -> None:
@@ -249,6 +267,14 @@ def _product_python_files() -> tuple[Path, ...]:
 def _action_steps(workflow: str, action: str) -> tuple[str, ...]:
     pattern = re.compile(rf"(?m)^ +(?:- +)?uses: {re.escape(action)}[^\n]*\n(?:^ {{8,}}\S[^\n]*\n?)*")
     return tuple(match.group(0) for match in pattern.finditer(workflow))
+
+
+def _workflow_triggers(workflow: str) -> tuple[str, ...]:
+    """Return the event names declared under the workflow's top-level `on:` key."""
+    block = re.search(r"(?m)^on:\n((?:(?:[ \t#].*)?\n)*)", workflow)
+    if block is None:
+        raise AssertionError("workflow has no top-level 'on:' block")
+    return tuple(match.group(1) for match in re.finditer(r"(?m)^ {2}([a-z_]+):", block.group(1)))
 
 
 def _imported_modules(node: ast.AST) -> tuple[str, ...]:
