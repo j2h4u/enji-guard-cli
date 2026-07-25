@@ -8,7 +8,6 @@ lifecycle live here so all facades share exactly one implementation.
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Protocol
 
 from enji_guard_cli.application.errors import ApplicationAuthError, ApplicationCommandError, exit_code_for_error
@@ -73,7 +72,6 @@ class ApplicationRunner:
 
     catalog_scope: CatalogObservationScope
     lifecycle: ApplicationLifecyclePort
-    credential_location: Path
     _closed: bool = field(default=False, init=False, repr=False)
 
     def close(self) -> None:

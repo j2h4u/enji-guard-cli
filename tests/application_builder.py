@@ -6,7 +6,6 @@ routing in a single place instead of repeating them at every call site.
 """
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import cast
 
 from enji_guard_cli.application import (
@@ -30,8 +29,6 @@ from enji_guard_cli.gitlab.ports import GitLabDiscoveryPort
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort, PortfolioTargetService
 from enji_guard_cli.runtime_observability.ports import RuntimeAuthCoordinator
 from enji_guard_cli.settings import default_settings
-
-DEFAULT_CREDENTIAL_LOCATION = Path("/tmp/enji-guard-test/auth.json")
 
 
 class UnobservedCatalog:
@@ -89,9 +86,7 @@ class ApplicationStubs:
             fanout=fanout,
         )
         return Application(
-            runner=ApplicationRunner(
-                scope, cast(ApplicationLifecyclePort, self.lifecycle), DEFAULT_CREDENTIAL_LOCATION
-            ),
+            runner=ApplicationRunner(scope, cast(ApplicationLifecyclePort, self.lifecycle)),
             catalog=catalog,
             auth=AuthFacade(cast(AuthSessionService, self.auth), cast(RuntimeAuthCoordinator, self.runtime_auth)),
             audit=audit,

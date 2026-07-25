@@ -68,7 +68,7 @@ def _create_read_surface(
         fanout=fanout,
     )
     return _ReadSurface(
-        runner=ApplicationRunner(scope, http_client, auth_file or settings.auth.auth_file),
+        runner=ApplicationRunner(scope, http_client),
         catalog=catalog,
         audit=audit,
         portfolio=PortfolioFacade(
