@@ -587,7 +587,7 @@ def project_delete(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _confirm_deletion(
-        f"project {project} is deleted permanently and cannot be restored",
+        f"deleting project {project} is permanent and cannot be undone",
         as_json=_json_output(json_output),
         assume_yes=yes,
     )
@@ -641,7 +641,7 @@ def repo_remove(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     _confirm_deletion(
-        f"{repo} is detached and its accumulated audit history stops being reachable",
+        f"detaching {repo} makes its accumulated audit history unreachable",
         as_json=_json_output(json_output),
         assume_yes=yes,
     )
