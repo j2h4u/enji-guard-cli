@@ -161,7 +161,7 @@ def repository(  # noqa: PLR0913
     provider: RepositoryProvider = RepositoryProvider.GITHUB,
     scores: Mapping[str, float | int | None] | None = None,
     recon_done: bool | None = None,
-    connected: bool | None = None,
+    connected: bool | None = True,
 ) -> RepositoryRef:
     """Build one repository reference with a valid provider identity."""
     return RepositoryRef(
@@ -181,9 +181,13 @@ REPOSITORY = repository()
 
 CATALOG = AuditCatalogResult(
     actions=(
-        AuditCatalogAction("audit.recon", "Recon", "workflow", "draft", None, "recon", "runbook-recon"),
-        AuditCatalogAction("audit.security", "Security", "audit", "published", "vulns", "audit", "runbook-security"),
-        AuditCatalogAction("audit.tests", "Tests", "audit", "published", "tests", "audit", "runbook-tests"),
+        AuditCatalogAction("audit.recon", "Recon", "workflow", "draft", None, "recon", "runbook-recon", "recon", "1"),
+        AuditCatalogAction(
+            "audit.security", "Security", "audit", "published", "vulns", "audit", "runbook-security", "security", "1"
+        ),
+        AuditCatalogAction(
+            "audit.tests", "Tests", "audit", "published", "tests", "audit", "runbook-tests", "tests", "1"
+        ),
     ),
     autofixes=(
         AuditCatalogAutofix("improvement.vuln-fix", "default", "Vuln fix", None, "runbook-vuln", "published", 1),
