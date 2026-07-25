@@ -29,6 +29,19 @@ class _TaskLookupResult:
     error: BaseException | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _ReconciliationCommit:
+    projected: tuple[AuditRun, ...]
+    suppress_task_ids: frozenset[str]
+
+
+# How many times reconcile re-reads the ledger looking for task ids that
+# appeared while earlier lookups were in flight.  Each extra round costs one
+# short locked read plus the new lookups; entries still unresolved after the
+# last round are kept under the conservative ledger-only projection.
+_MAX_LOOKUP_ROUNDS = 3
+
+
 class FileAuditLedger(AuditLedgerPort):
     """Small atomic JSON-backed implementation of :class:`AuditLedgerPort`."""
 
@@ -73,29 +86,80 @@ class FileAuditLedger(AuditLedgerPort):
         now: datetime | None = None,
     ) -> tuple[AuditRun, ...]:
         point = _utc(now)
-        projected: list[AuditRun] = []
-        suppress_task_ids: set[str] = set()
         upstream_by_action: dict[str, list[AuditRun]] = {}
         for run in upstream:
             if run.action_key is not None:
                 upstream_by_action.setdefault(run.action_key, []).append(run)
+
+        # Lookups are network calls, so they run with no lock held.  Each round
+        # takes the lock only long enough to read which task ids still need a
+        # detail, then drops it again for the calls themselves.
+        lookup_cache: dict[str, _TaskLookupResult] = {}
+        for _ in range(_MAX_LOOKUP_ROUNDS):
+            pending = self._pending_lookups(repo_id, point, lookup_cache)
+            if not pending:
+                break
+            _resolve_lookups(pending, task_lookup, lookup_cache)
+
+        commit = self._commit_reconciliation(repo_id, upstream_by_action, lookup_cache, point)
+        projected = [
+            *commit.projected,
+            *(run for run in upstream if run.task_id is None or run.task_id not in commit.suppress_task_ids),
+        ]
+        return _dedupe_runs(projected)
+
+    def _pending_lookups(
+        self,
+        repo_id: str,
+        now: datetime,
+        lookup_cache: dict[str, _TaskLookupResult],
+    ) -> tuple[str, ...]:
+        """Task ids this repository still needs a fresh detail for, in entry order."""
+
+        with self._transaction():
+            entries = self._read()
+        pending: dict[str, None] = {}
+        for entry in entries:
+            if entry.task_id is None or entry.task_id in lookup_cache:
+                continue
+            if entry.repo_id != repo_id or _expired(entry, now) or is_terminal_status(entry.task_status):
+                continue
+            pending[entry.task_id] = None
+        return tuple(pending)
+
+    def _commit_reconciliation(
+        self,
+        repo_id: str,
+        upstream_by_action: dict[str, list[AuditRun]],
+        lookup_cache: dict[str, _TaskLookupResult],
+        now: datetime,
+    ) -> _ReconciliationCommit:
+        """Apply the resolved lookups to a freshly read ledger, under one lock.
+
+        Every decision is recomputed against the entries read inside this
+        transaction, so a concurrent writer that added, replaced or removed an
+        entry during the lookups is honoured rather than overwritten.  Lookup
+        results are keyed by task id, which is the durable identity, so they
+        stay valid for whatever entry now carries that id.
+        """
+
+        projected: list[AuditRun] = []
+        suppress_task_ids: set[str] = set()
         retained: list[AuditLedgerEntry] = []
         changed = False
-        lookup_cache: dict[str, _TaskLookupResult] = {}
         with self._transaction():
             for entry in self._read():
                 if entry.repo_id != repo_id:
                     retained.append(entry)
                     continue
-                if _expired(entry, point) or is_terminal_status(entry.task_status):
+                if _expired(entry, now) or is_terminal_status(entry.task_status):
                     changed = True
                     continue
 
                 outcome = self._reconcile_entry(
                     entry,
-                    task_lookup,
-                    lookup_cache,
-                    point,
+                    lookup_cache.get(entry.task_id) if entry.task_id is not None else None,
+                    now,
                     has_upstream=any(is_active_run(run) for run in upstream_by_action.get(entry.audit_key, [])),
                 )
                 if outcome.suppress_task_id is not None:
@@ -109,14 +173,12 @@ class FileAuditLedger(AuditLedgerPort):
 
             if changed:
                 self._write(tuple(retained))
-        projected.extend(run for run in upstream if run.task_id is None or run.task_id not in suppress_task_ids)
-        return _dedupe_runs(projected)
+        return _ReconciliationCommit(tuple(projected), frozenset(suppress_task_ids))
 
     def _reconcile_entry(
         self,
         entry: AuditLedgerEntry,
-        task_lookup: Callable[[str], AuditTaskDetail],
-        lookup_cache: dict[str, _TaskLookupResult],
+        result: _TaskLookupResult | None,
         now: datetime,
         *,
         has_upstream: bool,
@@ -128,17 +190,11 @@ class FileAuditLedger(AuditLedgerPort):
 
         # task_id is the identity boundary. Always refresh it, even when
         # active-runs already contains a row for the same action.
-        result = lookup_cache.get(entry.task_id)
         if result is None:
-            try:
-                result = _TaskLookupResult(detail=task_lookup(entry.task_id))
-            except (
-                AuditNotFoundError,
-                AuditUpstreamError,
-                AuditMalformedError,
-            ) as exc:
-                result = _TaskLookupResult(error=exc)
-            lookup_cache[entry.task_id] = result
+            # The entry landed after the last lookup round.  Never drop a guard
+            # we have no upstream answer for: keep it and project from the
+            # ledger, exactly as a transient lookup failure does.
+            return _EntryReconciliation(True, entry.task_id, _project(entry, None))
         if result.error is not None:
             age = (now - entry.observed_at).total_seconds()
             if isinstance(result.error, AuditNotFoundError) and age > self.lookup_grace_seconds:
@@ -236,6 +292,24 @@ def new_entry(
         started_at=started_at,
         expires_at=observed + timedelta(seconds=ttl_seconds),
     )
+
+
+def _resolve_lookups(
+    task_ids: Sequence[str],
+    task_lookup: Callable[[str], AuditTaskDetail],
+    lookup_cache: dict[str, _TaskLookupResult],
+) -> None:
+    """Fetch task details sequentially with no ledger lock held."""
+
+    for task_id in task_ids:
+        try:
+            lookup_cache[task_id] = _TaskLookupResult(detail=task_lookup(task_id))
+        except (
+            AuditNotFoundError,
+            AuditUpstreamError,
+            AuditMalformedError,
+        ) as exc:
+            lookup_cache[task_id] = _TaskLookupResult(error=exc)
 
 
 def _lock_path(path: Path) -> Path:
