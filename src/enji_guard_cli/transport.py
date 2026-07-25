@@ -15,6 +15,7 @@ from tenacity import RetryCallState, Retrying, retry_if_exception, stop_after_at
 from tenacity.wait import wait_base
 
 from enji_guard_cli.settings import (
+    DEFAULT_TRANSPORT_RESPECT_RETRY_AFTER_HEADER,
     DEFAULT_TRANSPORT_RETRY_BACKOFF_FACTOR,
     DEFAULT_TRANSPORT_RETRY_JITTER_SECONDS,
     DEFAULT_TRANSPORT_RETRY_MAX_DELAY_SECONDS,
@@ -38,7 +39,7 @@ class RetryConfig:
     max_delay_seconds: float = DEFAULT_TRANSPORT_RETRY_MAX_DELAY_SECONDS
     jitter_seconds: float = DEFAULT_TRANSPORT_RETRY_JITTER_SECONDS
     status_forcelist: tuple[int, ...] = DEFAULT_TRANSPORT_RETRYABLE_STATUS_CODES
-    respect_retry_after_header: bool = True
+    respect_retry_after_header: bool = DEFAULT_TRANSPORT_RESPECT_RETRY_AFTER_HEADER
 
     def build(self) -> Self:
         """Keep a small policy object for callers; execution is owned by Tenacity below."""
