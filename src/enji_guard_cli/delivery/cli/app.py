@@ -28,7 +28,7 @@ from enji_guard_cli.application import (
 from enji_guard_cli.audit.email import EmailPreferencesUpdate
 from enji_guard_cli.audit.ports import AuditAutofixUpdate, AuditScheduleUpdate
 from enji_guard_cli.audit.schedules import CADENCES
-from enji_guard_cli.composition import create_application
+from enji_guard_cli.composition import create_application, runtime_auth_service
 from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION, CliPresentation, emit_text, json_projection
 from enji_guard_cli.delivery.cli.presenters import (
     AUDIT_READ,
@@ -47,7 +47,6 @@ from enji_guard_cli.delivery.cli.presenters import (
 )
 from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
 from enji_guard_cli.gitlab.models import GitLabProjectsQuery
-from enji_guard_cli.mcp_facade import McpQueryFacade
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.readiness import readiness_verdict
 from enji_guard_cli.runtime_observability.supervisor import RuntimeServiceOptions, run_service
@@ -234,6 +233,12 @@ def _application(auth_file: Path | None = None) -> Application:
     cached = _state["application"]
     if isinstance(cached, Application) and _state["application_auth_file"] == selected:
         return cached
+    # A single invocation can ask for two different credential files: ``_run``
+    # resolves the global one while the command action passes the subcommand's
+    # ``--auth-file``.  The cache holds exactly one application, so the one being
+    # displaced must be closed here or its pooled client is orphaned --
+    # ``_close_cached_application`` would only ever see the survivor.
+    _close_cached_application()
     application = create_application(selected)
     _state["application"] = application
     _state["application_auth_file"] = selected
@@ -300,7 +305,7 @@ def _run[PayloadT](
             ),
         )
     except ApplicationCommandError as exc:
-        raise _fail(exc.code, exc.message, as_json=as_json, exit_code=exc.exit_code) from None
+        raise _fail(exc.code, _operator_message(exc), as_json=as_json, exit_code=exc.exit_code) from None
     payload = cast(PayloadT, result.payload)
     if as_json:
         rendered = presentation.json(payload)
@@ -326,6 +331,35 @@ def _with_catalog_changes(payload: object, changes: list[ApplicationCatalogChang
     if isinstance(payload, (list, tuple)):
         return {"items": payload, "audit_catalog": audit_catalog}
     return {"value": payload, "audit_catalog": audit_catalog}
+
+
+def _operator_message(exc: ApplicationCommandError) -> str:
+    """Render one command failure for an operator terminal.
+
+    Credential failures are a dead end without the file path and the exact
+    import commands, so the CLI — and only the CLI — appends them here.  MCP
+    renders the same error without any host path or shell instruction.
+    """
+    if not exc.code.startswith("AUTH_"):
+        return exc.message
+    return f"{exc.message}. {_auth_remediation(_selected_credential_location())}"
+
+
+def _selected_credential_location() -> Path:
+    """Resolve the credential file this invocation asked for."""
+    selected = cast(Path | None, _state["auth_file"])
+    return selected if selected is not None else default_settings().auth.auth_file
+
+
+def _auth_remediation(credential_location: Path) -> str:
+    """Name the credential file and the exact commands that repair first run."""
+    return (
+        f"Credential file: {credential_location}. "
+        "First run: mkdir -p ~/.config/enji-guard/logs && chmod 700 ~/.config/enji-guard, then import a "
+        "credential with: printf '%s' \"$ENJI_API_TOKEN\" | enji-guard auth import-bearer --stdin "
+        "(cookie auth: enji-guard auth import-cookie --stdin). "
+        "Verify with: enji-guard auth status"
+    )
 
 
 def _command_exit_code(exc: Exception) -> int:
@@ -766,16 +800,21 @@ def run(
     allow_external_host: Annotated[bool, typer.Option("--allow-external-host")] = False,
 ) -> None:
     _validate_http_bind(host, transport, allow_external_host=allow_external_host)
-    application = _application()
-    run_service(
-        options=RuntimeServiceOptions(transport=transport, host=host, port=port, mount_path=mount_path),
-        runtime_auth=application.auth.runtime_auth,
-        mcp_server_factory=lambda host, port: create_mcp_server(
-            host, port, queries=McpQueryFacade(application.runner, application.portfolio, application.audit)
-        ),
-        mcp_server_runner=run_mcp_server_async,
-        settings=default_settings(),
-    )
+    auth_file = cast(Path | None, _state["auth_file"])
+    # Two independent lifetimes, nested deliberately.  The MCP server composes
+    # and closes its own narrow read-only surface inside its lifespan, which
+    # ends when the supervised MCP task finishes.  The credential coordinator
+    # outlives it: this ``with`` closes only after ``run_service`` returns, so
+    # the refresh loop keeps a live client throughout supervise_tasks shutdown,
+    # and its pool is released on the success and the failure path alike.
+    with runtime_auth_service(auth_file) as runtime_auth:
+        run_service(
+            options=RuntimeServiceOptions(transport=transport, host=host, port=port, mount_path=mount_path),
+            runtime_auth=runtime_auth,
+            mcp_server_factory=lambda host, port: create_mcp_server(host, port, auth_file=auth_file),
+            mcp_server_runner=run_mcp_server_async,
+            settings=default_settings(),
+        )
 
 
 @app.command("status", help="Show portfolio status, or one repository audit snapshot when REPO is provided.")

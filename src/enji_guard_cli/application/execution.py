@@ -8,7 +8,6 @@ lifecycle live here so all facades share exactly one implementation.
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Protocol
 
 from enji_guard_cli.application.errors import ApplicationAuthError, ApplicationCommandError, exit_code_for_error
@@ -73,7 +72,6 @@ class ApplicationRunner:
 
     catalog_scope: CatalogObservationScope
     lifecycle: ApplicationLifecyclePort
-    credential_location: Path
     _closed: bool = field(default=False, init=False, repr=False)
 
     def close(self) -> None:
@@ -111,20 +109,14 @@ class ApplicationRunner:
         return ApplicationResult(payload, self.catalog_scope.observed())
 
     def _command_error(self, code: str, message: str) -> ApplicationCommandError:
-        """Translate one context failure, making credential failures actionable."""
-        if code.startswith("AUTH_"):
-            message = f"{message}. {self._auth_remediation()}"
-        return ApplicationCommandError(code, message, exit_code_for_error(code))
+        """Translate one context failure into a surface-neutral command error.
 
-    def _auth_remediation(self) -> str:
-        """Name the credential file and the exact commands that repair first run."""
-        return (
-            f"Credential file: {self.credential_location}. "
-            "First run: mkdir -p ~/.config/enji-guard/logs && chmod 700 ~/.config/enji-guard, then import a "
-            "credential with: printf '%s' \"$ENJI_API_TOKEN\" | enji-guard auth import-bearer --stdin "
-            "(cookie auth: enji-guard auth import-cookie --stdin). "
-            "Verify with: enji-guard auth status"
-        )
+        The runner is shared by the operator CLI and the curated MCP surface,
+        so it must not decide how a failure is *repaired*.  Auth remediation
+        names a host path and shell commands, which MCP may never emit, so it
+        is composed at the CLI delivery boundary instead.
+        """
+        return ApplicationCommandError(code, message, exit_code_for_error(code))
 
 
 __all__ = [

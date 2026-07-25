@@ -54,18 +54,22 @@ def create_mcp_server(
     host: str = DEFAULT_HTTP_HOST,
     port: int = DEFAULT_HTTP_PORT,
     *,
-    queries: McpQueryFacade | None = None,
+    auth_file: Path | None = None,
 ) -> FastMCP:
-    active: McpQueryFacade | None = queries
+    """Build the curated MCP server; it composes its own narrow query surface.
+
+    The query surface is deliberately not injectable.  Every caller — the
+    container entrypoint included — gets the same read-only composition of
+    runner + portfolio + audit, bound to the server lifespan so its pooled
+    client is always released.
+    """
+    active: McpQueryFacade | None = None
 
     @asynccontextmanager
     async def lifespan(_server: FastMCP) -> AsyncIterator[None]:
         """Own a composed query surface for exactly as long as the server runs."""
         nonlocal active
-        if queries is not None:
-            yield
-            return
-        with mcp_query_facade() as owned:
+        with mcp_query_facade(auth_file) as owned:
             active = owned
             try:
                 yield
