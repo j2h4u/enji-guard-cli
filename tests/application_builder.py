@@ -10,7 +10,7 @@ Each fake therefore stores the exact arguments it was handed -- never
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import cast
 
 from enji_guard_cli.application import (
@@ -443,8 +443,10 @@ class RecordingPortfolioGateway:
         active_runs: Mapping[str, tuple[PortfolioActiveRun, ...]] | None = None,
         preflight: MovePreflight = ALLOWED_MOVE,
         failure: Exception | None = None,
+        added_recon_done: bool | None = True,
     ) -> None:
         self.details = {detail.project.project_id: detail for detail in details}
+        self.added_recon_done = added_recon_done
         self.preferences = preferences
         self.access_info = access_info or AccessInfo("free", True, AccessLimits())
         self.active_runs = dict(active_runs or {})
@@ -489,14 +491,19 @@ class RecordingPortfolioGateway:
     ) -> RepositoryRef:
         self.added_repositories.append(AddedRepository(project_id, identity, repo_access_credential_id))
         detail = self.details[project_id]
-        return repository(
+        added = repository(
             identity.locator,
             repo_id=f"added-{len(self.added_repositories)}",
             project=detail.project,
             host=identity.host,
             provider=identity.provider,
-            recon_done=True,
+            recon_done=self.added_recon_done,
         )
+        # Membership is the point of this call, so the added repository has to
+        # be visible to every later read -- the recon continuation resolves it
+        # against this same gateway.
+        self.details[project_id] = replace(detail, repositories=(*detail.repositories, added))
+        return added
 
     def remove_repository(self, project_id: str, repo_id: str) -> None:
         self.removed_repositories.append((project_id, repo_id))

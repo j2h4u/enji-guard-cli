@@ -7,17 +7,18 @@ construction and lifecycle remain in Audit.
 from dataclasses import dataclass
 
 from enji_guard_cli.portfolio.models import RepositoryRef
-from enji_guard_cli.portfolio.ports import AuditStartPort, AuditStatusReader
+from enji_guard_cli.portfolio.ports import AuditStartPort, AuditStatusReader, ReconState
 
 RECON_ACTION_KEY = "audit.recon"
 
 
 @dataclass(frozen=True, slots=True)
 class ReconResult:
-    state: str
+    state: ReconState
     repo_id: str
     task_id: str | None = None
     task_status: str | None = None
+    reason: str | None = None
 
 
 def start_recon(repository: RepositoryRef, *, audits: AuditStatusReader, starter: AuditStartPort) -> ReconResult:
@@ -29,8 +30,8 @@ def start_recon(repository: RepositoryRef, *, audits: AuditStatusReader, starter
             return ReconResult("already_running", repository.repo_id, run.task_id, run.status)
     if repository.recon_done is True:
         return ReconResult("unchanged", repository.repo_id)
-    result = starter.start(repository.repo_id, repository.project_id, RECON_ACTION_KEY)
-    return ReconResult("started", repository.repo_id, result.task_id, result.status)
+    outcome = starter.start(repository.repo_id, repository.project_id, RECON_ACTION_KEY)
+    return ReconResult(outcome.state, repository.repo_id, outcome.task_id, outcome.task_status, reason=outcome.reason)
 
 
 def recon_after_add(repository: RepositoryRef, *, audits: AuditStatusReader, starter: AuditStartPort) -> ReconResult:

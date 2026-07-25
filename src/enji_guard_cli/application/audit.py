@@ -15,7 +15,8 @@ from enji_guard_cli.audit.observation import AuditRepositoryObserver
 from enji_guard_cli.audit.ports import (
     AuditGatewayPort,
     AuditLedgerPort,
-    AuditRunResult,
+    AuditRunState,
+    AuditStartOutcome,
     AuditStatus,
     AuditWaitOptions,
     AuditWaitResult,
@@ -58,13 +59,13 @@ class AuditReconService(AuditStatusReader, AuditStartPort):
         active_runs = tuple(run for run in observation.active_runs if is_active_run(run))
         return PortfolioAuditStatus.from_audit_status(status, active_runs=active_runs)
 
-    def start(self, repo_id: str, project_id: str, action_key: str) -> AuditRunResult:
+    def start(self, repo_id: str, project_id: str, action_key: str) -> AuditStartOutcome:
         audit = audit_for_action(self.catalog, action_key)
         results = cast(
             list[dict[str, object]],
             self.start_service.start(repo_id, project_id, (audit,), self.catalog)["results"],
         )
-        return _run_result(results[0])
+        return _start_outcome(results[0])
 
 
 class AuditReconFactory(Protocol):
@@ -174,8 +175,14 @@ def audit_for_action(catalog: AuditCatalog, action_key: str) -> AuditDefinition:
     return audit
 
 
-def _run_result(result: dict[str, object]) -> AuditRunResult:
-    return AuditRunResult(cast(str | None, result.get("task_id")), cast(str | None, result.get("status")))
+def _start_outcome(item: dict[str, object]) -> AuditStartOutcome:
+    """Carry the batch item's own verdict across the port, unrewritten."""
+    return AuditStartOutcome(
+        cast(AuditRunState, item["state"]),
+        cast(str | None, item.get("task_id")),
+        cast(str | None, item.get("task_status")),
+        cast(str | None, item.get("reason")),
+    )
 
 
 __all__ = ["AuditFacade", "AuditReconFactory", "AuditReconService", "audit_for_action"]

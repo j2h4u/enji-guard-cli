@@ -207,6 +207,26 @@ class AuditRunResult:
     status: str | None
 
 
+AuditRunState = Literal["started", "queued", "already_running", "up_to_date", "failed"]
+"""Every outcome Audit can reach for one requested run, named once."""
+
+
+@dataclass(frozen=True, slots=True)
+class AuditStartOutcome:
+    """What starting one audit run actually did, and why when it did nothing.
+
+    ``AuditRunResult`` is the gateway's answer -- a task identity and nothing
+    more.  A caller that asked for exactly one run needs the outcome as well:
+    an upstream refusal and a run that was already in flight both come back
+    without a new task id, and only this type tells them apart.
+    """
+
+    state: AuditRunState
+    task_id: str | None = None
+    task_status: str | None = None
+    reason: str | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class AuditRunbookMetadata:
     """Runbook metadata needed to assemble an audit task."""

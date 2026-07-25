@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
 
 from enji_guard_cli.audit import AuditCatalog, AuditDefinition
 from enji_guard_cli.audit.errors import (
@@ -21,6 +20,7 @@ from enji_guard_cli.audit.ports import (
     AuditRun,
     AuditRunbookMetadata,
     AuditRunStart,
+    AuditRunState,
     AuditTaskBody,
 )
 from enji_guard_cli.audit.tasks import AuditTaskContext, task_for_repo
@@ -110,7 +110,7 @@ def _start_one_audit[TCreateRequest](
     if matching:
         representative = representative_projection(matching)
         task_id, task_status = _active_run_task(representative)
-        run_state: Literal["queued", "already_running"] = (
+        run_state: AuditRunState = (
             "already_running"
             if task_lifecycle(
                 representative.status,
@@ -174,7 +174,7 @@ def _active_run_task(run: AuditRun) -> tuple[str | None, str | None]:
 
 def _batch_result_item(
     action_key: str,
-    state: Literal["started", "queued", "already_running", "up_to_date", "failed"],
+    state: AuditRunState,
     head_hashes: tuple[str | None, str | None],
     task: tuple[str | None, str | None] = (None, None),
     reason: str | None = None,

@@ -1,6 +1,6 @@
 # pyright: basic
 
-from enji_guard_cli.audit.ports import AuditStatus
+from enji_guard_cli.audit.ports import AuditStartOutcome, AuditStatus
 from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvider, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioAuditStatus
 from enji_guard_cli.portfolio.recon import start_recon
@@ -13,9 +13,7 @@ class Audits:
 
 class Starter:
     def start(self, repo_id, project_id, action_key):
-        from enji_guard_cli.audit.ports import AuditRunResult
-
-        return AuditRunResult("task", "queued")
+        return AuditStartOutcome("started", "task", "queued")
 
 
 def test_recon_repeat_safe_when_done() -> None:
