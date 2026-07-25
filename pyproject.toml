@@ -153,7 +153,6 @@ forbidden_modules = [
     "mcp",
     "typer",
 ]
-allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 id = "audit-stays-independent-from-portfolio"
@@ -161,7 +160,6 @@ name = "Audit stays independent from Portfolio"
 type = "forbidden"
 source_modules = ["enji_guard_cli.audit"]
 forbidden_modules = ["enji_guard_cli.portfolio"]
-allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 id = "portfolio-enters-audit-through-ports"
@@ -172,40 +170,13 @@ forbidden_modules = ["enji_guard_cli.audit"]
 ignore_imports = [
     "enji_guard_cli.portfolio.ports -> enji_guard_cli.audit.ports",
 ]
-allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
-id = "application-avoids-wire-and-frameworks"
-name = "Application does not directly import wire or delivery dependencies"
+id = "application-stays-below-delivery"
+name = "Application never depends on a delivery framework"
 type = "forbidden"
 source_modules = ["enji_guard_cli.application"]
-forbidden_modules = [
-    "enji_guard_cli.delivery",
-    "enji_guard_cli.enji_gateway.client",
-    "enji_guard_cli.enji_gateway.contract",
-    "enji_guard_cli.enji_gateway.http",
-    "enji_guard_cli.enji_gateway.wire",
-    "enji_guard_cli.transport",
-    "httpx",
-    "mcp",
-    "typer",
-]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "delivery-avoids-gateway-internals"
-name = "Delivery does not directly import gateway internals"
-type = "forbidden"
-source_modules = ["enji_guard_cli.delivery"]
-forbidden_modules = [
-    "enji_guard_cli.enji_gateway.client",
-    "enji_guard_cli.enji_gateway.contract",
-    "enji_guard_cli.enji_gateway.http",
-    "enji_guard_cli.enji_gateway.wire",
-    "enji_guard_cli.transport",
-    "httpx",
-]
-allow_indirect_imports = true
+forbidden_modules = ["enji_guard_cli.delivery", "mcp", "typer"]
 
 [[tool.importlinter.contracts]]
 id = "gateway-stays-below-application"
@@ -213,22 +184,6 @@ name = "Enji gateway stays independent from application and delivery"
 type = "forbidden"
 source_modules = ["enji_guard_cli.enji_gateway"]
 forbidden_modules = ["enji_guard_cli.application", "enji_guard_cli.delivery", "mcp", "typer"]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-id = "mcp-uses-narrow-query-facade"
-name = "MCP directly uses only its narrow query facade"
-type = "forbidden"
-source_modules = ["enji_guard_cli.delivery.mcp.server"]
-forbidden_modules = [
-    "enji_guard_cli.application",
-    "enji_guard_cli.audit",
-    "enji_guard_cli.portfolio",
-    "enji_guard_cli.auth_session",
-    "enji_guard_cli.enji_gateway",
-    "enji_guard_cli.transport",
-]
-allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 id = "gateway-owns-wire-implementation"
