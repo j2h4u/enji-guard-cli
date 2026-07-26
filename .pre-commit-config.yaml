@@ -1,0 +1,35 @@
+# Fast feedback before a commit is written.  This is NOT a second definition of
+# the quality gate: `just check` remains the authority and CI runs it in full.
+# Only checks that finish in about a second belong here, because a slow hook is
+# a hook people bypass with `--no-verify`, and a bypassed hook protects nothing.
+#
+# Everything runs through `uv run` against the locked dev group, so a hook can
+# never drift to a different tool version than the gate uses.
+#
+# Install once with `just hooks`.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --no-preview
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --preview --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      # The architecture gate.  It reads the whole module graph rather than the
+      # staged files, so it is passed no filenames and runs once per commit.
+      - id: tach
+        name: tach module boundaries
+        entry: uv run tach check
+        language: system
+        pass_filenames: false
+        files: ^(src/|tach\.toml$)
+        require_serial: true

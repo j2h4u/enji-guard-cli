@@ -12,32 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      requires-codeql: ${{ steps.classify.outputs.requires-codeql }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-
-      - name: Classify changed files
-        id: classify
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          python3 scripts/classify_changed_files.py \
-            --event-name "${EVENT_NAME}" \
-            --base-sha "${BASE_SHA}" \
-            --head-sha "${HEAD_SHA}" \
-            --force-event schedule \
-            --output-key requires-codeql
-
   analyze:
     name: Analyze Python
-    needs: [changes]
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -45,23 +21,16 @@ jobs:
       security-events: write
 
     steps:
-      - name: Skip docs-only change
-        if: needs.changes.outputs.requires-codeql != 'true'
-        run: echo "No CodeQL analysis required."
-
       - name: Checkout
-        if: needs.changes.outputs.requires-codeql == 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Initialize CodeQL
-        if: needs.changes.outputs.requires-codeql == 'true'
         uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           languages: python
           queries: security-extended
 
       - name: Perform CodeQL Analysis
-        if: needs.changes.outputs.requires-codeql == 'true'
         uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           category: "/language:python"

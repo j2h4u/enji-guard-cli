@@ -1,11 +1,14 @@
 # Module boundaries, enforced by tach (https://github.com/tach-org/tach).
 #
-# THIS FILE DECLARES THE IDEAL, NOT TODAY'S REALITY.  `just module-boundaries`
-# is expected to be RED; every failure it reports is inventoried in
-# docs/architecture-cleanup.md with the file, the reason and the fix.  While
-# the cleanup is outstanding, import-linter (pyproject.toml) stays the enforced
-# gate and this check is deliberately kept out of `just check`.  When the
-# inventory is empty, this joins `check` and import-linter is deleted.
+# This file declares the whole module graph, and the graph is now true: the
+# 41 violations inventoried in docs/architecture-cleanup.md are all closed, so
+# `just module-boundaries` is green and runs inside `just check`.  It is the
+# architecture gate -- import-linter is gone.
+#
+# The reason tach replaced it: import-linter checks the contracts you remember
+# to write, so a new module with no contract about it is unconstrained by
+# default.  Here the graph is exhaustive and an undeclared edge is an error, so
+# forgetting to describe a dependency fails instead of passing quietly.
 #
 # There are no `deprecated = true` waivers here on purpose: a waiver turns a
 # violation into an approved edge, and the point of this file is that nothing
@@ -136,7 +139,7 @@ visibility = [
 ]
 
 [[interfaces]]
-# The rule that import-linter could not express, and the reason tach is here:
+# The rule import-linter could not express, and one reason tach replaced it:
 # `application` publishes exactly the names in its own `__all__`.  Deep imports
 # such as `application.subscriptions.AutofixListing` are banned, and -- more
 # importantly -- so is re-exporting a domain type from `application/__init__`

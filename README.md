@@ -100,7 +100,8 @@ Audit and Portfolio own product rules, Application composes their use cases,
 and gateway/auth/runtime packages own infrastructure. CLI and MCP stay thin
 and call Application instead of duplicating product or backend logic. The
 repository treats these DDD-style boundaries as architecture policy, and
-`import-linter` enforces them in the verification gate.
+`tach` enforces them in the verification gate: `tach.toml` declares the whole
+module graph, so an undeclared dependency fails rather than passing unnoticed.
 
 The CLI is the broad operator surface for agents. It exposes reads, writes,
 project administration, repository moves, schedule changes, email preferences,
@@ -526,10 +527,10 @@ The Docker service starts a background cookie refresh loop. Keep
 just verify
 ```
 
-The completion gate includes Ruff, basedpyright, import-linter, Vulture,
+The completion gate includes Ruff, basedpyright, tach, Vulture,
 deptry, OpenAPI contract validation, CRAP <= 30 per function, tests, and Docker
 build. Keep CLI and MCP thin, keep product logic behind Application, and treat
-import-linter failures as architectural regressions rather than style nits.
+tach failures as architectural regressions rather than style nits.
 `just verify` also builds the image; release workflows additionally execute the
 credentialless runtime contract, while authenticated live smoke remains an
 operator gate because CI receives no Enji credentials.

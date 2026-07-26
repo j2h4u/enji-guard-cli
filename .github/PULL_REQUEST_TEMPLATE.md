@@ -5,7 +5,7 @@
 ## Acceptance
 
 - [ ] User workflow or operator behavior is clear.
-- [ ] Tests, docs, OpenAPI, and import contracts are updated when affected.
+- [ ] Tests, docs, OpenAPI, and the tach module graph are updated when affected.
 - [ ] `just verify` passes.
 
 ## Runtime

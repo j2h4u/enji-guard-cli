@@ -14,7 +14,7 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
   bootstrap, auth-file paths, project/repo writes, scheduling, email settings, or
   other operator controls as MCP tools. MCP server code must use the narrow
   MCP facade, not the broad core facade.
-- Treat import-linter as architecture policy, not style advice.
+- Treat the tach module graph as architecture policy, not style advice.
 - Keep runtime tuning in frozen settings dataclasses, not env. Env is for
   credential/security ingress only.
 - Keep mutating batch writes explicit; never infer all-project or all-repo scope.
@@ -71,7 +71,7 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 ## QA
 
 - `just verify` is the completion gate.
-- Do not weaken, skip, or suppress Ruff, types, import contracts, Vulture,
+- Do not weaken, skip, or suppress Ruff, types, module boundaries, Vulture,
   deptry, OpenAPI, CRAP, tests, or Docker build.
 - Update reconstructed OpenAPI, docs, and tests together when API behavior changes.
 
