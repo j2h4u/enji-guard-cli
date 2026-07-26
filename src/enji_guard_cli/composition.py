@@ -19,7 +19,7 @@ from enji_guard_cli.application import (
 )
 from enji_guard_cli.audit.catalog_observation import AuditCatalogObserver
 from enji_guard_cli.audit.ledger import FileAuditLedger
-from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
+from enji_guard_cli.auth_session.adapters import StoredCredentialReader
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.enji_gateway import AuditGateway, GitLabGateway, PortfolioGateway
 from enji_guard_cli.enji_gateway.shared_client import SharedHttpClient, create_shared_http_client
@@ -40,14 +40,14 @@ class _ReadSurface:
     audit: AuditFacade
     portfolio: PortfolioFacade
     subscriptions: SubscriptionsFacade
-    credential_reader: GatewayCredentialReader
+    credential_reader: StoredCredentialReader
 
 
 def _create_read_surface(
     auth_file: Path | None, http_client: SharedHttpClient, settings: EnjiGuardSettings
 ) -> _ReadSurface:
     """Wire the facades that read portfolio membership and audit state."""
-    credential_reader = GatewayCredentialReader(auth_file, settings=settings)
+    credential_reader = StoredCredentialReader(auth_file, settings=settings)
     fanout = BoundedFanout(settings.fanout)
     ledger = FileAuditLedger(
         settings.active_run_ledger.state_file,

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
-from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
+from enji_guard_cli.auth_session.adapters import StoredCredentialReader
 from enji_guard_cli.auth_session.api import import_bearer_token
 from enji_guard_cli.enji_gateway.contract import (
     IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC,
@@ -40,7 +40,7 @@ from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "contracts" / "enji-openapi.json"
 HTTP_METHODS = frozenset({"get", "put", "post", "patch", "delete", "head", "options", "trace"})
-AUTH_PORT = GatewayCredentialReader()
+AUTH_PORT = StoredCredentialReader()
 
 
 @dataclass

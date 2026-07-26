@@ -281,14 +281,12 @@ AuditCurrentHeadState = Literal[
     "unverified",
     "missing",
     "blocked",
-    "failed",
     "unknown",
 ]
 AuditCurrentHeadAction = Literal[
     "none",
     "wait_for_current_head_run",
     "start_current_head_run",
-    "inspect_failed_run",
     "inspect_unverified_run",
     "resolve_unknown_head",
 ]
