@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.0.3](https://github.com/j2h4u/enji-guard-cli/compare/v3.0.2...v3.0.3) (2026-07-26)
+
+
+### Reverts
+
+* **ci:** stop auto-merging the release PR ([#195](https://github.com/j2h4u/enji-guard-cli/issues/195)) ([b06d55a](https://github.com/j2h4u/enji-guard-cli/commit/b06d55ab079a8f031a218aa67f60f559352f77c5))
+
+
+### Maintenance
+
+* drop the unused dev compose overlay ([#197](https://github.com/j2h4u/enji-guard-cli/issues/197)) ([f92f8fc](https://github.com/j2h4u/enji-guard-cli/commit/f92f8fcde42046b9e4138f1af21ca5d9a6528ac4))
+
 ## [3.0.2](https://github.com/j2h4u/enji-guard-cli/compare/v3.0.1...v3.0.2) (2026-07-26)
 
 
