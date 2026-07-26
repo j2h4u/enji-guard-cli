@@ -4,6 +4,14 @@ from dataclasses import dataclass
 
 from enji_guard_cli.application.catalog import AuditCatalogService
 from enji_guard_cli.application.portfolio_views import RepositoryRefView, repository_ref_view
+from enji_guard_cli.application.subscription_views import (
+    AuditAutofixDefinitionView,
+    AuditAutofixJobView,
+    AuditScheduleView,
+    autofix_definition_view,
+    autofix_job_view,
+    schedule_view,
+)
 from enji_guard_cli.audit.autofixes import definitions as autofix_definitions
 from enji_guard_cli.audit.autofixes import select as select_autofixes
 from enji_guard_cli.audit.autofixes import set_one
@@ -15,7 +23,6 @@ from enji_guard_cli.audit.ports import (
     AuditAutofixJob,
     AuditAutofixUpdate,
     AuditGatewayPort,
-    AuditSchedule,
     AuditScheduleUpdate,
 )
 from enji_guard_cli.audit.schedules import CADENCES, auto_time_for_targets, list_for_targets, set_for_targets
@@ -34,13 +41,13 @@ without reading an audit module.
 @dataclass(frozen=True, slots=True)
 class ScheduleListing:
     repository: RepositoryRefView
-    schedules: tuple[AuditSchedule, ...]
+    schedules: tuple[AuditScheduleView, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class AutofixListingItem:
-    definition: AuditAutofixDefinition
-    job: AuditAutofixJob | None
+    definition: AuditAutofixDefinitionView
+    job: AuditAutofixJobView | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +76,13 @@ class SubscriptionsFacade:
         targets = self.targets.targets(repo, project)
         results = list_for_targets(targets, keys, self.gateway, self.fanout)
         by_repo_id = {result.repo_id: result.schedules for result in results}
-        return tuple(ScheduleListing(repository_ref_view(target), by_repo_id[target.repo_id]) for target in targets)
+        return tuple(
+            ScheduleListing(
+                repository_ref_view(target),
+                tuple(schedule_view(schedule) for schedule in by_repo_id[target.repo_id]),
+            )
+            for target in targets
+        )
 
     def set_schedules(  # noqa: PLR0913
         self,
@@ -99,7 +112,7 @@ class SubscriptionsFacade:
         def read_target(target: RepositoryRef) -> AutofixListing:
             jobs = _index_autofix_jobs(self.gateway.list_autofix_jobs(target.repo_id))
             items = tuple(
-                AutofixListingItem(
+                _autofix_item(
                     definition,
                     jobs.get(definition.action_key) or jobs.get(definition.kind or definition.selector),
                 )
@@ -169,6 +182,13 @@ class SubscriptionsFacade:
             all_projects=resolved.all_projects,
             operation="mutation",
         )
+
+
+def _autofix_item(definition: AuditAutofixDefinition, job: AuditAutofixJob | None) -> AutofixListingItem:
+    return AutofixListingItem(
+        autofix_definition_view(definition),
+        autofix_job_view(job) if job is not None else None,
+    )
 
 
 def _normalize_autofix_jobs(jobs: tuple[AuditAutofixJob, ...]) -> tuple[AuditAutofixJob, ...]:

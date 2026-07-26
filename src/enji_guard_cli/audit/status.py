@@ -107,14 +107,6 @@ def _active_current_head_status(
             stale_active_task_id=active_run.task_id,
             stale_active_current_head_sha=run_sha,
         )
-    if run_lifecycle == "failed":
-        return AuditCurrentHeadStatus(
-            "failed",
-            "inspect_failed_run",
-            task_id=active_run.task_id,
-            task_status=active_run.status,
-            task_current_head_sha=run_sha,
-        )
     if run_sha is None:
         # The run carries no current-head evidence.  Absence of evidence is not
         # evidence of currency, so this must not be reported as a run worth
@@ -125,23 +117,20 @@ def _active_current_head_status(
             task_id=active_run.task_id,
             task_status=active_run.status,
         )
-    if run_lifecycle == "queued":
+    # `active_run` reaches this function only through `active_runs_for_action`,
+    # which keeps runs whose lifecycle is queued or running and nothing else.
+    # A terminal lifecycle here would mean that filter changed, not that this
+    # audit failed, so say so instead of inventing a status for it.
+    if run_lifecycle == "queued" or run_lifecycle == "running":  # noqa: PLR1714 - `in` does not narrow the literal.
         return AuditCurrentHeadStatus(
-            "queued",
+            run_lifecycle,
             "wait_for_current_head_run",
             task_id=active_run.task_id,
             task_status=active_run.status,
             task_current_head_sha=run_sha,
         )
-    if run_lifecycle == "running":
-        return AuditCurrentHeadStatus(
-            "running",
-            "wait_for_current_head_run",
-            task_id=active_run.task_id,
-            task_status=active_run.status,
-            task_current_head_sha=run_sha,
-        )
-    return AuditCurrentHeadStatus("missing", "start_current_head_run")
+    message = f"active run {active_run.task_id} has non-active lifecycle {run_lifecycle!r}"
+    raise AssertionError(message)
 
 
 def _artifact_expected(

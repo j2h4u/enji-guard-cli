@@ -131,6 +131,7 @@ depends_on = [
     "enji_guard_cli.fanout",
     "enji_guard_cli.settings",
     "enji_guard_cli.errors",
+    "enji_guard_cli.json_types",  # views carry provider passthrough as JSON, not as a domain type
 ]
 visibility = [
     "enji_guard_cli.composition",

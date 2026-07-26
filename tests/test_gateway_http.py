@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
+from enji_guard_cli.auth_session.adapters import StoredCredentialReader
 from enji_guard_cli.auth_session.api import (
     import_bearer_token,
     import_cookie,
@@ -49,7 +49,7 @@ from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpRes
 
 AUTH_REFRESH_ORIGIN = DEFAULT_GUARD_ORIGIN
 AUTH_REFRESH_REFERER = DEFAULT_GUARD_REFERER
-AUTH_PORT = GatewayCredentialReader()
+AUTH_PORT = StoredCredentialReader()
 
 
 def load_stored_auth(path: Path):

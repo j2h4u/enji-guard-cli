@@ -56,6 +56,11 @@ from enji_guard_cli.application.portfolio_views import (
     RepositoryStatusView,
 )
 from enji_guard_cli.application.projects import AuditProjectSource
+from enji_guard_cli.application.subscription_views import (
+    AuditAutofixDefinitionView,
+    AuditAutofixJobView,
+    AuditScheduleView,
+)
 from enji_guard_cli.application.subscriptions import (
     AUDIT_CADENCES,
     AutofixListing,
@@ -77,6 +82,8 @@ __all__ = [
     "ApplicationResult",
     "ApplicationRunner",
     "AuditArtifactView",
+    "AuditAutofixDefinitionView",
+    "AuditAutofixJobView",
     "AuditCatalogService",
     "AuditCurrentHeadView",
     "AuditFacade",
@@ -88,6 +95,7 @@ __all__ = [
     "AuditReconFactory",
     "AuditReconService",
     "AuditRunView",
+    "AuditScheduleView",
     "AuditStatusItemView",
     "AuditStatusView",
     "AuditSummaryItemView",

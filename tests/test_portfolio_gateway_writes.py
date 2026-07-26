@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
+from enji_guard_cli.auth_session.adapters import StoredCredentialReader
 from enji_guard_cli.auth_session.api import import_bearer_token
 from enji_guard_cli.enji_gateway.portfolio_gateway import PortfolioGateway
 from enji_guard_cli.portfolio.errors import PortfolioMalformedError
@@ -28,7 +28,7 @@ from enji_guard_cli.portfolio.models import (
 )
 from enji_guard_cli.transport import EnjiHttpRequest, EnjiHttpResponse
 
-AUTH_PORT = GatewayCredentialReader()
+AUTH_PORT = StoredCredentialReader()
 
 GITHUB_IDENTITY = RepositoryIdentity(RepositoryProvider.GITHUB, "owner/name", "github.com")
 GITLAB_IDENTITY = RepositoryIdentity(RepositoryProvider.GITLAB, "group/sub/name", "gitlab.example.com")

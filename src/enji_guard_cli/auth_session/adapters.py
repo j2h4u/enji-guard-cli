@@ -10,8 +10,13 @@ from enji_guard_cli.auth_session.store import load_auth, load_journal
 from enji_guard_cli.settings import EnjiGuardSettings, default_settings
 
 
-class GatewayCredentialReader(CredentialReader):
-    """Read-only credential adapter used by gateway requests."""
+class StoredCredentialReader(CredentialReader):
+    """Read-only view of the credentials on disk.
+
+    Nothing here is gateway-specific: it projects the auth file and its journal
+    into a usable credential and never writes.  The gateway is simply its
+    busiest caller.
+    """
 
     def __init__(self, auth_file: Path | None = None, *, settings: EnjiGuardSettings | None = None) -> None:
         resolved_settings = settings if settings is not None else default_settings()
@@ -30,4 +35,4 @@ class GatewayCredentialReader(CredentialReader):
         return _api.auth_headers(stored_auth)
 
 
-__all__ = ["GatewayCredentialReader"]
+__all__ = ["StoredCredentialReader"]

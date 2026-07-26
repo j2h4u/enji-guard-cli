@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 import enji_guard_cli.enji_gateway.client as api_client_module
-from enji_guard_cli.auth_session.adapters import GatewayCredentialReader
+from enji_guard_cli.auth_session.adapters import StoredCredentialReader
 from enji_guard_cli.auth_session.api import (
     _refresh_cookie_auth,
     backend_readiness_probe_async,
@@ -143,7 +143,7 @@ def test_non_replayable_profiles_do_not_auto_retry_status_responses(profile: Ret
 def test_gateway_unsafe_request_is_not_replayed_or_refreshed(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=long", auth_file)
-    session = api_client_module.load_api_session(auth_file, auth_port=GatewayCredentialReader())
+    session = api_client_module.load_api_session(auth_file, auth_port=StoredCredentialReader())
     calls: list[EnjiHttpRequest] = []
 
     class Client:
