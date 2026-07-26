@@ -207,7 +207,10 @@ class AuditRunResult:
     status: str | None
 
 
-AuditRunState = Literal["started", "queued", "already_running", "up_to_date", "failed"]
+# "started" is the only state that means this command created a run.
+# "already_queued" and "already_running" both describe a run that was
+# already there -- a plain "queued" read as "queued for you" and hid that.
+AuditRunState = Literal["started", "already_queued", "already_running", "up_to_date", "failed"]
 """Every outcome Audit can reach for one requested run, named once."""
 
 

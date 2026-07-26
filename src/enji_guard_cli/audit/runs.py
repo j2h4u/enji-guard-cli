@@ -118,7 +118,7 @@ def _start_one_audit[TCreateRequest](
                 completed_at=representative.completed_at,
             )
             == "running"
-            else "queued"
+            else "already_queued"
         )
         return _batch_result_item(action_key, run_state, (current_sha, last_sha), (task_id, task_status))
     if out_of_date(current_sha, last_sha) is False:
