@@ -5,6 +5,7 @@
 
 ### Fixes
 
+* **ci:** enforce the release-note contract a squash merge owes ([#190](https://github.com/j2h4u/enji-guard-cli/issues/190)) ([c2249b6](https://github.com/j2h4u/enji-guard-cli/commit/c2249b65baaef2c73645ac99d0c9dda674bec698))
 * **ci:** reject commit bodies release-please cannot parse ([#192](https://github.com/j2h4u/enji-guard-cli/issues/192)) ([c289e73](https://github.com/j2h4u/enji-guard-cli/commit/c289e73a6170bd230a1f9b36a2324fcf461fa656))
 
 
@@ -22,6 +23,11 @@
 
 * **application:** clear the small backlog ([#193](https://github.com/j2h4u/enji-guard-cli/issues/193)) ([72172d5](https://github.com/j2h4u/enji-guard-cli/commit/72172d51a45ca698baff5b357c7de501008da652))
 * **ci:** drop the changed-file classification gate ([#187](https://github.com/j2h4u/enji-guard-cli/issues/187)) ([e521a95](https://github.com/j2h4u/enji-guard-cli/commit/e521a9547b83afc4933679508860b309ac4ec874))
+
+
+### Documentation
+
+* **changelog:** restore what each release actually shipped ([#187](https://github.com/j2h4u/enji-guard-cli/issues/187)) ([e521a95](https://github.com/j2h4u/enji-guard-cli/commit/e521a9547b83afc4933679508860b309ac4ec874))
 
 ## [3.0.1](https://github.com/j2h4u/enji-guard-cli/compare/v3.0.0...v3.0.1) (2026-07-26)
 
