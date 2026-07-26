@@ -1,5 +1,71 @@
 # Changelog
 
+## [3.0.0](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.13...v3.0.0) (2026-07-26)
+
+
+### ⚠ BREAKING CHANGES
+
+The operator surface changed.
+
+* Duplicate commands are gone. Use `status REPO` instead of `repo status`, `recon status` or `audit status`; `wait REPO` instead of `audit wait`; `status` instead of `repo list` or `portfolio status`. The `portfolio` command group no longer exists.
+* `audit summary --all` is gone; omitting selectors already meant every audit.
+* `project delete`, `repo remove` and `--all-projects` writes require `--yes` from any non-TTY or `--json` caller.
+* `audit start|read REPO SELECTOR --all` now errors instead of silently starting every audit.
+* A repository-scoped precondition failure during `audit start` aborts with `VALIDATION` and exit 1, instead of reporting N unexplained `failed` items at exit 0.
+* MCP tool errors no longer carry the credential path or CLI bootstrap instructions; that guidance stays on the CLI surface.
+* An active run that cannot prove it targets the current head is reported as `unverified` / `inspect_unverified_run` instead of `queued` / `wait_for_current_head_run`.
+* An ambiguous bare repository locator raises `VALIDATION` naming the candidates rather than silently choosing one.
+
+### Features
+
+* **cli:** confirm irreversible `project delete`, `repo remove` and `--all-projects` writes ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **cli:** make legal values discoverable from `--help` ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **audit:** type task precondition failures by blast radius ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+
+### Fixes
+
+* **ci:** give container publishing a single CI-gated entry point ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **ci:** restore the scan-before-push invariant for container publishes ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **ci:** attest the scanned digest before promoting mutable tags ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **ci:** fetch tags so release builds are versioned, not `0.0.1` ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **ci:** move `:latest` only for the newest release tag ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **ci:** stop cancelling in-flight release and container publishes ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **ci:** fail loudly if release-please stops emitting root-path outputs ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **ci:** stop publishing images from untested docs-only commits ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **audit:** serialize ledger read-modify-write cycles ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **audit:** move task lookups out of the ledger critical section ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **audit:** stop hiding defects and unnamed failures behind `state=failed` ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **audit:** stop reporting an unproven active run as current ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **recon:** report the recon start that happened, not a hardcoded success ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **mcp:** keep auth remediation on the CLI surface only ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **mcp:** make the container entrypoint use the narrow MCP composition ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **mcp:** bind the composed query surface to the server lifespan ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **cli:** emit JSON error envelopes in `--json` mode ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **cli:** make credential failures actionable on first run ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **cli:** make audit selector and `--all` handling honest ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **cli:** accept a bare repository locator and suggest close matches ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **cli:** close the application displaced by an auth-file switch ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **gateway:** translate a refused audit start into a domain error ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **gateway:** keep the upstream HTTP status visible in the reason ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+
+### Performance
+
+* **transport:** collapse the owner-loop bridge to a pooled sync client ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+
+### Refactoring
+
+* **application:** split the facade into per-domain facades ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **application:** return application-owned views instead of domain types ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+* **auth_session:** own the credential-reader abstraction ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+
+### Documentation
+
+* document and pin the CLI exit-code contract ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+
+### Build
+
+* **tach:** declare the ideal module graph and inventory the debt ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+
 ## [2.2.13](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.12...v2.2.13) (2026-07-23)
 
 
