@@ -23,6 +23,23 @@ surface.
 - Added release automation, container publishing, and a strict local/CI quality
   gate. Added a release status check for open PRs, the latest release, GHCR
   publication, and recent GitHub Actions.
+- Hardened the release pipeline: one CI-gated entry point for container
+  publishing, scan before push, and provenance and SBOM attested against the
+  digest that consumer tags resolve to.
+- Made the audit ledger safe under concurrency, and made audit status honest
+  about what it cannot prove: a run without head evidence is reported as
+  unverified rather than as work worth waiting for.
+- Settled the operator contract: duplicate commands removed, irreversible
+  writes require explicit confirmation, and errors carry the upstream status
+  instead of a bare failure.
+- Replaced the owner-loop HTTP bridge with a pooled synchronous client, which
+  is faster at every batch size measured and removed the deadlock-avoidance
+  code that surrounded it.
+- Made module boundaries the enforced architecture gate through `tach`, which
+  declares the whole graph so an undeclared dependency fails; import-linter is
+  gone. The suite grew from 428 to over 900 tests behind a coverage floor.
+- Pinned the release notes themselves: a squash merge that would silently drop
+  what shipped now fails CI instead.
 
 ## Current State
 
@@ -37,23 +54,33 @@ operational hardening for maintenance and future releases.
   catch operational regressions before merge.
 - Refine MCP audit-reading ergonomics with real agents while keeping the
   surface centered on portfolio overview and concrete repository audits.
-- Explore modular install modes so the tool can be used as CLI-only when API
-  tokens make background cookie refresh unnecessary.
+- **When Enji Guard ships API keys, delete the refresh daemon.** Not make it
+  optional, not keep it as a fallback: browser-cookie auth is the only reason
+  it exists, and an API key removes that reason entirely. The auth state
+  machine, the rotation outbox, the supervisor task that owns refresh, and the
+  readiness plumbing that watches it all go with it.
+- **Make the MCP container optional in the same move.** The default becomes a
+  standalone CLI with no Docker, no supervisor and no background process —
+  installed and run directly. Anyone who wants the curated MCP surface for
+  agents opts into the container; nobody has to run one to use the tool.
 
 After that, the project should move into maintenance mode rather than broad
 feature development.
 
-## Appendix: Modular Install Notes
+## Appendix: Install Modes After API Keys
 
-The product should remain one project with multiple ways to run it, not a split
-between separate CLI and service products.
+The product stays one project with more than one way to run it, never a split
+into separate CLI and service products.
 
-- Base install: CLI and core only, suitable for API-token auth and direct agent
-  use through `uv`, `uvx`, or a host wrapper in `/usr/local/bin`.
-- MCP install: optional MCP dependencies and tools for agents that need a
-  curated read-mostly service surface.
-- Docker service: full runtime for MCP plus temporary cookie refresh while
-  browser-cookie auth is still needed.
+- **Default: CLI only.** Core plus CLI, authenticated with an API key, run
+  through `uv`, `uvx`, or a host wrapper in `/usr/local/bin`. No Docker, no
+  supervisor, no background process.
+- **Opt-in: MCP container.** The curated read-mostly surface for agents that
+  want it, and only for them.
 
-When Enji API tokens are available, CLI-only usage should not require Docker,
-MCP, supervisor tasks, or background refresh.
+The Docker service exists today because browser-cookie auth needs a process
+that keeps rotating credentials. That is its whole justification. Once an API
+key removes it, the refresh daemon is deleted rather than demoted to a
+fallback: a credential path nobody uses is one nobody tests, and it would keep
+the supervisor, the rotation state machine and their readiness plumbing alive
+for no one.
