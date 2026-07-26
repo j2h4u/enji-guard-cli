@@ -274,12 +274,22 @@ class AuditNewerRun:
 
 AuditFreshnessState = Literal["fresh", "stale", "unknown"]
 AuditTaskLifecycle = Literal["none", "queued", "running", "failed", "completed"]
-AuditCurrentHeadState = Literal["ready", "queued", "running", "missing", "blocked", "failed", "unknown"]
+AuditCurrentHeadState = Literal[
+    "ready",
+    "queued",
+    "running",
+    "unverified",
+    "missing",
+    "blocked",
+    "failed",
+    "unknown",
+]
 AuditCurrentHeadAction = Literal[
     "none",
     "wait_for_current_head_run",
     "start_current_head_run",
     "inspect_failed_run",
+    "inspect_unverified_run",
     "resolve_unknown_head",
 ]
 

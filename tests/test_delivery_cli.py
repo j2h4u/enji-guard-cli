@@ -346,6 +346,43 @@ def test_repository_status_text_is_compact_and_does_not_dump_json(monkeypatch: p
     assert '"audit_key"' not in result.stdout
 
 
+def test_repository_status_marks_a_run_without_head_evidence_as_unverified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reported defect: a pending task with no current-head metadata rendered
+    as `action=wait_for_current_head_run`, telling the operator to sit still."""
+
+    unproved = AuditRun("3265ad0f", "audit.security", "pending", "2026-07-25T20:17:17.698Z", None, None)
+    audit = RecordingAuditGateway(
+        catalog=SECURITY_ONLY,
+        task_links={"r1": (AuditTaskLink("t1", "audit.security", "completed", completed_at=REPORT_COMPLETED_AT),)},
+        rerun_state=AuditRerunState("head", "old-head", True, "t1", {"audit.security": "old-head"}),
+        active_runs={"r1": (unproved,)},
+    )
+    Ports(audit=audit).install(monkeypatch)
+
+    text_result = CliRunner().invoke(app, ["status", REPO])
+    json_result = CliRunner().invoke(app, ["status", REPO, "--json"])
+
+    assert text_result.exit_code == 0
+    assert "current_head=unverified action=inspect_unverified_run" in text_result.stdout
+    assert "wait_for_current_head_run" not in text_result.stdout
+    assert json_result.exit_code == 0
+    payload = cast(list[dict[str, object]], json.loads(json_result.stdout))
+    audit_section = cast(dict[str, object], payload[0]["audit"])
+    summary = cast(dict[str, object], audit_section["summary"])
+    items = cast(list[dict[str, object]], summary["items"])
+    current_head = cast(dict[str, object], items[0]["current_head"])
+    # Null fields are omitted by the JSON projection, so the absence of
+    # `task_current_head_sha` is itself the machine-readable "no evidence".
+    assert current_head == {
+        "state": "unverified",
+        "action_required": "inspect_unverified_run",
+        "task_id": "3265ad0f",
+        "task_status": "pending",
+    }
+
+
 def _readable_security_gateway(*, active_runs: tuple[AuditRun, ...] = ()) -> RecordingAuditGateway:
     """One published audit with exactly one completed, readable report."""
     return RecordingAuditGateway(
