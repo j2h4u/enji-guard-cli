@@ -5,6 +5,7 @@
 
 ### Fixes
 
+* **ci:** exempt the release PR from the release-note contract ([#194](https://github.com/j2h4u/enji-guard-cli/issues/194)) ([7949466](https://github.com/j2h4u/enji-guard-cli/commit/7949466586d8e23588245f7df3581ed0026fab91))
 * **ci:** enforce the release-note contract a squash merge owes ([#190](https://github.com/j2h4u/enji-guard-cli/issues/190)) ([c2249b6](https://github.com/j2h4u/enji-guard-cli/commit/c2249b65baaef2c73645ac99d0c9dda674bec698))
 * **ci:** reject commit bodies release-please cannot parse ([#192](https://github.com/j2h4u/enji-guard-cli/issues/192)) ([c289e73](https://github.com/j2h4u/enji-guard-cli/commit/c289e73a6170bd230a1f9b36a2324fcf461fa656))
 
