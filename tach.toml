@@ -180,7 +180,6 @@ expose = ["ports\\..*"]
 from = ["enji_guard_cli.runtime_observability"]
 visibility = ["enji_guard_cli.delivery.*", "enji_guard_cli.composition"]
 expose = [
-    "ports\\..*",
     "journey\\..*",
     "readiness\\..*",
     "supervisor\\..*",
@@ -270,7 +269,6 @@ expose = [
     "autofixes\\..*",
     "email\\..*",
     "observation\\..*",
-    "freshness\\..*",
     "catalog_observation\\.[A-Za-z]+Port",
 ]
 
@@ -300,7 +298,7 @@ visibility = [
 # identities, refs, errors -- never its services.
 from = ["enji_guard_cli.portfolio"]
 visibility = ["enji_guard_cli.gitlab", "enji_guard_cli.enji_gateway"]
-expose = ["[^.]+", "models\\..*", "errors\\..*", "ports\\..*"]
+expose = ["models\\..*", "errors\\..*", "ports\\..*"]
 
 [[interfaces]]
 # The application drives portfolio use cases.  `selectors` is the concrete
@@ -308,14 +306,12 @@ expose = ["[^.]+", "models\\..*", "errors\\..*", "ports\\..*"]
 from = ["enji_guard_cli.portfolio"]
 visibility = ["enji_guard_cli.application"]
 expose = [
-    "[^.]+",
     "models\\..*",
     "errors\\..*",
     "ports\\..*",
     "projects\\..*",
     "recon\\..*",
     "repositories\\..*",
-    "scopes\\..*",
     "status\\..*",
 ]
 
@@ -376,10 +372,12 @@ visibility = ["enji_guard_cli.application"]
 expose = ["[^.]+"]
 
 [[interfaces]]
-# Supervision drives refresh, so it sees the API and the event ports.
+# Supervision observes credential changes and drives refresh through the ports,
+# so it sees those and the curated seam -- not the API module or the models
+# behind it.
 from = ["enji_guard_cli.auth_session"]
 visibility = ["enji_guard_cli.runtime_observability"]
-expose = ["[^.]+", "api\\..*", "ports\\..*", "credential_changes\\..*", "models\\..*"]
+expose = ["[^.]+", "ports\\..*", "credential_changes\\..*"]
 
 [[interfaces]]
 from = ["enji_guard_cli.auth_session"]

@@ -33,8 +33,16 @@ hooks:
 # declares the whole module graph, so an undeclared edge fails rather than
 # passing unnoticed, which is what import-linter's contract-by-contract model
 # could not do.
+#
+# Three checks, because tach's own `exact = true` only covers the first:
+#   - `check`          : no undeclared or unused dependency edge;
+#   - `check-external` : every imported third-party module is a declared dependency;
+#   - interface gate   : no `expose` pattern that matches nothing, which would
+#                        keep a wider public surface open than the code uses.
 module-boundaries:
     uv run tach check
+    uv run tach check-external
+    scripts/check_tach_interfaces.py
 
 # Validate GitHub Actions workflow syntax and expressions.
 actionlint:
