@@ -209,16 +209,15 @@ jobs:
           candidate="${IMAGE_NAME}:sha-${SOURCE_SHA}"
           docker push "${candidate}" | tee push.log
 
-          # Prefer the digest the registry reported during this push.  Reading
-          # it back with imagetools is only a fallback, because a transient
-          # registry error there used to abort the job after the push had
-          # already made the image public and before anything was attested.
+          # Use only the digest the registry reported during this push.  There
+          # is deliberately no imagetools readback fallback: that reports the
+          # digest of whatever the tag resolves to now, which for an index is
+          # not the manifest that was pushed -- the exact confusion that made
+          # v3.0.0's attestations unverifiable.  An unparseable push is a
+          # broken push; fail instead of guessing.
           digest="$(sed -n 's/.*[[:space:]]digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' push.log | tail -n 1)"
           if [ -z "${digest}" ]; then
-            digest="$(docker buildx imagetools inspect "${candidate}" --format '{{.Manifest.Digest}}')"
-          fi
-          if [ -z "${digest}" ]; then
-            echo "::error::could not resolve the digest of ${candidate}"
+            echo "::error::${candidate} was pushed but its digest could not be read from the push output"
             exit 1
           fi
 
