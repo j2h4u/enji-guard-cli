@@ -3,7 +3,8 @@
 The executor itself lives in ``transport``; this module only translates
 settings into pool limits and retry policy.  It sits in ``enji_gateway`` so
 composition can build a client without importing ``transport`` directly, which
-the ``auth-and-gateway-own-transport`` import contract forbids.
+the declared module boundaries forbid: only ``auth_session`` and
+``enji_gateway`` may depend on ``transport``.
 """
 
 import httpx

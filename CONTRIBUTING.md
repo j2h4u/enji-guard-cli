@@ -11,7 +11,7 @@ Before editing, identify:
 - user workflow affected;
 - acceptance criteria;
 - whether the change crosses Audit/Portfolio/Application/infrastructure boundaries;
-- docs, OpenAPI, tests, or import-linter contracts that must change together;
+- docs, OpenAPI, tests, or the tach module graph that must change together;
 - whether the mutation must remain explicitly scoped and idempotent (`unchanged`, `already_present`, `already_running`).
 
 ## Acceptance
