@@ -203,6 +203,22 @@ def test_release_publishes_only_after_ci_succeeds_on_the_commit() -> None:
     assert re.search(r"^\s*needs: \[release-please, wait-for-ci\]$", release, re.MULTILINE)
 
 
+def test_release_pr_auto_merge_is_armed_on_an_always_present_output() -> None:
+    # The release PR is authored by github-actions[bot], so its checks park in
+    # `action_required` until a human approves them.  Auto-merge is what saves
+    # the second visit once they go green.
+    #
+    # It must be gated on `prs_created`, which release-please sets on every
+    # run, not on `pr`, which it sets only when a PR exists: gating on `pr`
+    # turns a renamed output into a silent skip, and releases would quietly
+    # stop arming auto-merge with nothing reporting why.
+    release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    assert "--auto" in release
+    assert re.search(r"^\s*if: steps\.release\.outputs\.prs_created == 'true'$", release, re.MULTILINE)
+    assert not re.search(r"^\s*if: steps\.release\.outputs\.pr != ''$", release, re.MULTILINE)
+
+
 def test_docker_marked_policy_tests_run_in_ci() -> None:
     # pyproject's addopts deselect the `docker` marker, so `just unit` skips
     # these.  docker-build is the only CI job with a daemon; if it stops
