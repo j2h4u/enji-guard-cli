@@ -203,31 +203,18 @@ def test_release_publishes_only_after_ci_succeeds_on_the_commit() -> None:
     assert re.search(r"^\s*needs: \[release-please, wait-for-ci\]$", release, re.MULTILINE)
 
 
-def test_release_pr_auto_merge_is_armed_on_an_always_present_output() -> None:
-    # The release PR is authored by github-actions[bot], so its checks park in
-    # `action_required` until a human approves them.  Auto-merge is what saves
-    # the second visit once they go green.
+def test_release_pr_is_not_auto_merged() -> None:
+    # Auto-merge merges the release PR as GITHUB_TOKEN, and a push made with
+    # that token does not trigger workflows.  The release commit then lands on
+    # main with no release.yml run behind it: no tag, no container publish, and
+    # nothing reporting the omission.  v3.0.2 reached main exactly that way.
     #
-    # It must be gated on `prs_created`, which release-please sets on every
-    # run, not on `pr`, which it sets only when a PR exists: gating on `pr`
-    # turns a renamed output into a silent skip, and releases would quietly
-    # stop arming auto-merge with nothing reporting why.
+    # Restoring it needs release-please to run under an identity that is not
+    # github-actions[bot], not a second attempt at arming auto-merge.
     release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
 
-    assert "--auto" in release
-    assert re.search(r"^\s*if: steps\.release\.outputs\.prs_created == 'true'$", release, re.MULTILINE)
-    assert not re.search(r"^\s*if: steps\.release\.outputs\.pr != ''$", release, re.MULTILINE)
-
-
-def test_release_pr_is_exempt_from_the_release_note_contract() -> None:
-    # The release PR's body is the release notes, so demanding an override
-    # block that describes it is circular -- and it legitimately carries a
-    # second commit whenever an entry release-please could not generate is
-    # added by hand.  Without the exemption the release blocks itself.
-    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-
-    assert "validate_release_notes" in ci
-    assert "if: ${{ !startsWith(github.event.pull_request.head.ref, 'release-please--') }}" in ci
+    assert "--auto" not in release
+    assert "gh pr merge" not in release
 
 
 def test_docker_marked_policy_tests_run_in_ci() -> None:
