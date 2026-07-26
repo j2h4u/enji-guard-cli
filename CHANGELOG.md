@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.1](https://github.com/j2h4u/enji-guard-cli/compare/v3.0.0...v3.0.1) (2026-07-26)
+
+
+### Fixes
+
+* **ci:** publish consumer tags as the attested manifest ([#185](https://github.com/j2h4u/enji-guard-cli/issues/185)) ([c79fb96](https://github.com/j2h4u/enji-guard-cli/commit/c79fb965afdbdb66d727ddf938e1a9c1ef143fe3))
+
 ## [3.0.0](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.13...v3.0.0) (2026-07-26)
 
 
