@@ -127,6 +127,38 @@ def test_batch_start_protection_considers_all_matching_runs() -> None:
     assert result["task_id"] == "task-running"
 
 
+def test_batch_start_names_a_pre_existing_pending_run_as_already_queued() -> None:
+    # A pending run that was already there must not be reported as `queued`:
+    # that reads as "queued for you" and is indistinguishable from a run this
+    # command created.  Only `started` may mean that.
+    audit = AuditDefinition("audit.security", "Security", "vulns", "audit")
+    project = _context().project
+    context = StartAuditsContext("repo_1", "project_1", [audit], AuditCatalog((audit,), audit))
+    state = _StartOneState(
+        AuditRerunState("new", "old", None, None, {"audit.security": "old"}),
+        (AuditRun("task-pending", "audit.security", "pending", None, None, None),),
+        project,
+    )
+
+    def _refuse(_: object) -> object:
+        raise AssertionError("upstream must not be asked to start a run that already exists")
+
+    dependencies = StartAuditDependencies(
+        make_audit_run_create=lambda *_: None,
+        start_audit_run=_refuse,
+        project_detail=lambda _: project,
+        runbook=lambda _: AuditRunbookMetadata("runbook", None, None),
+        current_repo_active_runs=lambda _: (),
+        record_started_run=lambda _: None,
+        task_identity=lambda _: (None, None),
+    )
+
+    result = _start_one_audit(audit, context=context, state=state, dependencies=dependencies)
+
+    assert result["state"] == "already_queued"
+    assert result["task_id"] == "task-pending"
+
+
 def test_batch_start_does_not_treat_stale_active_run_as_current_head_duplicate() -> None:
     audit = AuditDefinition(
         "audit.security",
