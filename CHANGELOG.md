@@ -1,5 +1,35 @@
 # Changelog
 
+## [3.0.2](https://github.com/j2h4u/enji-guard-cli/compare/v3.0.1...v3.0.2) (2026-07-26)
+
+
+### Fixes
+
+* **ci:** exempt the release PR from the release-note contract ([#194](https://github.com/j2h4u/enji-guard-cli/issues/194)) ([7949466](https://github.com/j2h4u/enji-guard-cli/commit/7949466586d8e23588245f7df3581ed0026fab91))
+* **ci:** enforce the release-note contract a squash merge owes ([#190](https://github.com/j2h4u/enji-guard-cli/issues/190)) ([c2249b6](https://github.com/j2h4u/enji-guard-cli/commit/c2249b65baaef2c73645ac99d0c9dda674bec698))
+* **ci:** reject commit bodies release-please cannot parse ([#192](https://github.com/j2h4u/enji-guard-cli/issues/192)) ([c289e73](https://github.com/j2h4u/enji-guard-cli/commit/c289e73a6170bd230a1f9b36a2324fcf461fa656))
+
+
+### Build
+
+* replace import-linter with tach and enable pre-commit hooks ([#189](https://github.com/j2h4u/enji-guard-cli/issues/189)) ([cbf0ea3](https://github.com/j2h4u/enji-guard-cli/commit/cbf0ea32c748c4c41672e28b46180927a094653d))
+
+
+### CI
+
+* **release:** arm auto-merge on the release PR ([#188](https://github.com/j2h4u/enji-guard-cli/issues/188)) ([d744547](https://github.com/j2h4u/enji-guard-cli/commit/d7445474ac90d1dfd3c1bea231c73891730d9521))
+
+
+### Refactoring
+
+* **application:** clear the small backlog ([#193](https://github.com/j2h4u/enji-guard-cli/issues/193)) ([72172d5](https://github.com/j2h4u/enji-guard-cli/commit/72172d51a45ca698baff5b357c7de501008da652))
+* **ci:** drop the changed-file classification gate ([#187](https://github.com/j2h4u/enji-guard-cli/issues/187)) ([e521a95](https://github.com/j2h4u/enji-guard-cli/commit/e521a9547b83afc4933679508860b309ac4ec874))
+
+
+### Documentation
+
+* **changelog:** restore what each release actually shipped ([#187](https://github.com/j2h4u/enji-guard-cli/issues/187)) ([e521a95](https://github.com/j2h4u/enji-guard-cli/commit/e521a9547b83afc4933679508860b309ac4ec874))
+
 ## [3.0.1](https://github.com/j2h4u/enji-guard-cli/compare/v3.0.0...v3.0.1) (2026-07-26)
 
 
