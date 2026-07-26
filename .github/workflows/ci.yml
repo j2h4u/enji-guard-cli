@@ -48,7 +48,13 @@ jobs:
       # squash keeps one subject and drops the rest.  Demand the override block
       # release-please reads, and check it will actually parse -- a malformed
       # block collapses to a single entry with no error anywhere.
+      #
+      # The release PR is exempt: its body *is* the release notes, so asking it
+      # for an override block describing itself is circular.  It also legitimately
+      # carries more than one commit whenever an entry release-please could not
+      # generate is added to it by hand.
       - name: Validate the release-note contract
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'release-please--') }}
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
