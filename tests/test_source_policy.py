@@ -219,6 +219,17 @@ def test_release_pr_auto_merge_is_armed_on_an_always_present_output() -> None:
     assert not re.search(r"^\s*if: steps\.release\.outputs\.pr != ''$", release, re.MULTILINE)
 
 
+def test_release_pr_is_exempt_from_the_release_note_contract() -> None:
+    # The release PR's body is the release notes, so demanding an override
+    # block that describes it is circular -- and it legitimately carries a
+    # second commit whenever an entry release-please could not generate is
+    # added by hand.  Without the exemption the release blocks itself.
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "validate_release_notes" in ci
+    assert "if: ${{ !startsWith(github.event.pull_request.head.ref, 'release-please--') }}" in ci
+
+
 def test_docker_marked_policy_tests_run_in_ci() -> None:
     # pyproject's addopts deselect the `docker` marker, so `just unit` skips
     # these.  docker-build is the only CI job with a daemon; if it stops
