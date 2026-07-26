@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_IMAGE_REF = "ghcr.io/j2h4u/enji-guard-cli@sha256:" + "0" * 64
 COMPOSE_PACKAGE_VERSION = "1.2.3+local.test"
@@ -38,9 +40,11 @@ RAW_GATEWAY_MODULES = frozenset(
 PRODUCT_SOURCE_ROOTS = (
     ROOT / "src" / "enji_guard_cli" / "audit",
     ROOT / "src" / "enji_guard_cli" / "portfolio",
-    ROOT / "src" / "enji_guard_cli" / "application.py",
+    ROOT / "src" / "enji_guard_cli" / "application",
     ROOT / "src" / "enji_guard_cli" / "delivery",
+    ROOT / "src" / "enji_guard_cli" / "mcp_facade.py",
 )
+BUILD_PUSH_ACTION = "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
 SETUP_UV_ACTION = "astral-sh/setup-uv@"
 TRIVY_ACTION = "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25"
 UV_VERSION = "0.11.17"
@@ -71,6 +75,7 @@ def _compose_config(path: Path, *, host_port: str | None = None) -> dict[str, ob
     return cast(dict[str, object], json.loads(result.stdout))
 
 
+@pytest.mark.docker
 def test_local_compose_requires_build_provenance() -> None:
     environment = os.environ.copy()
     environment.pop("PACKAGE_VERSION", None)
@@ -100,6 +105,7 @@ def test_local_compose_requires_build_provenance() -> None:
     assert any(variable in build.stderr for variable in ("PACKAGE_VERSION", "SOURCE_COMMIT"))
 
 
+@pytest.mark.docker
 def test_local_compose_passes_non_placeholder_build_provenance() -> None:
     compose = _compose_config(ROOT / "docker-compose.yml")
     services = cast(dict[str, object], compose["services"])
@@ -133,6 +139,7 @@ def test_dockerfile_rejects_placeholder_build_provenance() -> None:
     assert "SOURCE_COMMIT must be a Git object id" in dockerfile
 
 
+@pytest.mark.docker
 def test_local_and_ghcr_compose_critical_settings_stay_in_sync() -> None:
     local = _compose_common_service_fields(ROOT / "docker-compose.yml")
     ghcr = _compose_common_service_fields(ROOT / "deploy" / "docker-compose.ghcr.yml")
@@ -140,6 +147,7 @@ def test_local_and_ghcr_compose_critical_settings_stay_in_sync() -> None:
     assert local == ghcr
 
 
+@pytest.mark.docker
 def test_compose_publishes_mcp_on_configurable_nonconflicting_host_port() -> None:
     for path in (ROOT / "docker-compose.yml", ROOT / "deploy" / "docker-compose.ghcr.yml"):
         compose = _compose_config(path)
@@ -161,19 +169,60 @@ def test_compose_publishes_mcp_on_configurable_nonconflicting_host_port() -> Non
         ]
 
 
+@pytest.mark.docker
 def test_ghcr_compose_declares_stable_project_name() -> None:
     compose = _compose_config(ROOT / "deploy" / "docker-compose.ghcr.yml")
 
     assert compose["name"] == "enji-guard-cli"
 
 
-def test_container_publish_workflow_run_requires_trusted_source() -> None:
-    workflow = (ROOT / ".github" / "workflows" / "container.yml").read_text(encoding="utf-8")
+def test_container_publish_has_exactly_one_entry_point() -> None:
+    # Two publishing runs for one commit build two different digests and race
+    # for :latest and for the tag the attestation subject is resolved from, so
+    # the container workflow must stay reachable only through release.yml (plus
+    # the manual workflow_dispatch escape hatch).
+    container = (ROOT / ".github" / "workflows" / "container.yml").read_text(encoding="utf-8")
 
-    assert "github.event.workflow_run.event == 'push'" in workflow
-    assert "github.event.workflow_run.head_branch == 'main'" in workflow
-    assert "github.event.workflow_run.head_repository.full_name == github.repository" in workflow
-    assert "github.event.workflow_run.conclusion == 'success'" in workflow
+    assert _workflow_triggers(container) == ("workflow_call", "workflow_dispatch")
+    assert "workflow_run" not in container
+
+    callers = [
+        path
+        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        if "uses: ./.github/workflows/container.yml" in path.read_text(encoding="utf-8")
+    ]
+
+    assert [path.name for path in callers] == ["release.yml"]
+
+
+def test_release_publishes_only_after_ci_succeeds_on_the_commit() -> None:
+    release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    assert _workflow_triggers(release) == ("push", "workflow_dispatch")
+    assert "actions/workflows/ci.yml/runs?head_sha=" in release
+    assert re.search(r"^\s*needs: \[release-please, wait-for-ci\]$", release, re.MULTILINE)
+
+
+def test_docker_marked_policy_tests_run_in_ci() -> None:
+    # pyproject's addopts deselect the `docker` marker, so `just unit` skips
+    # these.  docker-build is the only CI job with a daemon; if it stops
+    # invoking them the packaging policy silently becomes local-only.
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    marked = [item for item in _source_files_marked_docker() if item]
+
+    assert marked
+    assert "-m docker" in (ROOT / "Justfile").read_text(encoding="utf-8")
+    assert "run: just docker-tests" in ci
+
+
+def test_publishing_workflows_are_not_cancellable() -> None:
+    # A cancellation between the first registry push and the attestation steps
+    # leaves promoted tags live with no provenance and no rollback.
+    for name in ("container.yml", "release.yml"):
+        workflow = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+
+        assert "cancel-in-progress: false" in workflow, name
+        assert "cancel-in-progress: true" not in workflow, name
 
 
 def test_setup_uv_installs_the_dockerfile_version() -> None:
@@ -193,16 +242,49 @@ def test_container_publish_scans_loaded_candidate_before_push() -> None:
     scan = workflow.index("- name: Scan candidate image")
     publish = workflow.index("- name: Publish tested image")
     scan_step = _action_steps(workflow, TRIVY_ACTION)
+    build_steps = _action_steps(workflow, BUILD_PUSH_ACTION)
     candidate_build = workflow[build:scan]
 
     assert build < scan < publish
     assert "load: true" in candidate_build
+    assert "push: false" in candidate_build
     assert "tags: ${{ steps.image-tags.outputs.tags }}" in candidate_build
+    assert "docker push" not in workflow[:scan]
     assert len(scan_step) == 1
     assert "scan-type: image" in scan_step[0]
-    assert "image-ref: ${{ env.IMAGE_NAME }}:latest" in scan_step[0]
+    assert "image-ref: ${{ env.IMAGE_NAME }}:sha-${{ steps.release-metadata.outputs.source-sha }}" in scan_step[0]
     assert 'exit-code: "1"' in scan_step[0]
     assert "ignore-unfixed: true" in scan_step[0]
+
+    # Ordering alone would not notice a second builder added after the scan, so
+    # pin that the workflow builds exactly once and that no build anywhere in it
+    # is allowed to push.  Every byte that reaches GHCR must come from the one
+    # image Trivy looked at.
+    assert len(build_steps) == 1
+    assert "push: true" not in workflow
+    assert all("push: false" in step and "load: true" in step for step in build_steps)
+
+
+def test_container_publish_attests_before_promoting_mutable_tags() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "container.yml").read_text(encoding="utf-8")
+    publish = workflow.index("- name: Publish tested image")
+    provenance = workflow.index("- name: Attest build provenance")
+    sbom = workflow.index("- name: Attest SBOM")
+    promote = workflow.index("- name: Promote attested tags")
+
+    # The publish step may push the immutable sha tag only.  :latest and the
+    # version tags are promoted after the attestations exist, so a failure
+    # between the two leaves the tags colleagues actually pull untouched.
+    assert publish < provenance < sbom < promote
+    assert workflow.count("docker push") == 1
+    assert 'docker push "${candidate}"' in workflow[publish:provenance]
+    assert "docker buildx imagetools create" not in workflow[:sbom]
+
+    # The attested subject must be provably the scanned image, not whatever the
+    # registry happens to serve under the tag by the time it is read back.
+    assert ".RepoDigests" in workflow[publish:provenance]
+    for subject in (workflow[provenance:sbom], workflow[sbom:promote]):
+        assert "subject-digest: ${{ steps.publish.outputs.digest }}" in subject
 
 
 def test_audit_schedule_domain_has_no_improvement_job_fallback() -> None:
@@ -227,6 +309,7 @@ def test_product_source_does_not_import_raw_gateway_implementations() -> None:
 def _product_python_files() -> tuple[Path, ...]:
     paths: list[Path] = []
     for root in PRODUCT_SOURCE_ROOTS:
+        assert root.exists(), f"product source root no longer exists: {root}"
         if root.is_file():
             paths.append(root)
         else:
@@ -239,6 +322,23 @@ def _action_steps(workflow: str, action: str) -> tuple[str, ...]:
     return tuple(match.group(0) for match in pattern.finditer(workflow))
 
 
+def _source_files_marked_docker() -> tuple[str, ...]:
+    """Return the test files that carry at least one `docker` marker."""
+    return tuple(
+        path.name
+        for path in sorted((ROOT / "tests").glob("test_*.py"))
+        if "@pytest.mark.docker" in path.read_text(encoding="utf-8")
+    )
+
+
+def _workflow_triggers(workflow: str) -> tuple[str, ...]:
+    """Return the event names declared under the workflow's top-level `on:` key."""
+    block = re.search(r"(?m)^on:\n((?:(?:[ \t#].*)?\n)*)", workflow)
+    if block is None:
+        raise AssertionError("workflow has no top-level 'on:' block")
+    return tuple(match.group(1) for match in re.finditer(r"(?m)^ {2}([a-z_]+):", block.group(1)))
+
+
 def _imported_modules(node: ast.AST) -> tuple[str, ...]:
     if isinstance(node, ast.Import):
         return tuple(alias.name for alias in node.names)
@@ -249,3 +349,38 @@ def _imported_modules(node: ast.AST) -> tuple[str, ...]:
             return tuple(f"{node.module}.{alias.name}" for alias in node.names)
         return (node.module,)
     return ()
+
+
+def test_application_seam_re_exports_no_domain_type() -> None:
+    """The application seam must publish its own types, never launder domain ones.
+
+    `tach` cannot catch this: once a domain type is re-exported from
+    `application/__init__`, every delivery import of it becomes legal while the
+    coupling stays exactly where it was.  This asserts the property directly --
+    every name the seam publishes is defined inside `enji_guard_cli.application`.
+    """
+    import enji_guard_cli.application as seam
+
+    laundered: dict[str, str] = {}
+    for name in seam.__all__:
+        published = cast(object, getattr(seam, name))
+        module = getattr(published, "__module__", None)
+        if isinstance(module, str) and not module.startswith("enji_guard_cli.application"):
+            laundered[name] = module
+
+    assert laundered == {}, f"application/__init__ re-exports types defined elsewhere: {laundered}"
+
+
+def test_delivery_names_no_bounded_context() -> None:
+    """Delivery renders what the application hands it, in the application's words."""
+    offenders = sorted(
+        f"{path.relative_to(ROOT)}:{node.lineno}"
+        for path in (ROOT / "src" / "enji_guard_cli" / "delivery").rglob("*.py")
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.ImportFrom)
+        and (node.module or "").startswith(
+            ("enji_guard_cli.audit", "enji_guard_cli.portfolio", "enji_guard_cli.gitlab")
+        )
+    )
+
+    assert offenders == []

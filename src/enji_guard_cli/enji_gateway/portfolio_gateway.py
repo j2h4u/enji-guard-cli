@@ -8,6 +8,7 @@ extensions.
 from collections.abc import Mapping
 from typing import cast
 
+from enji_guard_cli.auth_session import CredentialReader
 from enji_guard_cli.enji_gateway.http import (
     LanguageCode,
     RepoTransfer,
@@ -54,7 +55,7 @@ from enji_guard_cli.enji_gateway.http import (
 from enji_guard_cli.enji_gateway.http import (
     user_preferences as _user_preferences,
 )
-from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayClient, GatewayCredentialReader
+from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayClient
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.portfolio.errors import PortfolioMalformedError
 from enji_guard_cli.portfolio.models import (
@@ -79,7 +80,7 @@ class PortfolioGateway(PortfolioGatewayPort):
         auth_file: GatewayAuthFile = None,
         client: GatewayClient = None,
         *,
-        auth_port: GatewayCredentialReader,
+        auth_port: CredentialReader,
     ) -> None:
         self._auth_file = auth_file
         self._client = client

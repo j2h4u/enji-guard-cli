@@ -25,9 +25,23 @@ lifecycle, freshness relative to the repository head, scores, and readable
 findings. The Enji API may still call some wire payloads reports, but that
 transport vocabulary is not part of the user-facing model.
 
-Mutating batch commands require explicit scope. Use a `REPO` argument for one
+Mutating batch commands require explicit scope. Use `--repo REPO` for one
 repository, `--all-repos` with `--project NAME_OR_ID` for every repository in
-one project, or `--all-projects` for every repository in every project.
+one project, or `--all-projects` for every repository in every project. Scope is
+never implicit: omitting all three exits `1` with `VALIDATION`. The convention
+is positional `REPO` wherever a command targets exactly one repository
+(`status`, `audit start|read|summary`, `repo *`, `recon start`) and a named
+`--repo` on the batch commands (`schedule`, `improvement-jobs`, `email`), where
+the repository is one of three competing scope selectors.
+`--all-projects` is the only unbounded write scope, so it is confirmed before
+it runs: an interactive terminal is prompted, and every non-interactive caller
+(agents, MCP, CI, and any `--json` invocation, which never prompts) must pass
+`--yes`. Without it the command exits `1` with `CONFIRMATION_REQUIRED` and
+changes nothing.
+The two irreversible single-target deletions, `project delete` and `repo
+remove`, are confirmed the same way and with the same `--yes` flag: a project
+cannot be un-deleted, and a detached repository loses its accumulated audit
+history, so neither is recoverable by re-running an inverse command.
 Mutating commands are designed for agent retries: repeated calls should report
 `unchanged`, `already_present`, `already_running`, or equivalent state instead
 of duplicating upstream work.
@@ -70,7 +84,7 @@ The workflow is audit -> findings -> optional improvement. The live catalog's
 relationships are `security` -> `vuln-fix`, `tests` -> `test-writing`, and
 `dependency-hygiene` -> `dependency-update`; pentest is separate. The CLI is
 the operator surface for autofix management (`list` and `set`), while MCP
-remains read-only. Use an explicit `REPO`, `--all-repos` with `--project`, or
+remains read-only. Use an explicit `--repo REPO`, `--all-repos` with `--project`, or
 `--all-projects` for batch scope. The relationship mapping is temporary and
 can be removed when Enji exposes relationships directly.
 
@@ -185,11 +199,10 @@ For triage across all visible repositories:
 
 ```bash
 docker exec -i enji-guard-cli enji-guard status --sort weakest
-docker exec -i enji-guard-cli enji-guard repo list --sort latest-audit
 ```
 
-These portfolio-wide commands return the compact overview: project and
-repository identity, scores, recon/connection state, and active runs. They do
+`status` without a `REPO` returns the compact portfolio overview: project and
+repository identity, scores, recon/connection state, and active runs. It does
 not fetch every audit status for every repository. Use `status REPO` for the
 detailed status of one repository, `audit summary REPO` for compact audit
 triage, and `audit read REPO` for audit findings. Add `--json` only when the
@@ -385,12 +398,12 @@ docker exec -i enji-guard-cli enji-guard access
 docker exec -i enji-guard-cli enji-guard project list
 docker exec -i enji-guard-cli enji-guard project create Pets
 docker exec -i enji-guard-cli enji-guard project rename Pets Friends
-docker exec -i enji-guard-cli enji-guard project delete Pets
+docker exec -i enji-guard-cli enji-guard project delete Pets --yes
 docker exec -i enji-guard-cli enji-guard language show
 docker exec -i enji-guard-cli enji-guard language set ru
 docker exec -i enji-guard-cli enji-guard repo add github@github.com:j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard repo add gitlab@gitlab.example:group/subgroup/service --repo-access-credential-id "$ENJI_GITLAB_CREDENTIAL_ID"
-docker exec -i enji-guard-cli enji-guard repo remove github@github.com:j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard repo remove github@github.com:j2h4u/enji-guard-cli --yes
 docker exec -i enji-guard-cli enji-guard repo resolve github@github.com:j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard repo move github@github.com:j2h4u/enji-guard-cli --to-project Friends
 docker exec -i enji-guard-cli enji-guard status github@github.com:j2h4u/enji-guard-cli
@@ -403,12 +416,68 @@ docker exec -i enji-guard-cli enji-guard audit read github@github.com:j2h4u/enji
 docker exec -i enji-guard-cli enji-guard --project Pets schedule list
 docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos --enabled on --frequency workdays --timezone Asia/Almaty
 docker exec -i enji-guard-cli enji-guard --project Pets schedule auto-time --all-repos
-docker exec -i enji-guard-cli enji-guard improvement-jobs list github@github.com:j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard improvement-jobs set github@github.com:j2h4u/enji-guard-cli security vuln-fix --enabled on
+docker exec -i enji-guard-cli enji-guard improvement-jobs list --repo github@github.com:j2h4u/enji-guard-cli
+docker exec -i enji-guard-cli enji-guard improvement-jobs set --repo github@github.com:j2h4u/enji-guard-cli vuln-fix --enabled on
 docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --scheduled off
 ```
 
 Pass `--json` when a command output is consumed by automation.
+
+### Full Command Surface
+
+Every command the CLI exposes; `enji-guard COMMAND --help` is authoritative for
+options.
+
+| Command | Purpose |
+|---------|---------|
+| `status [REPO]` | Portfolio overview, or one repository audit snapshot when `REPO` is given. |
+| `wait REPO` | Block until the repository's audits finish. |
+| `health [--ready]` | Process liveness only; `--ready` probes the MCP listener and cached backend readiness. Healthchecks, probes, and CI gates must use `health --ready`, because bare `health` cannot fail while the process runs. |
+| `access` | Account plan and limits. |
+| `run` | Run the long-lived MCP service (used by the container entrypoint). |
+| `auth import-bearer\|import-cookie --stdin`, `auth status` | Credential bootstrap and credential state. |
+| `project list\|create\|rename\|delete\|settings` | Project administration; `delete` requires `--yes`. |
+| `repo add\|remove\|move\|resolve` | Repository administration; `remove` requires `--yes`. |
+| `recon start REPO` | Baseline discovery run. |
+| `audit start\|read\|summary REPO` | Run audits, read bodies, read compact metadata. |
+| `schedule list\|set\|auto-time\|timezone` | Automatic audit schedules. |
+| `improvement-jobs list\|set` | Curated autofix jobs. |
+| `email list\|set` | Audit completion email preferences. |
+| `language show\|set` | Account-wide audit language. |
+| `gitlab credentials\|projects` | GitLab credential and project discovery. |
+
+Each capability has exactly one command. `status` is the only snapshot — with
+`REPO` for one repository, without it for the portfolio table — and `wait` is
+the only blocking wait. The `audit`, `repo`, and `recon` groups do not repeat
+either of them, and there is no `portfolio` group; `auth status` reports
+credential state, which is a different subject.
+
+### Exit Codes
+
+The exit status is a stable contract; automation should branch on it instead of
+parsing text.
+
+| Code | Meaning | Typical error code |
+|------|---------|--------------------|
+| `0` | Success. | — |
+| `1` | Operator or upstream failure that is not authentication or a missing target. | `VALIDATION`, `CONFIRMATION_REQUIRED`, `ABORTED`, `UPSTREAM`, `STORAGE`, `UNREADY` |
+| `2` | Command-line usage error, raised by the parser before anything runs. | — |
+| `3` | Credentials are missing, expired, corrupt, or unusable. | `AUTH_*` |
+| `4` | The named repository, project, audit, or selector does not exist. | `NOT_FOUND`, `BAD_SELECTOR` |
+
+Errors always go to stderr. Without `--json` they are one `CODE: message` line;
+with `--json` they are a `{"code", "message"}` object, so stdout stays either
+valid JSON or empty:
+
+```console
+$ enji-guard --json status github@github.com:j2h4u/enji-guard-cli
+{
+  "code": "AUTH_REQUIRED",
+  "message": "auth file does not exist. Credential file: ~/.config/enji-guard/auth.json. ..."
+}
+$ echo $?
+3
+```
 
 Use the global `--project NAME_OR_ID` filter when a command must be scoped to
 one Enji project.
@@ -419,7 +488,7 @@ disambiguation when needed. `--to-project` selects the destination project.
 catalog action key. Its cadence and per-subscription IANA timezone are stored
 with each schedule; Enji assigns the run time by default. The service/container
 should run with the host timezone. Batch writes are explicit client-side loops:
-use `REPO`, `--project NAME_OR_ID --all-repos`, or `--all-projects`.
+use `--repo REPO`, `--project NAME_OR_ID --all-repos`, or `--all-projects`.
 `schedule set` updates the selected scope, and `schedule auto-time` restores
 Enji-assigned run times. Autofix `improvement-jobs` are not audit schedules.
 

@@ -197,3 +197,109 @@ def test_terminal_active_run_history_never_overrides_active_run_in_both_orders(
     status = build_status("repo-1", _catalog(), (), runs, AuditRerunState(None, None, None, None))
     assert status.items[0].task_lifecycle == "queued"
     assert status.items[0].task_id == "current"
+
+
+def test_pending_run_without_head_evidence_is_not_presented_as_worth_waiting_for() -> None:
+    """Reported defect: a pending task carrying no current-head metadata was
+    reported as ``queued``/``wait_for_current_head_run``, i.e. absence of
+    evidence rendered as evidence of currency."""
+
+    status = build_status(
+        "repo-1",
+        _catalog(),
+        (),
+        (
+            AuditRun(
+                "3265ad0f-0000-4000-8000-000000000000",
+                "audit.security",
+                "pending",
+                "2026-07-25T20:17:17.698Z",
+                None,
+                None,
+            ),
+        ),
+        AuditRerunState("current-sha", None, None, None, {"audit.security": "old-sha"}),
+    )
+
+    item = status.items[0]
+    assert item.freshness.state == "stale"
+    assert item.current_head.state == "unverified"
+    assert item.current_head.action_required == "inspect_unverified_run"
+    assert item.current_head.action_required != "wait_for_current_head_run"
+    assert item.current_head.task_id == "3265ad0f-0000-4000-8000-000000000000"
+    assert item.current_head.task_status == "pending"
+    assert item.current_head.task_current_head_sha is None
+
+
+def test_running_run_without_head_evidence_is_unverified_too() -> None:
+    status = build_status(
+        "repo-1",
+        _catalog(),
+        (),
+        (
+            AuditRun(
+                "no-evidence",
+                "audit.security",
+                "in_progress",
+                "2026-07-25T20:17:17.698Z",
+                "2026-07-25T20:18:00.000Z",
+                None,
+            ),
+        ),
+        AuditRerunState("current-sha", None, None, None, {"audit.security": "old-sha"}),
+    )
+
+    item = status.items[0]
+    assert item.current_head.state == "unverified"
+    assert item.current_head.action_required == "inspect_unverified_run"
+
+
+def test_failed_run_without_head_evidence_is_not_reported_as_unverified() -> None:
+    """Only live runs can be unproved.  A failed run is not an active run at
+    all, so the current-head answer stays "nothing is running for this head"."""
+
+    status = build_status(
+        "repo-1",
+        _catalog(),
+        (),
+        (AuditRun("boom", "audit.security", "failed", "2026-07-25T20:17:17.698Z", None, None),),
+        AuditRerunState("current-sha", None, None, None, {"audit.security": "old-sha"}),
+    )
+
+    item = status.items[0]
+    assert item.current_head.state == "missing"
+    assert item.current_head.action_required == "start_current_head_run"
+
+
+def test_unknown_current_head_is_its_own_state_not_unverified() -> None:
+    """An unproved run and an unknown repository head are different problems:
+    the first is about the task, the second about the repository."""
+
+    status = build_status(
+        "repo-1",
+        _catalog(),
+        (),
+        (AuditRun("pending-run", "audit.security", "pending", "2026-07-25T20:17:17.698Z", None, None),),
+        AuditRerunState(None, None, None, None, {"audit.security": "old-sha"}),
+    )
+
+    item = status.items[0]
+    assert item.current_head.state == "unknown"
+    assert item.current_head.action_required == "resolve_unknown_head"
+
+
+def test_unverified_run_is_still_active_so_wait_keeps_blocking() -> None:
+    """`wait` blocks on task liveness, not on the currency claim: the task is
+    genuinely running upstream, so returning early would be a lie in the other
+    direction."""
+
+    status = build_status(
+        "repo-1",
+        _catalog(),
+        (),
+        (AuditRun("pending-run", "audit.security", "pending", "2026-07-25T20:17:17.698Z", None, None),),
+        AuditRerunState("current-sha", None, None, None, {"audit.security": "old-sha"}),
+    )
+
+    assert status.items[0].current_head.state == "unverified"
+    assert status.active == ("audit.security",)

@@ -4,11 +4,7 @@ from enji_guard_cli.audit.catalog import parse_catalog_result
 from enji_guard_cli.audit.catalog_observation import AuditCatalogObserver, AuditCatalogSnapshotRepository
 from enji_guard_cli.audit.freshness import compare_heads, stale
 from enji_guard_cli.audit.models import AuditCatalog, AuditDefinition
-from enji_guard_cli.audit.observation import (
-    AuditRepositoryObservation,
-    AuditRepositoryObservationLoader,
-    AuditRepositoryObserver,
-)
+from enji_guard_cli.audit.observation import AuditRepositoryObservation, AuditRepositoryObserver
 from enji_guard_cli.audit.ports import AuditFreshness, AuditStatus, AuditStatusItem
 
 __all__ = [
@@ -18,7 +14,6 @@ __all__ = [
     "AuditDefinition",
     "AuditFreshness",
     "AuditRepositoryObservation",
-    "AuditRepositoryObservationLoader",
     "AuditRepositoryObserver",
     "AuditStatus",
     "AuditStatusItem",

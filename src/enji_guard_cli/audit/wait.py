@@ -34,7 +34,10 @@ def wait_for_completion(
         if heartbeat is not None and now >= next_heartbeat_at:
             heartbeat(result)
             next_heartbeat_at += options.heartbeat_seconds
-        dependencies.sleep(max(0.0, min(options.poll_seconds, deadline - now)))
+        # `now < deadline` here: the loop returns above whenever `timed_out`,
+        # and `now` is not re-read in between, so the remaining budget is
+        # always positive and needs no lower clamp.
+        dependencies.sleep(min(options.poll_seconds, deadline - now))
 
 
 def validate_wait_options(options: AuditWaitOptions) -> None:
@@ -62,10 +65,11 @@ def wait_result(
         reason = "waiting"
     elif status.missing:
         reason = "missing"
-    elif status.complete:
-        reason = "complete"
     else:
-        reason = "stale"
+        # `AuditStatus.complete` is `not active and not missing and not failed`,
+        # all three of which are excluded above, so this branch is exactly the
+        # complete case.  There is no fifth outcome to fall through to.
+        reason = "complete"
     return AuditWaitResult(
         repo_id=repo_id,
         status=status,

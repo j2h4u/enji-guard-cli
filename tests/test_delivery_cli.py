@@ -1,6 +1,13 @@
+"""CLI delivery over the real facade tree.
+
+Every command test here drives the same facades production composes and
+asserts on the *port* calls that resulted, not on which facade method the CLI
+named.  Only the port view distinguishes a facade that forwarded its arguments
+from one that translated them wrongly.
+"""
+
 import importlib
 import json
-from collections.abc import Callable, Mapping
 from typing import cast
 
 import pytest
@@ -9,68 +16,133 @@ from typer.core import TyperGroup
 from typer.main import get_command
 from typer.testing import CliRunner
 
-from enji_guard_cli.application import (
-    Application,
-    ApplicationAuthError,
-    ApplicationCommandError,
-    ApplicationResult,
-    AutofixListing,
-    AutofixListingItem,
-    AutofixWriteScope,
-    ScheduleListing,
+from application_builder import (
+    PETS,
+    ApplicationStubs,
+    RecordingAuditGateway,
+    RecordingAuthSession,
+    RecordingGitLabGateway,
+    RecordingPortfolioGateway,
+    RecordingTargetService,
+    WriteTargetsCall,
+    recording_application,
+    repository,
 )
-from enji_guard_cli.audit.artifacts import ArtifactReadItem, AuditRead, AuditSummary, AuditSummaryItem
+from cli_output import rendered as _rendered
+from enji_guard_cli.application import ApplicationAuthError, ApplicationCommandError
 from enji_guard_cli.audit.ports import (
     AuditArtifact,
-    AuditAutofixDefinition,
     AuditAutofixJob,
-    AuditAutofixUpdate,
-    AuditFreshness,
-    AuditGatewayPort,
-    AuditNewerRun,
+    AuditCatalogAction,
+    AuditCatalogAutofix,
+    AuditCatalogResult,
+    AuditReportRef,
+    AuditRerunState,
+    AuditRun,
     AuditSchedule,
-    AuditScheduleUpdate,
-    AuditStatus,
-    AuditStatusItem,
+    AuditTaskLink,
 )
-from enji_guard_cli.auth_session.service import AuthSessionService
+from enji_guard_cli.auth_session.api import AuthError
 from enji_guard_cli.delivery.cli.app import _command_exit_code, _json, _run, app
 from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION, render_fields
 from enji_guard_cli.delivery.cli.presenters import operation_text
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.gitlab.models import (
     GitLabCredential,
+    GitLabCredentialPage,
+    GitLabCredentialsResult,
     GitLabProjectPage,
     GitLabProjectsQuery,
     GitLabProjectsResult,
     GitLabScope,
 )
-from enji_guard_cli.portfolio.models import ProjectRef, RepositoryIdentity, RepositoryProvider, RepositoryRef
-from enji_guard_cli.portfolio.ports import PortfolioAuditStatus, PortfolioGatewayPort
-from enji_guard_cli.portfolio.status import PortfolioOverview, ProjectOverview, RepositoryOverview, RepositoryStatus
+from enji_guard_cli.portfolio.models import ProjectDetail
 from enji_guard_cli.runtime_observability.supervisor import RuntimeServiceOptions
 
+cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
 
-def _repo(locator: str, *, scores: Mapping[str, float | int | None] | None = None) -> RepositoryRef:
-    return RepositoryRef(
-        "r1",
-        "p1",
-        "Pets",
-        RepositoryIdentity(RepositoryProvider.GITHUB, locator, "github.com"),
-        scores=scores or {},
-        web_url="https://example.test/repository",
-        provider_repo_id="provider-test",
+REPO = "github@github.com:acme/cat"
+REPORT_COMPLETED_AT = "2026-07-20T00:00:00Z"
+
+
+def _catalog(*published: AuditCatalogAction, autofixes: tuple[AuditCatalogAutofix, ...] = ()) -> AuditCatalogResult:
+    """Build a catalog around the mandatory recon action."""
+    recon = AuditCatalogAction(
+        "audit.recon", "Recon", "workflow", "draft", None, "recon", "runbook-recon", "recon", "1"
+    )
+    return AuditCatalogResult(actions=(recon, *published), autofixes=autofixes)
+
+
+def _audit(selector: str, title: str) -> AuditCatalogAction:
+    return AuditCatalogAction(
+        f"audit.{selector}", title, "audit", "published", selector, "audit", f"runbook-{selector}", selector, "1"
     )
 
 
-cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
+SECURITY_ONLY = _catalog(_audit("security", "Security"))
+
+GITLAB_PROJECTS_RESULT = GitLabProjectsResult(
+    scope=GitLabScope(scope_type="group", scope_owner="acme"),
+    credential=GitLabCredential(
+        id="cred-42",
+        name="automation",
+        credential_type="cookie",
+        provider="gitlab",
+        scope_type="group",
+        scope_owner="acme",
+        status="ready",
+        last_error=None,
+        expires_at=None,
+        git_host="gitlab.com",
+        api_base_url="https://gitlab.com/api/v4",
+        gitlab_health_reason=None,
+    ),
+    projects=(),
+    pagination=GitLabProjectPage(page=3, per_page=17, next_page=None),
+)
+
+
+class Ports:
+    """Every port one CLI invocation can reach, each recording its own calls."""
+
+    def __init__(
+        self,
+        *,
+        audit: RecordingAuditGateway | None = None,
+        portfolio: RecordingPortfolioGateway | None = None,
+        targets: RecordingTargetService | None = None,
+        gitlab: RecordingGitLabGateway | None = None,
+        auth: RecordingAuthSession | None = None,
+    ) -> None:
+        self.audit = audit or RecordingAuditGateway()
+        self.portfolio = portfolio or RecordingPortfolioGateway((ProjectDetail(PETS, (repository(),)),))
+        self.targets = targets or RecordingTargetService()
+        self.auth = auth or RecordingAuthSession()
+        self.gitlab = gitlab
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        application = recording_application(
+            audit=self.audit,
+            portfolio=self.portfolio,
+            targets=self.targets,
+            auth=self.auth,
+            gitlab=self.gitlab,
+        )
+        monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: application)
+
+
+@pytest.fixture
+def ports(monkeypatch: pytest.MonkeyPatch) -> Ports:
+    installed = Ports()
+    installed.install(monkeypatch)
+    return installed
 
 
 def test_operator_command_tree_uses_audit_vocabulary() -> None:
     result = CliRunner().invoke(app, ["--help"])
     assert result.exit_code == 0
     for command in ("auth", "project", "repo", "recon", "audit", "schedule", "improvement-jobs", "email", "language"):
-        assert command in result.stdout
+        assert command in _rendered(result.stdout)
 
 
 def test_root_without_arguments_shows_agent_mental_model() -> None:
@@ -86,9 +158,10 @@ def test_root_without_arguments_shows_agent_mental_model() -> None:
 def test_audit_help_warns_that_wait_is_not_refresh() -> None:
     result = CliRunner().invoke(app, ["audit", "--help"])
     assert result.exit_code == 0
-    assert "Use status REPO as the first readiness check" in result.stdout
-    assert "wait is a real blocking wait" in result.stdout
-    assert "not a" in result.stdout
+    help_text = _rendered(result.stdout)
+    assert "Use status REPO as the first readiness check" in help_text
+    assert "wait is a real blocking wait" in help_text
+    assert "not a" in help_text
     assert "refresh" in result.stdout
 
 
@@ -97,7 +170,7 @@ def test_audit_read_and_summary_are_public_commands() -> None:
     assert isinstance(root, TyperGroup)
     audit = root.commands["audit"]
     assert isinstance(audit, TyperGroup)
-    assert set(audit.commands) >= {"read", "summary", "start", "wait"}
+    assert set(audit.commands) >= {"read", "summary", "start"}
     runner = CliRunner()
     # Keep invocation as a reachability smoke check; command membership is the contract.
     assert runner.invoke(app, ["audit", "read", "--help"]).exit_code == 0
@@ -135,111 +208,17 @@ def test_run_keeps_stdio_as_an_explicit_interactive_transport(monkeypatch: pytes
     assert cast(RuntimeServiceOptions, captured["options"]).transport == "stdio"
 
 
-class _FakeAuth:
-    def status(self) -> dict[str, object]:
-        return {"authenticated": True, "credential_type": "bearer"}
+def test_audit_start_resolves_the_selector_and_starts_the_named_audit(ports: Ports) -> None:
+    result = CliRunner().invoke(app, ["audit", "start", REPO, "security", "--project", "Pets", "--json"])
 
-    def refresh(self) -> dict[str, object]:
-        return {"ok": True, "credential_type": "cookie"}
-
-    def import_cookie(self, value: str) -> dict[str, object]:
-        return {"ok": True, "credential_type": "cookie", "length": len(value)}
-
-    def import_bearer_token(self, value: str) -> dict[str, object]:
-        return {"ok": True, "credential_type": "bearer", "length": len(value)}
-
-
-class _FakeApplication:
-    def __init__(self) -> None:
-        self.auth = _FakeAuth()
-        self.calls: list[tuple[str, object]] = []
-
-    def execute(self, action: Callable[[], object]) -> ApplicationResult:
-        return ApplicationResult(action())
-
-    def project_settings(self, project: str | None) -> object:
-        self.calls.append(("project_settings", project))
-        return {"project": project, "repositories": []}
-
-    def import_bearer(self, value: str) -> dict[str, object]:
-        return self.auth.import_bearer_token(value)
-
-    def access(self) -> object:
-        self.calls.append(("access", None))
-        return {"full_access": True}
-
-    def portfolio_overview(self, project: str | None, sort: str) -> object:
-        self.calls.append(("portfolio_overview", (project, sort)))
-        return {"observed_at": "2026-07-20T00:00:00Z", "projects": []}
-
-    def repository_status(self, repo: str, project: str | None) -> object:
-        self.calls.append(("repository_status", (repo, project)))
-        return {
-            "repository": {
-                "identity": {"provider": "github", "host": "github.com", "locator": repo},
-                "web_url": f"https://github.com/{repo}",
-                "provider_repo_id": "provider-1",
-            }
-        }
-
-    def audit_summary(self, repo: str, selectors: list[str], *, project: str | None) -> object:
-        self.calls.append(("audit_summary", (repo, selectors, project)))
-        return AuditSummary(repo, ())
-
-    def audit_read(self, repo: str, selectors: list[str], *, project: str | None, all_audits: bool) -> object:
-        self.calls.append(("audit_read", (repo, selectors, project, all_audits)))
-        return AuditRead(repo, ())
-
-    def audit_start(self, repo: str, project: str | None, selectors: list[str], *, all_audits: bool) -> object:
-        self.calls.append(("audit_start", (repo, project, selectors, all_audits)))
-        return {"repo_id": repo, "project_id": project, "results": [{"state": "started"}]}
-
-    def set_schedules(
-        self,
-        repo: str | None,
-        project: str | None,
-        update: AuditScheduleUpdate,
-        *,
-        scope: AutofixWriteScope,
-    ) -> object:
-        self.calls.append(("set_schedules", (repo, project, update, scope)))
-        return [{"state": "unchanged"}]
-
-    def list_schedules(self, repo: str | None, project: str | None) -> object:
-        self.calls.append(("list_schedules", (repo, project)))
-        return ()
-
-    def set_email_preferences(self, repo: str | None, project: str | None, update: object, *, scope: object) -> object:
-        self.calls.append(("set_email_preferences", (repo, project, update, scope)))
-        return [{"state": "changed"}]
-
-    def set_autofixes(
-        self,
-        repo: str | None,
-        project: str | None,
-        selectors: list[str],
-        update: AuditAutofixUpdate,
-        *,
-        scope: AutofixWriteScope,
-    ) -> object:
-        self.calls.append(("set_autofixes", (repo, project, selectors, update, scope)))
-        return [{"state": "unchanged"}]
-
-    def list_autofixes(self, repo: str | None, project: str | None) -> object:
-        self.calls.append(("list_autofixes", (repo, project)))
-        return ()
-
-
-def test_audit_start_calls_typed_application_and_emits_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
-    result = CliRunner().invoke(app, ["audit", "start", "org/repo", "security", "--project", "Pets", "--json"])
     assert result.exit_code == 0
     assert result.exception is None
     payload = cast(dict[str, object], json.loads(result.stdout))
-    assert payload["repo_id"] == "org/repo"
-    assert payload["project_id"] == "Pets"
-    assert fake.calls == [("audit_start", ("org/repo", "Pets", ["security"], False))]
+    assert payload["repo_id"] == "r1"
+    assert payload["project_id"] == "p1"
+    assert [(call.selector, call.project) for call in ports.targets.resolve_repository_calls] == [(REPO, "Pets")]
+    started = ports.audit.started
+    assert [(item.repo_id, item.project_id, item.action_key) for item in started] == [("r1", "p1", "audit.security")]
 
 
 def test_gitlab_projects_maps_all_query_options_and_emits_result(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -252,38 +231,8 @@ def test_gitlab_projects_maps_all_query_options_and_emits_result(monkeypatch: py
         scope_type="group",
         scope_owner="acme",
     )
-    payload = GitLabProjectsResult(
-        scope=GitLabScope(scope_type="group", scope_owner="acme"),
-        credential=GitLabCredential(
-            id="cred-42",
-            name="automation",
-            credential_type="cookie",
-            provider="gitlab",
-            scope_type="group",
-            scope_owner="acme",
-            status="ready",
-            last_error=None,
-            expires_at=None,
-            git_host="gitlab.com",
-            api_base_url="https://gitlab.com/api/v4",
-            gitlab_health_reason=None,
-        ),
-        projects=(),
-        pagination=GitLabProjectPage(page=3, per_page=17, next_page=None),
-    )
-
-    class FakeGitLabApplication:
-        query: GitLabProjectsQuery | None = None
-
-        def execute(self, action: Callable[[], object]) -> ApplicationResult:
-            return ApplicationResult(action())
-
-        def gitlab_projects(self, query: GitLabProjectsQuery) -> GitLabProjectsResult:
-            self.query = query
-            return payload
-
-    fake = FakeGitLabApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    gitlab = RecordingGitLabGateway(projects=GITLAB_PROJECTS_RESULT)
+    Ports(gitlab=gitlab).install(monkeypatch)
 
     result = CliRunner().invoke(
         app,
@@ -309,76 +258,69 @@ def test_gitlab_projects_maps_all_query_options_and_emits_result(monkeypatch: py
 
     assert result.exit_code == 0
     assert result.exception is None
-    assert fake.query == expected_query
+    assert gitlab.queries == [expected_query]
     rendered = cast(dict[str, object], json.loads(result.stdout))
     assert cast(dict[str, object], rendered["credential"])["id"] == "cred-42"
     assert "\x1b" not in result.stdout
 
 
-def test_project_settings_and_access_use_typed_application_methods(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
-    settings = CliRunner().invoke(app, ["project", "settings", "--project", "Pets", "--json"])
-    access = CliRunner().invoke(app, ["access", "--json"])
-    assert settings.exit_code == 0
-    assert access.exit_code == 0
-    assert fake.calls[:2] == [("project_settings", "Pets"), ("access", None)]
-
-
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        ["--project", "Pets", "status", "--sort", "weakest", "--json"],
-        ["--project", "Pets", "portfolio", "status", "--sort", "weakest", "--json"],
-        ["--project", "Pets", "repo", "list", "--sort", "weakest", "--json"],
-    ],
-)
-def test_portfolio_commands_use_compact_overview(monkeypatch: pytest.MonkeyPatch, arguments: list[str]) -> None:
-    fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
-
-    result = CliRunner().invoke(app, arguments)
+def test_project_settings_reads_the_selected_project_and_account_preferences(ports: Ports) -> None:
+    result = CliRunner().invoke(app, ["project", "settings", "--project", "Pets", "--json"])
 
     assert result.exit_code == 0
-    assert fake.calls == [("portfolio_overview", ("Pets", "weakest"))]
+    assert ports.targets.resolve_project_calls == ["Pets"]
+    payload = cast(dict[str, object], json.loads(result.stdout))
+    assert cast(dict[str, object], payload["project"])["project_id"] == "p1"
+    assert cast(dict[str, object], payload["account_preferences"])["language"] == "en"
 
 
-def test_status_for_one_repository_keeps_detailed_status(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
-
-    result = CliRunner().invoke(app, ["--project", "Pets", "status", "github@github.com:acme/cat", "--json"])
+def test_access_is_served_by_the_portfolio_gateway(ports: Ports) -> None:
+    result = CliRunner().invoke(app, ["access", "--json"])
 
     assert result.exit_code == 0
-    assert fake.calls == [("repository_status", ("github@github.com:acme/cat", "Pets"))]
+    payload = cast(dict[str, object], json.loads(result.stdout))
+    assert payload["full_access"] is True
+    assert payload["group"] == "free"
+
+
+def test_portfolio_status_applies_the_requested_repository_sort(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--sort`` must reach the overview assembly, not just the command line."""
+    strong = repository("acme/strong", repo_id="r-strong", scores={"tests": 90, "vulns": 80})
+    weak = repository("acme/weak", repo_id="r-weak", scores={"tests": 70, "vulns": 10})
+    portfolio = RecordingPortfolioGateway((ProjectDetail(PETS, (strong, weak)),))
+    Ports(portfolio=portfolio).install(monkeypatch)
+
+    result = CliRunner().invoke(app, ["--project", "Pets", "status", "--sort", "weakest", "--json"])
+
+    assert result.exit_code == 0
+    payload = cast(dict[str, object], json.loads(result.stdout))
+    projects = cast(list[dict[str, object]], payload["projects"])
+    repositories = cast(list[dict[str, object]], projects[0]["repositories"])
+    locators = [
+        cast(dict[str, object], cast(dict[str, object], item["repository"])["identity"])["locator"]
+        for item in repositories
+    ]
+    assert locators == ["acme/weak", "acme/strong"]
+
+
+def test_status_for_one_repository_keeps_detailed_status(ports: Ports) -> None:
+    result = CliRunner().invoke(app, ["--project", "Pets", "status", REPO, "--json"])
+
+    assert result.exit_code == 0
+    payload = cast(list[dict[str, object]], json.loads(result.stdout))
+    repository_payload = cast(dict[str, object], payload[0]["repository"])
+    identity = cast(dict[str, object], repository_payload["identity"])
+    summary = cast(dict[str, object], cast(dict[str, object], payload[0]["audit"])["summary"])
+    assert identity["locator"] == "acme/cat"
+    assert {item["audit_key"] for item in cast(list[dict[str, object]], summary["items"])} == {
+        "audit.security",
+        "audit.tests",
+    }
 
 
 def test_portfolio_text_is_compact_and_scenario_oriented(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeApplication()
-    overview = PortfolioOverview(
-        "2026-07-20T00:00:00Z",
-        (
-            ProjectOverview(
-                ProjectRef("p1", "Pets"),
-                (
-                    RepositoryOverview(
-                        RepositoryRef(
-                            "r1",
-                            "p1",
-                            "Pets",
-                            RepositoryIdentity(RepositoryProvider.GITHUB, "acme/cat", "github.com"),
-                            recon_done=True,
-                            scores={"tests": 80, "vulns": 40},
-                            web_url="https://example.test/repository",
-                            provider_repo_id="provider-test",
-                        )
-                    ),
-                ),
-            ),
-        ),
-    )
-    monkeypatch.setattr(fake, "portfolio_overview", lambda project, sort: overview)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    cat = repository("acme/cat", recon_done=True, scores={"tests": 80, "vulns": 40})
+    Ports(portfolio=RecordingPortfolioGateway((ProjectDetail(PETS, (cat,)),))).install(monkeypatch)
 
     result = CliRunner().invoke(app, ["status"])
 
@@ -389,19 +331,14 @@ def test_portfolio_text_is_compact_and_scenario_oriented(monkeypatch: pytest.Mon
 
 
 def test_repository_status_text_is_compact_and_does_not_dump_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeApplication()
-    freshness = AuditFreshness("head", "head", "fresh")
-    item = AuditStatusItem("audit.security", "Security", freshness, True, "completed", "t1", "completed")
-    payload = (
-        RepositoryStatus(
-            _repo("acme/cat"),
-            PortfolioAuditStatus(AuditStatus("r1", "head", (item,))),
-        ),
+    audit = RecordingAuditGateway(
+        catalog=SECURITY_ONLY,
+        task_links={"r1": (AuditTaskLink("t1", "audit.security", "completed", completed_at=REPORT_COMPLETED_AT),)},
+        rerun_state=AuditRerunState("head", "head", True, "t1", {"audit.security": "head"}),
     )
-    monkeypatch.setattr(fake, "repository_status", lambda repo, project: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    Ports(audit=audit).install(monkeypatch)
 
-    result = CliRunner().invoke(app, ["status", "github@github.com:acme/cat"])
+    result = CliRunner().invoke(app, ["status", REPO])
 
     assert result.exit_code == 0
     assert "audits: total=1 ready=1 active=0 stale=0 failed=0" in result.stdout
@@ -409,25 +346,68 @@ def test_repository_status_text_is_compact_and_does_not_dump_json(monkeypatch: p
     assert '"audit_key"' not in result.stdout
 
 
-def test_audit_summary_is_compact_in_text_and_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeApplication()
-    payload = AuditSummary(
-        "r1",
-        (
-            AuditSummaryItem(
-                "audit.security", True, 73, "2026-07-20T00:00:00Z", None, AuditFreshness("h", "h", "fresh")
-            ),
-        ),
-    )
-    monkeypatch.setattr(fake, "audit_summary", lambda repo, selectors, project=None: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+def test_repository_status_marks_a_run_without_head_evidence_as_unverified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reported defect: a pending task with no current-head metadata rendered
+    as `action=wait_for_current_head_run`, telling the operator to sit still."""
 
-    text_result = CliRunner().invoke(app, ["audit", "summary", "github@github.com:acme/cat"])
-    json_result = CliRunner().invoke(app, ["audit", "summary", "github@github.com:acme/cat", "--json"])
+    unproved = AuditRun("3265ad0f", "audit.security", "pending", "2026-07-25T20:17:17.698Z", None, None)
+    audit = RecordingAuditGateway(
+        catalog=SECURITY_ONLY,
+        task_links={"r1": (AuditTaskLink("t1", "audit.security", "completed", completed_at=REPORT_COMPLETED_AT),)},
+        rerun_state=AuditRerunState("head", "old-head", True, "t1", {"audit.security": "old-head"}),
+        active_runs={"r1": (unproved,)},
+    )
+    Ports(audit=audit).install(monkeypatch)
+
+    text_result = CliRunner().invoke(app, ["status", REPO])
+    json_result = CliRunner().invoke(app, ["status", REPO, "--json"])
+
+    assert text_result.exit_code == 0
+    assert "current_head=unverified action=inspect_unverified_run" in text_result.stdout
+    assert "wait_for_current_head_run" not in text_result.stdout
+    assert json_result.exit_code == 0
+    payload = cast(list[dict[str, object]], json.loads(json_result.stdout))
+    audit_section = cast(dict[str, object], payload[0]["audit"])
+    summary = cast(dict[str, object], audit_section["summary"])
+    items = cast(list[dict[str, object]], summary["items"])
+    current_head = cast(dict[str, object], items[0]["current_head"])
+    # Null fields are omitted by the JSON projection, so the absence of
+    # `task_current_head_sha` is itself the machine-readable "no evidence".
+    assert current_head == {
+        "state": "unverified",
+        "action_required": "inspect_unverified_run",
+        "task_id": "3265ad0f",
+        "task_status": "pending",
+    }
+
+
+def _readable_security_gateway(*, active_runs: tuple[AuditRun, ...] = ()) -> RecordingAuditGateway:
+    """One published audit with exactly one completed, readable report."""
+    return RecordingAuditGateway(
+        catalog=SECURITY_ONLY,
+        task_links={"r1": (AuditTaskLink("t1", "audit.security", "completed", completed_at=REPORT_COMPLETED_AT),)},
+        rerun_state=AuditRerunState("head", "head", True, "t1", {"audit.security": "head"}),
+        reports={("r1", "security"): (AuditReportRef("t1", REPORT_COMPLETED_AT, None, True),)},
+        artifacts={
+            ("r1", "audit.security"): AuditArtifact(
+                "audit.security", "# Security report\n\n- Fix the vulnerable dependency.", 73, REPORT_COMPLETED_AT
+            )
+        },
+        active_runs={"r1": active_runs},
+    )
+
+
+def test_audit_summary_is_compact_in_text_and_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    Ports(audit=_readable_security_gateway()).install(monkeypatch)
+
+    text_result = CliRunner().invoke(app, ["audit", "summary", REPO])
+    json_result = CliRunner().invoke(app, ["audit", "summary", REPO, "--json"])
 
     assert text_result.exit_code == 0
     assert "security  score=73 freshness=fresh" in text_result.stdout
-    assert "body" not in text_result.stdout
+    assert "Fix the vulnerable dependency" not in text_result.stdout
     assert json_result.exit_code == 0
     payload = cast(dict[str, object], json.loads(json_result.stdout))
     audits = cast(list[dict[str, object]], payload["audits"])
@@ -437,26 +417,12 @@ def test_audit_summary_is_compact_in_text_and_json(monkeypatch: pytest.MonkeyPat
 
 
 def test_audit_read_renders_markdown_for_humans_and_equivalent_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeApplication()
     report = "# Security report\n\n- Fix the vulnerable dependency."
-    payload = AuditRead(
-        "r1",
-        (
-            ArtifactReadItem(
-                "audit.security",
-                True,
-                AuditArtifact("audit.security", report, 73, "2026-07-20T00:00:00Z"),
-                None,
-                AuditFreshness("h", "h", "fresh"),
-                AuditNewerRun("task-new", "running", started_at="2026-07-21T00:00:00Z"),
-            ),
-        ),
-    )
-    monkeypatch.setattr(fake, "audit_read", lambda repo, selectors, project=None, all_audits=False: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    newer = AuditRun("task-new", "audit.security", "running", None, "2026-07-21T00:00:00Z", None)
+    Ports(audit=_readable_security_gateway(active_runs=(newer,))).install(monkeypatch)
 
-    text_result = CliRunner().invoke(app, ["audit", "read", "github@github.com:acme/cat", "security"])
-    json_result = CliRunner().invoke(app, ["audit", "read", "github@github.com:acme/cat", "security", "--json"])
+    text_result = CliRunner().invoke(app, ["audit", "read", REPO, "security"])
+    json_result = CliRunner().invoke(app, ["audit", "read", REPO, "security", "--json"])
 
     assert text_result.exit_code == 0
     assert "repository: r1" in text_result.stdout
@@ -475,7 +441,7 @@ def test_audit_read_renders_markdown_for_humans_and_equivalent_json(monkeypatch:
     assert audits[0]["audit_key"] == "audit.security"
     assert artifact["body"] == report
     assert artifact["score"] == 73
-    assert isinstance(audits[0]["newer_run"], dict)
+    assert cast(dict[str, object], audits[0]["newer_run"])["task_id"] == "task-new"
     assert "Report is stale; a newer audit is in progress." not in json_result.stdout
 
 
@@ -515,19 +481,15 @@ def test_json_preserves_semantic_nulls_and_non_null_falsy_values() -> None:
 
 
 def test_schedule_list_is_one_summary_line_per_repository(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeApplication()
-    repository = _repo("acme/cat")
-    payload = (
-        ScheduleListing(
-            repository,
-            (
+    audit = RecordingAuditGateway(
+        schedules={
+            "r1": (
                 AuditSchedule("audit.security", True, "workdays", None, None, "09:00", "auto", "Asia/Almaty"),
                 AuditSchedule("audit.tests", False, "weekly", None, None, "10:00", "user", "UTC"),
-            ),
-        ),
+            )
+        }
     )
-    monkeypatch.setattr(fake, "list_schedules", lambda repo, project: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    Ports(audit=audit).install(monkeypatch)
 
     text_result = CliRunner().invoke(app, ["schedule", "list"])
     json_result = CliRunner().invoke(app, ["schedule", "list", "--json"])
@@ -547,32 +509,40 @@ def test_schedule_list_is_one_summary_line_per_repository(monkeypatch: pytest.Mo
         assert field in output
     assert json_result.exit_code == 0
     payload = cast(list[dict[str, object]], json.loads(json_result.stdout))
-    repository = cast(dict[str, object], payload[0]["repository"])
-    schedules = cast(list[object], payload[0]["schedules"])
-    identity = cast(dict[str, object], repository["identity"])
+    identity = cast(dict[str, object], cast(dict[str, object], payload[0]["repository"])["identity"])
     assert identity["locator"] == "acme/cat"
-    assert len(schedules) == 2
+    assert len(cast(list[object], payload[0]["schedules"])) == 2
 
 
 def test_json_preserves_null_scores_from_typed_repository_dto() -> None:
-    rendered = _json(_repo("acme/cat", scores={"audit.security": None, "audit.tests": 0}))
+    rendered = _json(repository("acme/cat", scores={"audit.security": None, "audit.tests": 0}))
 
     assert isinstance(rendered, dict)
     assert rendered["scores"] == {"audit.security": None, "audit.tests": 0}
 
 
+AUTOFIX_CATALOG = _catalog(
+    _audit("security", "Security"),
+    _audit("tests", "Tests"),
+    _audit("dependency-hygiene", "Dependencies"),
+    autofixes=(
+        AuditCatalogAutofix("improvement.vuln-fix", "default", "Vuln fix", None, "rb-1", "published", 1),
+        AuditCatalogAutofix("improvement.dependency-update", "default", "Deps", None, "rb-2", "published", 2),
+        AuditCatalogAutofix("improvement.test-writing", "default", "Tests", None, "rb-3", "published", 3),
+    ),
+)
+
+TEST_WRITING_ONLY = _catalog(
+    _audit("tests", "Tests"),
+    autofixes=(AuditCatalogAutofix("improvement.test-writing", "default", "Tests", None, "rb-3", "published", 1),),
+)
+
+
 def test_improvement_jobs_list_is_one_summary_line_per_repository(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeApplication()
-    repository = _repo("acme/cat")
-    definition = AuditAutofixDefinition(
-        "improvement.test-writing", "default", "Tests", None, "audit.tests", "test-writing", True
-    )
     job = AuditAutofixJob(
         "improvement.test-writing", "default", "test-writing", True, True, frequency="workdays", timezone="UTC"
     )
-    payload = (AutofixListing(repository, (AutofixListingItem(definition, job),)),)
-    monkeypatch.setattr(fake, "list_autofixes", lambda repo, project: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    Ports(audit=RecordingAuditGateway(catalog=TEST_WRITING_ONLY, autofix_jobs={"r1": (job,)})).install(monkeypatch)
 
     result = CliRunner().invoke(app, ["improvement-jobs", "list"])
 
@@ -592,20 +562,12 @@ def test_improvement_jobs_list_is_one_summary_line_per_repository(monkeypatch: p
         assert field in output
 
 
-def test_improvement_jobs_text_preserves_mixed_dimensions_and_states(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fake = _FakeApplication()
-    repository = _repo("acme/cat")
-    definitions = tuple(
-        AuditAutofixDefinition(f"improvement.{selector}", "default", selector, None, None, selector, True)
-        for selector in ("security-fix", "dependency-update", "test-writing")
-    )
+def test_improvement_jobs_text_preserves_mixed_dimensions_and_states(monkeypatch: pytest.MonkeyPatch) -> None:
     jobs = (
         AuditAutofixJob(
-            "improvement.security-fix",
+            "improvement.vuln-fix",
             "default",
-            "security-fix",
+            "vuln-fix",
             True,
             False,
             frequency="daily",
@@ -626,43 +588,28 @@ def test_improvement_jobs_text_preserves_mixed_dimensions_and_states(
             schedule_time_source="user",
             pentest_mode="on",
         ),
-        None,
     )
-    payload = (
-        AutofixListing(
-            repository,
-            tuple(AutofixListingItem(definition, job) for definition, job in zip(definitions, jobs, strict=True)),
-        ),
-    )
-    monkeypatch.setattr(fake, "list_autofixes", lambda repo, project: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    Ports(audit=RecordingAuditGateway(catalog=AUTOFIX_CATALOG, autofix_jobs={"r1": jobs})).install(monkeypatch)
 
     result = CliRunner().invoke(app, ["improvement-jobs", "list"])
 
     assert result.exit_code == 0
     assert "enabled=1/3 configured=2/3 auto_fix=0/3" in result.stdout
-    assert "enabled_state=mixed[security-fix=true,dependency-update=false]" in result.stdout
-    assert "auto_fix_state=mixed[security-fix=false,dependency-update=unset]" in result.stdout
-    assert "frequency=mixed[security-fix=daily,dependency-update=weekly]" in result.stdout
-    assert "days=mixed[security-fix=mon,dependency-update=fri]" in result.stdout
-    assert "schedule_time=mixed[security-fix=09:00,dependency-update=10:00]" in result.stdout
-    assert "schedule_time_source=mixed[security-fix=auto,dependency-update=user]" in result.stdout
-    assert "pentest_mode=mixed[security-fix=off,dependency-update=on]" in result.stdout
+    assert "enabled_state=mixed[vuln-fix=true,dependency-update=false]" in result.stdout
+    assert "auto_fix_state=mixed[vuln-fix=false,dependency-update=unset]" in result.stdout
+    assert "frequency=mixed[vuln-fix=daily,dependency-update=weekly]" in result.stdout
+    assert "days=mixed[vuln-fix=mon,dependency-update=fri]" in result.stdout
+    assert "schedule_time=mixed[vuln-fix=09:00,dependency-update=10:00]" in result.stdout
+    assert "schedule_time_source=mixed[vuln-fix=auto,dependency-update=user]" in result.stdout
+    assert "pentest_mode=mixed[vuln-fix=off,dependency-update=on]" in result.stdout
     assert "unconfigured=test-writing disabled=dependency-update" in result.stdout
 
 
 def test_improvement_jobs_text_does_not_report_unknown_enabled_state_as_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake = _FakeApplication()
-    repository = _repo("acme/cat")
-    definition = AuditAutofixDefinition(
-        "improvement.test-writing", "default", "Tests", None, "audit.tests", "test-writing", True
-    )
     job = AuditAutofixJob("improvement.test-writing", "default", "test-writing", None, True)
-    payload = (AutofixListing(repository, (AutofixListingItem(definition, job),)),)
-    monkeypatch.setattr(fake, "list_autofixes", lambda repo, project: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    Ports(audit=RecordingAuditGateway(catalog=TEST_WRITING_ONLY, autofix_jobs={"r1": (job,)})).install(monkeypatch)
 
     result = CliRunner().invoke(app, ["improvement-jobs", "list"])
 
@@ -673,20 +620,18 @@ def test_improvement_jobs_text_does_not_report_unknown_enabled_state_as_disabled
 
 
 def test_schedule_list_groups_restricted_window_days_by_selector(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeApplication()
-    repository = _repo("acme/cat")
-    payload = (
-        ScheduleListing(
-            repository,
-            (
+    catalog = _catalog(_audit("security", "Security"), _audit("tests", "Tests"), _audit("deps", "Deps"))
+    audit = RecordingAuditGateway(
+        catalog=catalog,
+        schedules={
+            "r1": (
                 AuditSchedule("audit.security", True, "daily", None, None, None, "auto", "UTC", ("mon", "wed")),
                 AuditSchedule("audit.tests", True, "daily", None, None, None, "auto", "UTC", ("mon", "wed")),
                 AuditSchedule("audit.deps", True, "daily", None, None, None, "auto", "UTC", ("fri",)),
-            ),
-        ),
+            )
+        },
     )
-    monkeypatch.setattr(fake, "list_schedules", lambda repo, project: payload)
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+    Ports(audit=audit).install(monkeypatch)
 
     result = CliRunner().invoke(app, ["schedule", "list"])
 
@@ -694,27 +639,26 @@ def test_schedule_list_groups_restricted_window_days_by_selector(monkeypatch: py
     assert "window_days=mon,wed:security,tests|fri:deps" in result.stdout
 
 
-def test_batch_write_options_are_forwarded_with_explicit_scope(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+def test_batch_schedule_write_reaches_every_published_audit_of_the_scope(ports: Ports) -> None:
     result = CliRunner().invoke(
         app,
         ["--project", "Pets", "schedule", "set", "--all-repos", "--enabled", "on", "--frequency", "daily"],
     )
+
     assert result.exit_code == 0
-    name, args = fake.calls[-1]
-    assert name == "set_schedules"
-    values = cast(tuple[object, object, AuditScheduleUpdate, AutofixWriteScope], args)
-    assert values[0:2] == (None, "Pets")
-    assert values[2] == AuditScheduleUpdate(enabled=True, cadence="daily")
-    assert values[3].all_repos is True
+    assert ports.targets.write_targets_calls == [WriteTargetsCall(None, "Pets", True, False, "mutation")]
+    written = [
+        (item.repo_id, item.audit_key, item.schedule.enabled, item.schedule.cadence)
+        for item in ports.audit.schedule_writes
+    ]
+    assert written == [("r1", "audit.security", True, "daily"), ("r1", "audit.tests", True, "daily")]
 
 
-def test_autofix_write_options_are_forwarded_with_canonical_keyword_names(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+def test_autofix_write_reaches_the_gateway_with_the_selected_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The selector chooses which improvement job is rewritten, and only it."""
+    audit = RecordingAuditGateway(catalog=AUTOFIX_CATALOG)
+    installed = Ports(audit=audit)
+    installed.install(monkeypatch)
 
     result = CliRunner().invoke(
         app,
@@ -723,7 +667,7 @@ def test_autofix_write_options_are_forwarded_with_canonical_keyword_names(
             "Pets",
             "improvement-jobs",
             "set",
-            "tests/test-writing",
+            "test-writing",
             "--all-repos",
             "--enabled",
             "on",
@@ -735,32 +679,156 @@ def test_autofix_write_options_are_forwarded_with_canonical_keyword_names(
     )
 
     assert result.exit_code == 0
-    name, args = fake.calls[-1]
-    assert name == "set_autofixes"
-    values = cast(tuple[object, object, object, AuditAutofixUpdate, AutofixWriteScope], args)
-    assert values[:3] == (None, "Pets", ["tests/test-writing"])
-    assert values[3] == AuditAutofixUpdate(enabled=True, frequency="weekly", timezone="Asia/Almaty")
-    assert values[4].all_repos is True
+    assert installed.targets.write_targets_calls == [WriteTargetsCall(None, "Pets", True, False, "mutation")]
+    assert [(item.repo_id, item.kind) for item in audit.autofix_writes] == [("r1", "test-writing")]
+    written = audit.autofix_writes[0].job
+    assert (written.action_key, written.variant_key) == ("improvement.test-writing", "default")
+    assert (written.enabled, written.frequency, written.timezone) == (True, "weekly", "Asia/Almaty")
 
 
-def test_batch_write_rejects_ambiguous_scope_before_application(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+def test_autofix_write_keeps_the_existing_job_of_the_selected_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Picking the wrong existing job silently carries its settings forward.
+
+    Each stored job here has a distinct schedule time, timezone and pentest
+    mode, so a lookup that returns any job other than the requested kind
+    rewrites the wrong values and fails this test.
+    """
+    stored = (
+        AuditAutofixJob(
+            "improvement.vuln-fix",
+            "default",
+            "vuln-fix",
+            True,
+            True,
+            frequency="daily",
+            days_of_week=("mon",),
+            schedule_time="01:00",
+            schedule_time_source="user",
+            timezone="UTC",
+            pentest_mode="on",
+        ),
+        AuditAutofixJob(
+            "improvement.test-writing",
+            "default",
+            "test-writing",
+            False,
+            True,
+            frequency="monthly",
+            days_of_week=("fri",),
+            schedule_time="23:00",
+            schedule_time_source="user",
+            timezone="Asia/Almaty",
+            pentest_mode="off",
+        ),
+    )
+    audit = RecordingAuditGateway(catalog=AUTOFIX_CATALOG, autofix_jobs={"r1": stored})
+    Ports(audit=audit).install(monkeypatch)
+
+    result = CliRunner().invoke(app, ["improvement-jobs", "set", "--repo", REPO, "test-writing", "--enabled", "on"])
+
+    assert result.exit_code == 0
+    assert [(item.repo_id, item.kind) for item in audit.autofix_writes] == [("r1", "test-writing")]
+    written = audit.autofix_writes[0].job
+    assert written.action_key == "improvement.test-writing"
+    assert (written.schedule_time, written.days_of_week) == ("23:00", ("fri",))
+    assert (written.timezone, written.pentest_mode, written.frequency) == ("Asia/Almaty", "off", "monthly")
+    assert written.enabled is True
+
+
+def test_batch_write_rejects_ambiguous_scope_before_application(ports: Ports) -> None:
     result = CliRunner().invoke(app, ["email", "set", "--all-repos", "--all-projects", "--manual", "on"])
+
     assert result.exit_code == 1
     assert "pass --all-repos or --all-projects" in result.stderr
-    assert fake.calls == []
+    assert ports.targets.write_targets_calls == []
+    assert ports.audit.email_writes == []
 
 
-def test_auth_import_bearer_requires_stdin_and_never_prints_credential(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _FakeApplication()
-    monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: fake)
+def test_email_write_reaches_every_published_audit_of_the_repository(ports: Ports) -> None:
+    result = CliRunner().invoke(app, ["email", "set", "--repo", REPO, "--manual", "on", "--scheduled", "off"])
+
+    assert result.exit_code == 0
+    assert [(item.repo_id, item.audit_key) for item in ports.audit.email_writes] == [
+        ("r1", "audit.security"),
+        ("r1", "audit.tests"),
+    ]
+    assert {(item.update.manual, item.update.scheduled) for item in ports.audit.email_writes} == {(True, False)}
+
+
+def test_auth_import_bearer_requires_stdin_and_never_prints_credential(ports: Ports) -> None:
     missing = CliRunner().invoke(app, ["auth", "import-bearer"])
     assert missing.exit_code == 1
     assert "use --stdin" in missing.stderr
+    assert ports.auth.imported_tokens == []
+
     result = CliRunner().invoke(app, ["auth", "import-bearer", "--stdin", "--json"], input="Bearer secret-token\n")
     assert result.exit_code == 0
     assert "secret-token" not in result.stdout
+    assert ports.auth.imported_tokens == ["Bearer secret-token\n"]
+
+
+def test_auth_import_cookie_requires_stdin_and_hands_the_raw_header_to_the_store(ports: Ports) -> None:
+    missing = CliRunner().invoke(app, ["auth", "import-cookie"])
+    assert missing.exit_code == 1
+    assert "use --stdin" in missing.stderr
+    assert ports.auth.imported_cookies == []
+
+    result = CliRunner().invoke(app, ["auth", "import-cookie", "--stdin", "--json"], input="session=secret-value\n")
+    assert result.exit_code == 0
+    assert "secret-value" not in result.stdout
+    assert ports.auth.imported_cookies == ["session=secret-value\n"]
+
+
+@pytest.mark.parametrize(
+    ("command", "stdin"),
+    [
+        (["auth", "status"], None),
+        (["auth", "import-cookie", "--stdin"], "session=x"),
+        (["auth", "import-bearer", "--stdin"], "token"),
+    ],
+)
+def test_auth_failures_are_translated_into_the_application_vocabulary(
+    monkeypatch: pytest.MonkeyPatch, command: list[str], stdin: str | None
+) -> None:
+    """A credential-store failure must not reach delivery as an auth-library error."""
+    auth = RecordingAuthSession(failure=AuthError("AUTH_CORRUPT", "credential file is unreadable"))
+    Ports(auth=auth).install(monkeypatch)
+
+    result = CliRunner().invoke(app, command, input=stdin)
+
+    assert result.exit_code == 3
+    assert result.stderr.startswith("AUTH_CORRUPT: credential file is unreadable")
+
+
+def test_gitlab_credentials_forwards_every_paging_and_scope_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    credentials = GitLabCredentialsResult(
+        scope=GitLabScope(scope_type="group", scope_owner="acme"),
+        credentials=(),
+        pagination=GitLabCredentialPage(limit=7, offset=14, total=0),
+    )
+    gitlab = RecordingGitLabGateway(projects=GITLAB_PROJECTS_RESULT, credentials=credentials)
+    Ports(gitlab=gitlab).install(monkeypatch)
+
+    result = CliRunner().invoke(
+        app,
+        ["gitlab", "credentials", "--scope-type", "group", "--scope-owner", "acme", "--limit", "7", "--offset", "14"],
+    )
+
+    assert result.exit_code == 0
+    assert gitlab.credential_queries == [("group", "acme", 7, 14)]
+
+
+def test_wait_returns_immediately_when_every_audit_is_complete(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``wait`` is a real blocking wait, so a complete repository must not poll."""
+    Ports(audit=_readable_security_gateway()).install(monkeypatch)
+
+    result = CliRunner().invoke(app, ["wait", REPO, "--timeout", "1s", "--json"])
+
+    assert result.exit_code == 0
+    payload = cast(dict[str, object], json.loads(result.stdout))
+    assert payload["reason"] == "complete"
+    assert payload["complete"] is True
+    assert payload["timed_out"] is False
 
 
 @pytest.mark.parametrize(
@@ -779,11 +847,7 @@ def test_run_maps_current_application_errors_to_cli_contract(
     rendered: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    application = Application(
-        audit_gateway=cast(AuditGatewayPort, object()),
-        portfolio_gateway=cast(PortfolioGatewayPort, object()),
-        auth=cast(AuthSessionService, object()),
-    )
+    application = ApplicationStubs().build()
     monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: application)
 
     def fail() -> object:

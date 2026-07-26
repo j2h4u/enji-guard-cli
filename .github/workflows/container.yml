@@ -1,41 +1,41 @@
 name: Container
 
+# This workflow has no trigger of its own on purpose.  It publishes to GHCR,
+# and a commit must be published exactly once: two runs would build two
+# different digests from the same source and race each other for `:latest` and
+# for the tag the attestation subject is resolved from.  `release.yml` owns the
+# push-to-main path, gates on CI, and calls this workflow; `workflow_dispatch`
+# is the manual re-publish escape hatch and needs repository write access.
 on:
-  workflow_run:
-    workflows: ["CI"]
-    branches: [main]
-    types: [completed]
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      release_tag:
+        description: "Release tag to publish, for example v0.2.0.  Empty publishes the sha tag only."
+        required: false
+        default: ""
+        type: string
   workflow_dispatch:
     inputs:
       release_tag:
         description: "Existing release tag to publish, for example v0.2.0."
         required: false
+        type: string
 
 permissions:
   contents: read
-  packages: write
 
+# Never cancellable: a cancellation landing between the first push and the
+# attestation steps leaves promoted tags in GHCR with no provenance and no
+# rollback.  Queue instead, and let the publish run to its end.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.inputs.release_tag || github.event.release.tag_name || github.event.workflow_run.head_sha || github.sha }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ inputs.release_tag || github.sha }}
+  cancel-in-progress: false
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
   changes:
-    if: >-
-      ${{
-        github.event_name != 'workflow_run' ||
-        (
-          github.event.workflow_run.event == 'push' &&
-          github.event.workflow_run.head_branch == 'main' &&
-          github.event.workflow_run.head_repository.full_name == github.repository &&
-          github.event.workflow_run.conclusion == 'success'
-        )
-      }}
     runs-on: ubuntu-latest
     outputs:
       requires-image-publish: ${{ steps.classify.outputs.requires-image-publish }}
@@ -43,36 +43,47 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-tags: true
+          persist-credentials: false
+          ref: ${{ inputs.release_tag || github.sha }}
 
       - name: Classify changed files
         id: classify
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          EVENT_NAME: ${{ inputs.release_tag != '' && 'release' || github.event_name }}
+          HEAD_SHA: ${{ inputs.release_tag || github.sha }}
         run: |
+          # CI skips quality/test/crap/docker-build on a docs-only diff yet still
+          # concludes success, so this job must re-apply the same docs-only policy
+          # instead of forcing a publish: otherwise a README-only commit
+          # republishes an image nothing ever tested.  A release always publishes,
+          # because the release commit itself only touches CHANGELOG.md.
+          base_sha="$(git rev-parse --verify --quiet "${HEAD_SHA}^" || true)"
           python3 scripts/classify_changed_files.py \
             --event-name "${EVENT_NAME}" \
+            --base-sha "${base_sha}" \
             --head-sha "${HEAD_SHA}" \
-            --force-event workflow_run \
             --force-event release \
             --force-event workflow_dispatch \
             --output-key requires-image-publish
 
   publish:
     needs: [changes]
-    if: >-
-      ${{
-        (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') &&
-        needs.changes.outputs.requires-image-publish == 'true'
-      }}
+    if: needs.changes.outputs.requires-image-publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.release_tag || github.event.release.tag_name || github.event.workflow_run.head_sha || github.sha }}
+          fetch-tags: true
+          persist-credentials: false
+          ref: ${{ inputs.release_tag || github.sha }}
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
@@ -97,10 +108,9 @@ jobs:
       - name: Resolve release metadata
         id: release-metadata
         env:
-          INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
-          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          release_tag="${INPUT_RELEASE_TAG:-${EVENT_RELEASE_TAG}}"
+          release_tag="${INPUT_RELEASE_TAG}"
           source_sha="$(git rev-parse HEAD)"
           if [ -z "${release_tag}" ]; then
             release_tag="$(git tag --points-at "${source_sha}" --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n 1)"
@@ -114,14 +124,21 @@ jobs:
           RELEASE_TAG: ${{ steps.release-metadata.outputs.release-tag }}
           SOURCE_SHA: ${{ steps.release-metadata.outputs.source-sha }}
         run: |
+          tags=("${IMAGE_NAME}:sha-${SOURCE_SHA}")
+          if [[ "${RELEASE_TAG}" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            tags+=("${IMAGE_NAME}:${RELEASE_TAG}" "${IMAGE_NAME}:${RELEASE_TAG#v}")
+            newest_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n 1)"
+            if [ "${RELEASE_TAG}" = "${newest_tag}" ]; then
+              tags+=("${IMAGE_NAME}:latest")
+            else
+              echo "::notice::${RELEASE_TAG} is older than ${newest_tag}; leaving :latest untouched"
+            fi
+          else
+            echo "::notice::no release tag for ${SOURCE_SHA}; publishing the sha tag only"
+          fi
           {
             echo "tags<<EOF"
-            echo "${IMAGE_NAME}:latest"
-            echo "${IMAGE_NAME}:sha-${SOURCE_SHA}"
-            if [[ "${RELEASE_TAG}" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
-              echo "${IMAGE_NAME}:${RELEASE_TAG}"
-              echo "${IMAGE_NAME}:${RELEASE_TAG#v}"
-            fi
+            printf '%s\n' "${tags[@]}"
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
@@ -138,6 +155,10 @@ jobs:
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
+      # Nothing unscanned may reach the registry, so the candidate is only
+      # loaded into the local daemon. Trivy scans that local image and the push
+      # happens afterwards; provenance and SBOM are attested against the digest
+      # the registry assigns once the scanned image has been published.
       - name: Build candidate image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -152,25 +173,92 @@ jobs:
 
       - name: Verify candidate runtime contract
         env:
-          IMAGE_TAGS: ${{ steps.image-tags.outputs.tags }}
+          CANDIDATE: ${{ env.IMAGE_NAME }}:sha-${{ steps.release-metadata.outputs.source-sha }}
         run: |
-          candidate="$(printf '%s\n' "${IMAGE_TAGS}" | head -n 1)"
-          uv run --locked python -m scripts.release_contract --image "${candidate}"
+          uv run --locked python -m scripts.release_contract --image "${CANDIDATE}"
 
       - name: Scan candidate image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
-          image-ref: ${{ env.IMAGE_NAME }}:latest
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ steps.release-metadata.outputs.source-sha }}
           scanners: vuln
           severity: MEDIUM,HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
 
+      - name: Generate candidate SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ env.IMAGE_NAME }}:sha-${{ steps.release-metadata.outputs.source-sha }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      # Only the immutable sha tag is pushed here.  It is the tag nobody
+      # consumes by name, so if anything below fails the blast radius is one
+      # orphaned, already-scanned sha tag while :latest and :X.Y.Z keep pointing
+      # at the previous release.  The mutable tags are promoted further down,
+      # after the attestations exist.
       - name: Publish tested image
+        id: publish
+        env:
+          SOURCE_SHA: ${{ steps.release-metadata.outputs.source-sha }}
+        run: |
+          candidate="${IMAGE_NAME}:sha-${SOURCE_SHA}"
+          docker push "${candidate}" | tee push.log
+
+          # Prefer the digest the registry reported during this push.  Reading
+          # it back with imagetools is only a fallback, because a transient
+          # registry error there used to abort the job after the push had
+          # already made the image public and before anything was attested.
+          digest="$(sed -n 's/.*[[:space:]]digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' push.log | tail -n 1)"
+          if [ -z "${digest}" ]; then
+            digest="$(docker buildx imagetools inspect "${candidate}" --format '{{.Manifest.Digest}}')"
+          fi
+          if [ -z "${digest}" ]; then
+            echo "::error::could not resolve the digest of ${candidate}"
+            exit 1
+          fi
+
+          # The attestation subject must be the image this run built and
+          # scanned, not whatever the registry currently serves under the tag.
+          # A RepoDigest on the local image proves the two are the same blob.
+          if ! docker image inspect "${candidate}" \
+              --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+              | grep -qxF "${IMAGE_NAME}@${digest}"; then
+            echo "::error::${digest} is not a digest of the locally scanned ${candidate}"
+            exit 1
+          fi
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
+
+      # Registry-side retagging of an already-attested digest.  Nothing is
+      # rebuilt or re-uploaded, so every promoted tag resolves to exactly the
+      # manifest that was scanned above and attested immediately after.
+      - name: Promote attested tags
         env:
           IMAGE_TAGS: ${{ steps.image-tags.outputs.tags }}
+          SOURCE_SHA: ${{ steps.release-metadata.outputs.source-sha }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
         run: |
           while IFS= read -r tag; do
-            [ -n "${tag}" ] && docker push "${tag}"
+            [ -n "${tag}" ] || continue
+            [ "${tag}" != "${IMAGE_NAME}:sha-${SOURCE_SHA}" ] || continue
+            docker buildx imagetools create --tag "${tag}" "${IMAGE_NAME}@${DIGEST}"
           done <<< "${IMAGE_TAGS}"

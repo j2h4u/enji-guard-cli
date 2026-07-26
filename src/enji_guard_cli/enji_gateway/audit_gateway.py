@@ -25,6 +25,7 @@ from enji_guard_cli.audit.ports import (
     AuditTaskLink,
     AuditTaskLinksResult,
 )
+from enji_guard_cli.auth_session import CredentialReader
 from enji_guard_cli.enji_gateway.http import (
     AuditRunCreate,
 )
@@ -73,12 +74,20 @@ from enji_guard_cli.enji_gateway.http import (
 from enji_guard_cli.enji_gateway.http import (
     task_detail as _task_detail,
 )
-from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayClient, GatewayCredentialReader
+from enji_guard_cli.enji_gateway.ports import GatewayAuthFile, GatewayClient
 from enji_guard_cli.enji_gateway.wire import audit_artifact_from_snapshot, audit_report_refs_from_payload
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonValue
 
 HTTP_NOT_FOUND = 404
+
+
+def _upstream_reason(exc: EnjiApiError) -> str:
+    """Keep the HTTP status visible so a transient 5xx reads apart from a considered refusal."""
+
+    if exc.status_code is None:
+        return exc.message
+    return f"upstream returned HTTP {exc.status_code}: {exc.message}"
 
 
 class AuditGateway(AuditGatewayPort):
@@ -89,7 +98,7 @@ class AuditGateway(AuditGatewayPort):
         auth_file: GatewayAuthFile = None,
         client: GatewayClient = None,
         *,
-        auth_port: GatewayCredentialReader,
+        auth_port: CredentialReader,
     ) -> None:
         self._auth_file = auth_file
         self._client = client
@@ -155,7 +164,7 @@ class AuditGateway(AuditGatewayPort):
                 raise AuditNotFoundError(task_id) from exc
             if exc.response_malformed:
                 raise AuditMalformedError(f"task detail payload for {task_id} is malformed") from exc
-            raise AuditUpstreamError(f"task detail lookup failed for {task_id}: {exc.message}") from exc
+            raise AuditUpstreamError(f"task detail lookup failed for {task_id}: {_upstream_reason(exc)}") from exc
         task = payload
         returned_task_id = _optional_str(task.get("id"))
         if returned_task_id is not None and returned_task_id != task_id:
@@ -181,17 +190,26 @@ class AuditGateway(AuditGatewayPort):
         )
 
     def start_audit_run(self, request: AuditRunRequest) -> AuditRunResult:
-        payload = _start_audit_run(
-            AuditRunCreate(
-                repo_id=request.repo_id,
-                project_id=request.project_id,
-                action_key=request.action_key,
-                fleet_task_body=_fleet_task_body(request.action_key, request.task_body),
-            ),
-            self._auth_file,
-            self._client,
-            auth_port=self._auth_port,
-        )
+        try:
+            payload = _start_audit_run(
+                AuditRunCreate(
+                    repo_id=request.repo_id,
+                    project_id=request.project_id,
+                    action_key=request.action_key,
+                    fleet_task_body=_fleet_task_body(request.action_key, request.task_body),
+                ),
+                self._auth_file,
+                self._client,
+                auth_port=self._auth_port,
+            )
+        except EnjiApiError as exc:
+            # Auth is a session-wide condition with its own remediation, so it
+            # keeps travelling as-is instead of becoming one refused audit.
+            if exc.code.startswith("AUTH_"):
+                raise
+            if exc.response_malformed:
+                raise AuditMalformedError(f"start payload for {request.action_key} is malformed") from exc
+            raise AuditUpstreamError(f"start refused for {request.action_key}: {_upstream_reason(exc)}") from exc
         task = _object(payload.get("task"))
         return AuditRunResult(
             task_id=_optional_str(task.get("id")),

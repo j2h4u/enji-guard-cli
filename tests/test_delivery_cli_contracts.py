@@ -14,28 +14,25 @@ def test_full_operator_tree_and_report_break() -> None:
     assert "report" not in commands
 
 
-def test_audit_help_exposes_read_summary_start_wait() -> None:
+def test_audit_help_exposes_read_summary_start() -> None:
     root = get_command(app)
     assert isinstance(root, TyperGroup)
     audit = root.commands["audit"]
     assert isinstance(audit, TyperGroup)
-    assert set(audit.commands) >= {"read", "summary", "start", "wait"}
+    assert set(audit.commands) >= {"read", "summary", "start"}
     runner = CliRunner()
     # Reachability only; command membership above is the stable contract.
     assert runner.invoke(app, ["audit", "--help"]).exit_code == 0
 
 
 def test_application_surface_is_typed() -> None:
-    from enji_guard_cli.application import Application
+    from enji_guard_cli.application import AuditFacade, PortfolioFacade, SubscriptionsFacade
 
-    for method in (
-        "audit_start",
-        "audit_read",
-        "audit_summary",
-        "audit_wait",
-        "set_schedules",
-        "set_autofixes",
-        "set_email_preferences",
-        "set_language",
-    ):
-        assert callable(getattr(Application, method, None))
+    surface = {
+        AuditFacade: ("audit_start", "audit_read", "audit_summary", "audit_wait"),
+        SubscriptionsFacade: ("set_schedules", "set_autofixes", "set_email_preferences"),
+        PortfolioFacade: ("set_language",),
+    }
+    for facade, methods in surface.items():
+        for method in methods:
+            assert callable(getattr(facade, method, None))

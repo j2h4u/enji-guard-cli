@@ -1,17 +1,12 @@
-from typing import cast
-
-from enji_guard_cli.application import Application
+from application_builder import ApplicationStubs
 from enji_guard_cli.audit.ports import (
     AuditCatalogAction,
     AuditCatalogResult,
-    AuditGatewayPort,
     AuditRerunState,
     AuditRun,
     AuditRunsResult,
     AuditTaskLinksResult,
 )
-from enji_guard_cli.auth_session.service import AuthSessionService
-from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
 
 
 class _AuditGateway:
@@ -52,18 +47,17 @@ class _AuditGateway:
         assert repo_id == "repo-1"
         return AuditRerunState("head", None, None, None, {"audit.security": "old"})
 
+    def task_detail(self, task_id: str) -> object:
+        raise AssertionError(f"the ledger must not need upstream task detail: {task_id}")
+
     def task_links(self, repo_id: str) -> AuditTaskLinksResult:
         assert repo_id == "repo-1"
         return AuditTaskLinksResult(())
 
 
 def test_application_exposes_only_active_runs_in_repository_status() -> None:
-    app = Application(
-        cast(AuditGatewayPort, _AuditGateway()),
-        cast(PortfolioGatewayPort, object()),
-        cast(AuthSessionService, object()),
-    )
+    app = ApplicationStubs(audit_gateway=_AuditGateway()).build()
 
-    _status, active_runs = app._audit_status_with_runs("repo-1")
+    status = app.audit.recon(app.catalog.audits()).status("repo-1")
 
-    assert [run.task_id for run in active_runs] == ["running"]
+    assert [run.task_id for run in status.active_runs] == ["running"]

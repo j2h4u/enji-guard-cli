@@ -1,0 +1,439 @@
+# Module boundaries, enforced by tach (https://github.com/tach-org/tach).
+#
+# THIS FILE DECLARES THE IDEAL, NOT TODAY'S REALITY.  `just module-boundaries`
+# is expected to be RED; every failure it reports is inventoried in
+# docs/architecture-cleanup.md with the file, the reason and the fix.  While
+# the cleanup is outstanding, import-linter (pyproject.toml) stays the enforced
+# gate and this check is deliberately kept out of `just check`.  When the
+# inventory is empty, this joins `check` and import-linter is deleted.
+#
+# There are no `deprecated = true` waivers here on purpose: a waiver turns a
+# violation into an approved edge, and the point of this file is that nothing
+# broken looks approved.
+
+source_roots = ["src"]
+
+# The root package `enji_guard_cli/__init__.py` is empty and must stay empty:
+# every symbol belongs to a named module, so there is no "misc" drawer.
+root_module = "forbid"
+
+# A declared edge that no longer exists in the code is itself an error -- the
+# config must not accumulate fossils once the cleanup deletes an import.
+exact = true
+
+# Layers alone would silently permit any higher->lower edge.  Requiring the
+# edge to be written down means the graph is a document, not a side effect.
+layers_explicit_depends_on = true
+
+# The auth_session <-> enji_gateway cycle is the single reason this is red
+# today; see docs/architecture-cleanup.md, fix #1.
+forbid_circular_dependencies = true
+
+# `if TYPE_CHECKING:` imports are real coupling: a type that leaks across a
+# boundary drags its module into every consumer's mental model.
+ignore_type_checking_imports = false
+
+# Highest first.  Anything in a layer may depend downward (once declared) and
+# never upward; same-layer edges must be declared explicitly.
+layers = [
+    "delivery",       # transport-shaped I/O: argv, stdout, MCP wire protocol
+    "composition",    # the only place that knows concrete classes exist
+    "facade",         # read-only projection of the application for agents
+    "application",    # use cases; owns the operator-visible vocabulary
+    "observability",  # runtime supervision, telemetry, readiness, journeys
+    "gateway",        # anti-corruption layer over the Enji HTTP API
+    "domain",         # bounded contexts: audit, portfolio, gitlab
+    "credentials",    # auth material and its lifecycle -- below everything
+    "transport",      # HTTP mechanics: retries, timeouts, error mapping
+    "foundation",     # leaf utilities with no opinion about the product
+]
+
+# ---------------------------------------------------------------------------
+# delivery -- knows about presentation, must never know about the domain.
+# ---------------------------------------------------------------------------
+
+[[modules]]
+# The CLI composes an Application and prints it.  It has no business importing
+# audit/portfolio/gitlab types: presentation must be fed by the application
+# layer, otherwise every domain rename is a CLI change.
+path = "enji_guard_cli.delivery.cli"
+layer = "delivery"
+depends_on = [
+    "enji_guard_cli.composition",
+    "enji_guard_cli.application",
+    "enji_guard_cli.runtime_observability",
+    "enji_guard_cli.delivery.mcp",   # same-layer: `guard mcp serve` boots the server in-process
+    "enji_guard_cli.settings",
+    "enji_guard_cli.version",
+]
+
+[[modules]]
+# The MCP server is a sibling delivery surface, not a consumer of the CLI.
+path = "enji_guard_cli.delivery.mcp"
+layer = "delivery"
+depends_on = [
+    "enji_guard_cli.composition",
+    "enji_guard_cli.mcp_facade",
+    "enji_guard_cli.runtime_observability",
+    "enji_guard_cli.settings",
+]
+# Nothing may reach back into a delivery surface except the other one.
+visibility = ["enji_guard_cli.delivery.cli"]
+
+# ---------------------------------------------------------------------------
+# composition -- the wiring root.  Allowed to see concretes; nothing else is.
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "enji_guard_cli.composition"
+layer = "composition"
+depends_on = [
+    "enji_guard_cli.application",
+    "enji_guard_cli.mcp_facade",
+    "enji_guard_cli.runtime_observability",
+    "enji_guard_cli.enji_gateway",
+    "enji_guard_cli.audit",
+    "enji_guard_cli.portfolio",
+    "enji_guard_cli.auth_session",
+    "enji_guard_cli.fanout",
+    "enji_guard_cli.settings",
+]
+# Only a delivery surface may boot the process.
+visibility = ["enji_guard_cli.delivery.*"]
+
+# ---------------------------------------------------------------------------
+# facade -- a read-only projection for MCP; strictly above application.
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "enji_guard_cli.mcp_facade"
+layer = "facade"
+depends_on = ["enji_guard_cli.application", "enji_guard_cli.settings"]
+# Only the MCP surface and the wiring root; the CLI must not shortcut through it.
+visibility = ["enji_guard_cli.delivery.mcp", "enji_guard_cli.composition"]
+
+# ---------------------------------------------------------------------------
+# application -- use cases.  The only layer allowed to orchestrate the domain.
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "enji_guard_cli.application"
+layer = "application"
+depends_on = [
+    "enji_guard_cli.audit",
+    "enji_guard_cli.portfolio",
+    "enji_guard_cli.gitlab",
+    "enji_guard_cli.auth_session",
+    "enji_guard_cli.runtime_observability",
+    "enji_guard_cli.fanout",
+    "enji_guard_cli.settings",
+    "enji_guard_cli.errors",
+]
+visibility = [
+    "enji_guard_cli.composition",
+    "enji_guard_cli.mcp_facade",
+    "enji_guard_cli.delivery.cli",
+]
+
+[[interfaces]]
+# The rule that import-linter could not express, and the reason tach is here:
+# `application` publishes exactly the names in its own `__all__`.  Deep imports
+# such as `application.subscriptions.AutofixListing` are banned, and -- more
+# importantly -- so is re-exporting a domain type from `application/__init__`
+# and calling the boundary respected.  Top-level names only, no dots.
+from = ["enji_guard_cli.application"]
+expose = ["[^.]+"]
+
+# ---------------------------------------------------------------------------
+# observability -- supervision and telemetry.  Below application because the
+# application asks for a coordinator; it does not run the process.
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "enji_guard_cli.runtime_observability"
+layer = "observability"
+depends_on = [
+    "enji_guard_cli.auth_session",
+    "enji_guard_cli.atomic_json",
+    "enji_guard_cli.settings",
+]
+visibility = [
+    "enji_guard_cli.delivery.*",
+    "enji_guard_cli.composition",
+    "enji_guard_cli.application",
+]
+
+[[interfaces]]
+# Use cases may depend on the *shape* of runtime supervision (a port) and
+# nothing else -- never on the supervisor, the logger or the sink.
+from = ["enji_guard_cli.runtime_observability"]
+visibility = ["enji_guard_cli.application"]
+expose = ["ports\\..*"]
+
+[[interfaces]]
+# Delivery boots and observes the runtime, so it sees the entry points; the
+# telemetry sink stays private to the package.
+from = ["enji_guard_cli.runtime_observability"]
+visibility = ["enji_guard_cli.delivery.*", "enji_guard_cli.composition"]
+expose = [
+    "ports\\..*",
+    "journey\\..*",
+    "readiness\\..*",
+    "supervisor\\..*",
+    "telemetry\\..*",
+    "auth_coordinator\\..*",
+]
+
+# ---------------------------------------------------------------------------
+# gateway -- anti-corruption over the Enji HTTP API.
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "enji_guard_cli.enji_gateway"
+layer = "gateway"
+depends_on = [
+    "enji_guard_cli.audit",
+    "enji_guard_cli.portfolio",
+    "enji_guard_cli.gitlab",
+    "enji_guard_cli.auth_session",
+    "enji_guard_cli.transport",
+    "enji_guard_cli.transport_types",
+    "enji_guard_cli.settings",
+    "enji_guard_cli.errors",
+    "enji_guard_cli.json_types",
+]
+# Concrete adapters exist to be wired, and only the wiring root wires them.
+# In particular auth_session must NOT see this module: credentials are the
+# lower concept, the gateway is what consumes them.
+visibility = ["enji_guard_cli.composition"]
+
+[[interfaces]]
+# The gateway publishes the three adapters named in its `__all__`, plus the
+# shared client the wiring root has to build once and hand around.
+from = ["enji_guard_cli.enji_gateway"]
+expose = ["[^.]+", "shared_client\\..*"]
+
+# ---------------------------------------------------------------------------
+# domain -- three bounded contexts.  audit is independent of portfolio; the
+# portfolio -> audit and gitlab -> portfolio edges are same-layer and declared.
+# ---------------------------------------------------------------------------
+
+[[modules]]
+# Audit knows nothing about portfolios.  Enforced from this side, so no
+# portfolio change can quietly create the edge.
+path = "enji_guard_cli.audit"
+layer = "domain"
+depends_on = [
+    "enji_guard_cli.fanout",
+    "enji_guard_cli.settings",
+    "enji_guard_cli.atomic_json",
+    "enji_guard_cli.json_types",
+]
+cannot_depend_on = ["enji_guard_cli.portfolio", "enji_guard_cli.gitlab"]
+visibility = [
+    "enji_guard_cli.application",
+    "enji_guard_cli.enji_gateway",
+    "enji_guard_cli.portfolio",
+    "enji_guard_cli.composition",
+]
+
+[[interfaces]]
+# "Portfolio may enter Audit only through ports."  Stated where it belongs --
+# on Audit -- so it holds no matter what Portfolio does.  The gateway is bound
+# by the same rule: it translates wire payloads into port types, nothing more.
+from = ["enji_guard_cli.audit"]
+visibility = ["enji_guard_cli.portfolio", "enji_guard_cli.enji_gateway"]
+expose = ["ports\\..*", "errors\\..*"]
+
+[[interfaces]]
+# The application orchestrates audit use cases, so it sees the domain services
+# and the types they speak -- but never the persistence concretes (`ledger`,
+# `catalog`, `catalog_observation`'s repository) which belong to wiring.
+from = ["enji_guard_cli.audit"]
+visibility = ["enji_guard_cli.application"]
+expose = [
+    "[^.]+",
+    "ports\\..*",
+    "models\\..*",
+    "errors\\..*",
+    "artifacts\\..*",
+    "lifecycle\\..*",
+    "start\\..*",
+    "status\\..*",
+    "wait\\..*",
+    "workflows\\..*",
+    "schedules\\..*",
+    "autofixes\\..*",
+    "email\\..*",
+    "observation\\..*",
+    "freshness\\..*",
+    "catalog_observation\\.[A-Za-z]+Port",
+]
+
+[[interfaces]]
+# Wiring may reach concretes; that is the whole job of a composition root.
+from = ["enji_guard_cli.audit"]
+visibility = ["enji_guard_cli.composition"]
+expose = [".*"]
+
+[[modules]]
+path = "enji_guard_cli.portfolio"
+layer = "domain"
+depends_on = [
+    "enji_guard_cli.audit",   # same-layer, and only through audit.ports (see interface above)
+    "enji_guard_cli.fanout",
+    "enji_guard_cli.settings",
+]
+visibility = [
+    "enji_guard_cli.application",
+    "enji_guard_cli.enji_gateway",
+    "enji_guard_cli.gitlab",
+    "enji_guard_cli.composition",
+]
+
+[[interfaces]]
+# GitLab discovery and the gateway only ever need portfolio's vocabulary --
+# identities, refs, errors -- never its services.
+from = ["enji_guard_cli.portfolio"]
+visibility = ["enji_guard_cli.gitlab", "enji_guard_cli.enji_gateway"]
+expose = ["[^.]+", "models\\..*", "errors\\..*", "ports\\..*"]
+
+[[interfaces]]
+# The application drives portfolio use cases.  `selectors` is the concrete
+# gateway-backed target service and stays out.
+from = ["enji_guard_cli.portfolio"]
+visibility = ["enji_guard_cli.application"]
+expose = [
+    "[^.]+",
+    "models\\..*",
+    "errors\\..*",
+    "ports\\..*",
+    "projects\\..*",
+    "recon\\..*",
+    "repositories\\..*",
+    "scopes\\..*",
+    "status\\..*",
+]
+
+[[interfaces]]
+from = ["enji_guard_cli.portfolio"]
+visibility = ["enji_guard_cli.composition"]
+expose = [".*"]
+
+[[modules]]
+# GitLab discovery reuses portfolio's repository identity rather than minting
+# a second one; that is the only reason for this same-layer edge.
+path = "enji_guard_cli.gitlab"
+layer = "domain"
+depends_on = ["enji_guard_cli.portfolio"]
+cannot_depend_on = ["enji_guard_cli.audit"]
+visibility = ["enji_guard_cli.application", "enji_guard_cli.enji_gateway"]
+
+[[interfaces]]
+# gitlab/__init__ already re-exports its whole vocabulary; deep imports are
+# pure habit and are banned.
+from = ["enji_guard_cli.gitlab"]
+expose = ["[^.]+"]
+
+# ---------------------------------------------------------------------------
+# credentials -- auth material.  Below the gateway: it must not know who uses
+# the token it holds.
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "enji_guard_cli.auth_session"
+layer = "credentials"
+depends_on = [
+    "enji_guard_cli.transport",
+    "enji_guard_cli.transport_types",
+    "enji_guard_cli.settings",
+    "enji_guard_cli.atomic_json",
+]
+# Stated twice on purpose: the layer forbids it, and so does this, so the fix
+# cannot be "move enji_gateway down a layer".
+cannot_depend_on = ["enji_guard_cli.enji_gateway"]
+visibility = [
+    "enji_guard_cli.application",
+    "enji_guard_cli.runtime_observability",
+    "enji_guard_cli.enji_gateway",
+    "enji_guard_cli.composition",
+]
+
+[[interfaces]]
+# The gateway needs a credential, not a session lifecycle.
+from = ["enji_guard_cli.auth_session"]
+visibility = ["enji_guard_cli.enji_gateway"]
+expose = ["[^.]+"]
+
+[[interfaces]]
+# Use cases speak the curated seam in `auth_session/__all__` and nothing else.
+from = ["enji_guard_cli.auth_session"]
+visibility = ["enji_guard_cli.application"]
+expose = ["[^.]+"]
+
+[[interfaces]]
+# Supervision drives refresh, so it sees the API and the event ports.
+from = ["enji_guard_cli.auth_session"]
+visibility = ["enji_guard_cli.runtime_observability"]
+expose = ["[^.]+", "api\\..*", "ports\\..*", "credential_changes\\..*", "models\\..*"]
+
+[[interfaces]]
+from = ["enji_guard_cli.auth_session"]
+visibility = ["enji_guard_cli.composition"]
+expose = [".*"]
+
+# ---------------------------------------------------------------------------
+# transport -- HTTP mechanics.  No product vocabulary above `RetryProfile`.
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "enji_guard_cli.transport"
+layer = "transport"
+depends_on = ["enji_guard_cli.settings", "enji_guard_cli.transport_types"]
+# Exactly two callers make HTTP requests; everything else goes through them.
+visibility = ["enji_guard_cli.enji_gateway", "enji_guard_cli.auth_session"]
+
+# ---------------------------------------------------------------------------
+# foundation -- leaf utilities.  No product opinions, visible to everyone.
+# ---------------------------------------------------------------------------
+
+[[modules]]
+path = "enji_guard_cli.settings"
+layer = "foundation"
+
+[[modules]]
+path = "enji_guard_cli.fanout"
+layer = "foundation"
+depends_on = ["enji_guard_cli.settings"]
+
+[[modules]]
+path = "enji_guard_cli.atomic_json"
+layer = "foundation"
+
+[[modules]]
+# The shared HTTP error vocabulary. Foundation because both the gateway and
+# the use cases translate it, so neither may own it.
+path = "enji_guard_cli.errors"
+layer = "foundation"
+
+[[modules]]
+# Type aliases only; deliberately not folded into `transport_types`, which is
+# about retry policy rather than JSON shape.
+path = "enji_guard_cli.json_types"
+layer = "foundation"
+
+[[modules]]
+path = "enji_guard_cli.transport_types"
+layer = "foundation"
+
+[[modules]]
+path = "enji_guard_cli.version"
+layer = "foundation"
+depends_on = ["enji_guard_cli._build_provenance"]
+visibility = ["enji_guard_cli.delivery.cli"]
+
+[[modules]]
+# Written by the build; read by `version` and by nothing else, ever.
+path = "enji_guard_cli._build_provenance"
+layer = "foundation"
+visibility = ["enji_guard_cli.version"]

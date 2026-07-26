@@ -1,8 +1,13 @@
 from typing import cast
 
+from application_builder import ApplicationStubs
 from enji_guard_cli.application import Application
-from enji_guard_cli.audit.ports import AuditGatewayPort
-from enji_guard_cli.auth_session.service import AuthSessionService
+from enji_guard_cli.application.portfolio_views import (
+    account_preferences_view,
+    project_ref_view,
+    repository_ref_view,
+)
+from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.models import (
     AccessInfo,
     AccessLimits,
@@ -14,6 +19,8 @@ from enji_guard_cli.portfolio.models import (
     RepositoryRef,
 )
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
+from enji_guard_cli.portfolio.selectors import GatewayPortfolioTargetService
+from enji_guard_cli.settings import default_settings
 
 
 class _Portfolio:
@@ -42,23 +49,29 @@ class _Portfolio:
         return AccessInfo("pro", True, AccessLimits(can_use_schedules=True))
 
 
+def _facades(portfolio: _Portfolio) -> Application:
+    gateway = cast(PortfolioGatewayPort, portfolio)
+    targets = GatewayPortfolioTargetService(gateway, BoundedFanout(default_settings().fanout))
+    return ApplicationStubs(portfolio_gateway=portfolio, target_service=targets).build()
+
+
 def test_project_settings_keeps_language_account_wide() -> None:
     portfolio = _Portfolio()
-    app = Application(
-        cast(AuditGatewayPort, object()), cast(PortfolioGatewayPort, portfolio), cast(AuthSessionService, object())
-    )
+    app = _facades(portfolio)
 
-    settings = app.project_settings("pets")
+    settings = app.portfolio.project_settings("pets")
 
-    assert settings.project == portfolio.project
-    assert settings.repositories == (portfolio.repository,)
-    assert settings.account_preferences == AccountPreferences("en")
+    # The facade answers in application-owned views, so the assertion is that
+    # the domain objects were *mapped* faithfully -- not that they were handed
+    # through.  Comparing to the domain object here would only pass if the
+    # boundary had been laundered away.
+    assert settings.project == project_ref_view(portfolio.project)
+    assert settings.repositories == (repository_ref_view(portfolio.repository),)
+    assert settings.account_preferences == account_preferences_view(AccountPreferences("en"))
 
 
 def test_access_is_typed_and_gateway_backed() -> None:
     portfolio = _Portfolio()
-    app = Application(
-        cast(AuditGatewayPort, object()), cast(PortfolioGatewayPort, portfolio), cast(AuthSessionService, object())
-    )
+    app = _facades(portfolio)
 
-    assert app.access() == AccessInfo("pro", True, AccessLimits(can_use_schedules=True))
+    assert app.portfolio.access() == AccessInfo("pro", True, AccessLimits(can_use_schedules=True))

@@ -1,11 +1,13 @@
 from collections.abc import Callable
 from typing import cast
 
-from enji_guard_cli.application import Application, ApplicationResult
+from enji_guard_cli.application import ApplicationResult, ApplicationRunner, AuditFacade, PortfolioFacade
 from enji_guard_cli.mcp_facade import McpQueryFacade
 
 
-class _ApplicationSpy:
+class _FacadeSpy:
+    """Record which facade method the narrow MCP surface reaches for."""
+
     def __init__(self) -> None:
         self.calls: list[tuple[object, ...]] = []
 
@@ -23,8 +25,12 @@ class _ApplicationSpy:
 
 
 def test_mcp_facade_exposes_only_curated_query_scenarios() -> None:
-    application = _ApplicationSpy()
-    facade = McpQueryFacade(cast("Application", application))
+    application = _FacadeSpy()
+    facade = McpQueryFacade(
+        cast("ApplicationRunner", application),
+        cast("PortfolioFacade", application),
+        cast("AuditFacade", application),
+    )
 
     overview = facade.portfolio_overview("project", "weakest")
     audits = facade.repository_audits("owner/repo", "project")

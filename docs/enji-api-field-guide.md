@@ -190,8 +190,9 @@ schedule and does not replace `audit-auto-runs`.
 The current typed relationship registry supports `security` -> `vuln-fix`,
 `tests` -> `test-writing`, and `dependency-hygiene` -> `dependency-update`.
 Pentest is separate. Batch operations are explicit client-side loops over a
-single `REPO`, `--all-repos` within `--project`, or `--all-projects`; no wider
-scope is inferred. MCP remains read-only. Remove the temporary relationship
+single `--repo REPO`, `--all-repos` within `--project`, or `--all-projects`; no
+wider scope is inferred. `--all-projects` is the only unbounded scope and
+requires `--yes` from any non-TTY or `--json` caller. MCP remains read-only. Remove the temporary relationship
 registry when Enji exposes relationships directly. The current CLI only exposes
 published autofix entries that are not part of the separate pentest action set;
 unsupported autofix selectors remain blocked until a typed relationship is

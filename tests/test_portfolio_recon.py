@@ -1,6 +1,6 @@
 # pyright: basic
 
-from enji_guard_cli.audit.ports import AuditStatus
+from enji_guard_cli.audit.ports import AuditStartOutcome, AuditStatus
 from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvider, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioAuditStatus
 from enji_guard_cli.portfolio.recon import RECON_ACTION_KEY, start_recon
@@ -17,9 +17,7 @@ class Starter:
 
     def start(self, repo_id, project_id, action_key):
         self.action = (repo_id, project_id, action_key)
-        from enji_guard_cli.audit.ports import AuditRunResult
-
-        return AuditRunResult("task", "queued")
+        return AuditStartOutcome("started", "task", "queued")
 
 
 def test_recon_uses_canonical_audit_identity() -> None:

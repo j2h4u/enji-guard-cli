@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import random
@@ -10,15 +11,22 @@ from typing import Protocol, Self, cast
 from urllib.parse import urlsplit
 
 import httpx
-from tenacity import AsyncRetrying, RetryCallState, retry_if_exception, stop_after_attempt
+from tenacity import RetryCallState, Retrying, retry_if_exception, stop_after_attempt
 from tenacity.wait import wait_base
 
-from enji_guard_cli.settings import default_settings
+from enji_guard_cli.settings import (
+    DEFAULT_TRANSPORT_RESPECT_RETRY_AFTER_HEADER,
+    DEFAULT_TRANSPORT_RETRY_BACKOFF_FACTOR,
+    DEFAULT_TRANSPORT_RETRY_JITTER_SECONDS,
+    DEFAULT_TRANSPORT_RETRY_MAX_DELAY_SECONDS,
+    DEFAULT_TRANSPORT_RETRY_TOTAL,
+    DEFAULT_TRANSPORT_RETRYABLE_STATUS_CODES,
+    DEFAULT_TRANSPORT_TIMEOUT_SECONDS,
+)
 from enji_guard_cli.transport_types import RetryProfile
 
 RATE_LIMIT_STATUS_CODE = 429
 _LOGGER = logging.getLogger(__name__)
-_TRANSPORT_SETTINGS = default_settings().transport
 
 type EnjiJsonScalar = None | bool | int | float | str
 type EnjiJsonValue = EnjiJsonScalar | list[EnjiJsonValue] | dict[str, EnjiJsonValue]
@@ -26,12 +34,12 @@ type EnjiJsonValue = EnjiJsonScalar | list[EnjiJsonValue] | dict[str, EnjiJsonVa
 
 @dataclass(frozen=True, slots=True)
 class RetryConfig:
-    total: int = _TRANSPORT_SETTINGS.retry.total
-    backoff_factor: float = _TRANSPORT_SETTINGS.retry.backoff_factor
-    max_delay_seconds: float = _TRANSPORT_SETTINGS.retry.max_delay_seconds
-    jitter_seconds: float = _TRANSPORT_SETTINGS.retry.jitter_seconds
-    status_forcelist: tuple[int, ...] = _TRANSPORT_SETTINGS.retry.retryable_status_codes
-    respect_retry_after_header: bool = _TRANSPORT_SETTINGS.retry.respect_retry_after_header
+    total: int = DEFAULT_TRANSPORT_RETRY_TOTAL
+    backoff_factor: float = DEFAULT_TRANSPORT_RETRY_BACKOFF_FACTOR
+    max_delay_seconds: float = DEFAULT_TRANSPORT_RETRY_MAX_DELAY_SECONDS
+    jitter_seconds: float = DEFAULT_TRANSPORT_RETRY_JITTER_SECONDS
+    status_forcelist: tuple[int, ...] = DEFAULT_TRANSPORT_RETRYABLE_STATUS_CODES
+    respect_retry_after_header: bool = DEFAULT_TRANSPORT_RESPECT_RETRY_AFTER_HEADER
 
     def build(self) -> Self:
         """Keep a small policy object for callers; execution is owned by Tenacity below."""
@@ -46,7 +54,7 @@ class EnjiHttpRequest:
     headers: Mapping[str, str]
     profile: RetryProfile = RetryProfile.READ
     json_body: EnjiJsonValue | None = None
-    timeout_seconds: float = _TRANSPORT_SETTINGS.timeout_seconds
+    timeout_seconds: float = DEFAULT_TRANSPORT_TIMEOUT_SECONDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,25 +145,32 @@ class _RetryableResponseError(Exception):
         self.response = response
 
 
-def _new_async_client(limits: httpx.Limits | None) -> httpx.AsyncClient:
+def _new_client(limits: httpx.Limits | None) -> httpx.Client:
     if limits is None:
-        return httpx.AsyncClient(follow_redirects=False)
-    return httpx.AsyncClient(follow_redirects=False, limits=limits)
+        return httpx.Client(follow_redirects=False)
+    return httpx.Client(follow_redirects=False, limits=limits)
 
 
 class HttpxEnjiHttpClient:
-    """The sole real HTTP executor, including profile-aware Tenacity retries."""
+    """The sole real HTTP executor: a pooled, thread-safe blocking client.
+
+    ``httpx.Client`` owns the connection pool and is safe to share across
+    worker threads, so one instance serves the whole process.  The blocking
+    call is exposed to asyncio callers through ``asyncio.to_thread`` so a live
+    event loop (the runtime supervisor, which also hosts the MCP server) never
+    stalls on network I/O.
+    """
 
     def __init__(
         self,
-        client: httpx.AsyncClient | None = None,
+        client: httpx.Client | None = None,
         *,
         retry_config: RetryConfig | None = None,
         limits: httpx.Limits | None = None,
         event_sink: TransportEventSink = discard_transport_event,
     ) -> None:
         self._owned_client = client is None
-        self._client = client if client is not None else _new_async_client(limits)
+        self._client = client if client is not None else _new_client(limits)
         self._retry_config = retry_config or RetryConfig()
         self._event_sink = event_sink
 
@@ -163,17 +178,36 @@ class HttpxEnjiHttpClient:
         return self
 
     async def __aexit__(self, *_: object) -> None:
+        await asyncio.to_thread(self.close)
+
+    @property
+    def is_closed(self) -> bool:
+        """Whether the underlying connection pool has been released."""
+        return self._client.is_closed
+
+    def close(self) -> None:
+        """Release the connection pool; safe to call repeatedly."""
         if self._owned_client:
-            await self._client.aclose()
+            self._client.close()
 
     async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+        # ``asyncio.to_thread`` is not cancellable.  Cancelling the awaiting task
+        # raises CancelledError here promptly (so caller-side cancellation
+        # bookkeeping still runs), but the socket keeps running in the executor
+        # thread until ``request.timeout_seconds`` elapses.  Because
+        # ``asyncio.run`` waits on its default executor during shutdown, a
+        # supervisor shutdown can be delayed by at most one request timeout.
+        # That is the accepted price for deleting the owner-loop bridge.
+        return await asyncio.to_thread(self.request_blocking, request)
+
+    def request_blocking(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
         started_at = time.perf_counter()
         response: httpx.Response | None = None
         try:
             if not request.profile.can_retry or self._retry_config.total <= 0:
-                response = await self._request_once(request)
+                response = self._request_once(request)
             else:
-                retrying = AsyncRetrying(
+                retrying = Retrying(
                     retry=retry_if_exception(_is_retryable_attempt),
                     wait=_RetryWait(self._retry_config),
                     stop=stop_after_attempt(self._retry_config.total + 1),
@@ -181,9 +215,9 @@ class HttpxEnjiHttpClient:
                     before_sleep=lambda state: self._log_retry(request, state),
                 )
                 try:
-                    async for attempt in retrying:
+                    for attempt in retrying:
                         with attempt:
-                            response = await self._request_once(request)
+                            response = self._request_once(request)
                 except _RetryableResponseError as exc:
                     response = exc.response
         except httpx.HTTPError as exc:
@@ -199,16 +233,16 @@ class HttpxEnjiHttpClient:
         )
         return _response_from_httpx(response)
 
-    async def _request_once(self, request: EnjiHttpRequest) -> httpx.Response:
+    def _request_once(self, request: EnjiHttpRequest) -> httpx.Response:
         if request.json_body is None:
-            response = await self._client.request(
+            response = self._client.request(
                 request.method,
                 request.url,
                 headers=dict(request.headers),
                 timeout=request.timeout_seconds,
             )
         else:
-            response = await self._client.request(
+            response = self._client.request(
                 request.method,
                 request.url,
                 headers=dict(request.headers),

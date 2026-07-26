@@ -4,11 +4,12 @@ import importlib
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, cast
+from typing import cast
 
 import pytest
 from typer.testing import CliRunner
 
+from application_builder import ApplicationStubs
 from enji_guard_cli.application import Application
 from enji_guard_cli.audit.ports import AuditCatalogChange, AuditCatalogResult
 from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION
@@ -30,11 +31,7 @@ def test_run_emits_catalog_changes_from_the_command_application(
         def catalog(self) -> AuditCatalogResult:
             return AuditCatalogResult(actions=(), changes=(change,))
 
-    application = Application(
-        audit_gateway=cast(Any, CatalogGateway()),
-        portfolio_gateway=cast(Any, None),
-        auth=cast(Any, None),
-    )
+    application = ApplicationStubs(audit_gateway=CatalogGateway()).build()
     constructions = 0
 
     def application_factory(_auth_file: object = None) -> Application:
@@ -46,7 +43,7 @@ def test_run_emits_catalog_changes_from_the_command_application(
     monkeypatch.setitem(cli_module._state, "application", None)
     monkeypatch.setitem(cli_module._state, "application_auth_file", None)
 
-    cli_module._run(lambda: cli_module._application().catalog(), True, FIELDS_PRESENTATION)
+    cli_module._run(lambda: cli_module._application().catalog.catalog(), True, FIELDS_PRESENTATION)
 
     assert constructions == 1
     output = capsys.readouterr().out
@@ -63,19 +60,15 @@ def test_application_keeps_catalog_observation_isolated_per_execution() -> None:
             change = AuditCatalogChange(kind="changed", action_key=action_key, changed_fields=("title",))
             return AuditCatalogResult(actions=(), changes=(change,))
 
-    application = Application(
-        audit_gateway=cast(Any, CatalogGateway()),
-        portfolio_gateway=cast(Any, None),
-        auth=cast(Any, None),
-    )
+    application = ApplicationStubs(audit_gateway=CatalogGateway()).build()
 
     def execute() -> tuple[str, str]:
         def read_catalog() -> str:
-            action_key = application.catalog().changes[0].action_key
+            action_key = application.catalog.catalog().changes[0].action_key
             barrier.wait()
             return action_key
 
-        result = application.execute(read_catalog)
+        result = application.runner.execute(read_catalog)
         return cast(str, result.payload), result.catalog_changes[0].action_key
 
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="catalog") as pool:
@@ -87,11 +80,10 @@ def test_application_keeps_catalog_observation_isolated_per_execution() -> None:
 @pytest.mark.parametrize(
     ("args", "operation"),
     [
-        (("audit", "status", "repo-1"), "cli audit status"),
-        (("repo", "remove", "repo-1"), "cli repo remove"),
+        (("status", "repo-1"), "cli status"),
+        (("repo", "remove", "repo-1", "--yes"), "cli repo remove"),
         (("repo", "move", "repo-1", "--to-project", "project-2"), "cli repo move"),
         (("repo", "resolve", "repo-1"), "cli repo resolve"),
-        (("portfolio", "status"), "cli portfolio status"),
     ],
 )
 def test_cli_callbacks_set_the_operation_names_used_by_observation(

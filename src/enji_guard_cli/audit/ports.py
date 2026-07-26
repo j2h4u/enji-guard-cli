@@ -207,6 +207,26 @@ class AuditRunResult:
     status: str | None
 
 
+AuditRunState = Literal["started", "queued", "already_running", "up_to_date", "failed"]
+"""Every outcome Audit can reach for one requested run, named once."""
+
+
+@dataclass(frozen=True, slots=True)
+class AuditStartOutcome:
+    """What starting one audit run actually did, and why when it did nothing.
+
+    ``AuditRunResult`` is the gateway's answer -- a task identity and nothing
+    more.  A caller that asked for exactly one run needs the outcome as well:
+    an upstream refusal and a run that was already in flight both come back
+    without a new task id, and only this type tells them apart.
+    """
+
+    state: AuditRunState
+    task_id: str | None = None
+    task_status: str | None = None
+    reason: str | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class AuditRunbookMetadata:
     """Runbook metadata needed to assemble an audit task."""
@@ -254,12 +274,22 @@ class AuditNewerRun:
 
 AuditFreshnessState = Literal["fresh", "stale", "unknown"]
 AuditTaskLifecycle = Literal["none", "queued", "running", "failed", "completed"]
-AuditCurrentHeadState = Literal["ready", "queued", "running", "missing", "blocked", "failed", "unknown"]
+AuditCurrentHeadState = Literal[
+    "ready",
+    "queued",
+    "running",
+    "unverified",
+    "missing",
+    "blocked",
+    "failed",
+    "unknown",
+]
 AuditCurrentHeadAction = Literal[
     "none",
     "wait_for_current_head_run",
     "start_current_head_run",
     "inspect_failed_run",
+    "inspect_unverified_run",
     "resolve_unknown_head",
 ]
 
@@ -372,7 +402,7 @@ class AuditWaitResult:
     status: AuditStatus
     complete: bool
     timed_out: bool
-    reason: Literal["complete", "waiting", "failed", "missing", "stale", "timeout"]
+    reason: Literal["complete", "waiting", "failed", "missing", "timeout"]
     elapsed_seconds: int
 
 

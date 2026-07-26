@@ -115,6 +115,16 @@ def _active_current_head_status(
             task_status=active_run.status,
             task_current_head_sha=run_sha,
         )
+    if run_sha is None:
+        # The run carries no current-head evidence.  Absence of evidence is not
+        # evidence of currency, so this must not be reported as a run worth
+        # waiting for: the operator has to inspect the task and decide.
+        return AuditCurrentHeadStatus(
+            "unverified",
+            "inspect_unverified_run",
+            task_id=active_run.task_id,
+            task_status=active_run.status,
+        )
     if run_lifecycle == "queued":
         return AuditCurrentHeadStatus(
             "queued",

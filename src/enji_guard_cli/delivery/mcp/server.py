@@ -6,13 +6,15 @@ CLI/runtime surfaces.
 """
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 from typing import Literal, cast
 
 from mcp.server.fastmcp import FastMCP
 
-from enji_guard_cli.composition import create_mcp_query_facade
+from enji_guard_cli.composition import mcp_query_facade
 from enji_guard_cli.mcp_facade import McpQueryFacade, McpQueryResult
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.telemetry import configure_logging
@@ -52,9 +54,33 @@ def create_mcp_server(
     host: str = DEFAULT_HTTP_HOST,
     port: int = DEFAULT_HTTP_PORT,
     *,
-    queries: McpQueryFacade | None = None,
+    auth_file: Path | None = None,
 ) -> FastMCP:
-    query_facade = queries or create_mcp_query_facade()
+    """Build the curated MCP server; it composes its own narrow query surface.
+
+    The query surface is deliberately not injectable.  Every caller — the
+    container entrypoint included — gets the same read-only composition of
+    runner + portfolio + audit, bound to the server lifespan so its pooled
+    client is always released.
+    """
+    active: McpQueryFacade | None = None
+
+    @asynccontextmanager
+    async def lifespan(_server: FastMCP) -> AsyncIterator[None]:
+        """Own a composed query surface for exactly as long as the server runs."""
+        nonlocal active
+        with mcp_query_facade(auth_file) as owned:
+            active = owned
+            try:
+                yield
+            finally:
+                active = None
+
+    def query_facade() -> McpQueryFacade:
+        if active is None:
+            raise RuntimeError("the MCP query surface exists only while the server lifespan is running")
+        return active
+
     server = FastMCP(
         name="enji-guard-cli",
         instructions=(
@@ -63,6 +89,7 @@ def create_mcp_server(
         ),
         host=host,
         port=port,
+        lifespan=lifespan,
     )
 
     @server.tool(
@@ -78,7 +105,7 @@ def create_mcp_server(
             McpQueryResult,
             await asyncio.to_thread(
                 run_agent_journey,
-                lambda: query_facade.portfolio_overview(_project_arg(project), sort),
+                lambda: query_facade().portfolio_overview(_project_arg(project), sort),
                 AgentJourney(
                     event_prefix="mcp_tool",
                     operation=MCP_TOOL_NAMES[0],
@@ -100,7 +127,7 @@ def create_mcp_server(
             McpQueryResult,
             await asyncio.to_thread(
                 run_agent_journey,
-                lambda: query_facade.repository_audits(repo.strip(), _project_arg(project)),
+                lambda: query_facade().repository_audits(repo.strip(), _project_arg(project)),
                 AgentJourney(
                     event_prefix="mcp_tool",
                     operation=MCP_TOOL_NAMES[1],

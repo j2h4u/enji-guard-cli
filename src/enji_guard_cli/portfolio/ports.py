@@ -2,9 +2,9 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
-from enji_guard_cli.audit.ports import AuditRun, AuditRunResult, AuditStatus
+from enji_guard_cli.audit.ports import AuditRun, AuditRunState, AuditStartOutcome, AuditStatus
 from enji_guard_cli.portfolio.models import (
     AccessInfo,
     AccountPreferences,
@@ -93,5 +93,20 @@ class AuditStatusReader(Protocol):
     def status(self, repo_id: str) -> PortfolioAuditStatus: ...
 
 
+ReconState = Literal[AuditRunState, "unchanged"]
+"""Audit's own run states plus the one Portfolio decides before asking.
+
+The vocabularies are deliberately unified rather than mapped.  ``started`` and
+``already_running`` already mean the same thing on both sides, and the states
+only Audit can reach -- ``queued``, ``up_to_date``, ``failed`` -- have no
+Portfolio equivalent worth inventing: translating them would either lose the
+distinction or invent one.  ``unchanged`` is the single state Portfolio owns,
+because the ``recon_done`` short-circuit happens before Audit is consulted.
+
+It is declared here, at the one module allowed to see Audit's ports, so the
+recon use-case never has to reach across the boundary itself.
+"""
+
+
 class AuditStartPort(Protocol):
-    def start(self, repo_id: str, project_id: str, action_key: str) -> AuditRunResult: ...
+    def start(self, repo_id: str, project_id: str, action_key: str) -> AuditStartOutcome: ...

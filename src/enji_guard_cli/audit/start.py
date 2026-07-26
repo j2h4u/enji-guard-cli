@@ -27,7 +27,7 @@ class AuditStartService:
     def __init__(
         self,
         gateway: AuditGatewayPort,
-        ledger: AuditLedgerPort | None,
+        ledger: AuditLedgerPort,
         project: Callable[[str], AuditProject],
     ) -> None:
         self.gateway = gateway
@@ -36,8 +36,6 @@ class AuditStartService:
 
     def active_runs(self, repo_id: str):
         upstream = self.gateway.active_runs(repo_id).runs
-        if self.ledger is None:
-            return upstream
         return self.ledger.reconcile(repo_id, upstream, self.gateway.task_detail)
 
     def start(
@@ -64,8 +62,6 @@ class AuditStartService:
         )
 
     def _record_started(self, context: AuditRunStart) -> None:
-        if self.ledger is None:
-            return
         self.ledger.record_started(
             new_entry(
                 context,

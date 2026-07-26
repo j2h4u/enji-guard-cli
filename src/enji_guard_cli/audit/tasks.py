@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from enji_guard_cli.audit.errors import AuditActionUnusableError, AuditRepositoryUnusableError
 from enji_guard_cli.audit.models import AuditDefinition
 from enji_guard_cli.audit.ports import AuditProject, AuditRunbookMetadata, AuditTaskBody
 
@@ -23,18 +24,18 @@ class AuditTaskContext:
 def task_for_repo(context: AuditTaskContext, repo_id: str) -> AuditTaskBody:
     repository = next((repo for repo in context.project.repositories if repo.repo_id == repo_id), None)
     if repository is None:
-        raise ValueError(f"project does not contain repo id: {repo_id}")
+        raise AuditRepositoryUnusableError(f"project does not contain repo id: {repo_id}")
     if repository.connected is not True:
-        raise ValueError(f"repo is not connected: {repository.locator}")
+        raise AuditRepositoryUnusableError(f"repo is not connected: {repository.locator}")
     locator = repository.locator
     if not isinstance(locator, str) or not locator.strip() or locator in {"/", "//"}:
-        raise ValueError(f"repository has incomplete locator: {locator!r}")
+        raise AuditRepositoryUnusableError(f"repository has incomplete locator: {locator!r}")
     if not isinstance(context.artifact_schema_name, str) or not context.artifact_schema_name.strip():
-        raise ValueError("audit task is missing artifact schema name")
+        raise AuditActionUnusableError("audit task is missing artifact schema name")
     if not isinstance(context.artifact_schema_version, str) or not context.artifact_schema_version.strip():
-        raise ValueError("audit task is missing artifact schema version")
+        raise AuditActionUnusableError("audit task is missing artifact schema version")
     if not isinstance(context.runbook_id, str) or not context.runbook_id.strip():
-        raise ValueError("audit task is missing runbook id")
+        raise AuditActionUnusableError("audit task is missing runbook id")
     return AuditTaskBody(
         title=f"{context.audit.title} for {locator}",
         description=_description(context, locator, repo_id, repository.web_url),
