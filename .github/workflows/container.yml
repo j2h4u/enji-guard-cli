@@ -209,16 +209,15 @@ jobs:
           candidate="${IMAGE_NAME}:sha-${SOURCE_SHA}"
           docker push "${candidate}" | tee push.log
 
-          # Prefer the digest the registry reported during this push.  Reading
-          # it back with imagetools is only a fallback, because a transient
-          # registry error there used to abort the job after the push had
-          # already made the image public and before anything was attested.
+          # Use only the digest the registry reported during this push.  There
+          # is deliberately no imagetools readback fallback: that reports the
+          # digest of whatever the tag resolves to now, which for an index is
+          # not the manifest that was pushed -- the exact confusion that made
+          # v3.0.0's attestations unverifiable.  An unparseable push is a
+          # broken push; fail instead of guessing.
           digest="$(sed -n 's/.*[[:space:]]digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' push.log | tail -n 1)"
           if [ -z "${digest}" ]; then
-            digest="$(docker buildx imagetools inspect "${candidate}" --format '{{.Manifest.Digest}}')"
-          fi
-          if [ -z "${digest}" ]; then
-            echo "::error::could not resolve the digest of ${candidate}"
+            echo "::error::${candidate} was pushed but its digest could not be read from the push output"
             exit 1
           fi
 
@@ -240,18 +239,27 @@ jobs:
           subject-digest: ${{ steps.publish.outputs.digest }}
           push-to-registry: true
 
+      # `actions/attest-sbom` is deprecated and now only forwards to
+      # `actions/attest`; call the latter directly.
       - name: Attest SBOM
-        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-name: ${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.publish.outputs.digest }}
-          sbom-path: sbom.spdx.json
+          predicate-type: https://spdx.dev/Document/v2.3
+          predicate-path: sbom.spdx.json
           push-to-registry: true
 
-      # Registry-side retagging of an already-attested digest.  Nothing is
-      # rebuilt or re-uploaded, so every promoted tag resolves to exactly the
-      # manifest that was scanned above and attested immediately after.
-      - name: Promote attested tags
+      # The scanned image is already loaded locally under every tag, so each
+      # push uploads the *same* manifest and every tag resolves to the digest
+      # that was scanned and attested above.
+      #
+      # This must not use buildx imagetools retagging: that wraps the manifest
+      # in a fresh index with its own digest, so the tag stops resolving to the
+      # attested subject and `gh attestation verify oci://...:X.Y.Z` returns 404
+      # while the attestation quietly exists on a digest nobody looks up.
+      # v3.0.0 shipped exactly that.
+      - name: Publish the attested digest under its consumer tags
         env:
           IMAGE_TAGS: ${{ steps.image-tags.outputs.tags }}
           SOURCE_SHA: ${{ steps.release-metadata.outputs.source-sha }}
@@ -260,5 +268,10 @@ jobs:
           while IFS= read -r tag; do
             [ -n "${tag}" ] || continue
             [ "${tag}" != "${IMAGE_NAME}:sha-${SOURCE_SHA}" ] || continue
-            docker buildx imagetools create --tag "${tag}" "${IMAGE_NAME}@${DIGEST}"
+            docker push "${tag}" | tee tag-push.log
+            pushed="$(sed -n 's/.*[[:space:]]digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' tag-push.log | tail -n 1)"
+            if [ "${pushed}" != "${DIGEST}" ]; then
+              echo "::error::${tag} resolved to ${pushed}, not the attested ${DIGEST}"
+              exit 1
+            fi
           done <<< "${IMAGE_TAGS}"
