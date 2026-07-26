@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.13...v3.0.0) (2026-07-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** the operator surface changed.
+
+### Refactoring
+
+* **cli:** harden the release pipeline, ledger, transport, and operator contract ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
+
 ## [2.2.13](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.12...v2.2.13) (2026-07-23)
 
 
