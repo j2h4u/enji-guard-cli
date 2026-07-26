@@ -79,6 +79,36 @@ jobs:
               ;;
           esac
 
+      # The release PR is opened by GITHUB_TOKEN, so its author is
+      # github-actions[bot] and GitHub parks its check runs in
+      # `action_required` until a human presses "Approve and run".  Auto-merge
+      # cannot remove that press -- it waits on checks that have not started --
+      # but it removes the second visit: once the approved checks go green the
+      # PR merges itself instead of sitting there waiting to be noticed.
+      #
+      # Enabling it is idempotent, so a later run re-arming an already-armed
+      # PR is harmless.
+      #
+      # The condition is `prs_created`, which the action sets on every run,
+      # rather than `pr`, which it sets only when a PR exists.  Gating on `pr`
+      # would turn a renamed output into a silent skip -- releases would simply
+      # stop arming auto-merge and nothing would say why.
+      - name: Arm auto-merge on the release PR
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+        run: |
+          number="$(printf '%s' "${RELEASE_PR}" | jq -r '.number // empty')"
+          if [ -z "${number}" ]; then
+            echo "::error::prs_created is true but no PR number could be read from the 'pr' output"
+            echo "::error::pr='${RELEASE_PR}'"
+            exit 1
+          fi
+          gh pr merge "${number}" --auto --squash --repo "${REPOSITORY}"
+          echo "auto-merge armed on release PR #${number}"
+
   # Nothing may be published from a commit whose CI has not passed.  The
   # container workflow has no trigger of its own, so this poll is the only gate
   # in front of it and replaces the `workflow_run` conclusion check that the
