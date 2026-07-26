@@ -7,6 +7,14 @@
 
 * **ci:** publish consumer tags as the attested manifest ([#185](https://github.com/j2h4u/enji-guard-cli/issues/185)) ([c79fb96](https://github.com/j2h4u/enji-guard-cli/commit/c79fb965afdbdb66d727ddf938e1a9c1ef143fe3))
 
+  **Fixes attestation verification for anyone pulling the image by tag.** 3.0.0 attested the digest it pushed, then applied the consumer tags with `buildx imagetools create`, which wraps the manifest in a fresh index carrying its own digest. The tag therefore resolved to something other than the attested subject, and `gh attestation verify oci://ghcr.io/j2h4u/enji-guard-cli:3.0.0` returned 404 while the attestation sat, unreachable, on the inner digest.
+
+  Each consumer tag is now pushed directly from the same locally scanned image, and the run fails if the digest the registry reports back is not the attested one.
+
+* **ci:** resolve the pushed digest only from the push output ([c79fb96](https://github.com/j2h4u/enji-guard-cli/commit/c79fb965afdbdb66d727ddf938e1a9c1ef143fe3))
+
+  The imagetools readback fallback is gone: it reported the digest the tag resolves to now, which for an index is not the manifest that was pushed. An unparseable push is treated as a broken push rather than an invitation to guess.
+
 ## [3.0.0](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.13...v3.0.0) (2026-07-26)
 
 
@@ -22,6 +30,7 @@ The operator surface changed.
 * MCP tool errors no longer carry the credential path or CLI bootstrap instructions; that guidance stays on the CLI surface.
 * An active run that cannot prove it targets the current head is reported as `unverified` / `inspect_unverified_run` instead of `queued` / `wait_for_current_head_run`.
 * An ambiguous bare repository locator raises `VALIDATION` naming the candidates rather than silently choosing one.
+* The human status line printed by `wait` now renders as `AuditStatusView(...)` where it previously read `AuditStatus(...)`, a consequence of the application returning its own view types. Field names and values are unchanged, and `--json` output is byte-identical.
 
 ### Features
 
@@ -73,12 +82,27 @@ The operator surface changed.
 
 * **tach:** declare the ideal module graph and inventory the debt ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b))
 
+### Supply chain
+
+Hardening of the publishing workflows beyond the fixes listed above, all in [b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b):
+
+* Registry write permission is scoped to the container publish job instead of the whole workflow, and CodeQL runs under least-privilege default permissions.
+* Container checkouts no longer persist the git token.
+* The aggregate CI gate fails on a skipped required job rather than treating it as a pass.
+* The image that gets scanned is the image that was built, and `just docker-check` plus the Docker-marked packaging policy tests run in CI.
+
+### Maintenance
+
+* The test suite grew from 428 to 914 tests and gained a coverage floor as a ratchet. Acceptance for this release was mutation-based: each guarantee was verified by breaking the code and confirming a test went red ([b9af8d1](https://github.com/j2h4u/enji-guard-cli/commit/b9af8d1a882ddc4193662fc6db4d94bb13df9c8b)).
+
 ## [2.2.13](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.12...v2.2.13) (2026-07-23)
 
 
 ### Fixes
 
 * **audit:** start current-head runs ([#180](https://github.com/j2h4u/enji-guard-cli/issues/180)) ([ac7e408](https://github.com/j2h4u/enji-guard-cli/commit/ac7e4082ba2e4b1eb3e5901035922d38694a7ff7))
+
+  Completes the readiness work of 2.2.11 and 2.2.12. `status` correctly reported `current_head=blocked action=start_current_head_run`, but `audit start --all` then answered `queued` from a stale ledger entry and started nothing, so the advice could not be acted on. The duplicate-run guard now ignores active runs whose recorded `current_head_sha` differs from the current head, while still refusing to duplicate a run whose head is unknown.
 
 ## [2.2.12](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.11...v2.2.12) (2026-07-23)
 
@@ -87,12 +111,16 @@ The operator surface changed.
 
 * **audit:** expose only active runs ([#178](https://github.com/j2h4u/enji-guard-cli/issues/178)) ([31ebc50](https://github.com/j2h4u/enji-guard-cli/commit/31ebc50dd555697779c3c0e2012863c7bb49f43c))
 
+  `audit.active_runs` could list completed historical tasks, so the field did not mean what its name said. Terminal upstream history is now filtered out of the outward field; the raw projections are kept internally for status reconciliation. Summary readiness was already correct and is unchanged.
+
 ## [2.2.11](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.10...v2.2.11) (2026-07-23)
 
 
 ### Fixes
 
 * **audit:** expose current-head readiness ([#176](https://github.com/j2h4u/enji-guard-cli/issues/176)) ([ecda863](https://github.com/j2h4u/enji-guard-cli/commit/ecda8630dbeac0f7256367b686108a4cd5d39ed1))
+
+  `audit status` could report a readable but stale artifact as `ready`, leaving no way to tell whether the result described the current repository head. Each audit now carries a `current_head` state and a recommended `action` — for example `current_head=running action=wait_for_current_head_run` — and the human output renders them explicitly.
 
 ## [2.2.10](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.9...v2.2.10) (2026-07-23)
 
@@ -101,12 +129,18 @@ The operator surface changed.
 
 * **auth:** persist only auth cookies ([34144e1](https://github.com/j2h4u/enji-guard-cli/commit/34144e167f937d1b3c091f68a3a502ce9710a011))
 
+  Cookie import and `Set-Cookie` merging now keep only the recognised auth cookies. Unrelated cookies pasted in from a browser session are neither stored in the auth file nor sent back upstream. A cookie header carrying no auth pair is now rejected with `cookie input does not contain auth cookie pairs`.
+
+  The same change adds validation to every settings group. An invalid configuration — an empty base URL, a retry status code outside 100–599, an empty retryable-status list, a keepalive count above `max_connections`, an unknown log level or log format, an unknown repository sort — now fails immediately instead of being accepted and misbehaving later.
+
 ## [2.2.9](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.8...v2.2.9) (2026-07-23)
 
 
 ### Fixes
 
 * **cli:** show audit mental model without args ([8767c2c](https://github.com/j2h4u/enji-guard-cli/commit/8767c2cc08894716509b267ea7231fecd5d4fd3d))
+
+  Running `enji-guard` with no subcommand printed an error; it now prints help and exits 0. The root help gained a "Mental model" section putting `status REPO` first, and the `audit` group help states that `wait` is a real blocking wait rather than a way to refresh state.
 
 
 ### Documentation
@@ -120,12 +154,16 @@ The operator surface changed.
 
 * **docker:** use available MCP host port ([26746e2](https://github.com/j2h4u/enji-guard-cli/commit/26746e2b71097a7a7cd0bcd31ce6b66b770e46e4))
 
+  Corrects 2.2.7: the default published MCP host port is **18082**. 18080 was itself taken. `ENJI_GUARD_MCP_HOST_PORT` still overrides it.
+
 ## [2.2.7](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.6...v2.2.7) (2026-07-23)
 
 
 ### Fixes
 
 * **docker:** avoid MCP host port collision ([0a0f6a9](https://github.com/j2h4u/enji-guard-cli/commit/0a0f6a92711b262345626f0d3f4a4aa28bf7738a))
+
+  Moves the published MCP host port off the previous default, which collided with a neighbouring service, and makes it configurable through `ENJI_GUARD_MCP_HOST_PORT`. Superseded the next day by 2.2.8, which settles on 18082.
 
 ## [2.2.6](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.5...v2.2.6) (2026-07-23)
 
@@ -134,6 +172,8 @@ The operator surface changed.
 
 * **ci:** require releasable PR titles ([#165](https://github.com/j2h4u/enji-guard-cli/issues/165)) ([60afcef](https://github.com/j2h4u/enji-guard-cli/commit/60afcef312a5580ac5d5951b08a3fd8874e766d4))
 
+  PRs are squash-merged, so the PR title becomes the commit subject on `main` and therefore the changelog input. CI now rejects a title that is not a releasable Conventional Commit, instead of letting it silently drop out of the next release.
+
 ## [2.2.5](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.4...v2.2.5) (2026-07-23)
 
 
@@ -141,10 +181,14 @@ The operator surface changed.
 
 * **release:** treat maintenance commits as releasable ([#163](https://github.com/j2h4u/enji-guard-cli/issues/163)) ([08a04c7](https://github.com/j2h4u/enji-guard-cli/commit/08a04c7d8bb256c7e68597ef6d011818a45a2649))
 
+  Maintenance-type commits produced a version bump but no changelog section, so a release could ship with an empty set of notes. Every conventional type now maps to a section. Breaking still means major, `feat` minor, everything else patch.
+
 
 ### Refactoring
 
 * remove verified dead code ([#162](https://github.com/j2h4u/enji-guard-cli/issues/162)) ([c4ae8dd](https://github.com/j2h4u/enji-guard-cli/commit/c4ae8ddf39910e1d1b31e309e5dbcb616fd02742))
+
+  Internal helpers with no remaining references, across audit, portfolio, gateway and application. No public surface changed.
 
 ## [2.2.4](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.3...v2.2.4) (2026-07-23)
 
@@ -152,7 +196,19 @@ The operator surface changed.
 ### Fixes
 
 * **auth:** make cookie rotation crash-consistent ([#159](https://github.com/j2h4u/enji-guard-cli/issues/159)) ([72bcdb3](https://github.com/j2h4u/enji-guard-cli/commit/72bcdb332fd3fb2ef6fb65a0d137c9296292b71a))
+
+  The largest change in the 2.2 line: credential auto-refresh was rebuilt on a durable state machine with a typed storage projection and an outbox, so that a crash in the middle of a rotation cannot lose or replay a refresh token. What this guarantees in operation:
+
+  - At most one refresh request is issued per credential revision, and a refresh token that may already have been consumed is never replayed.
+  - Rotation outcomes are delivered through a durable outbox, so telemetry that failed to send survives a restart or a credential import under a stable redacted event key.
+  - Corrupt, unsupported, malformed-UTF-8 and clock-anomaly states fail closed rather than guessing, and do so without taking down sibling supervisor tasks. The readiness heartbeat keeps running after a watcher failure.
+  - The gateway, status, readiness and MCP surfaces are read-only with respect to credentials; only the refresh coordinator writes.
+
+  New durable state files appear next to the auth file. Refresh jitter now comes from a secure source.
+
 * **compose:** require build provenance ([#161](https://github.com/j2h4u/enji-guard-cli/issues/161)) ([a4a2d37](https://github.com/j2h4u/enji-guard-cli/commit/a4a2d3788e70cefcb38dcfc8e01f615a413dba83))
+
+  **Local builds change.** A plain `docker build` or `docker compose build` without `PACKAGE_VERSION` and `SOURCE_COMMIT` now fails instead of quietly producing an image stamped `0.0.0+local`. Use the Just recipes, which compute the version and the source SHA for you.
 
 ## [2.2.3](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.2...v2.2.3) (2026-07-22)
 
@@ -161,6 +217,15 @@ The operator surface changed.
 
 * pin GHCR compose project name ([#154](https://github.com/j2h4u/enji-guard-cli/issues/154)) ([933bf75](https://github.com/j2h4u/enji-guard-cli/commit/933bf755c95ef0fcba3ce979d22b15ac19821996))
 
+  The deployed Compose project name was derived from the directory it was launched from, so it could collide with a neighbouring service and adopt or destroy its containers. It is now pinned to `enji-guard-cli`.
+
+
+### Refactoring
+
+* replace repeated service parameters with typed options ([#153](https://github.com/j2h4u/enji-guard-cli/issues/153)) ([079c1b2](https://github.com/j2h4u/enji-guard-cli/commit/079c1b2544d9ec43e76b3b522190b4e5d379c121))
+
+  Introduces frozen `GitLabProjectsQuery` and `RuntimeServiceOptions` values in place of long parameter lists. Also drops an obsolete readiness compatibility branch.
+
 ## [2.2.2](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.1...v2.2.2) (2026-07-22)
 
 
@@ -168,13 +233,24 @@ The operator surface changed.
 
 * **container:** refresh trixie base for liblzma security update ([#151](https://github.com/j2h4u/enji-guard-cli/issues/151)) ([880350d](https://github.com/j2h4u/enji-guard-cli/commit/880350d3dc7729ef21024dc09d6f9203ed4329a0))
 
+  Both pinned `python:slim-trixie` base digests move to the current Debian security snapshot, picking up `liblzma5 5.8.1-1+deb13u1` and closing CVE-2026-34743. Trivy reports no MEDIUM or higher findings against the published image.
+
 ## [2.2.1](https://github.com/j2h4u/enji-guard-cli/compare/v2.2.0...v2.2.1) (2026-07-22)
 
 
 ### Fixes
 
 * **audit:** parse authoritative task detail contract ([#148](https://github.com/j2h4u/enji-guard-cli/issues/148)) ([7665c35](https://github.com/j2h4u/enji-guard-cli/commit/7665c35d24db9a9f84f18578987e69d47fd2e494))
-* honor explicit health listener options, scan candidate images before publishing, remove dead legacy surfaces with RUF100 enforcement, and pass typed audit updates through the application facade ([#150](https://github.com/j2h4u/enji-guard-cli/issues/150)) ([6a539a7](https://github.com/j2h4u/enji-guard-cli/commit/6a539a7f1af3c616e01288864de1b7bf8629f61f))
+
+  Task detail is now read from the shape the Enji API actually returns. Completed tasks are no longer reported as `queued` on the strength of a stale local ledger entry.
+
+* **cli:** honor health listener endpoint options ([#150](https://github.com/j2h4u/enji-guard-cli/issues/150)) ([6a539a7](https://github.com/j2h4u/enji-guard-cli/commit/6a539a7f1af3c616e01288864de1b7bf8629f61f))
+
+  An explicitly supplied health listener host and port were ignored in favour of the defaults.
+
+* remove dead legacy report and portfolio surfaces ([#150](https://github.com/j2h4u/enji-guard-cli/issues/150)) ([6a539a7](https://github.com/j2h4u/enji-guard-cli/commit/6a539a7f1af3c616e01288864de1b7bf8629f61f))
+
+* **ci:** scan the candidate image before publishing it ([#150](https://github.com/j2h4u/enji-guard-cli/issues/150)) ([6a539a7](https://github.com/j2h4u/enji-guard-cli/commit/6a539a7f1af3c616e01288864de1b7bf8629f61f))
 
 ## [2.2.0](https://github.com/j2h4u/enji-guard-cli/compare/v2.1.0...v2.2.0) (2026-07-22)
 
