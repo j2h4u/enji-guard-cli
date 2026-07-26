@@ -17,7 +17,12 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Existing release tag to publish, for example v0.2.0."
+        # Leaving this empty does NOT mean "publish the latest release": the
+        # checkout falls back to `github.sha`, which is the current head of the
+        # branch this run was dispatched from.  That publishes a `sha-` tag for
+        # unreleased work, and promotes no consumer tag unless that commit
+        # happens to carry a release tag.  Name the tag to republish a release.
+        description: "Existing release tag to publish, for example v0.2.0.  Empty publishes the dispatched branch head as a sha tag only."
         required: false
         type: string
 
@@ -35,41 +40,7 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      requires-image-publish: ${{ steps.classify.outputs.requires-image-publish }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: false
-          ref: ${{ inputs.release_tag || github.sha }}
-
-      - name: Classify changed files
-        id: classify
-        env:
-          EVENT_NAME: ${{ inputs.release_tag != '' && 'release' || github.event_name }}
-          HEAD_SHA: ${{ inputs.release_tag || github.sha }}
-        run: |
-          # CI skips quality/test/crap/docker-build on a docs-only diff yet still
-          # concludes success, so this job must re-apply the same docs-only policy
-          # instead of forcing a publish: otherwise a README-only commit
-          # republishes an image nothing ever tested.  A release always publishes,
-          # because the release commit itself only touches CHANGELOG.md.
-          base_sha="$(git rev-parse --verify --quiet "${HEAD_SHA}^" || true)"
-          python3 scripts/classify_changed_files.py \
-            --event-name "${EVENT_NAME}" \
-            --base-sha "${base_sha}" \
-            --head-sha "${HEAD_SHA}" \
-            --force-event release \
-            --force-event workflow_dispatch \
-            --output-key requires-image-publish
-
   publish:
-    needs: [changes]
-    if: needs.changes.outputs.requires-image-publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
