@@ -267,18 +267,32 @@ def test_container_publish_scans_loaded_candidate_before_push() -> None:
 
 def test_container_publish_attests_before_promoting_mutable_tags() -> None:
     workflow = (ROOT / ".github" / "workflows" / "container.yml").read_text(encoding="utf-8")
+    scan = workflow.index("- name: Scan candidate image")
     publish = workflow.index("- name: Publish tested image")
     provenance = workflow.index("- name: Attest build provenance")
     sbom = workflow.index("- name: Attest SBOM")
-    promote = workflow.index("- name: Promote attested tags")
+    promote = workflow.index("- name: Publish the attested digest under its consumer tags")
 
     # The publish step may push the immutable sha tag only.  :latest and the
-    # version tags are promoted after the attestations exist, so a failure
-    # between the two leaves the tags colleagues actually pull untouched.
+    # version tags follow after the attestations exist, so a failure between
+    # the two leaves the tags colleagues actually pull untouched.
     assert publish < provenance < sbom < promote
-    assert workflow.count("docker push") == 1
     assert 'docker push "${candidate}"' in workflow[publish:provenance]
-    assert "docker buildx imagetools create" not in workflow[:sbom]
+
+    # Nothing may push before the scan.  Counting pushes is the wrong rule --
+    # the consumer tags are pushed too -- so pin the ordering instead.
+    assert "docker push" not in workflow[:scan]
+
+    # `imagetools create` must never appear.  It wraps the manifest in a fresh
+    # index with its own digest, so the tag stops resolving to the attested
+    # subject and `gh attestation verify oci://...:X.Y.Z` returns 404 while the
+    # attestation quietly exists on a digest nobody looks up.  v3.0.0 shipped
+    # exactly that.
+    executable = "\n".join(line for line in workflow.splitlines() if not line.lstrip().startswith("#"))
+    assert "imagetools create" not in executable
+
+    # Every consumer tag must be proven to carry the attested digest.
+    assert "not the attested ${DIGEST}" in workflow[promote:]
 
     # The attested subject must be provably the scanned image, not whatever the
     # registry happens to serve under the tag by the time it is read back.
