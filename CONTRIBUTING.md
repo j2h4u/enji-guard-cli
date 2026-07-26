@@ -46,9 +46,23 @@ notes. Do not edit an unreleased version into `CHANGELOG.md`; release-please
 owns version headings, dates, comparison links, and the generated GitHub
 Release.
 
+The override is a `BEGIN_COMMIT_OVERRIDE` / `END_COMMIT_OVERRIDE` block in the
+PR description. Release-please replaces the entire squash commit message with
+its contents, so the block is what the changelog is built from. CI demands one
+from any PR that squashes more than one commit, because the merge keeps a single
+subject and silently discards the rest — that is how v3.0.0 turned 98 commits
+into one changelog line.
+
+Two formatting rules matter, and release-please enforces neither: the
+Conventional Commit type must sit at column 0 with entries separated by blank
+lines, and a `BREAKING CHANGE:` note must carry its bullets on the very next
+line. A bulleted list of subjects, which is what GitHub's default squash body
+looks like, parses as one entry; a blank line under `BREAKING CHANGE:` ends the
+note and drops everything below it. `scripts/validate_release_notes.py` checks
+both in CI.
+
 When a broad user-facing change cannot be understood from the commit subjects,
-use the implementation PR's release-note override to tell the short product
-story. Describe the current concepts and likely user workflows rather than the
+use that override to tell the short product story. Describe the current concepts and likely user workflows rather than the
 refactor history. For example, explain that audits now own run state,
 freshness, scores, and findings; that improvements are optional operator work;
 and that MCP intentionally exposes only portfolio context and repository audit

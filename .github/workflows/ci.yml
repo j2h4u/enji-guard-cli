@@ -20,17 +20,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Everything a PR owes release-please.  The job keeps its original id so the
+  # aggregate gate below and the branch protection contexts stay stable.
   pr-title:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
 
       - name: Validate releasable PR title
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: python3 scripts/validate_pr_title.py --title "${PR_TITLE}"
+
+      # The squash body is built from these subjects, so an unparseable one is
+      # a changelog line release-please cannot classify.
+      - name: Validate PR commit subjects
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 -m scripts.validate_pr_commits --base-sha "${BASE_SHA}" --head-sha "${HEAD_SHA}"
+
+      # A multi-commit PR cannot describe itself through its title alone: the
+      # squash keeps one subject and drops the rest.  Demand the override block
+      # release-please reads, and check it will actually parse -- a malformed
+      # block collapses to a single entry with no error anywhere.
+      - name: Validate the release-note contract
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          count="$(git rev-list --no-merges --count "${BASE_SHA}..${HEAD_SHA}")"
+          printf '%s' "${PR_BODY}" \
+            | python3 -m scripts.validate_release_notes --body-file - --commit-count "${count}"
 
   changes:
     runs-on: ubuntu-latest
