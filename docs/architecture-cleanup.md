@@ -9,10 +9,15 @@ concrete change that fixed it.
 "All modules validated!" — 0 failures.**  The baseline was **41 failures** —
 23 interface, 18 layer/visibility.
 
-Remaining follow-up: `module-boundaries` can now join `just check`, and the 11
-`import-linter` contracts in `pyproject.toml` can be deleted — they are fully
-subsumed. Both are deliberately left as a separate change so that this one is
-pure refactoring with no gate movement.
+That follow-up is done. `module-boundaries` now runs inside `just check`, and
+the 11 `import-linter` contracts in `pyproject.toml` are deleted — they were
+fully subsumed. It was kept as a separate change so the refactoring itself
+moved no gate.
+
+`tach` is now the only architecture gate, and it is a stricter one:
+import-linter checked the contracts somebody remembered to write, so a module
+nobody wrote a contract about was unconstrained by default. `tach.toml`
+declares the graph exhaustively, so an undeclared edge fails.
 
 ## The declared layers
 

@@ -25,14 +25,14 @@ print-lint:
 fmt-check:
     uv run ruff format --no-preview --check src scripts tests
 
-# Check import-layer architecture contracts.
-import-contracts:
-    uv run lint-imports
+# Install the git pre-commit hooks (see .pre-commit-config.yaml).
+hooks:
+    uv run pre-commit install
 
-# Declared-ideal module boundaries (tach).  Advisory until the cleanup session
-# lands: import-linter is the enforced gate meanwhile, so `check` never goes
-# red on debt we have already inventoried.  Once this is clean it joins `check`
-# and import-linter is removed.
+# Module boundaries, enforced by tach.  This is the architecture gate: tach.toml
+# declares the whole module graph, so an undeclared edge fails rather than
+# passing unnoticed, which is what import-linter's contract-by-contract model
+# could not do.
 module-boundaries:
     uv run tach check
 
@@ -73,7 +73,7 @@ fix:
     uv run ruff format --no-preview src scripts tests
 
 # Static quality gate.
-check: fmt-check lint preview-complexity-lint print-lint typecheck typecheck-tests import-contracts actionlint openapi-contract compile dead-code dependency-lint
+check: fmt-check lint preview-complexity-lint print-lint typecheck typecheck-tests module-boundaries actionlint openapi-contract compile dead-code dependency-lint
 
 # Unit tests.  Docker-marked packaging tests are excluded by default addopts.
 unit:

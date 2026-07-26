@@ -137,8 +137,11 @@ agents can orient quickly before making changes.
 - **OpenAPI as the canonical API boundary**: the reconstructed OpenAPI contract
   is the source of truth for the service API. Markdown docs do not define a
   second contract.
-- **Import-linter as architecture policy**: import-linter expresses enforced
-  module boundaries, not style preferences. Audit cannot depend on Portfolio.
+- **Tach as architecture policy**: the tach module graph expresses enforced
+  module boundaries, not style preferences.  It replaced import-linter, whose
+  contract-by-contract model left any module nobody wrote a contract about
+  unconstrained by default; tach declares the graph exhaustively, so an
+  undeclared edge is an error. Audit cannot depend on Portfolio.
   Portfolio cannot depend on Audit except for the explicit typed
   `portfolio.ports -> audit.ports` seam used by recon and status composition;
   new cross-context imports must be moved to application orchestration or an
