@@ -108,12 +108,77 @@ agents can orient quickly before making changes.
   implicit: a valid credential with no applicable journal. Startup reconciles a
   matching `RESERVED` safely, recovers `ROTATED`, and durably converts an
   abandoned `REQUESTED` to `OUTCOME_UNKNOWN` before ordinary readiness starts.
-  `REJECTED` and `OUTCOME_UNKNOWN` are terminal: they remain visible and require
-  an operator to import a fresh browser credential, which supersedes the old
-  revision and clears its journal. No automatic POST follows `REQUESTED`; a
+  `REJECTED` is terminal: it remains visible and requires an operator to import
+  a fresh browser credential, which supersedes the old revision and clears its
+  journal. No automatic POST follows `REQUESTED`; a
   failure after dispatch, malformed response, cancellation, timeout, transport
   failure, or 429/5xx is conservatively unknown. Transport retries do not cover
   cookie refresh.
+
+  `OUTCOME_UNKNOWN` is not terminal but unadjudicated, and **the refresh loop
+  is what adjudicates it**. Parked on an ambiguous generation, the loop asks the
+  backend what the refresh actually did: a `GET /api/v1/auth/me` carrying the
+  credential already on disk. The refresh token is not withheld — it rides the
+  stored `Cookie` header like every other cookie. What makes the probe safe is
+  the *endpoint*: a read that does not consume refresh tokens.
+
+  Deciding inside the loop is not a detail, it is the whole reason this works.
+  An earlier design put adjudication in the readiness probe, which both broke
+  the observer rule above and silently did nothing: clearing the journal does
+  not change the credential revision, the loop waits on that revision, and the
+  credential watcher is filtered to the auth file alone. Readiness would report
+  ready while the loop stayed parked until the access token expired. The loop
+  needs no waking, because the task that must act is the one deciding.
+
+  `401`/`403` proves the source is dead — the rotation landed and its
+  replacement was lost with the ambiguous response — so the loop stays parked
+  for an import. Anything else decides nothing and retries on the next pass,
+  which is also how the loop learns the backend returned. Adjudication is never
+  attempted with a credential that is not still usable, and readiness keeps
+  refusing an unadjudicated credential exactly as before.
+
+  **A `200` is weaker evidence than it looks, and the design depends on knowing
+  that.** `/api/v1/auth/me` authenticates the `access_token` JWT, which stays
+  valid until its own expiry whether or not the refresh token was consumed — and
+  refresh is scheduled `auto_refresh.lead_seconds` (300s) *before* that expiry,
+  so the probe runs while the old JWT is still good in both worlds. `200`
+  therefore means "the access token still works", not "the rotation never
+  landed". No endpoint can prove the latter; only spending the refresh token
+  can.
+
+  So clearing the journal on `200` is not proof, it is a bounded bet. If the
+  rotation did land, the cleared journal lets the next scheduled refresh re-send
+  a consumed token — the very replay `REQUESTED` exists to prevent, deferred by
+  one hop. That is accepted here because the downside is already spent: if the
+  rotation landed and its successor was lost, the session is unrecoverable
+  regardless, so a rejected replay costs nothing that was not already gone. The
+  bet pays in the common case — a gateway `502` during a backend redeploy never
+  reached the app, so nothing rotated and the service heals itself.
+
+  Clearing enqueues an `adjudicated_alive` outbox record beside the standing
+  `outcome_unknown` one. The failure record is deliberately not retracted: the
+  ambiguity really happened. Without the resolution record telemetry would show
+  a rotation that failed and never show it recovering, which reads as an outage
+  nobody fixed. `adjudicated_alive` is an outbox-only outcome — no journal state
+  carries it, so a journal claiming it is corrupt.
+
+  This rests on one backend coupling, pinned by
+  `test_a_false_clear_terminates_cleanly_at_the_next_refresh`: a consumed
+  refresh token must draw a protocol-confirmed `401`/`403`, which lands in
+  `REJECTED` and asks for an import exactly once. If the backend instead
+  answered `5xx` for a consumed token, adjudication would oscillate
+  (clear → refresh → `OUTCOME_UNKNOWN` → probe `200` → clear).
+
+  **Adjudication is therefore bounded by the access token's own expiry.** Past
+  it the probe can only return `401` whether or not the rotation landed, so
+  continuing would invent a verdict and probe forever. The window closes, the
+  loop stays parked, and a human is asked once. The oscillation cannot outlive
+  that deadline, and it costs no timer and no configuration: the deadline is
+  data already in the credential, read by `cookie_access_expires_at`. An expiry
+  that cannot be read is not a window that can be proven open, so it closes too.
+
+  Ownership here is pinned by `tests/test_side_effect_ownership.py`, not by
+  `tach`: `tach` governs imports, and mutating credential state is a call.
 
   Storage loads are typed rather than collapsed: `ABSENT`, `CORRUPT`,
   `UNSUPPORTED`, `IO_FAILURE`, clock anomaly, and `LOADED` remain distinct.

@@ -71,6 +71,13 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 ## QA
 
 - `just verify` is the completion gate.
+- Run `just release-check` before `gh pr create`, and again with
+  `body=<file>` once the PR description exists. It runs the same three
+  validators CI runs, so a rejected commit message or a missing
+  `BEGIN_COMMIT_OVERRIDE` block is caught while it is still cheap to fix --
+  amending one commit rather than rewriting eight. Editing a PR body does not
+  re-run CI: `pull_request` fires on opened/synchronize/reopened, so a body-only
+  fix needs a close/reopen, and a plain re-run replays the stale payload.
 - Do not weaken, skip, or suppress Ruff, types, module boundaries, Vulture,
   deptry, OpenAPI, CRAP, tests, or Docker build.
 - Update reconstructed OpenAPI, docs, and tests together when API behavior changes.
@@ -91,10 +98,29 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
   backend readiness. Heartbeat records auth/backend failures; it must not call
   refresh directly.
 - The host auth file must stay writable because Enji rotates refresh cookies.
-- Cookie bootstrap is one-time: refresh in the browser first, then import the
-  current cookie state. Prefer a `Cookie` header from any Fleet request made
-  after refresh. If using the refresh request itself, merge its response
-  `Set-Cookie` values; its request `Cookie` has the old refresh token.
+- Cookie bootstrap needs exactly one thing from the operator: the cookie.
+  Ask for it in a sentence, and hand over a snippet to paste rather than prose
+  to follow -- sign in at <https://guard.enji.ai/app/login>, then in that tab's
+  DevTools console run
+
+  ```javascript
+  await fetch('https://fleet.enji.ai/api/v1/auth/me', { credentials: 'include' });
+  ```
+
+  and copy Request Headers -> Cookie from that call in the Network tab.
+  The snippet only *creates* a request to copy from: the auth cookies are
+  `httpOnly`, so no console one-liner can return them and `document.cookie`
+  will not show them. That is why the copy comes from the Network tab, and why
+  there is no shorter path to offer.
+
+  Then do the rest yourself: run `import-cookie --stdin`, verify, report. Do
+  not hand over a numbered runbook for steps you are able to run. Their
+  responsibility ends when the cookie arrives.
+  Paste the whole header without pruning it; `AUTH_COOKIE_NAMES` keeps
+  `access_token` and `refresh_token` and drops everything else, so
+  `cf_clearance` and analytics cookies need no manual editing.
+  If using the refresh request itself, merge its response `Set-Cookie` values;
+  its request `Cookie` has the old refresh token.
 - After bootstrap, prove Docker auth recovery works with `auth status`,
   `health --ready`, and `enji_auth_auto_refresh_succeeded` in logs. MCP tools
   should either work through the configured service auth or return clear auth

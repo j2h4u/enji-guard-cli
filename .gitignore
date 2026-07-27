@@ -44,3 +44,6 @@ logs/
 .planning/graphs/
 .planning/research/.cache/
 graphify-out/
+
+# cross-ai review outputs (scratch, regenerated per run)
+.crossai-review/

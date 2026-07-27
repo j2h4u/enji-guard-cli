@@ -43,6 +43,9 @@ class AutoRefreshSettingsLike(Protocol):
     def fallback_seconds(self) -> int: ...
 
     @property
+    def adjudication_poll_seconds(self) -> int: ...
+
+    @property
     def revision_poll_seconds(self) -> float: ...
 
     @property
@@ -63,6 +66,7 @@ class AutoRefreshLoopDependencies:
     load_auth_fn: Callable[[Path], AuthLoadResult]
     cookie_refresh_sleep_seconds_fn: Callable[..., int]
     refresh_cookie_auth_fn: Callable[[Path, StoredAuth, object], Awaitable[StoredAuth]]
+    adjudicate_unknown_outcome_fn: Callable[[Path, object], Awaitable[bool]]
     log_event_fn: Callable[..., None]
     logger: logging.Logger
     client_factory: Callable[[], AbstractAsyncContextManager[object]]
@@ -195,6 +199,7 @@ async def _auto_refresh_loop(
                     source_revision=exc.source_revision,
                     refresh_settings=refresh_settings,
                     dependencies=dependencies,
+                    client=client,
                 )
                 continue
             retry_count = 0
@@ -206,15 +211,27 @@ async def _wait_until_revision_changes(
     source_revision: str,
     refresh_settings: AutoRefreshSettingsLike,
     dependencies: AutoRefreshLoopDependencies,
+    client: object,
 ) -> None:
+    """Park on a terminal generation until an import or an adjudication frees it.
+
+    A terminal outcome used to be escapable only by a credential import, which
+    changes the revision this waits on.  An ambiguous outcome now has a second
+    exit: the loop asks the backend what the refresh actually did, and resumes
+    in place if the held credential turns out to be alive.  Deciding here rather
+    than in an observer is what makes that exit work at all -- there is no other
+    task to wake, because the task that must act is this one.
+    """
+
     while not await _wait_for_credential_change(
         auth_file=auth_file,
         expected_revision=source_revision,
-        timeout_seconds=refresh_settings.fallback_seconds,
+        timeout_seconds=refresh_settings.adjudication_poll_seconds,
         poll_seconds=refresh_settings.revision_poll_seconds,
         dependencies=dependencies,
     ):
-        pass
+        if await dependencies.adjudicate_unknown_outcome_fn(auth_file, client):
+            return
 
 
 async def _wait_for_credential_change(

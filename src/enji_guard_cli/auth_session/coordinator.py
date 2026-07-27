@@ -23,6 +23,8 @@ from enji_guard_cli.auth_session.state_machine import (
     Requested,
     Reserved,
     Rotated,
+    SourceRevisionAlive,
+    rotation_event_key,
     rotation_event_metadata,
     transition,
 )
@@ -424,6 +426,41 @@ class RefreshCoordinator:
             )
         except OSError, RuntimeError, ValueError:
             return False
+
+
+def adjudicate_source_revision_alive(auth_path: Path, source_revision: str) -> bool:
+    """Clear an ambiguous rotation once a probe proved the source still works.
+
+    Returns whether the journal was cleared.  Everything is re-read under the
+    lock, so a concurrent import or a rotation that landed while the probe was
+    in flight wins and this call becomes a no-op.
+
+    The earlier ``outcome_unknown`` outbox record is left standing -- that event
+    really did happen -- and a second ``adjudicated_alive`` record is enqueued
+    beside it.  Without the resolution record, telemetry would show a rotation
+    that failed and never show it recovering, which reads as an outage nobody
+    fixed.
+    """
+
+    with auth_file_lock(auth_path):
+        loaded = load_auth(auth_path)
+        if not isinstance(loaded, AuthLoaded) or loaded.auth["revision"] != source_revision:
+            return False
+        journal = load_journal(auth_path)
+        if not isinstance(journal, JournalLoaded):
+            return False
+        state = journal.state
+        if not isinstance(state, OutcomeUnknown) or state.source_revision != source_revision:
+            return False
+        resolved = transition(state, SourceRevisionAlive())
+        assert isinstance(resolved.state, Ready)
+        enqueue_outcome(auth_path, _adjudication_record(source_revision))
+        delete_journal(auth_path)
+        return True
+
+
+def _adjudication_record(source_revision: str) -> OutcomeOutboxRecord:
+    return OutcomeOutboxRecord("adjudicated_alive", rotation_event_key(source_revision, "adjudicated_alive"))
 
 
 def import_credential(auth_path: Path, auth: StoredAuth) -> StoredAuth:

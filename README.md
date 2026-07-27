@@ -340,12 +340,16 @@ printf '%s' "$ENJI_API_TOKEN" | docker exec -i enji-guard-cli enji-guard auth im
 Until API tokens are available, cookie auth is supported as a temporary
 compatibility path:
 
-Refresh the Enji session in the browser first, then trigger an authenticated
-Fleet request such as:
+Sign in at <https://guard.enji.ai/app/login> so the browser holds a current
+session, then trigger an authenticated Fleet request from that tab:
 
 ```javascript
 await fetch('https://fleet.enji.ai/api/v1/auth/me', { credentials: 'include' });
 ```
+
+The session is issued by Guard (`https://guard.enji.ai`) and spent against
+Fleet (`https://fleet.enji.ai`); the supervisor sends the same Guard origin and
+referer when it rotates the cookie.
 
 In DevTools Network, open `GET /api/v1/auth/me` and copy Request Headers ->
 Cookie, not response headers. If you inspect the refresh request itself, merge
@@ -368,8 +372,9 @@ Each import creates a fresh credential revision, even for identical input. The
 supervisor uses a private v2 rotation journal before a cookie POST; it is
 credential storage and must not be inspected, copied, or deleted. A dispatched
 request is never automatically replayed. If status or readiness says that
-re-import is required, refresh the browser session and run `auth import-cookie`
-again; that explicit import is the only other credential writer.
+re-import is required, sign in again at <https://guard.enji.ai/app/login> and
+run `auth import-cookie`; that explicit import is the only other credential
+writer.
 
 Telemetry at `~/.config/enji-guard/logs/telemetry.jsonl` records non-secret
 rotation outcomes with a stable `event_key`. Delivery is at-least-once, so

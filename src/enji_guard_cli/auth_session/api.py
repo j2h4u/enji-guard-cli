@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
 
@@ -12,7 +12,12 @@ from enji_guard_cli.auth_session.cookies import (
     jwt_expires_at,
     normalize_cookie_header,
 )
-from enji_guard_cli.auth_session.coordinator import CoordinatorDependencies, RefreshCoordinator, import_credential
+from enji_guard_cli.auth_session.coordinator import (
+    CoordinatorDependencies,
+    RefreshCoordinator,
+    adjudicate_source_revision_alive,
+    import_credential,
+)
 from enji_guard_cli.auth_session.credential_changes import credential_changes
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
 from enji_guard_cli.auth_session.payloads import (
@@ -22,7 +27,12 @@ from enji_guard_cli.auth_session.payloads import (
     _unauthenticated_payload,
 )
 from enji_guard_cli.auth_session.ports import AuthEventSink, AuthOutcomeSink
-from enji_guard_cli.auth_session.projection import AuthProjectionError, network_credential, project_auth
+from enji_guard_cli.auth_session.projection import (
+    AuthProjectionError,
+    adjudication_credential,
+    network_credential,
+    project_auth,
+)
 from enji_guard_cli.auth_session.store import (
     CredentialType,
     StoredAuth,
@@ -209,6 +219,100 @@ async def backend_readiness_probe_async(
         )
 
 
+async def adjudicate_unknown_outcome(
+    auth_file: Path,
+    client: EnjiHttpClient,
+    *,
+    event_sink: AuthEventSink,
+) -> bool:
+    """Ask the backend what an ambiguous refresh actually did.
+
+    Returns whether the ambiguity was resolved in favour of the held
+    credential, which is the only outcome that lets the caller resume.
+
+    This belongs to the refresh loop, not to any observer.  The loop is what
+    parks on ``OUTCOME_UNKNOWN`` and what needs a working credential, so it is
+    the one that must decide -- and because it decides in place, nothing has to
+    be woken afterwards.
+
+    The probe is a read of ``/api/v1/auth/me`` with the credential already on
+    disk.  The refresh token is not withheld -- it rides the stored ``Cookie``
+    header like every other cookie.  What makes this safe is the *endpoint*: a
+    read that does not consume refresh tokens.  Point this at anything else and
+    the safety argument is gone.
+
+    A ``200`` is weaker evidence than it looks.  ``/api/v1/auth/me``
+    authenticates the ``access_token`` JWT, which stays valid until its own
+    expiry whether or not the refresh token was consumed -- and refresh is
+    scheduled a lead window *before* that expiry, so the probe runs while the
+    old JWT is still good in both worlds.  So ``200`` means "the access token
+    still works", not "the rotation never landed"; see ``docs/decisions.md``
+    for why clearing on it is a bounded bet rather than a proof.
+    """
+
+    pending = adjudication_credential(_auth_projection(auth_file))
+    if pending is None:
+        return False
+    stored_auth, state = pending
+    if _adjudication_window_closed(stored_auth, datetime.now(UTC)):
+        event_sink(
+            _LOGGER,
+            logging.ERROR,
+            "enji_auth_adjudication_window_closed",
+            {"source_revision": state.source_revision},
+        )
+        return False
+
+    try:
+        response = await _request_auth_status(stored_auth, client)
+    except EnjiHttpError:
+        return False
+
+    if response.status_code == HTTP_OK:
+        cleared = await asyncio.to_thread(adjudicate_source_revision_alive, auth_file, state.source_revision)
+        if cleared:
+            event_sink(
+                _LOGGER,
+                logging.INFO,
+                "enji_auth_adjudication_source_alive",
+                {"source_revision": state.source_revision},
+            )
+        return cleared
+
+    if response.status_code in HTTP_AUTH_FAILURE_CODES or is_auth_invalid_response(response):
+        # The source is dead: the rotation landed and its successor was lost
+        # with the ambiguous response.  Only an import recovers this.
+        event_sink(
+            _LOGGER,
+            logging.ERROR,
+            "enji_auth_adjudication_source_dead",
+            {"source_revision": state.source_revision, "status_code": response.status_code},
+        )
+    return False
+
+
+def _adjudication_window_closed(stored_auth: StoredAuth, now: datetime) -> bool:
+    """Bound adjudication by the access token's own expiry.
+
+    Adjudication is only worth attempting while the credential could still be
+    used, and that window is exactly the life of the stored ``access_token``.
+    Past it the probe can only return ``401`` whether or not the rotation
+    landed, so continuing would turn a clean unknown into a false "successor
+    lost" verdict and keep the loop probing forever.
+
+    This is also the only defence against the oscillation the design otherwise
+    admits: a backend answering ``5xx`` rather than a clean rejection for a
+    consumed refresh token would loop clear -> refresh -> unknown -> probe.
+    That loop now has a deadline it cannot outlive.
+
+    An expiry that cannot be read is not a window that can be proven open, so
+    it closes too -- consistent with every other fail-closed decision here.
+    """
+
+    expires_at = cookie_access_expires_at(stored_auth)
+    return expires_at is None or now >= expires_at
+
+
 def start_auto_refresh_task(
     auth_file: Path | None = None,
     *,
@@ -229,6 +333,9 @@ def start_auto_refresh_task(
                 cookie_refresh_sleep_seconds_fn=cookie_refresh_sleep_seconds,
                 refresh_cookie_auth_fn=lambda path, auth, client: _refresh_cookie_auth(
                     path, auth, cast(EnjiHttpClient, client), outcome_sink=outcome_sink
+                ),
+                adjudicate_unknown_outcome_fn=lambda path, client: adjudicate_unknown_outcome(
+                    path, cast(EnjiHttpClient, client), event_sink=resolved_event_sink
                 ),
                 log_event_fn=resolved_event_sink,
                 logger=_LOGGER,

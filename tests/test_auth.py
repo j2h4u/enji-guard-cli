@@ -17,6 +17,7 @@ import enji_guard_cli.transport as transport_module
 from enji_guard_cli.auth_session.api import (
     AuthStatusPayload,
     _refresh_cookie_auth,
+    adjudicate_unknown_outcome,
     auth_headers,
     auth_status_async,
     backend_readiness_probe_async,
@@ -40,6 +41,7 @@ from enji_guard_cli.auth_session.store import (
     AuthLoaded,
     AuthUnsupported,
     load_auth,
+    pending_rotation_path,
     write_journal,
 )
 from enji_guard_cli.delivery.cli.app import app
@@ -47,6 +49,13 @@ from enji_guard_cli.runtime_observability.auth_coordinator import RuntimeAuthCoo
 from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER, AutoRefreshSettings
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient
 from enji_guard_cli.transport_types import RetryProfile
+
+
+async def _never_adjudicates(_auth_file: Path, _client: object) -> bool:
+    """Most loop tests are not about adjudication; keep that exit shut."""
+
+    return False
+
 
 AUTH_REFRESH_ORIGIN = DEFAULT_GUARD_ORIGIN
 AUTH_REFRESH_REFERER = DEFAULT_GUARD_REFERER
@@ -176,7 +185,7 @@ def test_future_credential_import_timestamp_has_stable_clock_anomaly_classificat
         (lambda revision: OutcomeUnknown(revision, "timeout"), "AUTH_REFRESH_OUTCOME_UNKNOWN"),
     ],
 )
-def test_terminal_auth_projection_bypasses_status_and_readiness_network(
+def test_terminal_auth_projection_bypasses_status_network(
     tmp_path: Path,
     state_factory: Callable[[str], RotationState],
     expected_code: str,
@@ -186,26 +195,314 @@ def test_terminal_auth_projection_bypasses_status_and_readiness_network(
     loaded = load_auth(auth_file)
     assert isinstance(loaded, AuthLoaded)
     write_journal(auth_file, state_factory(loaded.auth["revision"]))
+
+    class Client:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            raise AssertionError("terminal auth projection must not perform HTTP")
+
+    status = asyncio.run(auth_status_async(auth_file, Client()))
+
+    assert status["code"] == expected_code
+    assert "import a fresh browser credential" in cast(str, status["message"])
+
+
+def test_rejected_projection_bypasses_readiness_network(tmp_path: Path) -> None:
+    """A confirmed rejection is an answer, so there is nothing to adjudicate."""
+
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    write_journal(auth_file, Rejected(loaded.auth["revision"], "rejected"))
     requests: list[EnjiHttpRequest] = []
 
     class Client:
         async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
             requests.append(request)
-            raise AssertionError("terminal auth projection must not perform HTTP")
+            raise AssertionError("a rejected projection must not perform HTTP")
 
-    async def observe() -> tuple[AuthStatusPayload, AuthBackendReadinessResult]:
-        return (
-            await auth_status_async(auth_file, Client()),
-            await backend_readiness_probe_async(auth_file, Client()),
-        )
+    readiness = asyncio.run(backend_readiness_probe_async(auth_file, Client()))
 
-    status, readiness = asyncio.run(observe())
-
-    assert status["code"] == expected_code
-    assert "import a fresh browser credential" in cast(str, status["message"])
-    assert readiness.failure_code == expected_code
+    assert readiness.failure_code == "AUTH_REFRESH_REJECTED"
     assert readiness.bypass_grace is True
     assert requests == []
+
+
+@pytest.mark.parametrize(
+    ("state_factory", "expected_reason"),
+    [
+        (lambda revision: Rejected(revision, "refresh rejected with HTTP 401"), "refresh rejected with HTTP 401"),
+        (
+            lambda revision: OutcomeUnknown(revision, "ambiguous refresh response HTTP 502"),
+            "ambiguous refresh response HTTP 502",
+        ),
+    ],
+)
+def test_terminal_auth_status_surfaces_the_journal_reason(
+    tmp_path: Path,
+    state_factory: Callable[[str], RotationState],
+    expected_reason: str,
+) -> None:
+    """The reason is the whole diagnosis; a bare code sends operators digging."""
+
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    write_journal(auth_file, state_factory(loaded.auth["revision"]))
+
+    class Client:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            raise AssertionError("terminal auth projection must not perform HTTP")
+
+    status = asyncio.run(auth_status_async(auth_file, Client()))
+
+    assert expected_reason in cast(str, status["message"])
+
+
+def _unknown_outcome_auth_file(tmp_path: Path, *, access_token_lifetime: timedelta = timedelta(minutes=5)) -> Path:
+    """An auth file stuck exactly where the 502 left the live service.
+
+    The access token carries a real expiry, because adjudication is bounded by
+    it: the refresh that produced the ambiguity fires a lead window *before*
+    expiry, so in the real incident the token still had minutes of life left.
+    """
+
+    auth_file = tmp_path / "auth.json"
+    access_token = unsigned_jwt({"exp": int((datetime.now(UTC) + access_token_lifetime).timestamp())})
+    import_cookie(f"access_token={access_token}; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    write_journal(auth_file, OutcomeUnknown(loaded.auth["revision"], "ambiguous refresh response HTTP 502"))
+    return auth_file
+
+
+class _RecordingClient:
+    def __init__(self, response: EnjiHttpResponse) -> None:
+        self.response = response
+        self.requests: list[EnjiHttpRequest] = []
+
+    async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+        self.requests.append(request)
+        return self.response
+
+
+def _collecting_sink(events: list[tuple[str, dict[str, object]]]) -> Callable[..., None]:
+    def sink(_logger: object, _level: int, event: str, fields: Mapping[str, object]) -> None:
+        events.append((event, dict(fields)))
+
+    return sink
+
+
+def _adjudicate(auth_file: Path, client: object, events: list[tuple[str, dict[str, object]]] | None = None) -> bool:
+    return asyncio.run(
+        adjudicate_unknown_outcome(
+            auth_file,
+            cast(HttpxEnjiHttpClient, client),
+            event_sink=_collecting_sink(events if events is not None else []),
+        )
+    )
+
+
+def test_adjudication_clears_an_alive_source_with_a_read_only_probe(tmp_path: Path) -> None:
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+    client = _RecordingClient(EnjiHttpResponse(200, {}, b'{"email": "operator@example.com"}'))
+    events: list[tuple[str, dict[str, object]]] = []
+
+    assert _adjudicate(auth_file, client, events) is True
+
+    assert not pending_rotation_path(auth_file).exists()
+    assert [(request.method, request.url) for request in client.requests] == [
+        ("GET", "https://fleet.enji.ai/api/v1/auth/me")
+    ]
+    assert [event for event, _fields in events] == ["enji_auth_adjudication_source_alive"]
+
+
+def test_adjudication_never_replays_the_refresh_exchange(tmp_path: Path) -> None:
+    """The probe must carry the held credential, never re-send the exchange."""
+
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+    client = _RecordingClient(EnjiHttpResponse(200, {}, b"{}"))
+
+    _adjudicate(auth_file, client)
+
+    assert all("/auth/refresh" not in request.url for request in client.requests)
+    assert all(request.method == "GET" for request in client.requests)
+
+
+def test_readiness_reports_ready_again_once_the_loop_adjudicated(tmp_path: Path) -> None:
+    """Readiness needs no adjudication logic of its own; clearing is enough."""
+
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+    client = _RecordingClient(EnjiHttpResponse(200, {}, b'{"email": "operator@example.com"}'))
+
+    before = asyncio.run(backend_readiness_probe_async(auth_file, client))
+    assert before.ready is False
+    assert before.bypass_grace is True
+
+    assert _adjudicate(auth_file, client) is True
+
+    after = asyncio.run(backend_readiness_probe_async(auth_file, client))
+    assert after.ready is True
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_adjudication_stays_parked_when_the_source_is_dead(tmp_path: Path, status_code: int) -> None:
+    """A dead source proves the rotation landed and its successor is lost."""
+
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+    client = _RecordingClient(EnjiHttpResponse(status_code, {}, b"{}"))
+    events: list[tuple[str, dict[str, object]]] = []
+
+    assert _adjudicate(auth_file, client, events) is False
+
+    assert pending_rotation_path(auth_file).exists()
+    assert [event for event, _fields in events] == ["enji_auth_adjudication_source_dead"]
+
+
+@pytest.mark.parametrize("status_code", [500, 502, 503])
+def test_adjudication_decides_nothing_while_the_backend_is_down(tmp_path: Path, status_code: int) -> None:
+    """The probe is also the signal that the backend has not returned yet."""
+
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+    client = _RecordingClient(EnjiHttpResponse(status_code, {}, b"{}"))
+    events: list[tuple[str, dict[str, object]]] = []
+
+    assert _adjudicate(auth_file, client, events) is False
+
+    assert pending_rotation_path(auth_file).exists()
+    assert events == []
+
+
+def test_adjudication_decides_nothing_when_the_probe_transport_fails(tmp_path: Path) -> None:
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+
+    class Client:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            raise EnjiHttpError("TIMEOUT", "auth status timed out")
+
+    assert _adjudicate(auth_file, Client()) is False
+    assert pending_rotation_path(auth_file).exists()
+
+
+def test_adjudication_stops_once_the_access_token_has_expired(tmp_path: Path) -> None:
+    """The oscillation the design admits gets a deadline it cannot outlive.
+
+    A backend that answered 5xx instead of a clean rejection for a consumed
+    refresh token would loop clear -> refresh -> unknown -> probe forever. Past
+    the access token's own expiry the probe can only return 401 either way, so
+    continuing would invent a verdict; a human is asked once instead.
+    """
+
+    auth_file = _unknown_outcome_auth_file(tmp_path, access_token_lifetime=timedelta(seconds=-1))
+    events: list[tuple[str, dict[str, object]]] = []
+
+    class Client:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            raise AssertionError("a closed adjudication window must not perform HTTP")
+
+    assert _adjudicate(auth_file, Client(), events) is False
+
+    assert pending_rotation_path(auth_file).exists()
+    assert [event for event, _fields in events] == ["enji_auth_adjudication_window_closed"]
+
+
+def test_adjudication_stops_when_the_access_token_expiry_is_unreadable(tmp_path: Path) -> None:
+    """An expiry we cannot read is not a window we can prove is open."""
+
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=opaque; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    write_journal(auth_file, OutcomeUnknown(loaded.auth["revision"], "ambiguous refresh response HTTP 502"))
+
+    class Client:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            raise AssertionError("an unprovable adjudication window must not perform HTTP")
+
+    assert _adjudicate(auth_file, Client()) is False
+
+
+def test_adjudication_refuses_a_confirmed_rejection(tmp_path: Path) -> None:
+    """Only ambiguity is adjudicable; a rejection is already an answer."""
+
+    auth_file = tmp_path / "auth.json"
+    access_token = unsigned_jwt({"exp": int((datetime.now(UTC) + timedelta(minutes=5)).timestamp())})
+    import_cookie(f"access_token={access_token}; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    write_journal(auth_file, Rejected(loaded.auth["revision"], "refresh rejected with HTTP 401"))
+
+    class Client:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            raise AssertionError("a rejected journal must not be probed")
+
+    assert _adjudicate(auth_file, Client()) is False
+
+
+def test_a_parked_refresh_loop_resumes_after_adjudication(tmp_path: Path) -> None:
+    """The end-to-end claim: an ambiguous 502 heals itself without an import.
+
+    This is the test whose absence let a working-looking feature ship broken.
+    Every part was covered on its own -- the probe, the journal clear, the
+    readiness verdict -- while the one thing that mattered, that the refresh
+    loop actually resumes, was covered by nothing. Adjudicating inside the loop
+    is what makes it true: there is no second task to wake.
+    """
+
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    revision = loaded.auth["revision"]
+    dispatches: list[str] = []
+    resumed = asyncio.Event()
+    probe_client = _RecordingClient(EnjiHttpResponse(200, {}, b"{}"))
+    ticks = iter(range(10_000))
+
+    async def refresh(_path: Path, auth: RuntimeStoredAuth, _client: object) -> RuntimeStoredAuth:
+        dispatches.append(auth["revision"])
+        if len(dispatches) == 1:
+            # The 502: dispatched, outcome unknown, journal already written.
+            raise TerminalRevisionRequiredError(revision, message="refresh outcome is unknown")
+        resumed.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def adjudicate(path: Path, _client: object) -> bool:
+        return await adjudicate_unknown_outcome(
+            path, cast(HttpxEnjiHttpClient, probe_client), event_sink=_collecting_sink([])
+        )
+
+    async def exercise() -> None:
+        task = asyncio.create_task(
+            auto_refresh_module._auto_refresh_loop(
+                auth_file=auth_file,
+                refresh_settings=AutoRefreshSettings(
+                    enabled=True, lead_seconds=300, fallback_seconds=900, adjudication_poll_seconds=1
+                ),
+                dependencies=_loop_dependencies(
+                    changes=_never_changes,
+                    overrides=_LoopOverrides(
+                        load_auth_fn=lambda path: cast(AuthLoaded, load_auth(path)),
+                        revision_reader=lambda _path: revision,
+                        refresh_fn=refresh,
+                        adjudicate_fn=adjudicate,
+                        monotonic_fn=lambda: next(ticks),
+                        sleep_fn=lambda _seconds: asyncio.sleep(0),
+                    ),
+                ),
+            )
+        )
+        try:
+            await asyncio.wait_for(resumed.wait(), timeout=5)
+        finally:
+            task.cancel()
+
+    asyncio.run(exercise())
+
+    # Two dispatches: the one that hit the 502, and the one adjudication freed.
+    assert dispatches == [revision, revision]
+    assert not pending_rotation_path(auth_file).exists()
 
 
 @pytest.mark.parametrize(
@@ -244,6 +541,7 @@ def test_auto_refresh_loop_observes_non_cookie_storage_states_without_dispatch(
                     load_auth_fn=lambda _path: cast(auto_refresh_module.AuthLoadResult, loaded),
                     cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
                     refresh_cookie_auth_fn=no_dispatch,
+                    adjudicate_unknown_outcome_fn=_never_adjudicates,
                     log_event_fn=log_event,
                     logger=auto_refresh_module.logging.getLogger("test"),
                     client_factory=_TestClient,
@@ -397,6 +695,7 @@ def test_auto_refresh_loop_survives_terminal_cookie_response_error() -> None:
                     load_auth_fn=lambda _path: AuthLoaded(_test_cookie_auth("r1")),
                     cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
                     refresh_cookie_auth_fn=lambda _path, _auth, _client: terminal_refresh(),
+                    adjudicate_unknown_outcome_fn=_never_adjudicates,
                     log_event_fn=lambda *_args, **_kwargs: None,
                     logger=auto_refresh_module.logging.getLogger("test"),
                     client_factory=Client,
@@ -430,6 +729,7 @@ def test_credential_change_wait_survives_timeout() -> None:
             load_auth_fn=lambda _path: AuthLoaded(_test_cookie_auth()),
             cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
             refresh_cookie_auth_fn=unused_refresh,
+            adjudicate_unknown_outcome_fn=_never_adjudicates,
             log_event_fn=lambda *_args, **_kwargs: None,
             logger=auto_refresh_module.logging.getLogger("test"),
             client_factory=_TestClient,
@@ -1346,6 +1646,7 @@ class _LoopOverrides:
     cookie_refresh_sleep_seconds_fn: Callable[..., int] | None = None
     load_auth_fn: Callable[[Path], AuthLoaded] = lambda _path: AuthLoaded(_test_cookie_auth())
     log_event_fn: Callable[..., None] = lambda *_args, **_kwargs: None
+    adjudicate_fn: Callable[[Path, object], Awaitable[bool]] | None = None
 
 
 def _loop_dependencies(
@@ -1356,6 +1657,9 @@ def _loop_dependencies(
     async def refresh(_path: Path, _auth: RuntimeStoredAuth, _client: object) -> RuntimeStoredAuth:
         return cast(RuntimeStoredAuth, {})
 
+    async def never_adjudicates(_path: Path, _client: object) -> bool:
+        return False
+
     return auto_refresh_module.AutoRefreshLoopDependencies(
         load_auth_fn=resolved_overrides.load_auth_fn,
         cookie_refresh_sleep_seconds_fn=(
@@ -1364,6 +1668,9 @@ def _loop_dependencies(
             else lambda **_kwargs: 0
         ),
         refresh_cookie_auth_fn=resolved_overrides.refresh_fn if resolved_overrides.refresh_fn is not None else refresh,
+        adjudicate_unknown_outcome_fn=(
+            resolved_overrides.adjudicate_fn if resolved_overrides.adjudicate_fn is not None else never_adjudicates
+        ),
         log_event_fn=resolved_overrides.log_event_fn,
         logger=auto_refresh_module.logging.getLogger("test"),
         client_factory=_TestClient,
