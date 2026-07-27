@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.0.4](https://github.com/j2h4u/enji-guard-cli/compare/v3.0.3...v3.0.4) (2026-07-27)
+
+
+### Fixes
+
+* **audit:** name a pre-existing pending run honestly ([#198](https://github.com/j2h4u/enji-guard-cli/issues/198)) ([6be2268](https://github.com/j2h4u/enji-guard-cli/commit/6be2268f320499d526ea461f731a9fece6b73e48))
+* **ci:** judge the artifact that actually lands for bot PRs ([#206](https://github.com/j2h4u/enji-guard-cli/issues/206)) ([d5fc305](https://github.com/j2h4u/enji-guard-cli/commit/d5fc3053d2a2c27fc449b936445166e6f0c573b6))
+
+
+### Build
+
+* **deps:** bump typer in the python-minor-patch group ([#202](https://github.com/j2h4u/enji-guard-cli/issues/202)) ([116cbc4](https://github.com/j2h4u/enji-guard-cli/commit/116cbc439853de258b700273b5238868e9e98462))
+* pin which modules may own a side effect ([#204](https://github.com/j2h4u/enji-guard-cli/issues/204)) ([f124de7](https://github.com/j2h4u/enji-guard-cli/commit/f124de71710d488dbf154e08a622cd7ebd0effba))
+* **tach:** close the half of the model exact cannot see ([#201](https://github.com/j2h4u/enji-guard-cli/issues/201)) ([07ac5fc](https://github.com/j2h4u/enji-guard-cli/commit/07ac5fcfd80b5f9184e94e8906ee4384a3eb9222))
+* **tach:** give the MCP surface a public interface ([#205](https://github.com/j2h4u/enji-guard-cli/issues/205)) ([0613752](https://github.com/j2h4u/enji-guard-cli/commit/0613752023c081c5cbdcd50e2fafdf27d23e0535))
+
+
+### Documentation
+
+* record the API-key endgame and refresh the roadmap ([#199](https://github.com/j2h4u/enji-guard-cli/issues/199)) ([0c606b2](https://github.com/j2h4u/enji-guard-cli/commit/0c606b237e1aa0da5ffd4bada7ca2019400408f9))
+
 ## [3.0.3](https://github.com/j2h4u/enji-guard-cli/compare/v3.0.2...v3.0.3) (2026-07-26)
 
 
