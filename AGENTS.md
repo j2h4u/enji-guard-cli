@@ -92,10 +92,22 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
   refresh directly.
 - The host auth file must stay writable because Enji rotates refresh cookies.
 - Cookie bootstrap needs exactly one thing from the operator: the cookie.
-  Ask for it in a sentence -- sign in at <https://guard.enji.ai/app/login>,
-  open any Fleet request in DevTools Network, copy Request Headers -> Cookie --
-  and then do the rest yourself: run `import-cookie --stdin`, verify, report.
-  Do not hand over a numbered runbook for steps you are able to run. Their
+  Ask for it in a sentence, and hand over a snippet to paste rather than prose
+  to follow -- sign in at <https://guard.enji.ai/app/login>, then in that tab's
+  DevTools console run
+
+  ```javascript
+  await fetch('https://fleet.enji.ai/api/v1/auth/me', { credentials: 'include' });
+  ```
+
+  and copy Request Headers -> Cookie from that call in the Network tab.
+  The snippet only *creates* a request to copy from: the auth cookies are
+  `httpOnly`, so no console one-liner can return them and `document.cookie`
+  will not show them. That is why the copy comes from the Network tab, and why
+  there is no shorter path to offer.
+
+  Then do the rest yourself: run `import-cookie --stdin`, verify, report. Do
+  not hand over a numbered runbook for steps you are able to run. Their
   responsibility ends when the cookie arrives.
   Paste the whole header without pruning it; `AUTH_COOKIE_NAMES` keeps
   `access_token` and `refresh_token` and drops everything else, so
