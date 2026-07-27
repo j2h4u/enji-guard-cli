@@ -49,19 +49,37 @@ class Import:
     path: str
 
 
-def _module_of(path: Path) -> str:
-    parts = path.relative_to(SOURCE_ROOT / PACKAGE).parts
-    if len(parts) == 1:
-        return f"{PACKAGE}.{parts[0].removesuffix('.py')}"
-    # `delivery` holds two sibling surfaces that tach models separately.
-    if parts[0] == "delivery":
-        return f"{PACKAGE}.delivery.{parts[1]}"
-    return f"{PACKAGE}.{parts[0]}"
+def module_paths(config: dict[str, object]) -> tuple[str, ...]:
+    """Return declared module paths, longest first.
+
+    Modules are not all one level deep -- `delivery.cli` and `delivery.mcp` are
+    siblings under a package that is not itself a module -- so ownership has to
+    come from the declared graph rather than from counting dots.
+    """
+
+    modules = config.get("modules", [])
+    assert isinstance(modules, list)
+    paths: list[str] = []
+    for module in modules:
+        assert isinstance(module, dict)
+        paths.append(str(module["path"]))
+    return tuple(sorted(paths, key=len, reverse=True))
 
 
-def _imports() -> Iterator[Import]:
+def _owning_module(dotted: str, modules: tuple[str, ...]) -> str | None:
+    return next((path for path in modules if dotted == path or dotted.startswith(f"{path}.")), None)
+
+
+def _dotted_name(path: Path) -> str:
+    parts = path.relative_to(SOURCE_ROOT).parts
+    return ".".join((*parts[:-1], parts[-1].removesuffix(".py")))
+
+
+def _imports(modules: tuple[str, ...]) -> Iterator[Import]:
     for file in sorted((SOURCE_ROOT / PACKAGE).rglob("*.py")):
-        consumer = _module_of(file)
+        consumer = _owning_module(_dotted_name(file), modules)
+        if consumer is None:
+            continue
         try:
             tree = ast.parse(file.read_text(encoding="utf-8"))
         except SyntaxError as exc:  # pragma: no cover - a parse error fails the gate elsewhere
@@ -69,13 +87,10 @@ def _imports() -> Iterator[Import]:
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom) or node.module is None:
                 continue
-            if not node.module.startswith(f"{PACKAGE}."):
+            target = _owning_module(node.module, modules)
+            if target is None or target == consumer:
                 continue
-            parts = node.module.split(".")
-            target = f"{PACKAGE}.{parts[1]}"
-            if consumer == target or consumer.startswith(f"{target}."):
-                continue
-            submodule = ".".join(parts[2:])
+            submodule = node.module[len(target) :].lstrip(".")
             for alias in node.names:
                 yield Import(consumer, target, f"{submodule}.{alias.name}" if submodule else alias.name)
 
@@ -121,7 +136,8 @@ def stray_catch_alls(config: dict[str, object]) -> list[tuple[str, list[str]]]:
 
 def main() -> int:
     config = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    dead = dead_patterns(config, list(_imports()))
+    modules = module_paths(config)
+    dead = dead_patterns(config, list(_imports(modules)))
     stray = stray_catch_alls(config)
     if not dead and not stray:
         print("✅ Every tach interface pattern is exercised by a real import.")
