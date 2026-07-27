@@ -1,5 +1,36 @@
 # Changelog
 
+## [3.1.0](https://github.com/j2h4u/enji-guard-cli/compare/v3.0.5...v3.1.0) (2026-07-27)
+
+
+### Features
+
+* **auth:** adjudicate an ambiguous refresh outcome instead of failing closed ([caec1ac](https://github.com/j2h4u/enji-guard-cli/commit/caec1acf277513d75d54610d8181a1bb064fc155))
+* **auth:** bound adjudication by the access token's own expiry ([caec1ac](https://github.com/j2h4u/enji-guard-cli/commit/caec1acf277513d75d54610d8181a1bb064fc155))
+* **auth:** emit a resolution event when an ambiguous rotation is adjudicated ([caec1ac](https://github.com/j2h4u/enji-guard-cli/commit/caec1acf277513d75d54610d8181a1bb064fc155))
+
+
+### Fixes
+
+* **auth:** correct what a 200 adjudication probe actually proves ([caec1ac](https://github.com/j2h4u/enji-guard-cli/commit/caec1acf277513d75d54610d8181a1bb064fc155))
+
+
+### Build
+
+* add just release-check so CI stops being the first to say no ([caec1ac](https://github.com/j2h4u/enji-guard-cli/commit/caec1acf277513d75d54610d8181a1bb064fc155))
+
+
+### Documentation
+
+* **agents:** ask the operator for the cookie, not for a runbook ([caec1ac](https://github.com/j2h4u/enji-guard-cli/commit/caec1acf277513d75d54610d8181a1bb064fc155))
+* **agents:** give the operator a snippet to paste, not prose to follow ([caec1ac](https://github.com/j2h4u/enji-guard-cli/commit/caec1acf277513d75d54610d8181a1bb064fc155))
+* **auth:** name the Guard login page in the cookie import steps ([caec1ac](https://github.com/j2h4u/enji-guard-cli/commit/caec1acf277513d75d54610d8181a1bb064fc155))
+
+
+### Refactoring
+
+* **auth:** move adjudication into the refresh loop that must act ([caec1ac](https://github.com/j2h4u/enji-guard-cli/commit/caec1acf277513d75d54610d8181a1bb064fc155))
+
 ## [3.0.5](https://github.com/j2h4u/enji-guard-cli/compare/v3.0.4...v3.0.5) (2026-07-27)
 
 
