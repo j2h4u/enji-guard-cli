@@ -1,6 +1,14 @@
 # Agent Rules
 
 Python 3.14 Docker service exposing Enji Guard through core code, CLI, and MCP.
+
+Most people who clone this repository want to **run** the service, not change
+it. Assume that first: an agent reading this is usually helping an operator get
+the container up and authenticated, and `## Ops` is the section that serves
+them. `## Development` and `## QA` apply only once the task is actually to
+change the code. Do not answer an operator with development workflow, and do
+not hand back steps you can run yourself.
+
 README.md carries the user-facing CLI model and workflows.
 docs/decisions.md captures the current architectural decisions and invariants.
 CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
