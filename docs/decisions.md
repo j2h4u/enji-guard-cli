@@ -160,9 +160,16 @@ agents can orient quickly before making changes.
   refresh token must draw a protocol-confirmed `401`/`403`, which lands in
   `REJECTED` and asks for an import exactly once. If the backend instead
   answered `5xx` for a consumed token, adjudication would oscillate
-  (clear → refresh → `OUTCOME_UNKNOWN` → probe `200` → clear) until the access
-  token expires, with no per-iteration alert. That failure mode is not defended
-  against in code, because nothing here controls that backend.
+  (clear → refresh → `OUTCOME_UNKNOWN` → probe `200` → clear).
+
+  **Adjudication is therefore bounded by the access token's own expiry.** Past
+  it the probe can only return `401` — the source is unusable whether or not the
+  rotation landed — so there is nothing left to establish. The window closes,
+  readiness reports `AUTH_REFRESH_ADJUDICATION_EXPIRED` with `bypass_grace`, and
+  a human is asked once. The oscillation above cannot outlive that deadline, and
+  it costs no timer and no configuration: the deadline is data already in the
+  credential, read by `cookie_access_expires_at`. An expiry that cannot be read
+  is not a window that can be proven open, so it closes too.
 
   Storage loads are typed rather than collapsed: `ABSENT`, `CORRUPT`,
   `UNSUPPORTED`, `IO_FAILURE`, clock anomaly, and `LOADED` remain distinct.

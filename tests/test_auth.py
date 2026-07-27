@@ -254,11 +254,17 @@ def test_terminal_auth_status_surfaces_the_journal_reason(
     assert expected_reason in cast(str, status["message"])
 
 
-def _unknown_outcome_auth_file(tmp_path: Path) -> Path:
-    """An auth file stuck exactly where the 502 left the live service."""
+def _unknown_outcome_auth_file(tmp_path: Path, *, access_token_lifetime: timedelta = timedelta(minutes=5)) -> Path:
+    """An auth file stuck exactly where the 502 left the live service.
+
+    The access token carries a real expiry, because adjudication is bounded by
+    it: the refresh that produced the ambiguity fires a lead window *before*
+    expiry, so in the real incident the token still had minutes of life left.
+    """
 
     auth_file = tmp_path / "auth.json"
-    import_cookie("access_token=old; refresh_token=old", auth_file)
+    access_token = unsigned_jwt({"exp": int((datetime.now(UTC) + access_token_lifetime).timestamp())})
+    import_cookie(f"access_token={access_token}; refresh_token=old", auth_file)
     loaded = load_auth(auth_file)
     assert isinstance(loaded, AuthLoaded)
     write_journal(auth_file, OutcomeUnknown(loaded.auth["revision"], "ambiguous refresh response HTTP 502"))
@@ -384,6 +390,52 @@ def test_unknown_outcome_decides_nothing_while_the_backend_is_down(tmp_path: Pat
     assert readiness.bypass_grace is False
     assert readiness.failure_code == "AUTH_REFRESH_OUTCOME_UNKNOWN"
     assert pending_rotation_path(auth_file).exists()
+
+
+def test_adjudication_stops_once_the_access_token_has_expired(tmp_path: Path) -> None:
+    """The oscillation the design admits gets a deadline it cannot outlive.
+
+    A backend that answered 5xx instead of a clean rejection for a consumed
+    refresh token would loop clear -> refresh -> unknown -> probe forever. Past
+    the access token's own expiry the credential is unusable either way, so
+    there is nothing left to establish and a human is asked once.
+    """
+
+    auth_file = _unknown_outcome_auth_file(tmp_path, access_token_lifetime=timedelta(seconds=-1))
+    requests: list[EnjiHttpRequest] = []
+
+    class Client:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            requests.append(request)
+            raise AssertionError("a closed adjudication window must not perform HTTP")
+
+    readiness = asyncio.run(backend_readiness_probe_async(auth_file, Client()))
+
+    assert readiness.ready is False
+    assert readiness.bypass_grace is True
+    assert readiness.failure_code == "AUTH_REFRESH_ADJUDICATION_EXPIRED"
+    assert "ambiguous refresh response HTTP 502" in cast(str, readiness.failure_message)
+    assert requests == []
+    assert pending_rotation_path(auth_file).exists()
+
+
+def test_adjudication_stops_when_the_access_token_expiry_is_unreadable(tmp_path: Path) -> None:
+    """An expiry we cannot read is not a window we can prove is open."""
+
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=opaque; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    write_journal(auth_file, OutcomeUnknown(loaded.auth["revision"], "ambiguous refresh response HTTP 502"))
+
+    class Client:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            raise AssertionError("an unprovable adjudication window must not perform HTTP")
+
+    readiness = asyncio.run(backend_readiness_probe_async(auth_file, Client()))
+
+    assert readiness.bypass_grace is True
+    assert readiness.failure_code == "AUTH_REFRESH_ADJUDICATION_EXPIRED"
 
 
 def test_unknown_outcome_decides_nothing_when_the_probe_transport_fails(tmp_path: Path) -> None:

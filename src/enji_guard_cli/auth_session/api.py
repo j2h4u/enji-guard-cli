@@ -3,7 +3,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
 
@@ -57,6 +57,7 @@ from enji_guard_cli.transport_types import RetryProfile
 AUTH_REFRESH_PATH = "/api/v1/auth/refresh"
 AUTH_INVALID_CODE = "AUTH_INVALID"
 AUTH_REFRESH_SUCCESSOR_LOST_CODE = "AUTH_REFRESH_SUCCESSOR_LOST"
+AUTH_REFRESH_ADJUDICATION_EXPIRED_CODE = "AUTH_REFRESH_ADJUDICATION_EXPIRED"
 AUTH_REFRESH_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
 )
@@ -212,6 +213,9 @@ async def backend_readiness_probe_async(
                 ),
             )
         adjudication = _Adjudication(pending[0], pending[1], exc)
+        closed = _adjudication_window_closed(adjudication, datetime.now(UTC))
+        if closed is not None:
+            return _backend_readiness_failure(started_at, closed)
         return await _with_readiness_client(
             client,
             lambda active, timeout: _adjudicate_unknown_outcome(
@@ -245,6 +249,48 @@ class _Adjudication:
     stored_auth: StoredAuth
     state: OutcomeUnknown
     unresolved: AuthProjectionError
+
+
+def _adjudication_window_closed(
+    adjudication: _Adjudication,
+    now: datetime,
+) -> AuthBackendReadinessResult | None:
+    """Bound adjudication by the access token's own expiry.
+
+    Adjudication is only worth attempting while the credential could still be
+    used, and that window is exactly the life of the stored ``access_token``.
+    Past it the probe can only return ``401`` -- the source is unusable whether
+    or not the rotation landed -- so retrying forever would keep the service
+    quietly unready instead of asking a human once.
+
+    This is also the only defence against the oscillation the design otherwise
+    admits: a backend that answers ``5xx`` rather than a clean rejection for a
+    consumed refresh token would loop clear -> refresh -> unknown -> probe.
+    That loop now has a deadline it cannot outlive.
+
+    An expiry we cannot read is not a window we can prove is open, so it closes
+    too -- consistent with every other fail-closed decision in this module.
+    """
+
+    expires_at = cookie_access_expires_at(adjudication.stored_auth)
+    if expires_at is not None and now < expires_at:
+        return None
+    detail = (
+        "the access token expired before the backend answered"
+        if expires_at is not None
+        else "the stored credential has no readable access token expiry"
+    )
+    return AuthBackendReadinessResult(
+        ready=False,
+        failure_kind="storage",
+        failure_code=AUTH_REFRESH_ADJUDICATION_EXPIRED_CODE,
+        failure_message=(
+            f"{adjudication.state.reason}; {detail}, so the outcome can no longer be established; "
+            "import a fresh browser credential"
+        ),
+        credential_type=adjudication.stored_auth["credential"]["type"],
+        bypass_grace=True,
+    )
 
 
 async def _adjudicate_unknown_outcome(
