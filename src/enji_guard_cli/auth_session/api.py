@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
@@ -12,7 +13,12 @@ from enji_guard_cli.auth_session.cookies import (
     jwt_expires_at,
     normalize_cookie_header,
 )
-from enji_guard_cli.auth_session.coordinator import CoordinatorDependencies, RefreshCoordinator, import_credential
+from enji_guard_cli.auth_session.coordinator import (
+    CoordinatorDependencies,
+    RefreshCoordinator,
+    adjudicate_source_revision_alive,
+    import_credential,
+)
 from enji_guard_cli.auth_session.credential_changes import credential_changes
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
 from enji_guard_cli.auth_session.payloads import (
@@ -22,7 +28,13 @@ from enji_guard_cli.auth_session.payloads import (
     _unauthenticated_payload,
 )
 from enji_guard_cli.auth_session.ports import AuthEventSink, AuthOutcomeSink
-from enji_guard_cli.auth_session.projection import AuthProjectionError, network_credential, project_auth
+from enji_guard_cli.auth_session.projection import (
+    AuthProjectionError,
+    adjudication_credential,
+    network_credential,
+    project_auth,
+)
+from enji_guard_cli.auth_session.state_machine import OutcomeUnknown
 from enji_guard_cli.auth_session.store import (
     CredentialType,
     StoredAuth,
@@ -182,31 +194,132 @@ async def backend_readiness_probe_async(
 ) -> AuthBackendReadinessResult:
     started_at = time.monotonic()
     target = auth_file if auth_file is not None else default_auth_file()
+    projection = _auth_projection(target)
     try:
-        stored_auth = network_credential(_auth_projection(target))
+        stored_auth = network_credential(projection)
     except AuthProjectionError as exc:
+        pending = adjudication_credential(projection)
+        if pending is None:
+            return _backend_readiness_failure(
+                started_at,
+                AuthBackendReadinessResult(
+                    ready=False,
+                    failure_kind="storage",
+                    failure_code=exc.code,
+                    failure_message=exc.message,
+                    bypass_grace=True,
+                ),
+            )
+        adjudication = _Adjudication(pending[0], pending[1], exc)
+        return await _with_readiness_client(
+            client,
+            lambda active, timeout: _adjudicate_unknown_outcome(
+                target, adjudication, active, started_at=started_at, timeout_seconds=timeout
+            ),
+        )
+
+    return await _with_readiness_client(
+        client,
+        lambda active, timeout: _backend_readiness_probe_with_client(
+            stored_auth, active, started_at=started_at, timeout_seconds=timeout
+        ),
+    )
+
+
+async def _with_readiness_client(
+    client: EnjiHttpClient | None,
+    run: Callable[[EnjiHttpClient, float | None], Awaitable[AuthBackendReadinessResult]],
+) -> AuthBackendReadinessResult:
+    if client is not None:
+        return await run(client, None)
+    timeout_seconds = default_settings().readiness.heartbeat_timeout_seconds
+    async with HttpxEnjiHttpClient(event_sink=discard_transport_event) as owned_client:
+        return await run(owned_client, timeout_seconds)
+
+
+@dataclass(frozen=True, slots=True)
+class _Adjudication:
+    """The credential to probe with, and the verdict it has to replace."""
+
+    stored_auth: StoredAuth
+    state: OutcomeUnknown
+    unresolved: AuthProjectionError
+
+
+async def _adjudicate_unknown_outcome(
+    target: Path,
+    adjudication: _Adjudication,
+    client: EnjiHttpClient,
+    *,
+    started_at: float,
+    timeout_seconds: float | None = None,
+) -> AuthBackendReadinessResult:
+    """Ask the backend what an ambiguous refresh actually did.
+
+    This is a read of ``/api/v1/auth/me`` with the credential already on disk.
+    The one-time refresh token is never sent, so nothing here can consume a
+    rotation -- that is what separates adjudication from the replay the state
+    machine forbids.
+    """
+
+    stored_auth = adjudication.stored_auth
+    unresolved = adjudication.unresolved
+    credential_type = stored_auth["credential"]["type"]
+    try:
+        response = await _request_auth_status(stored_auth, client, timeout_seconds=timeout_seconds)
+    except EnjiHttpError as exc:
+        return _unadjudicated(started_at, unresolved, credential_type, status_code=exc.status_code)
+
+    if response.status_code == HTTP_OK:
+        cleared = await asyncio.to_thread(adjudicate_source_revision_alive, target, adjudication.state.source_revision)
+        if not cleared:
+            # Storage moved under the probe.  Decide nothing and re-read the
+            # durable state on the next tick.
+            return _unadjudicated(started_at, unresolved, credential_type, status_code=response.status_code)
+        return AuthBackendReadinessResult(
+            ready=True,
+            credential_type=credential_type,
+            elapsed_ms=_elapsed_ms(started_at),
+        )
+
+    if response.status_code in HTTP_AUTH_FAILURE_CODES or is_auth_invalid_response(response):
+        # The source credential is dead: the rotation landed and its successor
+        # was lost with the ambiguous response.  Only an import recovers this.
         return _backend_readiness_failure(
             started_at,
             AuthBackendReadinessResult(
                 ready=False,
                 failure_kind="storage",
-                failure_code=exc.code,
-                failure_message=exc.message,
+                failure_code=unresolved.code,
+                failure_message=unresolved.message,
+                failure_status_code=response.status_code,
+                credential_type=credential_type,
                 bypass_grace=True,
             ),
         )
+    return _unadjudicated(started_at, unresolved, credential_type, status_code=response.status_code)
 
-    if client is not None:
-        return await _backend_readiness_probe_with_client(stored_auth, client, started_at=started_at)
 
-    settings = default_settings()
-    async with HttpxEnjiHttpClient(event_sink=discard_transport_event) as owned_client:
-        return await _backend_readiness_probe_with_client(
-            stored_auth,
-            owned_client,
-            started_at=started_at,
-            timeout_seconds=settings.readiness.heartbeat_timeout_seconds,
-        )
+def _unadjudicated(
+    started_at: float,
+    unresolved: AuthProjectionError,
+    credential_type: str,
+    *,
+    status_code: int | None,
+) -> AuthBackendReadinessResult:
+    """Stay unready without burning the credential on an unproven verdict."""
+
+    return _backend_readiness_failure(
+        started_at,
+        AuthBackendReadinessResult(
+            ready=False,
+            failure_kind="upstream",
+            failure_code=unresolved.code,
+            failure_message=unresolved.message,
+            failure_status_code=status_code,
+            credential_type=credential_type,
+        ),
+    )
 
 
 def start_auto_refresh_task(

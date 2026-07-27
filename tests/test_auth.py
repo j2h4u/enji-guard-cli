@@ -40,6 +40,7 @@ from enji_guard_cli.auth_session.store import (
     AuthLoaded,
     AuthUnsupported,
     load_auth,
+    pending_rotation_path,
     write_journal,
 )
 from enji_guard_cli.delivery.cli.app import app
@@ -176,7 +177,7 @@ def test_future_credential_import_timestamp_has_stable_clock_anomaly_classificat
         (lambda revision: OutcomeUnknown(revision, "timeout"), "AUTH_REFRESH_OUTCOME_UNKNOWN"),
     ],
 )
-def test_terminal_auth_projection_bypasses_status_and_readiness_network(
+def test_terminal_auth_projection_bypasses_status_network(
     tmp_path: Path,
     state_factory: Callable[[str], RotationState],
     expected_code: str,
@@ -186,26 +187,173 @@ def test_terminal_auth_projection_bypasses_status_and_readiness_network(
     loaded = load_auth(auth_file)
     assert isinstance(loaded, AuthLoaded)
     write_journal(auth_file, state_factory(loaded.auth["revision"]))
+
+    class Client:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            raise AssertionError("terminal auth projection must not perform HTTP")
+
+    status = asyncio.run(auth_status_async(auth_file, Client()))
+
+    assert status["code"] == expected_code
+    assert "import a fresh browser credential" in cast(str, status["message"])
+
+
+def test_rejected_projection_bypasses_readiness_network(tmp_path: Path) -> None:
+    """A confirmed rejection is an answer, so there is nothing to adjudicate."""
+
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    write_journal(auth_file, Rejected(loaded.auth["revision"], "rejected"))
     requests: list[EnjiHttpRequest] = []
 
     class Client:
         async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
             requests.append(request)
-            raise AssertionError("terminal auth projection must not perform HTTP")
+            raise AssertionError("a rejected projection must not perform HTTP")
 
-    async def observe() -> tuple[AuthStatusPayload, AuthBackendReadinessResult]:
-        return (
-            await auth_status_async(auth_file, Client()),
-            await backend_readiness_probe_async(auth_file, Client()),
-        )
+    readiness = asyncio.run(backend_readiness_probe_async(auth_file, Client()))
 
-    status, readiness = asyncio.run(observe())
-
-    assert status["code"] == expected_code
-    assert "import a fresh browser credential" in cast(str, status["message"])
-    assert readiness.failure_code == expected_code
+    assert readiness.failure_code == "AUTH_REFRESH_REJECTED"
     assert readiness.bypass_grace is True
     assert requests == []
+
+
+@pytest.mark.parametrize(
+    ("state_factory", "expected_reason"),
+    [
+        (lambda revision: Rejected(revision, "refresh rejected with HTTP 401"), "refresh rejected with HTTP 401"),
+        (
+            lambda revision: OutcomeUnknown(revision, "ambiguous refresh response HTTP 502"),
+            "ambiguous refresh response HTTP 502",
+        ),
+    ],
+)
+def test_terminal_auth_status_surfaces_the_journal_reason(
+    tmp_path: Path,
+    state_factory: Callable[[str], RotationState],
+    expected_reason: str,
+) -> None:
+    """The reason is the whole diagnosis; a bare code sends operators digging."""
+
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    write_journal(auth_file, state_factory(loaded.auth["revision"]))
+
+    class Client:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            raise AssertionError("terminal auth projection must not perform HTTP")
+
+    status = asyncio.run(auth_status_async(auth_file, Client()))
+
+    assert expected_reason in cast(str, status["message"])
+
+
+def _unknown_outcome_auth_file(tmp_path: Path) -> Path:
+    """An auth file stuck exactly where the 502 left the live service."""
+
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    write_journal(auth_file, OutcomeUnknown(loaded.auth["revision"], "ambiguous refresh response HTTP 502"))
+    return auth_file
+
+
+class _RecordingClient:
+    def __init__(self, response: EnjiHttpResponse) -> None:
+        self.response = response
+        self.requests: list[EnjiHttpRequest] = []
+
+    async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+        self.requests.append(request)
+        return self.response
+
+
+def test_unknown_outcome_adjudicates_alive_source_and_clears_the_journal(tmp_path: Path) -> None:
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+    client = _RecordingClient(EnjiHttpResponse(200, {}, b'{"email": "operator@example.com"}'))
+
+    readiness = asyncio.run(backend_readiness_probe_async(auth_file, client))
+
+    assert readiness.ready is True
+    assert readiness.bypass_grace is False
+    assert not pending_rotation_path(auth_file).exists()
+    assert [(request.method, request.url) for request in client.requests] == [
+        ("GET", "https://fleet.enji.ai/api/v1/auth/me")
+    ]
+
+
+def test_unknown_outcome_adjudication_never_sends_the_refresh_token(tmp_path: Path) -> None:
+    """The probe must carry the held credential, never replay the exchange."""
+
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+    client = _RecordingClient(EnjiHttpResponse(200, {}, b"{}"))
+
+    asyncio.run(backend_readiness_probe_async(auth_file, client))
+
+    assert all("/auth/refresh" not in request.url for request in client.requests)
+    assert all(request.method == "GET" for request in client.requests)
+
+
+def test_adjudicated_credential_becomes_usable_again(tmp_path: Path) -> None:
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+    client = _RecordingClient(EnjiHttpResponse(200, {}, b'{"email": "operator@example.com"}'))
+
+    async def observe() -> AuthStatusPayload:
+        await backend_readiness_probe_async(auth_file, client)
+        return await auth_status_async(auth_file, client)
+
+    status = asyncio.run(observe())
+
+    assert status["authenticated"] is True
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_unknown_outcome_stays_terminal_when_the_source_is_dead(tmp_path: Path, status_code: int) -> None:
+    """A dead source proves the rotation landed and its successor is lost."""
+
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+    client = _RecordingClient(EnjiHttpResponse(status_code, {}, b"{}"))
+
+    readiness = asyncio.run(backend_readiness_probe_async(auth_file, client))
+
+    assert readiness.ready is False
+    assert readiness.bypass_grace is True
+    assert readiness.failure_code == "AUTH_REFRESH_OUTCOME_UNKNOWN"
+    assert pending_rotation_path(auth_file).exists()
+
+
+@pytest.mark.parametrize("status_code", [500, 502, 503])
+def test_unknown_outcome_decides_nothing_while_the_backend_is_down(tmp_path: Path, status_code: int) -> None:
+    """The probe is also the signal that the backend has not returned yet."""
+
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+    client = _RecordingClient(EnjiHttpResponse(status_code, {}, b"{}"))
+
+    readiness = asyncio.run(backend_readiness_probe_async(auth_file, client))
+
+    assert readiness.ready is False
+    assert readiness.bypass_grace is False
+    assert readiness.failure_code == "AUTH_REFRESH_OUTCOME_UNKNOWN"
+    assert pending_rotation_path(auth_file).exists()
+
+
+def test_unknown_outcome_decides_nothing_when_the_probe_transport_fails(tmp_path: Path) -> None:
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+
+    class Client:
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            raise EnjiHttpError("TIMEOUT", "auth status timed out")
+
+    readiness = asyncio.run(backend_readiness_probe_async(auth_file, Client()))
+
+    assert readiness.ready is False
+    assert readiness.bypass_grace is False
+    assert pending_rotation_path(auth_file).exists()
 
 
 @pytest.mark.parametrize(

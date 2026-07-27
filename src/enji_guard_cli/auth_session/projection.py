@@ -172,19 +172,36 @@ def network_credential(projection: AuthProjection) -> StoredAuth:
     match projection:
         case CredentialReady(auth=auth) | RotationReserved(auth=auth) | RotationInProgress(auth=auth):
             return auth
-        case ReimportRequired(state=Rejected()):
+        case ReimportRequired(state=Rejected(reason=reason)):
             raise AuthProjectionError(
-                "AUTH_REFRESH_REJECTED", "refresh was rejected; import a fresh browser credential"
+                "AUTH_REFRESH_REJECTED", f"refresh was rejected ({reason}); import a fresh browser credential"
             )
-        case ReimportRequired(state=OutcomeUnknown()):
+        case ReimportRequired(state=OutcomeUnknown(reason=reason)):
             raise AuthProjectionError(
-                "AUTH_REFRESH_OUTCOME_UNKNOWN", "refresh outcome is unknown; import a fresh browser credential"
+                "AUTH_REFRESH_OUTCOME_UNKNOWN",
+                f"refresh outcome is unknown ({reason}); import a fresh browser credential",
             )
         case _:
             error = _STATIC_PROJECTION_ERRORS.get(type(projection))
             if error is not None:
                 raise AuthProjectionError(*error)
             raise AssertionError(f"unexpected auth projection: {type(projection).__name__}")
+
+
+def adjudication_credential(projection: AuthProjection) -> tuple[StoredAuth, OutcomeUnknown] | None:
+    """Return the credential to probe with when a refresh outcome is unknown.
+
+    Deliberately separate from :func:`network_credential`, which still refuses
+    this projection.  An unadjudicated credential may be used only to ask the
+    backend what already happened -- never to serve traffic.  Callers must not
+    relax anything until that probe answers ``200``.
+    """
+
+    match projection:
+        case ReimportRequired(auth=auth, state=OutcomeUnknown() as state):
+            return auth, state
+        case _:
+            return None
 
 
 def _project_loaded(auth: StoredAuth, journal_result: JournalLoadResult) -> AuthProjection:

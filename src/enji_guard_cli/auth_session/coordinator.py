@@ -23,6 +23,7 @@ from enji_guard_cli.auth_session.state_machine import (
     Requested,
     Reserved,
     Rotated,
+    SourceRevisionAlive,
     rotation_event_metadata,
     transition,
 )
@@ -424,6 +425,32 @@ class RefreshCoordinator:
             )
         except OSError, RuntimeError, ValueError:
             return False
+
+
+def adjudicate_source_revision_alive(auth_path: Path, source_revision: str) -> bool:
+    """Clear an ambiguous rotation once a probe proved the source still works.
+
+    Returns whether the journal was cleared.  Everything is re-read under the
+    lock, so a concurrent import or a rotation that landed while the probe was
+    in flight wins and this call becomes a no-op.  The outcome outbox is left
+    alone: the ``outcome_unknown`` event really did happen, and delivery of
+    that history is not this function's business.
+    """
+
+    with auth_file_lock(auth_path):
+        loaded = load_auth(auth_path)
+        if not isinstance(loaded, AuthLoaded) or loaded.auth["revision"] != source_revision:
+            return False
+        journal = load_journal(auth_path)
+        if not isinstance(journal, JournalLoaded):
+            return False
+        state = journal.state
+        if not isinstance(state, OutcomeUnknown) or state.source_revision != source_revision:
+            return False
+        resolved = transition(state, SourceRevisionAlive())
+        assert isinstance(resolved.state, Ready)
+        delete_journal(auth_path)
+        return True
 
 
 def import_credential(auth_path: Path, auth: StoredAuth) -> StoredAuth:

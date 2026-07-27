@@ -87,8 +87,26 @@ class Recover:
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class SourceRevisionAlive:
+    """A read-only probe proved the source credential still authenticates.
+
+    This is the only way out of ``OutcomeUnknown`` that does not require an
+    import, and it is not a replay: the verdict comes from a request that
+    carried the credential we already hold, never the one-time refresh token.
+    A live source revision means the exchange never rotated it.
+    """
+
+
 RotationEvent = (
-    Begin | DispatchBegun | ExchangeSucceeded | ExchangeRejected | ExchangeOutcomeUnknown | Imported | Recover
+    Begin
+    | DispatchBegun
+    | ExchangeSucceeded
+    | ExchangeRejected
+    | ExchangeOutcomeUnknown
+    | Imported
+    | Recover
+    | SourceRevisionAlive
 )
 
 
@@ -217,6 +235,11 @@ def _terminal_transition(state: Rejected | OutcomeUnknown, event: RotationEvent)
             return Transition(Ready(revision), (DeleteJournal(),))
         case Recover():
             return Transition(state, (WaitForTerminalRevision(state.source_revision),))
+        case SourceRevisionAlive() if isinstance(state, OutcomeUnknown):
+            # Only ambiguity is adjudicable.  `Rejected` is a confirmed answer
+            # from the server, so a live probe there would be a contradiction
+            # to investigate, not a state to clear.
+            return Transition(Ready(state.source_revision), (DeleteJournal(),))
         case _:
             return _invalid_transition(state, event)
 

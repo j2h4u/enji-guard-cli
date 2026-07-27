@@ -14,6 +14,7 @@ from enji_guard_cli.auth_session.coordinator import (
     CoordinatorDependencies,
     RefreshCoordinator,
     TerminalRevisionRequiredError,
+    adjudicate_source_revision_alive,
     import_credential,
 )
 from enji_guard_cli.auth_session.models import StoredAuth
@@ -39,6 +40,7 @@ from enji_guard_cli.auth_session.state_machine import (
     Rotated,
     RotationEvent,
     RotationState,
+    SourceRevisionAlive,
     WaitForTerminalRevision,
     transition,
 )
@@ -118,6 +120,7 @@ from enji_guard_cli.transport import EnjiHttpError, EnjiHttpResponse
             (WaitForTerminalRevision("r1"),),
         ),
         (Rejected("r1", "invalid"), Imported("r2"), Ready("r2"), (DeleteJournal(),)),
+        (OutcomeUnknown("r1", "timeout"), SourceRevisionAlive(), Ready("r1"), (DeleteJournal(),)),
     ],
 )
 def test_transition_matrix(
@@ -135,6 +138,67 @@ def test_transition_matrix(
 def test_transition_rejects_impossible_internal_event() -> None:
     with pytest.raises(InvalidTransitionError):
         transition(Ready("r1"), DispatchBegun())
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        Ready("r1"),
+        Reserved("r1"),
+        Requested("r1"),
+        Rotated("r1", "access_token=new; refresh_token=new", "r2"),
+        Rejected("r1", "invalid"),
+    ],
+)
+def test_only_an_ambiguous_outcome_is_adjudicable(state: RotationState) -> None:
+    """Every other state already knows what happened; clearing one would lie."""
+
+    with pytest.raises(InvalidTransitionError):
+        transition(state, SourceRevisionAlive())
+
+
+def test_adjudication_clears_only_the_matching_unknown_rotation(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    revision = loaded.auth["revision"]
+    write_journal(auth_file, OutcomeUnknown(revision, "ambiguous refresh response HTTP 502"))
+
+    assert adjudicate_source_revision_alive(auth_file, "some-other-revision") is False
+    assert pending_rotation_path(auth_file).exists()
+
+    assert adjudicate_source_revision_alive(auth_file, revision) is True
+    assert not pending_rotation_path(auth_file).exists()
+
+    # Idempotent: a second pass has nothing left to clear.
+    assert adjudicate_source_revision_alive(auth_file, revision) is False
+
+
+def test_adjudication_refuses_a_journal_that_is_not_ambiguous(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    revision = loaded.auth["revision"]
+    write_journal(auth_file, Rejected(revision, "refresh rejected with HTTP 401"))
+
+    assert adjudicate_source_revision_alive(auth_file, revision) is False
+    assert pending_rotation_path(auth_file).exists()
+
+
+def test_adjudication_loses_to_a_credential_import(tmp_path: Path) -> None:
+    """An import that landed while the probe flew already superseded us."""
+
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    stale_revision = loaded.auth["revision"]
+    write_journal(auth_file, OutcomeUnknown(stale_revision, "ambiguous refresh response HTTP 502"))
+    import_cookie("access_token=fresh; refresh_token=fresh", auth_file)
+
+    assert adjudicate_source_revision_alive(auth_file, stale_revision) is False
 
 
 def test_storage_validation_rejects_corrupt_external_inputs(tmp_path: Path) -> None:

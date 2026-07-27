@@ -108,12 +108,33 @@ agents can orient quickly before making changes.
   implicit: a valid credential with no applicable journal. Startup reconciles a
   matching `RESERVED` safely, recovers `ROTATED`, and durably converts an
   abandoned `REQUESTED` to `OUTCOME_UNKNOWN` before ordinary readiness starts.
-  `REJECTED` and `OUTCOME_UNKNOWN` are terminal: they remain visible and require
-  an operator to import a fresh browser credential, which supersedes the old
-  revision and clears its journal. No automatic POST follows `REQUESTED`; a
+  `REJECTED` is terminal: it remains visible and requires an operator to import
+  a fresh browser credential, which supersedes the old revision and clears its
+  journal. No automatic POST follows `REQUESTED`; a
   failure after dispatch, malformed response, cancellation, timeout, transport
   failure, or 429/5xx is conservatively unknown. Transport retries do not cover
   cookie refresh.
+
+  `OUTCOME_UNKNOWN` is not terminal but unadjudicated. The readiness loop
+  resolves it by asking the backend what already happened: a `GET
+  /api/v1/auth/me` carrying the credential already on disk. This is not the
+  forbidden replay — the one-time refresh token is never sent, so the probe
+  cannot consume a rotation. `200` proves the source revision survived, so the
+  exchange never rotated it; the journal is cleared under the file lock and the
+  ordinary refresh schedule resumes. `401`/`403` proves the source is dead, so
+  the rotation landed and its replacement was lost with the ambiguous response —
+  terminal, import required, as before. Anything else decides nothing and
+  retries on the next tick, which is also how the loop learns the backend
+  returned. Until an explicit `200`, the credential still must not serve
+  traffic: `network_credential` keeps refusing it, and a separate
+  `adjudication_credential` accessor hands it out for the probe alone.
+
+  This recovers the common case — a gateway `502` during a backend redeploy
+  never reached the app, so nothing rotated — and only that case. If the
+  rotation truly landed and its successor was lost, nothing recovers it. If the
+  server briefly honours both revisions, the probe returns `200`, work resumes
+  on a credential that dies later, and the next refresh fails with a clean
+  rejection: softer degradation, not immunity.
 
   Storage loads are typed rather than collapsed: `ABSENT`, `CORRUPT`,
   `UNSUPPORTED`, `IO_FAILURE`, clock anomaly, and `LOADED` remain distinct.
