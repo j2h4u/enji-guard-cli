@@ -55,9 +55,10 @@ dispatch becomes `OUTCOME_UNKNOWN`. `REJECTED` and `OUTCOME_UNKNOWN` require
 explicit operator re-import; there is no `auth refresh` command or retry
 workflow.
 
-After a real re-authentication, refresh the browser session, request
-`/api/v1/auth/me`, and import that request's current `Cookie` header. Do not
-use `document.cookie`. If using the refresh request itself, merge response
+After a real re-authentication, sign in at
+<https://guard.enji.ai/app/login> so the browser holds a current session,
+request `/api/v1/auth/me`, and import that request's current `Cookie` header.
+Do not use `document.cookie`. If using the refresh request itself, merge response
 `Set-Cookie` values because its request header has the old refresh token. The
 import creates a new revision, supersedes a terminal generation, wakes the
 supervisor promptly, and readiness is re-evaluated without a restart. Validate
