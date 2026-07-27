@@ -56,6 +56,7 @@ from enji_guard_cli.transport_types import RetryProfile
 
 AUTH_REFRESH_PATH = "/api/v1/auth/refresh"
 AUTH_INVALID_CODE = "AUTH_INVALID"
+AUTH_REFRESH_SUCCESSOR_LOST_CODE = "AUTH_REFRESH_SUCCESSOR_LOST"
 AUTH_REFRESH_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
 )
@@ -257,25 +258,41 @@ async def _adjudicate_unknown_outcome(
     """Ask the backend what an ambiguous refresh actually did.
 
     This is a read of ``/api/v1/auth/me`` with the credential already on disk.
-    The one-time refresh token is never sent, so nothing here can consume a
-    rotation -- that is what separates adjudication from the replay the state
-    machine forbids.
+    The refresh token is not withheld -- it rides the stored ``Cookie`` header
+    like every other cookie.  What makes this safe is the *endpoint*: a read
+    that does not consume refresh tokens.  Point this at anything else and the
+    safety argument is gone.
+
+    A ``200`` is weaker evidence than it looks.  ``/api/v1/auth/me``
+    authenticates the ``access_token`` JWT, which stays valid until its own
+    expiry whether or not the refresh token was consumed -- and refresh is
+    scheduled a lead window *before* that expiry, so the probe runs while the
+    old JWT is still good in both worlds.  So ``200`` means "the access token
+    still works", not "the rotation never landed".  If it did land, clearing
+    here lets the next scheduled refresh re-send a consumed token and take a
+    clean rejection; see ``docs/decisions.md`` for why that trade is bounded.
     """
 
     stored_auth = adjudication.stored_auth
-    unresolved = adjudication.unresolved
     credential_type = stored_auth["credential"]["type"]
     try:
         response = await _request_auth_status(stored_auth, client, timeout_seconds=timeout_seconds)
     except EnjiHttpError as exc:
-        return _unadjudicated(started_at, unresolved, credential_type, status_code=exc.status_code)
+        return _unadjudicated(started_at, adjudication, credential_type, status_code=exc.status_code)
 
     if response.status_code == HTTP_OK:
         cleared = await asyncio.to_thread(adjudicate_source_revision_alive, target, adjudication.state.source_revision)
         if not cleared:
             # Storage moved under the probe.  Decide nothing and re-read the
-            # durable state on the next tick.
-            return _unadjudicated(started_at, unresolved, credential_type, status_code=response.status_code)
+            # durable state on the next tick.  This is a storage race, not an
+            # upstream fault, and dashboards should not read it as one.
+            return _unadjudicated(
+                started_at,
+                adjudication,
+                credential_type,
+                status_code=response.status_code,
+                failure_kind="storage",
+            )
         return AuthBackendReadinessResult(
             ready=True,
             credential_type=credential_type,
@@ -284,38 +301,47 @@ async def _adjudicate_unknown_outcome(
 
     if response.status_code in HTTP_AUTH_FAILURE_CODES or is_auth_invalid_response(response):
         # The source credential is dead: the rotation landed and its successor
-        # was lost with the ambiguous response.  Only an import recovers this.
+        # was lost with the ambiguous response.  Only an import recovers this,
+        # and it gets its own code so alerting can tell a proven-terminal state
+        # from one that is merely still waiting on the backend.
         return _backend_readiness_failure(
             started_at,
             AuthBackendReadinessResult(
                 ready=False,
                 failure_kind="storage",
-                failure_code=unresolved.code,
-                failure_message=unresolved.message,
+                failure_code=AUTH_REFRESH_SUCCESSOR_LOST_CODE,
+                failure_message=(
+                    "refresh rotated the credential and its replacement was lost; import a fresh browser credential"
+                ),
                 failure_status_code=response.status_code,
                 credential_type=credential_type,
                 bypass_grace=True,
             ),
         )
-    return _unadjudicated(started_at, unresolved, credential_type, status_code=response.status_code)
+    return _unadjudicated(started_at, adjudication, credential_type, status_code=response.status_code)
 
 
 def _unadjudicated(
     started_at: float,
-    unresolved: AuthProjectionError,
+    adjudication: _Adjudication,
     credential_type: str,
     *,
     status_code: int | None,
+    failure_kind: str = "upstream",
 ) -> AuthBackendReadinessResult:
-    """Stay unready without burning the credential on an unproven verdict."""
+    """Stay unready without burning the credential on an unproven verdict.
+
+    Deliberately not the projection's message: that one tells the operator to
+    import a credential, which fixes nothing while the backend is unreachable.
+    """
 
     return _backend_readiness_failure(
         started_at,
         AuthBackendReadinessResult(
             ready=False,
-            failure_kind="upstream",
-            failure_code=unresolved.code,
-            failure_message=unresolved.message,
+            failure_kind=failure_kind,
+            failure_code=adjudication.unresolved.code,
+            failure_message=(f"{adjudication.state.reason}; the adjudication probe has no answer yet, retrying"),
             failure_status_code=status_code,
             credential_type=credential_type,
         ),

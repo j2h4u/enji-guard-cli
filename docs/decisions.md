@@ -117,24 +117,44 @@ agents can orient quickly before making changes.
 
   `OUTCOME_UNKNOWN` is not terminal but unadjudicated. The readiness loop
   resolves it by asking the backend what already happened: a `GET
-  /api/v1/auth/me` carrying the credential already on disk. This is not the
-  forbidden replay — the one-time refresh token is never sent, so the probe
-  cannot consume a rotation. `200` proves the source revision survived, so the
-  exchange never rotated it; the journal is cleared under the file lock and the
-  ordinary refresh schedule resumes. `401`/`403` proves the source is dead, so
-  the rotation landed and its replacement was lost with the ambiguous response —
-  terminal, import required, as before. Anything else decides nothing and
+  /api/v1/auth/me` carrying the credential already on disk. The refresh token is
+  not withheld — it rides the stored `Cookie` header like every other cookie.
+  What makes the probe safe is the *endpoint*: a read that does not consume
+  refresh tokens. `401`/`403` proves the source is dead, so the rotation landed
+  and its replacement was lost with the ambiguous response — terminal, import
+  required, reported as `AUTH_REFRESH_SUCCESSOR_LOST` so alerting can tell it
+  from a state that is merely still waiting. Anything else decides nothing and
   retries on the next tick, which is also how the loop learns the backend
-  returned. Until an explicit `200`, the credential still must not serve
-  traffic: `network_credential` keeps refusing it, and a separate
+  returned. Until an explicit `200`, the credential must not serve traffic:
+  `network_credential` keeps refusing it, and a separate
   `adjudication_credential` accessor hands it out for the probe alone.
 
-  This recovers the common case — a gateway `502` during a backend redeploy
-  never reached the app, so nothing rotated — and only that case. If the
-  rotation truly landed and its successor was lost, nothing recovers it. If the
-  server briefly honours both revisions, the probe returns `200`, work resumes
-  on a credential that dies later, and the next refresh fails with a clean
-  rejection: softer degradation, not immunity.
+  **A `200` is weaker evidence than it looks, and the design depends on knowing
+  that.** `/api/v1/auth/me` authenticates the `access_token` JWT, which stays
+  valid until its own expiry whether or not the refresh token was consumed — and
+  refresh is scheduled `auto_refresh.lead_seconds` (300s) *before* that expiry,
+  so the probe runs while the old JWT is still good in both worlds. `200`
+  therefore means "the access token still works", not "the rotation never
+  landed". No endpoint can prove the latter; only spending the refresh token
+  can.
+
+  So clearing the journal on `200` is not proof, it is a bounded bet. If the
+  rotation did land, the cleared journal lets the next scheduled refresh re-send
+  a consumed token — the very replay `REQUESTED` exists to prevent, deferred by
+  one hop. That is accepted here because the downside is already spent: if the
+  rotation landed and its successor was lost, the session is unrecoverable
+  regardless, so a rejected replay costs nothing that was not already gone. The
+  bet pays in the common case — a gateway `502` during a backend redeploy never
+  reached the app, so nothing rotated and the service heals itself.
+
+  This rests on one backend coupling, pinned by
+  `test_a_false_clear_terminates_cleanly_at_the_next_refresh`: a consumed
+  refresh token must draw a protocol-confirmed `401`/`403`, which lands in
+  `REJECTED` and asks for an import exactly once. If the backend instead
+  answered `5xx` for a consumed token, adjudication would oscillate
+  (clear → refresh → `OUTCOME_UNKNOWN` → probe `200` → clear) until the access
+  token expires, with no per-iteration alert. That failure mode is not defended
+  against in code, because nothing here controls that backend.
 
   Storage loads are typed rather than collapsed: `ABSENT`, `CORRUPT`,
   `UNSUPPORTED`, `IO_FAILURE`, clock anomaly, and `LOADED` remain distinct.

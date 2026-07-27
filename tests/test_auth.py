@@ -39,7 +39,9 @@ from enji_guard_cli.auth_session.store import (
     AuthIoFailure,
     AuthLoaded,
     AuthUnsupported,
+    JournalLoaded,
     load_auth,
+    load_journal,
     pending_rotation_path,
     write_journal,
 )
@@ -312,6 +314,48 @@ def test_adjudicated_credential_becomes_usable_again(tmp_path: Path) -> None:
     assert status["authenticated"] is True
 
 
+def test_a_false_clear_terminates_cleanly_at_the_next_refresh(tmp_path: Path) -> None:
+    """The safety argument for clearing on 200 rests entirely on this path.
+
+    A 200 from /auth/me does not prove the rotation failed to land: it only
+    proves the access_token JWT has not expired.  So the probe can clear an
+    ambiguity that really did rotate.  When it does, the next scheduled refresh
+    re-sends the consumed token and must take a *confirmed* rejection, landing
+    in REJECTED rather than looping through OUTCOME_UNKNOWN forever.
+    """
+
+    auth_file = _unknown_outcome_auth_file(tmp_path)
+    probe_client = _RecordingClient(EnjiHttpResponse(200, {}, b"{}"))
+
+    class DeadRefreshClient:
+        """The backend already burnt this refresh token during the 502."""
+
+        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
+            assert request.url.endswith("/api/v1/auth/refresh")
+            return EnjiHttpResponse(401, {}, b'{"error": {"code": "AUTH_INVALID"}}')
+
+    async def exercise() -> None:
+        adjudicated = await backend_readiness_probe_async(auth_file, probe_client)
+        assert adjudicated.ready is True
+
+        stored = load_auth(auth_file)
+        assert isinstance(stored, AuthLoaded)
+        with pytest.raises(TerminalRevisionRequiredError):
+            await _refresh_cookie_auth(auth_file, stored.auth, DeadRefreshClient())
+
+    asyncio.run(exercise())
+
+    journal = load_journal(auth_file)
+    assert isinstance(journal, JournalLoaded)
+    assert isinstance(journal.state, Rejected)
+
+    # And it is terminal for readiness, so a human is asked exactly once.
+    settled = asyncio.run(backend_readiness_probe_async(auth_file, probe_client))
+    assert settled.ready is False
+    assert settled.bypass_grace is True
+    assert settled.failure_code == "AUTH_REFRESH_REJECTED"
+
+
 @pytest.mark.parametrize("status_code", [401, 403])
 def test_unknown_outcome_stays_terminal_when_the_source_is_dead(tmp_path: Path, status_code: int) -> None:
     """A dead source proves the rotation landed and its successor is lost."""
@@ -323,7 +367,7 @@ def test_unknown_outcome_stays_terminal_when_the_source_is_dead(tmp_path: Path, 
 
     assert readiness.ready is False
     assert readiness.bypass_grace is True
-    assert readiness.failure_code == "AUTH_REFRESH_OUTCOME_UNKNOWN"
+    assert readiness.failure_code == "AUTH_REFRESH_SUCCESSOR_LOST"
     assert pending_rotation_path(auth_file).exists()
 
 
