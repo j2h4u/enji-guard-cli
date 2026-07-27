@@ -1,8 +1,7 @@
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
@@ -34,7 +33,6 @@ from enji_guard_cli.auth_session.projection import (
     network_credential,
     project_auth,
 )
-from enji_guard_cli.auth_session.state_machine import OutcomeUnknown
 from enji_guard_cli.auth_session.store import (
     CredentialType,
     StoredAuth,
@@ -56,8 +54,6 @@ from enji_guard_cli.transport_types import RetryProfile
 
 AUTH_REFRESH_PATH = "/api/v1/auth/refresh"
 AUTH_INVALID_CODE = "AUTH_INVALID"
-AUTH_REFRESH_SUCCESSOR_LOST_CODE = "AUTH_REFRESH_SUCCESSOR_LOST"
-AUTH_REFRESH_ADJUDICATION_EXPIRED_CODE = "AUTH_REFRESH_ADJUDICATION_EXPIRED"
 AUTH_REFRESH_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
 )
@@ -196,202 +192,125 @@ async def backend_readiness_probe_async(
 ) -> AuthBackendReadinessResult:
     started_at = time.monotonic()
     target = auth_file if auth_file is not None else default_auth_file()
-    projection = _auth_projection(target)
     try:
-        stored_auth = network_credential(projection)
+        stored_auth = network_credential(_auth_projection(target))
     except AuthProjectionError as exc:
-        pending = adjudication_credential(projection)
-        if pending is None:
-            return _backend_readiness_failure(
-                started_at,
-                AuthBackendReadinessResult(
-                    ready=False,
-                    failure_kind="storage",
-                    failure_code=exc.code,
-                    failure_message=exc.message,
-                    bypass_grace=True,
-                ),
-            )
-        adjudication = _Adjudication(pending[0], pending[1], exc)
-        closed = _adjudication_window_closed(adjudication, datetime.now(UTC))
-        if closed is not None:
-            return _backend_readiness_failure(started_at, closed)
-        return await _with_readiness_client(
-            client,
-            lambda active, timeout: _adjudicate_unknown_outcome(
-                target, adjudication, active, started_at=started_at, timeout_seconds=timeout
+        return _backend_readiness_failure(
+            started_at,
+            AuthBackendReadinessResult(
+                ready=False,
+                failure_kind="storage",
+                failure_code=exc.code,
+                failure_message=exc.message,
+                bypass_grace=True,
             ),
         )
 
-    return await _with_readiness_client(
-        client,
-        lambda active, timeout: _backend_readiness_probe_with_client(
-            stored_auth, active, started_at=started_at, timeout_seconds=timeout
-        ),
-    )
-
-
-async def _with_readiness_client(
-    client: EnjiHttpClient | None,
-    run: Callable[[EnjiHttpClient, float | None], Awaitable[AuthBackendReadinessResult]],
-) -> AuthBackendReadinessResult:
     if client is not None:
-        return await run(client, None)
-    timeout_seconds = default_settings().readiness.heartbeat_timeout_seconds
+        return await _backend_readiness_probe_with_client(stored_auth, client, started_at=started_at)
+
+    settings = default_settings()
     async with HttpxEnjiHttpClient(event_sink=discard_transport_event) as owned_client:
-        return await run(owned_client, timeout_seconds)
+        return await _backend_readiness_probe_with_client(
+            stored_auth,
+            owned_client,
+            started_at=started_at,
+            timeout_seconds=settings.readiness.heartbeat_timeout_seconds,
+        )
 
 
-@dataclass(frozen=True, slots=True)
-class _Adjudication:
-    """The credential to probe with, and the verdict it has to replace."""
-
-    stored_auth: StoredAuth
-    state: OutcomeUnknown
-    unresolved: AuthProjectionError
-
-
-def _adjudication_window_closed(
-    adjudication: _Adjudication,
-    now: datetime,
-) -> AuthBackendReadinessResult | None:
-    """Bound adjudication by the access token's own expiry.
-
-    Adjudication is only worth attempting while the credential could still be
-    used, and that window is exactly the life of the stored ``access_token``.
-    Past it the probe can only return ``401`` -- the source is unusable whether
-    or not the rotation landed -- so retrying forever would keep the service
-    quietly unready instead of asking a human once.
-
-    This is also the only defence against the oscillation the design otherwise
-    admits: a backend that answers ``5xx`` rather than a clean rejection for a
-    consumed refresh token would loop clear -> refresh -> unknown -> probe.
-    That loop now has a deadline it cannot outlive.
-
-    An expiry we cannot read is not a window we can prove is open, so it closes
-    too -- consistent with every other fail-closed decision in this module.
-    """
-
-    expires_at = cookie_access_expires_at(adjudication.stored_auth)
-    if expires_at is not None and now < expires_at:
-        return None
-    detail = (
-        "the access token expired before the backend answered"
-        if expires_at is not None
-        else "the stored credential has no readable access token expiry"
-    )
-    return AuthBackendReadinessResult(
-        ready=False,
-        failure_kind="storage",
-        failure_code=AUTH_REFRESH_ADJUDICATION_EXPIRED_CODE,
-        failure_message=(
-            f"{adjudication.state.reason}; {detail}, so the outcome can no longer be established; "
-            "import a fresh browser credential"
-        ),
-        credential_type=adjudication.stored_auth["credential"]["type"],
-        bypass_grace=True,
-    )
-
-
-async def _adjudicate_unknown_outcome(
-    target: Path,
-    adjudication: _Adjudication,
+async def adjudicate_unknown_outcome(
+    auth_file: Path,
     client: EnjiHttpClient,
     *,
-    started_at: float,
-    timeout_seconds: float | None = None,
-) -> AuthBackendReadinessResult:
+    event_sink: AuthEventSink,
+) -> bool:
     """Ask the backend what an ambiguous refresh actually did.
 
-    This is a read of ``/api/v1/auth/me`` with the credential already on disk.
-    The refresh token is not withheld -- it rides the stored ``Cookie`` header
-    like every other cookie.  What makes this safe is the *endpoint*: a read
-    that does not consume refresh tokens.  Point this at anything else and the
-    safety argument is gone.
+    Returns whether the ambiguity was resolved in favour of the held
+    credential, which is the only outcome that lets the caller resume.
+
+    This belongs to the refresh loop, not to any observer.  The loop is what
+    parks on ``OUTCOME_UNKNOWN`` and what needs a working credential, so it is
+    the one that must decide -- and because it decides in place, nothing has to
+    be woken afterwards.
+
+    The probe is a read of ``/api/v1/auth/me`` with the credential already on
+    disk.  The refresh token is not withheld -- it rides the stored ``Cookie``
+    header like every other cookie.  What makes this safe is the *endpoint*: a
+    read that does not consume refresh tokens.  Point this at anything else and
+    the safety argument is gone.
 
     A ``200`` is weaker evidence than it looks.  ``/api/v1/auth/me``
     authenticates the ``access_token`` JWT, which stays valid until its own
     expiry whether or not the refresh token was consumed -- and refresh is
     scheduled a lead window *before* that expiry, so the probe runs while the
     old JWT is still good in both worlds.  So ``200`` means "the access token
-    still works", not "the rotation never landed".  If it did land, clearing
-    here lets the next scheduled refresh re-send a consumed token and take a
-    clean rejection; see ``docs/decisions.md`` for why that trade is bounded.
+    still works", not "the rotation never landed"; see ``docs/decisions.md``
+    for why clearing on it is a bounded bet rather than a proof.
     """
 
-    stored_auth = adjudication.stored_auth
-    credential_type = stored_auth["credential"]["type"]
+    pending = adjudication_credential(_auth_projection(auth_file))
+    if pending is None:
+        return False
+    stored_auth, state = pending
+    if _adjudication_window_closed(stored_auth, datetime.now(UTC)):
+        event_sink(
+            _LOGGER,
+            logging.ERROR,
+            "enji_auth_adjudication_window_closed",
+            {"source_revision": state.source_revision},
+        )
+        return False
+
     try:
-        response = await _request_auth_status(stored_auth, client, timeout_seconds=timeout_seconds)
-    except EnjiHttpError as exc:
-        return _unadjudicated(started_at, adjudication, credential_type, status_code=exc.status_code)
+        response = await _request_auth_status(stored_auth, client)
+    except EnjiHttpError:
+        return False
 
     if response.status_code == HTTP_OK:
-        cleared = await asyncio.to_thread(adjudicate_source_revision_alive, target, adjudication.state.source_revision)
-        if not cleared:
-            # Storage moved under the probe.  Decide nothing and re-read the
-            # durable state on the next tick.  This is a storage race, not an
-            # upstream fault, and dashboards should not read it as one.
-            return _unadjudicated(
-                started_at,
-                adjudication,
-                credential_type,
-                status_code=response.status_code,
-                failure_kind="storage",
+        cleared = await asyncio.to_thread(adjudicate_source_revision_alive, auth_file, state.source_revision)
+        if cleared:
+            event_sink(
+                _LOGGER,
+                logging.INFO,
+                "enji_auth_adjudication_source_alive",
+                {"source_revision": state.source_revision},
             )
-        return AuthBackendReadinessResult(
-            ready=True,
-            credential_type=credential_type,
-            elapsed_ms=_elapsed_ms(started_at),
-        )
+        return cleared
 
     if response.status_code in HTTP_AUTH_FAILURE_CODES or is_auth_invalid_response(response):
-        # The source credential is dead: the rotation landed and its successor
-        # was lost with the ambiguous response.  Only an import recovers this,
-        # and it gets its own code so alerting can tell a proven-terminal state
-        # from one that is merely still waiting on the backend.
-        return _backend_readiness_failure(
-            started_at,
-            AuthBackendReadinessResult(
-                ready=False,
-                failure_kind="storage",
-                failure_code=AUTH_REFRESH_SUCCESSOR_LOST_CODE,
-                failure_message=(
-                    "refresh rotated the credential and its replacement was lost; import a fresh browser credential"
-                ),
-                failure_status_code=response.status_code,
-                credential_type=credential_type,
-                bypass_grace=True,
-            ),
+        # The source is dead: the rotation landed and its successor was lost
+        # with the ambiguous response.  Only an import recovers this.
+        event_sink(
+            _LOGGER,
+            logging.ERROR,
+            "enji_auth_adjudication_source_dead",
+            {"source_revision": state.source_revision, "status_code": response.status_code},
         )
-    return _unadjudicated(started_at, adjudication, credential_type, status_code=response.status_code)
+    return False
 
 
-def _unadjudicated(
-    started_at: float,
-    adjudication: _Adjudication,
-    credential_type: str,
-    *,
-    status_code: int | None,
-    failure_kind: str = "upstream",
-) -> AuthBackendReadinessResult:
-    """Stay unready without burning the credential on an unproven verdict.
+def _adjudication_window_closed(stored_auth: StoredAuth, now: datetime) -> bool:
+    """Bound adjudication by the access token's own expiry.
 
-    Deliberately not the projection's message: that one tells the operator to
-    import a credential, which fixes nothing while the backend is unreachable.
+    Adjudication is only worth attempting while the credential could still be
+    used, and that window is exactly the life of the stored ``access_token``.
+    Past it the probe can only return ``401`` whether or not the rotation
+    landed, so continuing would turn a clean unknown into a false "successor
+    lost" verdict and keep the loop probing forever.
+
+    This is also the only defence against the oscillation the design otherwise
+    admits: a backend answering ``5xx`` rather than a clean rejection for a
+    consumed refresh token would loop clear -> refresh -> unknown -> probe.
+    That loop now has a deadline it cannot outlive.
+
+    An expiry that cannot be read is not a window that can be proven open, so
+    it closes too -- consistent with every other fail-closed decision here.
     """
 
-    return _backend_readiness_failure(
-        started_at,
-        AuthBackendReadinessResult(
-            ready=False,
-            failure_kind=failure_kind,
-            failure_code=adjudication.unresolved.code,
-            failure_message=(f"{adjudication.state.reason}; the adjudication probe has no answer yet, retrying"),
-            failure_status_code=status_code,
-            credential_type=credential_type,
-        ),
-    )
+    expires_at = cookie_access_expires_at(stored_auth)
+    return expires_at is None or now >= expires_at
 
 
 def start_auto_refresh_task(
@@ -414,6 +333,9 @@ def start_auto_refresh_task(
                 cookie_refresh_sleep_seconds_fn=cookie_refresh_sleep_seconds,
                 refresh_cookie_auth_fn=lambda path, auth, client: _refresh_cookie_auth(
                     path, auth, cast(EnjiHttpClient, client), outcome_sink=outcome_sink
+                ),
+                adjudicate_unknown_outcome_fn=lambda path, client: adjudicate_unknown_outcome(
+                    path, cast(EnjiHttpClient, client), event_sink=resolved_event_sink
                 ),
                 log_event_fn=resolved_event_sink,
                 logger=_LOGGER,

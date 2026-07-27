@@ -37,6 +37,13 @@ from enji_guard_cli.auth_session.store import (
 )
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpResponse
 
+
+async def _never_adjudicates(_auth_file: Path, _client: object) -> bool:
+    """Most loop tests are not about adjudication; keep that exit shut."""
+
+    return False
+
+
 ROOT = Path(__file__).parents[1]
 PROCESS_TIMEOUT_SECONDS = 5.0
 POLL_SECONDS = 0.01
@@ -381,6 +388,7 @@ def test_watcher_disabled_revision_polling_detects_atomic_credential_replacement
             load_auth_fn=load_auth,
             cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
             refresh_cookie_auth_fn=unused_refresh,
+            adjudicate_unknown_outcome_fn=_never_adjudicates,
             log_event_fn=lambda *_args, **_kwargs: None,
             logger=auto_refresh.logging.getLogger("test"),
             client_factory=_UnusedClient,

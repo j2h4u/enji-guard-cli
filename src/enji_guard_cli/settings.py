@@ -29,6 +29,8 @@ DEFAULT_GUARD_REFERER = "https://guard.enji.ai/"
 DEFAULT_AUTO_REFRESH_ENABLED = True
 DEFAULT_AUTO_REFRESH_LEAD_SECONDS = 300
 DEFAULT_AUTO_REFRESH_FALLBACK_SECONDS = 900
+# How often a parked ambiguous rotation re-asks the backend what it did.
+DEFAULT_AUTO_REFRESH_ADJUDICATION_POLL_SECONDS = 300
 # Bind-mounted filesystems do not reliably deliver inotify events into the
 # container.  Polling this revision is therefore the correctness mechanism;
 # the watcher only shortens normal wake-up latency.
@@ -94,6 +96,7 @@ class AutoRefreshSettings:
     enabled: bool
     lead_seconds: int
     fallback_seconds: int
+    adjudication_poll_seconds: int = DEFAULT_AUTO_REFRESH_ADJUDICATION_POLL_SECONDS
     revision_poll_seconds: float = DEFAULT_AUTO_REFRESH_REVISION_POLL_SECONDS
     pre_dispatch_retry_limit: int = DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_LIMIT
     pre_dispatch_retry_initial_seconds: float = DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_INITIAL_SECONDS
@@ -103,6 +106,7 @@ class AutoRefreshSettings:
     def __post_init__(self) -> None:
         _require_non_negative("auto_refresh.lead_seconds", self.lead_seconds)
         _require_positive("auto_refresh.fallback_seconds", self.fallback_seconds)
+        _require_positive("auto_refresh.adjudication_poll_seconds", self.adjudication_poll_seconds)
         _require_positive("auto_refresh.revision_poll_seconds", self.revision_poll_seconds)
         _require_non_negative("auto_refresh.pre_dispatch_retry_limit", self.pre_dispatch_retry_limit)
         _require_positive("auto_refresh.pre_dispatch_retry_initial_seconds", self.pre_dispatch_retry_initial_seconds)
@@ -278,6 +282,7 @@ def default_settings() -> EnjiGuardSettings:
             enabled=DEFAULT_AUTO_REFRESH_ENABLED,
             lead_seconds=DEFAULT_AUTO_REFRESH_LEAD_SECONDS,
             fallback_seconds=DEFAULT_AUTO_REFRESH_FALLBACK_SECONDS,
+            adjudication_poll_seconds=DEFAULT_AUTO_REFRESH_ADJUDICATION_POLL_SECONDS,
             revision_poll_seconds=DEFAULT_AUTO_REFRESH_REVISION_POLL_SECONDS,
             pre_dispatch_retry_limit=DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_LIMIT,
             pre_dispatch_retry_initial_seconds=DEFAULT_AUTO_REFRESH_PRE_DISPATCH_RETRY_INITIAL_SECONDS,

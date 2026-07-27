@@ -41,6 +41,27 @@ HTTP_CLIENT_OWNERS = frozenset({"enji_gateway/shared_client.py", "transport.py"}
 # The CLI binds a health listener and must check the address first.
 SOCKET_OWNERS = frozenset({"delivery/cli/app.py"})
 
+# Advancing durable credential state.  `decisions.md` gives this to the
+# supervisor alone: gateway, status, readiness and MCP are observers, and an
+# observer that mutates is the defect this list exists to catch.  It really
+# happened -- adjudication was first built into the readiness probe, which both
+# broke the rule and did not work, because the task that had to act was the
+# refresh loop and nothing woke it.  `store.py` is excluded: it is the
+# primitive these owners are built from, not a caller.
+CREDENTIAL_STATE_MUTATORS = frozenset({"auth_session/api.py", "auth_session/coordinator.py"})
+
+_MUTATING_NAMES = frozenset(
+    {
+        "adjudicate_source_revision_alive",
+        "cas_replace_cookie",
+        "delete_journal",
+        "enqueue_outcome",
+        "import_credential",
+        "write_auth_file",
+        "write_journal",
+    }
+)
+
 # Unambiguous path-writing methods only.  `replace` and `rename` are left out
 # on purpose: `str.replace` is everywhere, and matching it would make this
 # gate cry wolf until someone widened the list to silence it.
@@ -83,6 +104,10 @@ def _writes_to_disk(tree: ast.Module) -> bool:
     return "fcntl" in _imports(tree)
 
 
+def _referenced_names(tree: ast.Module) -> set[str]:
+    return {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+
+
 def _reads_environment(tree: ast.Module) -> bool:
     return any(isinstance(node, ast.Attribute) and node.attr in {"environ", "getenv"} for node in ast.walk(tree))
 
@@ -113,6 +138,16 @@ def test_only_declared_modules_name_the_http_client() -> None:
 
 def test_only_declared_modules_open_sockets() -> None:
     _assert_exact("socket use", _owners(lambda tree: "socket" in _imports(tree)), SOCKET_OWNERS)
+
+
+def test_only_declared_modules_advance_credential_state() -> None:
+    # Referencing, not calling: `asyncio.to_thread(adjudicate_..., ...)` passes
+    # the mutator as a value, and a call-only check would wave that through.
+    _assert_exact(
+        "credential state mutation",
+        _owners(lambda tree: bool(_MUTATING_NAMES & _referenced_names(tree))) - {"auth_session/store.py"},
+        CREDENTIAL_STATE_MUTATORS,
+    )
 
 
 def test_no_module_spawns_a_process() -> None:
