@@ -24,6 +24,7 @@ from enji_guard_cli.auth_session.state_machine import (
     Reserved,
     Rotated,
     SourceRevisionAlive,
+    rotation_event_key,
     rotation_event_metadata,
     transition,
 )
@@ -432,9 +433,13 @@ def adjudicate_source_revision_alive(auth_path: Path, source_revision: str) -> b
 
     Returns whether the journal was cleared.  Everything is re-read under the
     lock, so a concurrent import or a rotation that landed while the probe was
-    in flight wins and this call becomes a no-op.  The outcome outbox is left
-    alone: the ``outcome_unknown`` event really did happen, and delivery of
-    that history is not this function's business.
+    in flight wins and this call becomes a no-op.
+
+    The earlier ``outcome_unknown`` outbox record is left standing -- that event
+    really did happen -- and a second ``adjudicated_alive`` record is enqueued
+    beside it.  Without the resolution record, telemetry would show a rotation
+    that failed and never show it recovering, which reads as an outage nobody
+    fixed.
     """
 
     with auth_file_lock(auth_path):
@@ -449,8 +454,13 @@ def adjudicate_source_revision_alive(auth_path: Path, source_revision: str) -> b
             return False
         resolved = transition(state, SourceRevisionAlive())
         assert isinstance(resolved.state, Ready)
+        enqueue_outcome(auth_path, _adjudication_record(source_revision))
         delete_journal(auth_path)
         return True
+
+
+def _adjudication_record(source_revision: str) -> OutcomeOutboxRecord:
+    return OutcomeOutboxRecord("adjudicated_alive", rotation_event_key(source_revision, "adjudicated_alive"))
 
 
 def import_credential(auth_path: Path, auth: StoredAuth) -> StoredAuth:

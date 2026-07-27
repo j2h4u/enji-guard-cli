@@ -519,7 +519,7 @@ def _parse_outbox_record(raw_record: object) -> OutcomeOutboxRecord | None:
     if not isinstance(event_key, str) or not event_key:
         return None
     match raw_outcome:
-        case "rotated" | "rejected" | "outcome_unknown" as outcome:
+        case "rotated" | "rejected" | "outcome_unknown" | "adjudicated_alive" as outcome:
             if event_key.startswith("auth-rotation:") and event_key.endswith(f":{outcome}"):
                 return OutcomeOutboxRecord(outcome, event_key)
         case _:

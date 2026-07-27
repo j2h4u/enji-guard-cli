@@ -147,6 +147,14 @@ agents can orient quickly before making changes.
   bet pays in the common case — a gateway `502` during a backend redeploy never
   reached the app, so nothing rotated and the service heals itself.
 
+  Clearing enqueues an `adjudicated_alive` outbox record beside the standing
+  `outcome_unknown` one, delivered as `enji_auth_rotation_adjudicated_alive` by
+  the next coordinator pass. The failure record is deliberately not retracted:
+  the ambiguity really happened. Without the resolution record telemetry would
+  show a rotation that failed and never show it recovering, which reads as an
+  outage nobody fixed. `adjudicated_alive` is an outbox-only outcome — no
+  journal state carries it, so a journal claiming it is corrupt.
+
   This rests on one backend coupling, pinned by
   `test_a_false_clear_terminates_cleanly_at_the_next_refresh`: a consumed
   refresh token must draw a protocol-confirmed `401`/`403`, which lands in

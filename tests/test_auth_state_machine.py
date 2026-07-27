@@ -175,6 +175,46 @@ def test_adjudication_clears_only_the_matching_unknown_rotation(tmp_path: Path) 
     assert adjudicate_source_revision_alive(auth_file, revision) is False
 
 
+def test_adjudication_delivers_a_resolution_event_beside_the_failure(tmp_path: Path) -> None:
+    """Telemetry that shows only the failure reads as an outage nobody fixed."""
+
+    auth_file = tmp_path / "SENTINEL_AUTH_PATH.json"
+    import_cookie("access_token=SENTINEL_SECRET; refresh_token=SENTINEL_SECRET", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    revision = loaded.auth["revision"]
+    write_journal(auth_file, OutcomeUnknown(revision, "ambiguous refresh response HTTP 502"), outbox_enqueued=True)
+    enqueue_outcome(auth_file, OutcomeOutboxRecord("outcome_unknown", f"auth-rotation:{revision}:outcome_unknown"))
+    events: list[tuple[str, dict[str, object]]] = []
+
+    def sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> bool:
+        _ = logger, level
+        events.append((event, dict(fields)))
+        return True
+
+    assert adjudicate_source_revision_alive(auth_file, revision) is True
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            raise AssertionError("draining the outbox must not dispatch a refresh")
+
+    # The next coordinator pass is what delivers durable records.
+    asyncio.run(
+        RefreshCoordinator(
+            auth_file, Exchange(), dependencies=CoordinatorDependencies(outcome_sink=sink)
+        ).recover_startup()
+    )
+
+    assert events == [
+        ("enji_auth_rotation_outcome_unknown", {"event_key": f"auth-rotation:{revision}:outcome_unknown"}),
+        ("enji_auth_rotation_adjudicated_alive", {"event_key": f"auth-rotation:{revision}:adjudicated_alive"}),
+    ]
+    rendered = repr(events)
+    assert "SENTINEL_SECRET" not in rendered
+    assert "SENTINEL_AUTH_PATH" not in rendered
+
+
 def test_adjudication_refuses_a_journal_that_is_not_ambiguous(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=old", auth_file)

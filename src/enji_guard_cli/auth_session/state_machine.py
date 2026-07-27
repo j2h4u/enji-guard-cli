@@ -250,7 +250,7 @@ def _invalid_transition(state: RotationState, event: RotationEvent) -> Never:
     raise InvalidTransitionError(f"{type(event).__name__} is invalid for {type(state).__name__}")
 
 
-RotationOutcome = Literal["rotated", "rejected", "outcome_unknown"]
+RotationOutcome = Literal["rotated", "rejected", "outcome_unknown", "adjudicated_alive"]
 
 
 @dataclass(frozen=True, slots=True)
