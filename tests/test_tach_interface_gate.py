@@ -1,4 +1,4 @@
-from scripts.check_tach_interfaces import Import, dead_patterns, stray_catch_alls
+from scripts.check_tach_interfaces import Import, dead_patterns, module_paths, stray_catch_alls
 
 CONSUMER = "enji_guard_cli.application"
 TARGET = "enji_guard_cli.audit"
@@ -79,3 +79,27 @@ def test_a_catch_all_with_no_visibility_is_rejected() -> None:
     config: dict[str, object] = {"interfaces": [{"from": [TARGET], "expose": [".*"]}]}
 
     assert stray_catch_alls(config) == [(TARGET, ["*"])]
+
+
+def test_ownership_comes_from_the_declared_graph_not_from_counting_dots() -> None:
+    # `delivery.cli` and `delivery.mcp` are sibling modules under a package that
+    # is not itself a module.  Taking the first two segments would attribute
+    # both to a non-existent `delivery` module, and every interface declared on
+    # either would be reported dead.
+    config: dict[str, object] = {
+        "modules": [
+            {"path": "enji_guard_cli.delivery.cli"},
+            {"path": "enji_guard_cli.delivery.mcp"},
+            {"path": "enji_guard_cli.audit"},
+        ]
+    }
+
+    assert module_paths(config)[0] == "enji_guard_cli.delivery.cli"
+    assert "enji_guard_cli.delivery" not in module_paths(config)
+
+
+def test_longest_declared_prefix_wins() -> None:
+    config: dict[str, object] = {"modules": [{"path": "enji_guard_cli.delivery.mcp"}, {"path": "enji_guard_cli.audit"}]}
+    ordered = module_paths(config)
+
+    assert ordered.index("enji_guard_cli.delivery.mcp") < ordered.index("enji_guard_cli.audit")

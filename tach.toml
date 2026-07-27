@@ -83,6 +83,15 @@ depends_on = [
 # Nothing may reach back into a delivery surface except the other one.
 visibility = ["enji_guard_cli.delivery.cli"]
 
+[[interfaces]]
+# `guard mcp serve` boots the server in-process, so the CLI needs the two
+# entry points and nothing else.  Without this the whole server module is
+# reachable, private helpers included -- which tach reports as fine, because
+# the module edge is declared and only the symbol is wrong.
+from = ["enji_guard_cli.delivery.mcp"]
+visibility = ["enji_guard_cli.delivery.cli"]
+expose = ["server\\.(create_mcp_server|run_mcp_server_async)"]
+
 # ---------------------------------------------------------------------------
 # composition -- the wiring root.  Allowed to see concretes; nothing else is.
 # ---------------------------------------------------------------------------
