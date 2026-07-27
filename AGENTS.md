@@ -91,10 +91,17 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
   backend readiness. Heartbeat records auth/backend failures; it must not call
   refresh directly.
 - The host auth file must stay writable because Enji rotates refresh cookies.
-- Cookie bootstrap is one-time: refresh in the browser first, then import the
-  current cookie state. Prefer a `Cookie` header from any Fleet request made
-  after refresh. If using the refresh request itself, merge its response
-  `Set-Cookie` values; its request `Cookie` has the old refresh token.
+- Cookie bootstrap needs exactly one thing from the operator: the cookie.
+  Ask for it in a sentence -- sign in at <https://guard.enji.ai/app/login>,
+  open any Fleet request in DevTools Network, copy Request Headers -> Cookie --
+  and then do the rest yourself: run `import-cookie --stdin`, verify, report.
+  Do not hand over a numbered runbook for steps you are able to run. Their
+  responsibility ends when the cookie arrives.
+  Paste the whole header without pruning it; `AUTH_COOKIE_NAMES` keeps
+  `access_token` and `refresh_token` and drops everything else, so
+  `cf_clearance` and analytics cookies need no manual editing.
+  If using the refresh request itself, merge its response `Set-Cookie` values;
+  its request `Cookie` has the old refresh token.
 - After bootstrap, prove Docker auth recovery works with `auth status`,
   `health --ready`, and `enji_auth_auto_refresh_succeeded` in logs. MCP tools
   should either work through the configured service auth or return clear auth
