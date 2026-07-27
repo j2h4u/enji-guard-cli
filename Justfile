@@ -132,6 +132,30 @@ docker-up: docker-build
 # Full local gate for agents before claiming completion.
 verify: check crap-check unit docker-tests docker-build
 
+# Everything the PR owes release-please, checked before pushing rather than
+# after a red CI.  The three validators already existed and already ran in CI;
+# nothing surfaced them locally, so each rule was learned once by breaking it.
+# `title` and `body` default to what the branch already implies, so the common
+# case is a bare `just release-check`.
+release-check title="" body="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="$(git merge-base origin/main HEAD)"
+    count="$(git rev-list --no-merges --count "${base}..HEAD")"
+    title="{{title}}"
+    if [ -z "${title}" ]; then
+        title="$(git log -1 --format=%s "$(git rev-list "${base}..HEAD" | tail -1)")"
+    fi
+    python3 scripts/validate_pr_title.py --title "${title}"
+    python3 -m scripts.validate_pr_commits --base-sha "${base}" --head-sha "$(git rev-parse HEAD)"
+    if [ -n "{{body}}" ]; then
+        python3 -m scripts.validate_release_notes --body-file "{{body}}" --commit-count "${count}"
+    elif [ "${count}" -gt 1 ]; then
+        printf 'note: %s commits will squash into one.\n' "${count}" >&2
+        printf 'The PR body needs a BEGIN_COMMIT_OVERRIDE block; re-run with body=<file> to check it.\n' >&2
+        exit 1
+    fi
+
 # Show release, release PR, workflow, and published image status.
 release-status:
     scripts/release_status.py

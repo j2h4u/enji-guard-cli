@@ -71,6 +71,13 @@ CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
 ## QA
 
 - `just verify` is the completion gate.
+- Run `just release-check` before `gh pr create`, and again with
+  `body=<file>` once the PR description exists. It runs the same three
+  validators CI runs, so a rejected commit message or a missing
+  `BEGIN_COMMIT_OVERRIDE` block is caught while it is still cheap to fix --
+  amending one commit rather than rewriting eight. Editing a PR body does not
+  re-run CI: `pull_request` fires on opened/synchronize/reopened, so a body-only
+  fix needs a close/reopen, and a plain re-run replays the stale payload.
 - Do not weaken, skip, or suppress Ruff, types, module boundaries, Vulture,
   deptry, OpenAPI, CRAP, tests, or Docker build.
 - Update reconstructed OpenAPI, docs, and tests together when API behavior changes.
