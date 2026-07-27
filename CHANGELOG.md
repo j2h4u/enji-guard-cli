@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.5](https://github.com/j2h4u/enji-guard-cli/compare/v3.0.4...v3.0.5) (2026-07-27)
+
+
+### Build
+
+* **deps:** bump the github-actions group across 1 directory with 5 updates ([#203](https://github.com/j2h4u/enji-guard-cli/issues/203)) ([ecf1bc2](https://github.com/j2h4u/enji-guard-cli/commit/ecf1bc2fffddbb868050ca70339571a3e9a8b370))
+
 ## [3.0.4](https://github.com/j2h4u/enji-guard-cli/compare/v3.0.3...v3.0.4) (2026-07-27)
 
 
