@@ -38,7 +38,15 @@ jobs:
 
       # The squash body is built from these subjects, so an unparseable one is
       # a changelog line release-please cannot classify.
+      #
+      # Bot branches are exempt.  Dependabot writes release-note bullets at
+      # column 0 in its commit bodies, which is exactly what this rejects -- but
+      # those bodies never reach main: a bot PR is squashed with a message
+      # supplied at merge time, so the artifact being judged here is not the one
+      # that lands.  The subject still has to be releasable, and it is: the
+      # title check above runs for every author.
       - name: Validate PR commit subjects
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'dependabot/') }}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}

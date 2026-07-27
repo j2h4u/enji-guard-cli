@@ -217,6 +217,21 @@ def test_release_pr_is_not_auto_merged() -> None:
     assert "gh pr merge" not in release
 
 
+def test_bot_branches_are_exempt_from_the_commit_body_rule() -> None:
+    # Dependabot writes release-note bullets at column 0, which the commit-body
+    # rule rejects.  It is judging the wrong artifact for a bot PR: those bodies
+    # never reach main, because a bot PR is squashed with a message supplied at
+    # merge time.  The subject check still runs for every author.
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "validate_pr_commits" in ci
+    assert "if: ${{ !startsWith(github.event.pull_request.head.ref, 'dependabot/') }}" in ci
+    # The title check must stay unconditional -- it is what keeps a bot subject
+    # releasable at all.
+    title_step = ci.split("- name: Validate releasable PR title")[1].split("- name:")[0]
+    assert "if:" not in title_step
+
+
 def test_docker_marked_policy_tests_run_in_ci() -> None:
     # pyproject's addopts deselect the `docker` marker, so `just unit` skips
     # these.  docker-build is the only CI job with a daemon; if it stops
