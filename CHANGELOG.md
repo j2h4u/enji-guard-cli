@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.7](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.6...v3.1.7) (2026-07-28)
+
+
+### Fixes
+
+* remove cleanup debt from audits ([63e77f3](https://github.com/j2h4u/enji-guard-cli/commit/63e77f373ea34179d8815328c6934e019e401632))
+
 ## [3.1.6](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.5...v3.1.6) (2026-07-28)
 
 
