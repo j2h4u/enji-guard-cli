@@ -20,6 +20,14 @@ class FakeRunner:
             result = release_smoke.CommandResult(2, "", "sort must be one of: default, name\n")
         elif "--help" in call:
             result = release_smoke.CommandResult(0, "Usage: enji-guard\n", "")
+        elif call[-4:] == ["audit", "summary", "github@github.com:owner/repo", "--json"]:
+            result = release_smoke.CommandResult(
+                0,
+                json.dumps({"repo_id": "repo-1", "audits": [{"audit_key": "audit.security"}]}),
+                "",
+            )
+        elif call[-3:] == ["audit", "summary", "github@github.com:owner/repo"]:
+            result = release_smoke.CommandResult(0, "security  freshness=fresh\n", "")
         elif call[-2:] == ["github@github.com:owner/repo", "--json"]:
             payload = [
                 {

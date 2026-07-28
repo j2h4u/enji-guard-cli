@@ -1,0 +1,34 @@
+services:
+  enji-guard-cli:
+    container_name: enji-guard-cli
+    command: ["run", "--transport", "streamable-http", "--host", "0.0.0.0", "--allow-external-host"]
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:${ENJI_GUARD_MCP_HOST_PORT:-18082}:8000"
+    mem_limit: 512m
+    memswap_limit: 512m
+    pids_limit: 128
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    healthcheck:
+      test: ["CMD", "enji-guard", "health", "--ready"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    volumes:
+      - type: bind
+        source: /etc/localtime
+        target: /etc/localtime
+        read_only: true
+      - type: bind
+        source: ${HOME}/.config/enji-guard
+        target: /home/app/.config/enji-guard
+        bind:
+          create_host_path: false

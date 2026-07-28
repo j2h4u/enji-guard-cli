@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NotRequired, TypedDict
 
-from enji_guard_cli.auth_session.payloads import AuthRefreshPayload, AuthStatusPayload
+from enji_guard_cli.auth_session.payloads import AuthStatusPayload
 from enji_guard_cli.auth_session.store import (
     BearerTokenCredential,
     CookieCredential,
@@ -72,7 +72,6 @@ class AuthSessionStatus:
 
 __all__ = [
     "AuthBackendReadinessResult",
-    "AuthRefreshPayload",
     "AuthSessionStatus",
     "AuthStatusPayload",
     "BearerTokenCredential",

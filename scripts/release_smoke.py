@@ -248,14 +248,19 @@ def _status_json_signature(value: object) -> tuple[str, str, dict[str, tuple[str
     return qualified, head, audits
 
 
-def _check_cli(settings: DockerSmokeSettings, runner: CommandRunner, reporter: Reporter) -> None:
-    checks: tuple[tuple[str, tuple[str, ...], bool], ...] = (
-        ("cli help", ("--help",), False),
-        ("cli auth status", ("auth", "status", "--json"), True),
-        ("cli readiness", ("health", "--ready", "--json"), True),
-    )
-    _check_cli_basics(settings, runner, reporter, checks)
+def _audit_summary_signature(value: object) -> int:
+    if not isinstance(value, Mapping):
+        raise SmokeFailure("audit summary JSON returned a non-object")
+    repo_id = value.get("repo_id")
+    audits = value.get("audits")
+    if not isinstance(repo_id, str) or not repo_id:
+        raise SmokeFailure("audit summary JSON omitted repo_id")
+    if not isinstance(audits, list) or not audits:
+        raise SmokeFailure("audit summary JSON omitted audits")
+    return len(audits)
 
+
+def _check_status_parity(settings: DockerSmokeSettings, runner: CommandRunner, reporter: Reporter) -> None:
     human = _run_cli(settings, ("status", settings.repo), runner)
     structured = _run_cli(settings, ("status", settings.repo, "--json"), runner)
     if human.returncode != 0 or structured.returncode != 0:
@@ -277,6 +282,29 @@ def _check_cli(settings: DockerSmokeSettings, runner: CommandRunner, reporter: R
         if human_fields[3] is not None and human_fields[3] != json_fields[3]:
             raise SmokeFailure("status human and JSON task_lifecycle differs")
     reporter.pass_("cli status human/JSON parity")
+
+
+def _check_audit_summary(settings: DockerSmokeSettings, runner: CommandRunner, reporter: Reporter) -> None:
+    summary_human = _run_cli(settings, ("audit", "summary", settings.repo), runner)
+    summary_structured = _run_cli(settings, ("audit", "summary", settings.repo, "--json"), runner)
+    if summary_human.returncode != 0 or summary_structured.returncode != 0:
+        raise SmokeFailure("audit summary human or JSON command returned an error")
+    if not summary_human.stdout.strip():
+        raise SmokeFailure("audit summary human output is empty")
+    if _audit_summary_signature(_json_object(summary_structured, "audit summary json")) <= 0:
+        raise SmokeFailure("audit summary JSON returned no audits")
+    reporter.pass_("cli audit summary read-only")
+
+
+def _check_cli(settings: DockerSmokeSettings, runner: CommandRunner, reporter: Reporter) -> None:
+    checks: tuple[tuple[str, tuple[str, ...], bool], ...] = (
+        ("cli help", ("--help",), False),
+        ("cli auth status", ("auth", "status", "--json"), True),
+        ("cli readiness", ("health", "--ready", "--json"), True),
+    )
+    _check_cli_basics(settings, runner, reporter, checks)
+    _check_status_parity(settings, runner, reporter)
+    _check_audit_summary(settings, runner, reporter)
 
     validation = _run_cli(settings, ("status", "--sort", "__release_smoke_invalid__"), runner)
     if validation.returncode == 0 or "sort must be one of" not in validation.stderr:

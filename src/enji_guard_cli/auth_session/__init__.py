@@ -2,7 +2,6 @@
 
 from enji_guard_cli.auth_session.api import AuthError
 from enji_guard_cli.auth_session.models import (
-    AuthRefreshPayload,
     AuthSessionStatus,
     AuthStatusPayload,
     CredentialType,
@@ -20,7 +19,6 @@ from enji_guard_cli.auth_session.service import (
 
 __all__ = [
     "AuthError",
-    "AuthRefreshPayload",
     "AuthSessionPort",
     "AuthSessionService",
     "AuthSessionStatus",

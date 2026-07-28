@@ -1,9 +1,6 @@
 from pathlib import Path
 from typing import Protocol, TypedDict
 
-from enji_guard_cli.auth_session.cookies import cookie_count, cookie_value, jwt_expires_at
-from enji_guard_cli.auth_session.store import CredentialType, StoredAuth
-
 
 class AuthStatusPayload(TypedDict):
     authenticated: bool
@@ -16,14 +13,6 @@ class AuthStatusPayload(TypedDict):
     user_id: str | None
 
 
-class AuthRefreshPayload(TypedDict):
-    ok: bool
-    auth_file: str
-    credential_type: str
-    cookie_count: int
-    access_expires_at: str | None
-
-
 class AuthenticatedProfile(TypedDict):
     email: str | None
     name: str | None
@@ -32,21 +21,6 @@ class AuthenticatedProfile(TypedDict):
 
 class ResponseAdapter(Protocol):
     def json(self, *, operation: str) -> object: ...
-
-
-def _auth_refresh_payload(auth_file: Path, stored_auth: StoredAuth) -> AuthRefreshPayload:
-    credential = stored_auth["credential"]
-    if credential["type"] != CredentialType.COOKIE.value:
-        raise ValueError("stored credential is not cookie based")
-    access_token = cookie_value(credential["cookie_header"], "access_token")
-    expires_at = jwt_expires_at(access_token) if access_token is not None else None
-    return {
-        "ok": True,
-        "auth_file": str(auth_file),
-        "credential_type": CredentialType.COOKIE.value,
-        "cookie_count": cookie_count(credential["cookie_header"]),
-        "access_expires_at": expires_at.isoformat() if expires_at is not None else None,
-    }
 
 
 def _profile_from_response(response: ResponseAdapter) -> AuthenticatedProfile:
