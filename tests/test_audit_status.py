@@ -156,6 +156,45 @@ def test_stale_report_with_only_old_active_run_requires_current_head_start() -> 
     assert item.current_head.stale_active_current_head_sha == "old-sha"
 
 
+def test_current_head_run_wins_over_stale_running_run_for_readiness() -> None:
+    status = build_status(
+        "repo-1",
+        _catalog(),
+        (),
+        (
+            AuditRun(
+                "old-run",
+                "audit.security",
+                "in_progress",
+                "2026-01-01T00:03:00+00:00",
+                None,
+                None,
+                current_head_sha="old-sha",
+            ),
+            AuditRun(
+                "current-run",
+                "audit.security",
+                "pending",
+                "2026-01-01T00:01:00+00:00",
+                None,
+                None,
+                current_head_sha="current-sha",
+            ),
+        ),
+        AuditRerunState("current-sha", None, None, None, {"audit.security": "old-sha"}),
+    )
+
+    item = status.items[0]
+    assert item.can_read is True
+    assert item.freshness.state == "stale"
+    assert item.task_id == "current-run"
+    assert item.task_lifecycle == "queued"
+    assert item.current_head.state == "queued"
+    assert item.current_head.action_required == "wait_for_current_head_run"
+    assert item.current_head.task_id == "current-run"
+    assert item.current_head.task_current_head_sha == "current-sha"
+
+
 @pytest.mark.parametrize(
     "links",
     [

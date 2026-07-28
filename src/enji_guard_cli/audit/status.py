@@ -22,8 +22,8 @@ def build_status(
     rerun_state: AuditRerunState | None,
 ) -> AuditStatus:
     links_by_key = _links_by_action(links)
-    runs_by_key = _runs_by_action(active_runs)
     current_sha = rerun_state.current_head_sha if rerun_state else None
+    runs_by_key = _runs_by_action(active_runs, current_sha)
     items = tuple(
         _status_item(
             audit, links_by_key.get(audit.action_key), runs_by_key.get(audit.action_key), current_sha, rerun_state
@@ -144,14 +144,24 @@ def _artifact_expected(
     return audited_sha is not None or lifecycle == "completed"
 
 
-def _runs_by_action(runs: tuple[AuditRun, ...]) -> dict[str, AuditRun]:
+def _runs_by_action(runs: tuple[AuditRun, ...], current_sha: str | None) -> dict[str, AuditRun]:
     actions = {run.action_key for run in runs if run.action_key is not None}
     result: dict[str, AuditRun] = {}
     for action in actions:
         matching = active_runs_for_action(runs, action)
         if matching:
-            result[action] = max(matching, key=projection_sort_key)
+            result[action] = max(
+                matching, key=lambda run: (_head_evidence_priority(run, current_sha), *projection_sort_key(run))
+            )
     return result
+
+
+def _head_evidence_priority(run: AuditRun, current_sha: str | None) -> int:
+    if current_sha is not None and run.current_head_sha == current_sha:
+        return 2
+    if run.current_head_sha is not None:
+        return 1
+    return 0
 
 
 def _links_by_action(links: tuple[AuditTaskLink, ...]) -> dict[str, AuditTaskLink]:
