@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.1.5](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.4...v3.1.5) (2026-07-28)
+
+
+### Fixes
+
+* keep auth adjudication inside refresh evidence window ([d933143](https://github.com/j2h4u/enji-guard-cli/commit/d9331436b1e3ca99ff66d8c1d21d4048fcffa337))
+
+
+### CI
+
+* skip release workflow for docs-only pushes ([8634241](https://github.com/j2h4u/enji-guard-cli/commit/8634241ded306cec93fa41ee6cd8f66d8367b7bf))
+
+
+### Documentation
+
+* add agent feedback loop roadmap item ([b956a6f](https://github.com/j2h4u/enji-guard-cli/commit/b956a6f0553292ef39d4d8a2249123b4225e4f55))
+
 ## [3.1.4](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.3...v3.1.4) (2026-07-28)
 
 
