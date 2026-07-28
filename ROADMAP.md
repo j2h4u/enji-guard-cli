@@ -65,7 +65,8 @@ operational hardening for maintenance and future releases.
   readiness plumbing that watches it all go with it.
 - **Make the MCP container optional in the same move.** The default becomes a
   standalone CLI with no Docker, no supervisor and no background process —
-  installed and run directly. Anyone who wants the curated MCP surface for
+  packaged as a normal Python distribution and installable with `pip`/`pipx`
+  without any container bootstrap. Anyone who wants the curated MCP surface for
   agents opts into the container; nobody has to run one to use the tool.
 
 After that, the project should move into maintenance mode rather than broad
@@ -76,9 +77,10 @@ feature development.
 The product stays one project with more than one way to run it, never a split
 into separate CLI and service products.
 
-- **Default: CLI only.** Core plus CLI, authenticated with an API key, run
-  through `uv`, `uvx`, or a host wrapper in `/usr/local/bin`. No Docker, no
-  supervisor, no background process.
+- **Default: CLI only.** Core plus CLI, authenticated with an API key,
+  published as the normal Python package and installed with `pip`, `pipx`, `uv
+  tool install`, or equivalent Python tooling. No Docker, no supervisor, no
+  background process.
 - **Opt-in: MCP container.** The curated read-mostly surface for agents that
   want it, and only for them.
 
