@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.1.6](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.5...v3.1.6) (2026-07-28)
+
+
+### Fixes
+
+* avoid project install in container publish setup ([53f19d3](https://github.com/j2h4u/enji-guard-cli/commit/53f19d3b3daeebcf43124708a26aeaf57b7cce97))
+* harden audit output and container supply chain ([97080da](https://github.com/j2h4u/enji-guard-cli/commit/97080da025cf1a4a11b0bb938dd5174e31bc370c))
+
 ## [3.1.5](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.4...v3.1.5) (2026-07-28)
 
 
