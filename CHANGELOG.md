@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.5](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.4...v3.1.5) (2026-07-28)
+
+
+### Documentation
+
+* add agent feedback loop roadmap item ([b956a6f](https://github.com/j2h4u/enji-guard-cli/commit/b956a6f0553292ef39d4d8a2249123b4225e4f55))
+
 ## [3.1.4](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.3...v3.1.4) (2026-07-28)
 
 
