@@ -48,10 +48,30 @@ docker exec -i enji-guard-cli enji-guard auth status
 | `SOURCE_COMMIT` | Local compose build arg embedded in image provenance | Computed by `just docker-build` and `just docker-up`; must be the Git object id behind the image. |
 | `~/.config/enji-guard` | Host bind mount for auth state, telemetry, and runtime files | Host-owned service directory, writable by container uid `1000`. |
 
-Python and uv are pinned in CI and the Dockerfile, but those pins live in
-different formats. `tests/test_source_policy.py` is the guardrail: it requires
-every `setup-uv` step to use the Dockerfile uv version and verifies the
-runtime-only install mode used by the privileged container publisher.
+The common Docker service contract lives in
+`deploy/docker-compose.service.yml`. Local development `docker-compose.yml`
+adds the build context and local image tag; `deploy/docker-compose.ghcr.yml`
+adds the immutable GHCR image reference. Do not duplicate runtime limits,
+ports, healthcheck, volumes, or command flags between those entrypoint files.
+
+Python and uv setup for GitHub Actions is centralized in
+`.github/actions/setup-python-uv/action.yml`. The Dockerfile still pins the
+runtime image and builder tool by immutable references, because Docker needs
+its own source format. `tests/test_source_policy.py` is the guardrail: it
+requires workflows to use the local setup action, verifies that the action and
+Dockerfile stay on the same Python/uv versions, and verifies the runtime-only
+install mode used by the privileged container publisher.
+
+The remaining values in `src/enji_guard_cli/settings.py` are product constants,
+not operator configuration. They are grouped by owner:
+
+| Group | Examples | Owner |
+| --- | --- | --- |
+| Auth endpoints and rotation timing | Enji base URLs, refresh lead/fallback intervals, revision polling | Product code. Change only with an auth/runtime design change and tests. |
+| HTTP transport policy | timeout, retry count, retryable statuses, connection pool limits | Product code. These describe the CLI service contract, not per-host tuning. |
+| Readiness and audit polling | backend readiness interval, stale-after window, audit wait defaults | Product code. Expose only after a concrete operator workflow needs it. |
+| Local paths and filenames | auth file, telemetry log, readiness state, active-run ledger | Storage contract. Change with migration or compatibility handling. |
+| Docker ingress knobs | image reference, MCP host port, local build provenance | Operator/runtime values listed in the table above. |
 
 Keep the auth directory writable by uid `1000`; it contains the credential and
 private rotation journal. Docker health uses cached readiness from the

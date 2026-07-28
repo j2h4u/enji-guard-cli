@@ -92,13 +92,6 @@ PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC = EnjiEndpointSpec(
     operation="project active runs",
     retry_profile=RetryProfile.READ,
 )
-PROJECT_RUN_LANGUAGE_ENDPOINT_SPEC = EnjiEndpointSpec(
-    method="GET",
-    path_template="/api/ux/projects/{projectId}/run-language",
-    operation_id="getProjectRunLanguage",
-    operation="language show",
-    retry_profile=RetryProfile.READ,
-)
 FLEET_PROJECT_CREATE_ENDPOINT_SPEC = EnjiEndpointSpec(
     method="POST",
     path_template="/api/v1/projects",

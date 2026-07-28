@@ -47,6 +47,8 @@ PRODUCT_SOURCE_ROOTS = (
 BUILD_PUSH_ACTION = "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
 SETUP_UV_ACTION = "astral-sh/setup-uv@"
 TRIVY_ACTION = "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25"
+PYTHON_UV_ACTION = ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
+PYTHON_VERSION = "3.14"
 UV_VERSION = "0.11.33"
 
 
@@ -265,15 +267,23 @@ def test_publishing_workflows_are_not_cancellable() -> None:
         assert "cancel-in-progress: true" not in workflow, name
 
 
-def test_setup_uv_installs_the_dockerfile_version() -> None:
+def test_workflows_use_the_repository_python_uv_setup_contract() -> None:
     workflows = tuple(sorted((ROOT / ".github" / "workflows").glob("*.yml")))
-    setup_uv_steps = [
-        step for workflow in workflows for step in _action_steps(workflow.read_text(encoding="utf-8"), SETUP_UV_ACTION)
-    ]
+    workflow_text = "\n".join(workflow.read_text(encoding="utf-8") for workflow in workflows)
 
-    assert setup_uv_steps
-    assert all(f'version: "{UV_VERSION}"' in step for step in setup_uv_steps)
-    assert f"ghcr.io/astral-sh/uv:{UV_VERSION}@sha256:" in (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "uses: ./.github/actions/setup-python-uv" in workflow_text
+    assert SETUP_UV_ACTION not in workflow_text
+    assert "actions/setup-python@" not in workflow_text
+
+
+def test_python_uv_setup_contract_matches_the_dockerfile_version() -> None:
+    action = PYTHON_UV_ACTION.read_text(encoding="utf-8")
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert f'python-version: "{PYTHON_VERSION}"' in action
+    assert f'version: "{UV_VERSION}"' in action
+    assert re.search(rf"^FROM python:{re.escape(PYTHON_VERSION)}[.]", dockerfile, flags=re.MULTILINE)
+    assert f"ghcr.io/astral-sh/uv:{UV_VERSION}@sha256:" in dockerfile
 
 
 def test_privileged_container_publish_uses_runtime_only_locked_dependencies() -> None:

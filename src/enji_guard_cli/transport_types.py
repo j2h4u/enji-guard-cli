@@ -11,7 +11,3 @@ class RetryProfile(StrEnum):
     @property
     def can_retry(self) -> bool:
         return self in {self.READ, self.SAFE_PROBE, self.IDEMPOTENT_MUTATION}
-
-    @property
-    def replay_safe(self) -> bool:
-        return self in {self.READ, self.SAFE_PROBE, self.IDEMPOTENT_MUTATION}

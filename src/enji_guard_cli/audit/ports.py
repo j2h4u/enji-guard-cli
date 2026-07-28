@@ -137,20 +137,6 @@ class AuditRunStart:
 
 
 @dataclass(frozen=True, slots=True)
-class AuditItemStatus:
-    """Neutral audit/task status used by Audit run orchestration."""
-
-    action_key: str
-    current_head_sha: str | None
-    audited_head_sha: str | None
-    can_read: bool
-    completed_at: str | None
-    task_id: str | None
-    task_status: str | None
-    task_active: bool
-
-
-@dataclass(frozen=True, slots=True)
 class AuditRunsResult:
     """Runs currently projected for one repository."""
 
@@ -506,11 +492,6 @@ class AuditLedgerEntry:
     observed_at: datetime
     started_at: str | None
     expires_at: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class AuditLedgerProjection:
-    entries: tuple[AuditLedgerEntry, ...]
 
 
 class AuditCatalogPort(Protocol):

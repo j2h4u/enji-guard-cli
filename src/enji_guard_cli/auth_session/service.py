@@ -58,9 +58,6 @@ class AuthSessionService:
     def status(self) -> AuthSessionStatus:
         return AuthSessionStatus.from_payload(asyncio.run(self.status_async()))
 
-    async def status_result_async(self) -> AuthSessionStatus:
-        return AuthSessionStatus.from_payload(await self.status_async())
-
     async def backend_readiness_probe_async(self) -> AuthBackendReadinessResult:
         """Observe backend auth state without triggering cookie refresh."""
         return await _api.backend_readiness_probe_async(self.auth_file, self.client)
