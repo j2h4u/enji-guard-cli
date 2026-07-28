@@ -282,7 +282,7 @@ def test_privileged_container_publish_uses_runtime_only_locked_dependencies() ->
         0
     ]
 
-    assert "uv sync --locked --no-dev --no-build" in install_step
+    assert "uv sync --locked --no-install-project --no-dev --no-build" in install_step
     assert "uv sync --locked\n" not in install_step
 
 
