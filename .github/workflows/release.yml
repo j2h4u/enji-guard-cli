@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "AGENTS.md"
+      - "CONTRIBUTING.md"
+      - "README.md"
+      - "ROADMAP.md"
+      - "docs/**"
   workflow_dispatch:
 
 permissions:

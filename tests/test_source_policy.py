@@ -203,6 +203,17 @@ def test_release_publishes_only_after_ci_succeeds_on_the_commit() -> None:
     assert re.search(r"^\s*needs: \[release-please, wait-for-ci\]$", release, re.MULTILINE)
 
 
+def test_release_workflow_ignores_docs_only_pushes_but_not_release_commits() -> None:
+    release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    assert "paths-ignore:" in release
+    for ignored_path in ('"README.md"', '"ROADMAP.md"', '"docs/**"'):
+        assert ignored_path in release
+
+    assert '"CHANGELOG.md"' not in release
+    assert '".release-please-manifest.json"' not in release
+
+
 def test_release_pr_is_not_auto_merged() -> None:
     # Auto-merge merges the release PR as GITHUB_TOKEN, and a push made with
     # that token does not trigger workflows.  The release commit then lands on
