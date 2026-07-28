@@ -158,16 +158,6 @@ class GatewayPortfolioTargetService(GatewaySelectorResolver):
             return self.targets(project=scope.project)
         return self.targets(scope.repo, scope.project)
 
-    def linked_website_mapping(self, project_id: str) -> dict[str, tuple[str, ...]]:
-        """Return website-to-repository links as an immutable-value mapping."""
-
-        detail = self.gateway.project_detail(project_id)
-        return {
-            url: tuple(repo_ids)
-            for url, repo_ids in detail.linked_website_repo_ids.items()
-            if url in detail.linked_websites
-        }
-
 
 def parse_repository_selector(value: str) -> RepositoryIdentity:
     raw = value.strip()

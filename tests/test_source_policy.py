@@ -47,7 +47,7 @@ PRODUCT_SOURCE_ROOTS = (
 BUILD_PUSH_ACTION = "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
 SETUP_UV_ACTION = "astral-sh/setup-uv@"
 TRIVY_ACTION = "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25"
-UV_VERSION = "0.11.18"
+UV_VERSION = "0.11.33"
 
 
 def _compose_common_service_fields(path: Path) -> dict[str, object]:
@@ -274,6 +274,31 @@ def test_setup_uv_installs_the_dockerfile_version() -> None:
     assert setup_uv_steps
     assert all(f'version: "{UV_VERSION}"' in step for step in setup_uv_steps)
     assert f"ghcr.io/astral-sh/uv:{UV_VERSION}@sha256:" in (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+
+def test_privileged_container_publish_uses_runtime_only_locked_dependencies() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "container.yml").read_text(encoding="utf-8")
+    install_step = workflow.split("- name: Install dependencies", 1)[1].split("- uses: docker/setup-buildx-action", 1)[
+        0
+    ]
+
+    assert "uv sync --locked --no-dev --no-build" in install_step
+    assert "uv sync --locked\n" not in install_step
+
+
+def test_deployment_docs_define_the_runtime_configuration_map() -> None:
+    deployment = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+
+    assert "## Runtime configuration map" in deployment
+    for name in (
+        "ENJI_GUARD_IMAGE_REF",
+        "ENJI_GUARD_MCP_HOST_PORT",
+        "PACKAGE_VERSION",
+        "SOURCE_COMMIT",
+        "~/.config/enji-guard",
+    ):
+        assert name in deployment
+    assert "tests/test_source_policy.py" in deployment
 
 
 def test_container_publish_scans_loaded_candidate_before_push() -> None:

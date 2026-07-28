@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enji_guard_cli.portfolio.errors import PortfolioNotFoundError
-from enji_guard_cli.portfolio.models import OperationResult, RepositoryIdentitySource, RepositoryRef
+from enji_guard_cli.portfolio.models import OperationResult, RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort
 from enji_guard_cli.portfolio.selectors import (
     GatewayPortfolioTargetService,
@@ -11,33 +11,6 @@ from enji_guard_cli.portfolio.selectors import (
     resolve_project,
     resolve_repository,
 )
-
-
-def same_upstream_repository(left: RepositoryRef, right: RepositoryRef) -> bool:
-    """Match refreshed records without conflating provider and Enji IDs."""
-
-    if (
-        left.identity_source is RepositoryIdentitySource.PROVIDER
-        and right.identity_source is RepositoryIdentitySource.PROVIDER
-    ):
-        return left.stable_identity_key == right.stable_identity_key
-    # A provider ID may appear only after connection/verification.  The Enji
-    # membership ID proves continuity across that transition and across
-    # provider-side renames while no native ID is available, but only within
-    # the same provider namespace and host.
-    return (
-        left.repo_id == right.repo_id
-        and left.identity.provider is right.identity.provider
-        and left.identity.host == right.identity.host
-    )
-
-
-def reconcile_repository(existing: RepositoryRef, refreshed: RepositoryRef) -> RepositoryRef:
-    """Accept provider refreshes, including locator changes caused by renames."""
-
-    if not same_upstream_repository(existing, refreshed):
-        raise ValueError("repository refresh changed provider identity")
-    return refreshed
 
 
 def all_targets(*, gateway: PortfolioGatewayPort) -> tuple[RepositoryRef, ...]:

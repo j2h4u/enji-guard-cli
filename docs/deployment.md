@@ -38,6 +38,21 @@ docker exec -i enji-guard-cli enji-guard health --ready
 docker exec -i enji-guard-cli enji-guard auth status
 ```
 
+## Runtime configuration map
+
+| Name | Where it is used | Source of truth |
+| --- | --- | --- |
+| `ENJI_GUARD_IMAGE_REF` | `deploy/docker-compose.ghcr.yml` production image reference | Operator-provided immutable GHCR digest or `sha-<commit>` tag. Do not use `latest`. |
+| `ENJI_GUARD_MCP_HOST_PORT` | Local and production compose host port for the MCP HTTP listener | Optional operator override; defaults to `18082`. Container port stays `8000`. |
+| `PACKAGE_VERSION` | Local compose build arg embedded in image provenance | Computed by `just docker-build` and `just docker-up`; not hand-written for normal local runtime. |
+| `SOURCE_COMMIT` | Local compose build arg embedded in image provenance | Computed by `just docker-build` and `just docker-up`; must be the Git object id behind the image. |
+| `~/.config/enji-guard` | Host bind mount for auth state, telemetry, and runtime files | Host-owned service directory, writable by container uid `1000`. |
+
+Python and uv are pinned in CI and the Dockerfile, but those pins live in
+different formats. `tests/test_source_policy.py` is the guardrail: it requires
+every `setup-uv` step to use the Dockerfile uv version and verifies the
+runtime-only install mode used by the privileged container publisher.
+
 Keep the auth directory writable by uid `1000`; it contains the credential and
 private rotation journal. Docker health uses cached readiness from the
 supervisor heartbeat: local MCP must listen, backend readiness must be fresh,

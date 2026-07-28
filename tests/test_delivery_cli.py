@@ -407,18 +407,16 @@ def test_repository_status_marks_a_run_without_head_evidence_as_unverified(
     }
 
 
-def _readable_security_gateway(*, active_runs: tuple[AuditRun, ...] = ()) -> RecordingAuditGateway:
+def _readable_security_gateway(
+    *, active_runs: tuple[AuditRun, ...] = (), body: str = "# Security report\n\n- Fix the vulnerable dependency."
+) -> RecordingAuditGateway:
     """One published audit with exactly one completed, readable report."""
     return RecordingAuditGateway(
         catalog=SECURITY_ONLY,
         task_links={"r1": (AuditTaskLink("t1", "audit.security", "completed", completed_at=REPORT_COMPLETED_AT),)},
         rerun_state=AuditRerunState("head", "head", True, "t1", {"audit.security": "head"}),
         reports={("r1", "security"): (AuditReportRef("t1", REPORT_COMPLETED_AT, None, True),)},
-        artifacts={
-            ("r1", "audit.security"): AuditArtifact(
-                "audit.security", "# Security report\n\n- Fix the vulnerable dependency.", 73, REPORT_COMPLETED_AT
-            )
-        },
+        artifacts={("r1", "audit.security"): AuditArtifact("audit.security", body, 73, REPORT_COMPLETED_AT)},
         active_runs={"r1": active_runs},
     )
 
@@ -467,6 +465,29 @@ def test_audit_read_renders_markdown_for_humans_and_equivalent_json(monkeypatch:
     assert artifact["score"] == 73
     assert cast(dict[str, object], audits[0]["newer_run"])["task_id"] == "task-new"
     assert "Report is stale; a newer audit is in progress." not in json_result.stdout
+
+
+def test_audit_read_sanitizes_terminal_control_sequences_only_for_humans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report = "# Safe\n\x1b[31mred\x1b[0m\n\x1b]8;;https://evil.test\x07link\x1b]8;;\x07\nfirst\roverwrite"
+    Ports(audit=_readable_security_gateway(body=report)).install(monkeypatch)
+
+    text_result = CliRunner().invoke(app, ["audit", "read", REPO, "security"])
+    json_result = CliRunner().invoke(app, ["audit", "read", REPO, "security", "--json"])
+
+    assert text_result.exit_code == 0
+    assert "\x1b" not in text_result.stdout
+    assert "\r" not in text_result.stdout
+    assert "red" in text_result.stdout
+    assert "link" in text_result.stdout
+    assert "firstoverwrite" in text_result.stdout
+
+    assert json_result.exit_code == 0
+    rendered = cast(dict[str, object], json.loads(json_result.stdout))
+    audits = cast(list[dict[str, object]], rendered["audits"])
+    artifact = cast(dict[str, object], audits[0]["artifact"])
+    assert artifact["body"] == report
 
 
 def test_json_omits_nested_optional_null_fields_but_keeps_top_level_and_list_nulls() -> None:

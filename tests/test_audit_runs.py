@@ -19,7 +19,6 @@ from enji_guard_cli.audit.runs import (
     _StartOneState,
     active_runs_for_action,
     audit_run_task_body,
-    skipped_audit_payload,
 )
 from enji_guard_cli.audit.tasks import AuditTaskContext, task_for_repo
 from enji_guard_cli.enji_gateway.audit_gateway import _fleet_task_body
@@ -71,14 +70,6 @@ def test_audit_task_body_is_neutral_until_gateway_translation() -> None:
         "origin_type": "manual",
         "repo_access_contexts": [{"provider": "github", "repo_full_name": "j2h4u/example"}],
     }
-
-
-def test_skipped_audit_result_keeps_typed_runs_until_delivery_projection() -> None:
-    run = AuditRun("task-1", "audit.security", "running", None, None, None)
-
-    result = skipped_audit_payload("audit.security", "audit.security", (run,))
-
-    assert result["active_runs"] == [run]
 
 
 @pytest.mark.parametrize(

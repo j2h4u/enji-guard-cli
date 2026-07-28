@@ -24,28 +24,6 @@ class AgentJourney:
     all_flag: bool | None = None
 
 
-def selector_kind_for_repo(repo: str | None, *, project: str | None = None, all_flag: bool = False) -> str:
-    if all_flag:
-        return "all"
-    if repo is not None:
-        return "repository_locator" if "/" in repo else "repository_id"
-    if project is not None:
-        return "project"
-    return "unknown"
-
-
-def selector_kind_for_repository(repository: str) -> str:
-    return "repository_locator" if "/" in repository else "unknown"
-
-
-def selector_kind_for_mcp_repo(repo: str) -> str:
-    if "/" in repo:
-        return "repository_locator"
-    if repo.startswith("repo_"):
-        return "repository_id"
-    return "selector"
-
-
 def run_agent_journey(
     body: JourneyBody,
     journey: AgentJourney,
