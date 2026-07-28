@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.4](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.3...v3.1.4) (2026-07-28)
+
+
+### Fixes
+
+* prefer current-head audit runs in status ([44cd6cb](https://github.com/j2h4u/enji-guard-cli/commit/44cd6cb7fa8bab0e37757865f4e6ef375622ee77))
+
 ## [3.1.3](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.2...v3.1.3) (2026-07-28)
 
 
