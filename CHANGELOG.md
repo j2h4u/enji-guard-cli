@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.3](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.2...v3.1.3) (2026-07-28)
+
+
+### Documentation
+
+* clarify pip install path after api keys ([f38cc20](https://github.com/j2h4u/enji-guard-cli/commit/f38cc20ef8bc49f200aac19ef50cc3d0f3f4ca8c))
+
 ## [3.1.2](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.1...v3.1.2) (2026-07-28)
 
 
