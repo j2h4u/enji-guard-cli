@@ -20,6 +20,7 @@ class StoredCredentialReader(CredentialReader):
 
     def __init__(self, auth_file: Path | None = None, *, settings: EnjiGuardSettings | None = None) -> None:
         resolved_settings = settings if settings is not None else default_settings()
+        self.settings = resolved_settings
         self.auth_file = auth_file if auth_file is not None else resolved_settings.auth.auth_file
 
     def load(self, auth_file: Path | None = None) -> StoredAuth:
@@ -32,7 +33,7 @@ class StoredCredentialReader(CredentialReader):
             raise CredentialError(exc.code, exc.message) from exc
 
     def headers(self, stored_auth: StoredAuth) -> dict[str, str]:
-        return _api.auth_headers(stored_auth)
+        return {**_api.auth_headers(stored_auth), "Origin": self.settings.auth.guard_origin}
 
 
 __all__ = ["StoredCredentialReader"]

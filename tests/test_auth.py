@@ -3,7 +3,7 @@ import base64
 import json
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
@@ -32,6 +32,7 @@ from enji_guard_cli.auth_session.cookies import merge_set_cookie_headers, set_co
 from enji_guard_cli.auth_session.coordinator import PreDispatchLocalError, TerminalRevisionRequiredError
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
 from enji_guard_cli.auth_session.ports import AuthOutcomeSink
+from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.auth_session.state_machine import OutcomeUnknown, Rejected, RotationState
 from enji_guard_cli.auth_session.store import (
     AuthAbsent,
@@ -46,7 +47,14 @@ from enji_guard_cli.auth_session.store import (
 )
 from enji_guard_cli.delivery.cli.app import app
 from enji_guard_cli.runtime_observability.auth_coordinator import RuntimeAuthCoordinatorAdapter
-from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER, AutoRefreshSettings
+from enji_guard_cli.settings import (
+    DEFAULT_GUARD_ORIGIN,
+    DEFAULT_GUARD_REFERER,
+    AuthSettings,
+    AutoRefreshSettings,
+    EnjiGuardSettings,
+    default_settings,
+)
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient
 from enji_guard_cli.transport_types import RetryProfile
 
@@ -93,10 +101,14 @@ def _loaded_auth(path: Path) -> RuntimeStoredAuth:
 
 
 async def _refresh_stored_cookie_auth(
-    path: Path, client: HttpxEnjiHttpClient, *, outcome_sink: object = None
+    path: Path, client: HttpxEnjiHttpClient, *, settings: object = None, outcome_sink: object = None
 ) -> RuntimeStoredAuth:
     return await _refresh_cookie_auth(
-        path, _loaded_auth(path), client, outcome_sink=cast(AuthOutcomeSink | None, outcome_sink)
+        path,
+        _loaded_auth(path),
+        client,
+        settings=cast(EnjiGuardSettings | None, settings),
+        outcome_sink=cast(AuthOutcomeSink | None, outcome_sink),
     )
 
 
@@ -144,6 +156,25 @@ def test_import_cookie_stores_cookie_credential(tmp_path: Path) -> None:
         "cookie_header": "access_token=old; refresh_token=long",
     }
     assert auth_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_auth_session_service_imports_credentials_with_configured_base_url(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    settings = replace(
+        default_settings(),
+        auth=AuthSettings(
+            base_url="https://fleet.example.test",
+            auth_file=auth_file,
+            guard_origin="https://guard.example.test",
+            guard_referer="https://guard.example.test/",
+        ),
+    )
+    service = AuthSessionService(settings=settings)
+
+    service.import_cookie("Cookie: access_token=old; refresh_token=long")
+
+    stored = cast(StoredAuth, json.loads(auth_file.read_text(encoding="utf-8")))
+    assert stored["base_url"] == "https://fleet.example.test"
 
 
 def test_import_cookie_rejects_header_without_auth_cookies(tmp_path: Path) -> None:
@@ -1190,6 +1221,42 @@ def test_refresh_auth_updates_rotated_access_and_refresh_cookies(tmp_path: Path)
         "type": "cookie",
         "cookie_header": f"access_token={unsigned_jwt({'exp': int(expires_at.timestamp())})}; refresh_token=new",
     }
+
+
+def test_refresh_auth_uses_configured_origin_and_referer(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    settings = replace(
+        default_settings(),
+        auth=AuthSettings(
+            base_url="https://fleet.example.test",
+            auth_file=auth_file,
+            guard_origin="https://guard.example.test",
+            guard_referer="https://guard.example.test/custom/",
+        ),
+    )
+    import_cookie("access_token=old; refresh_token=old", auth_file, base_url=settings.auth.base_url)
+    captured: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(dict(request.headers))
+        return httpx.Response(
+            200,
+            json={"message": "token refreshed"},
+            headers=[
+                ("Set-Cookie", "access_token=fresh; Path=/; HttpOnly"),
+                ("Set-Cookie", "refresh_token=fresh; Path=/api/v1/auth; HttpOnly"),
+            ],
+            request=request,
+        )
+
+    async def run_refresh() -> RuntimeStoredAuth:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            return await _refresh_stored_cookie_auth(auth_file, HttpxEnjiHttpClient(client), settings=settings)
+
+    asyncio.run(run_refresh())
+
+    assert captured["origin"] == "https://guard.example.test"
+    assert captured["referer"] == "https://guard.example.test/custom/"
 
 
 def test_refresh_auth_rejects_success_response_without_refresh_cookie(tmp_path: Path) -> None:

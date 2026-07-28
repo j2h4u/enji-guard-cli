@@ -103,7 +103,7 @@ def load_api_session(
 
 
 def api_headers(stored_auth: StoredAuth, auth_port: CredentialReader) -> dict[str, str]:
-    return {**auth_port.headers(stored_auth), "Origin": default_settings().auth.guard_origin}
+    return auth_port.headers(stored_auth)
 
 
 def run_api_request[T](

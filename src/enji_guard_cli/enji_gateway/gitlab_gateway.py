@@ -363,7 +363,7 @@ def _optional_url(value: object, field: str) -> str | None:
         return None
     try:
         parsed = urlsplit(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        if parsed.scheme != "https" or not parsed.netloc:
             raise ValueError
         if parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
             raise ValueError

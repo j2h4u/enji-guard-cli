@@ -1,6 +1,6 @@
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
@@ -44,7 +44,7 @@ from enji_guard_cli.enji_gateway.http import (
     task_detail,
     user_preferences,
 )
-from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER
+from enji_guard_cli.settings import DEFAULT_GUARD_ORIGIN, DEFAULT_GUARD_REFERER, AuthSettings, default_settings
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse
 
 AUTH_REFRESH_ORIGIN = DEFAULT_GUARD_ORIGIN
@@ -137,6 +137,34 @@ def test_access_returns_normalized_payload_and_uses_stored_auth_headers(tmp_path
             headers={"Authorization": "Bearer token-123", "Origin": AUTH_REFRESH_ORIGIN},
         )
     ]
+
+
+def test_gateway_headers_use_configured_origin(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    settings = replace(
+        default_settings(),
+        auth=AuthSettings(
+            base_url="https://fleet.example.test",
+            auth_file=auth_file,
+            guard_origin="https://guard.example.test",
+            guard_referer="https://guard.example.test/",
+        ),
+    )
+    import_bearer_token("token-123", auth_file, base_url=settings.auth.base_url)
+    client = FakeEnjiHttpClient(
+        [
+            EnjiHttpResponse(
+                200,
+                {},
+                b'{"access":{"group":null,"fullAccess":false,"limits":{},"usage":[]}}',
+            )
+        ]
+    )
+
+    access(auth_file, client, auth_port=StoredCredentialReader(settings=settings))
+
+    assert client.requests[0].headers["Origin"] == "https://guard.example.test"
+    assert client.requests[0].url == "https://fleet.example.test/api/ux/me/access"
 
 
 def test_report_language_endpoints_use_observed_paths_and_payloads(tmp_path: Path) -> None:
