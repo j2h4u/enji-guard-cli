@@ -57,26 +57,6 @@ class FileAuditLedger(AuditLedgerPort):
             entries = [item for item in self._read() if not _same_identity(item, entry)]
             self._write((*entries, entry))
 
-    def active_for(
-        self,
-        repo_id: str,
-        audit_key: str | None = None,
-        *,
-        now: datetime | None = None,
-    ) -> tuple[AuditLedgerEntry, ...]:
-        point = _utc(now)
-        with self._transaction():
-            entries = tuple(
-                entry
-                for entry in self._read()
-                if entry.repo_id == repo_id
-                and (audit_key is None or entry.audit_key == audit_key)
-                and not _expired(entry, point)
-                and not is_terminal_status(entry.task_status)
-            )
-            self.prune(now=point)
-        return entries
-
     def reconcile(
         self,
         repo_id: str,

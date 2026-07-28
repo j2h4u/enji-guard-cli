@@ -42,6 +42,14 @@ class GitLabCredentialsResult:
 
 
 @dataclass(frozen=True, slots=True)
+class GitLabCredentialsQuery:
+    scope_type: str | None = None
+    scope_owner: str | None = None
+    limit: int = 50
+    offset: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class GitLabProject:
     path_with_namespace: str
     provider_project_id: str

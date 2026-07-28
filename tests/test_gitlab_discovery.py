@@ -9,8 +9,13 @@ from enji_guard_cli.auth_session.api import import_bearer_token
 from enji_guard_cli.delivery.cli.app import _emit, _json
 from enji_guard_cli.enji_gateway import GitLabGateway
 from enji_guard_cli.enji_gateway import gitlab_gateway as gateway_module
-from enji_guard_cli.enji_gateway.http import gitlab_credentials, gitlab_projects
-from enji_guard_cli.gitlab.models import GitLabProjectsQuery
+from enji_guard_cli.enji_gateway.http import (
+    GitLabCredentialsHttpRequest,
+    GitLabProjectsHttpRequest,
+    gitlab_credentials,
+    gitlab_projects,
+)
+from enji_guard_cli.gitlab.models import GitLabCredentialsQuery, GitLabProjectsQuery
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
 from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvider
 from enji_guard_cli.portfolio.selectors import parse_repository_selector
@@ -75,7 +80,7 @@ def test_gitlab_gateway_discovers_all_pages_and_returns_safe_selector(monkeypatc
     assert [project.provider_project_id for project in result.projects] == ["101", "202"]
     assert result.projects[0].selector.canonical_key == ("gitlab", "gitlab.example.com", "team/service")
     assert "clone_http_url" not in result.projects[0].__dict__ if hasattr(result.projects[0], "__dict__") else True
-    assert [call["page"] for call in calls] == [1, 2]
+    assert [cast(GitLabProjectsHttpRequest, call["request"]).page for call in calls] == [1, 2]
 
 
 def test_gitlab_gateway_requires_explicit_credential_when_scope_has_many(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -217,23 +222,22 @@ def test_gitlab_http_endpoints_preserve_contract_queries(tmp_path: Path) -> None
     gitlab_credentials(
         auth_file,
         cast(EnjiHttpClient, client),
-        scope_type="project",
-        scope_owner="p",
-        limit=10,
-        offset=20,
+        request=GitLabCredentialsHttpRequest(scope_type="project", scope_owner="p", limit=10, offset=20),
         auth_port=AUTH_PORT,
     )
     gitlab_projects(
         auth_file,
         cast(EnjiHttpClient, client),
-        credential_id="cred-1",
-        host="gitlab.example.com",
-        api_base_url="https://gitlab.example.com/api/v4",
-        search="service",
-        page=2,
-        per_page=25,
-        scope_type="project",
-        scope_owner="p",
+        request=GitLabProjectsHttpRequest(
+            credential_id="cred-1",
+            host="gitlab.example.com",
+            api_base_url="https://gitlab.example.com/api/v4",
+            search="service",
+            page=2,
+            per_page=25,
+            scope_type="project",
+            scope_owner="p",
+        ),
         auth_port=AUTH_PORT,
     )
     assert client.requests[0].url.endswith(
@@ -284,7 +288,7 @@ def test_gitlab_gateway_paginates_credentials_for_explicit_and_implicit_selectio
     calls: list[int] = []
 
     def credentials(*args: object, **kwargs: object) -> JsonObjectPayload:
-        offset = cast(int, kwargs["offset"])
+        offset = cast(GitLabCredentialsHttpRequest, kwargs["request"]).offset
         calls.append(offset)
         return {
             "data": first_page if offset == 0 else second_page,
@@ -308,7 +312,7 @@ def test_gitlab_gateway_rejects_duplicate_credential_across_pages(monkeypatch: p
     duplicate_page: list[JsonValue] = [_credential(credential_id="cred-1")]
 
     def credentials(*args: object, **kwargs: object) -> JsonObjectPayload:
-        offset = cast(int, kwargs["offset"])
+        offset = cast(GitLabCredentialsHttpRequest, kwargs["request"]).offset
         return {
             "data": first_page if offset == 0 else duplicate_page,
             "meta": {"limit": 50, "offset": offset, "total": 51},
@@ -332,18 +336,18 @@ def test_gitlab_gateway_normalizes_default_scope_and_rejects_personal_owner(
     monkeypatch.setattr(gateway_module.http, "gitlab_credentials", credentials)
     result = _gateway().list_credentials()
     assert result.scope == gateway_module.GitLabScope("personal", None)
-    assert calls[0]["scope_type"] == "personal"
-    assert calls[0]["scope_owner"] is None
+    assert cast(GitLabCredentialsHttpRequest, calls[0]["request"]).scope_type == "personal"
+    assert cast(GitLabCredentialsHttpRequest, calls[0]["request"]).scope_owner is None
 
     calls.clear()
-    result = _gateway().list_credentials(scope_type=" ", scope_owner=" ")
+    result = _gateway().list_credentials(GitLabCredentialsQuery(scope_type=" ", scope_owner=" "))
     assert result.scope == gateway_module.GitLabScope("personal", None)
-    assert calls[0]["scope_type"] == "personal"
-    assert calls[0]["scope_owner"] is None
+    assert cast(GitLabCredentialsHttpRequest, calls[0]["request"]).scope_type == "personal"
+    assert cast(GitLabCredentialsHttpRequest, calls[0]["request"]).scope_owner is None
 
     call_count = len(calls)
     with pytest.raises(ValueError, match="only valid for project"):
-        _gateway().list_credentials(scope_type="personal", scope_owner="owner")
+        _gateway().list_credentials(GitLabCredentialsQuery(scope_type="personal", scope_owner="owner"))
     assert len(calls) == call_count
 
 
@@ -359,16 +363,23 @@ def test_gitlab_http_endpoints_omit_empty_optional_query_values(tmp_path: Path) 
     auth_file = tmp_path / "auth.json"
     import_bearer_token("token-123", auth_file)
     client = Client()
-    gitlab_credentials(auth_file, cast(EnjiHttpClient, client), scope_type="", scope_owner=" ", auth_port=AUTH_PORT)
+    gitlab_credentials(
+        auth_file,
+        cast(EnjiHttpClient, client),
+        request=GitLabCredentialsHttpRequest(scope_type="", scope_owner=" "),
+        auth_port=AUTH_PORT,
+    )
     gitlab_projects(
         auth_file,
         cast(EnjiHttpClient, client),
-        credential_id="cred-1",
-        host="",
-        api_base_url="",
-        search="",
-        scope_type="",
-        scope_owner=" ",
+        request=GitLabProjectsHttpRequest(
+            credential_id="cred-1",
+            host="",
+            api_base_url="",
+            search="",
+            scope_type="",
+            scope_owner=" ",
+        ),
         auth_port=AUTH_PORT,
     )
     assert client.requests[0].url.endswith("credential_type=git&provider=gitlab&limit=50&offset=0")

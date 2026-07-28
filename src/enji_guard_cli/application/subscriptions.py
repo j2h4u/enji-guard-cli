@@ -63,6 +63,36 @@ class AutofixWriteScope:
 
 
 @dataclass(frozen=True, slots=True)
+class ScheduleWriteRequest:
+    repo: str | None
+    project: str | None
+    enabled: bool | None = None
+    cadence: str | None = None
+    timezone: str | None = None
+    scope: AutofixWriteScope | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AutofixWriteRequest:
+    repo: str | None
+    project: str | None
+    selectors: tuple[str, ...]
+    enabled: bool | None = None
+    frequency: str | None = None
+    timezone: str | None = None
+    scope: AutofixWriteScope | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EmailPreferencesWriteRequest:
+    repo: str | None
+    project: str | None
+    manual: bool | None = None
+    scheduled: bool | None = None
+    scope: AutofixWriteScope | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SubscriptionsFacade:
     """Read and write the recurring settings attached to published audits."""
 
@@ -84,20 +114,13 @@ class SubscriptionsFacade:
             for target in targets
         )
 
-    def set_schedules(  # noqa: PLR0913
-        self,
-        repo: str | None,
-        project: str | None,
-        *,
-        enabled: bool | None = None,
-        cadence: str | None = None,
-        timezone: str | None = None,
-        scope: AutofixWriteScope | None = None,
-    ) -> tuple[object, ...]:
+    def set_schedules(self, request: ScheduleWriteRequest) -> tuple[object, ...]:
         """Apply one schedule change, given the operator's raw argv values."""
         keys = self._published_keys()
-        update = AuditScheduleUpdate(enabled=enabled, cadence=cadence, timezone=timezone)
-        return set_for_targets(self._write_targets(repo, project, scope), keys, update, self.gateway)
+        update = AuditScheduleUpdate(enabled=request.enabled, cadence=request.cadence, timezone=request.timezone)
+        return set_for_targets(
+            self._write_targets(request.repo, request.project, request.scope), keys, update, self.gateway
+        )
 
     def schedule_auto_time(
         self, repo: str | None, project: str | None = None, *, scope: AutofixWriteScope | None = None
@@ -122,22 +145,12 @@ class SubscriptionsFacade:
 
         return self.fanout.map(targets, read_target)
 
-    def set_autofixes(  # noqa: PLR0913
-        self,
-        repo: str | None,
-        project: str | None,
-        selectors: list[str],
-        *,
-        enabled: bool | None = None,
-        frequency: str | None = None,
-        timezone: str | None = None,
-        scope: AutofixWriteScope | None = None,
-    ) -> tuple[object, ...]:
+    def set_autofixes(self, request: AutofixWriteRequest) -> tuple[object, ...]:
         """Apply one improvement-job change, given the operator's argv values."""
-        update = AuditAutofixUpdate(enabled=enabled, frequency=frequency, timezone=timezone)
-        selected = select_autofixes(selectors, autofix_definitions(self.catalog.catalog()))
+        update = AuditAutofixUpdate(enabled=request.enabled, frequency=request.frequency, timezone=request.timezone)
+        selected = select_autofixes(request.selectors, autofix_definitions(self.catalog.catalog()))
         result: list[object] = []
-        for target in self._write_targets(repo, project, scope):
+        for target in self._write_targets(request.repo, request.project, request.scope):
             jobs = _index_autofix_jobs(self.gateway.list_autofix_jobs(target.repo_id))
             for definition in selected:
                 existing = jobs.get(definition.action_key) or jobs.get(definition.kind or definition.selector)
@@ -154,19 +167,13 @@ class SubscriptionsFacade:
         keys = self._published_keys()
         return list_email_for_targets(self.targets.targets(repo, project), keys, self.gateway, self.fanout)
 
-    def set_email_preferences(
-        self,
-        repo: str | None,
-        project: str | None,
-        *,
-        manual: bool | None = None,
-        scheduled: bool | None = None,
-        scope: AutofixWriteScope | None = None,
-    ) -> tuple[object, ...]:
+    def set_email_preferences(self, request: EmailPreferencesWriteRequest) -> tuple[object, ...]:
         """Apply one completion-email change, given the operator's argv values."""
         keys = self._published_keys()
-        update = EmailPreferencesUpdate(manual=manual, scheduled=scheduled)
-        return set_email_for_targets(self._write_targets(repo, project, scope), keys, update, self.gateway)
+        update = EmailPreferencesUpdate(manual=request.manual, scheduled=request.scheduled)
+        return set_email_for_targets(
+            self._write_targets(request.repo, request.project, request.scope), keys, update, self.gateway
+        )
 
     def _published_keys(self) -> tuple[str, ...]:
         return tuple(audit.action_key for audit in self.catalog.audits().published_audits)

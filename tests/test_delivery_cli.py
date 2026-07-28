@@ -51,6 +51,7 @@ from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.gitlab.models import (
     GitLabCredential,
     GitLabCredentialPage,
+    GitLabCredentialsQuery,
     GitLabCredentialsResult,
     GitLabProjectPage,
     GitLabProjectsQuery,
@@ -860,7 +861,7 @@ def test_gitlab_credentials_forwards_every_paging_and_scope_option(monkeypatch: 
     )
 
     assert result.exit_code == 0
-    assert gitlab.credential_queries == [("group", "acme", 7, 14)]
+    assert gitlab.credential_queries == [GitLabCredentialsQuery("group", "acme", 7, 14)]
 
 
 def test_wait_returns_immediately_when_every_audit_is_complete(monkeypatch: pytest.MonkeyPatch) -> None:

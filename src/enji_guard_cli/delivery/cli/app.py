@@ -19,7 +19,6 @@ from typing import Annotated, Literal, cast
 import typer
 
 from enji_guard_cli.application import (
-    AUDIT_CADENCES,
     Application,
     ApplicationCatalogChange,
     ApplicationCommandError,
@@ -27,21 +26,20 @@ from enji_guard_cli.application import (
     AutofixWriteScope,
 )
 from enji_guard_cli.composition import create_application, runtime_auth_service
+from enji_guard_cli.delivery.cli.audit_commands import AuditCommandApps, AuditCommandDeps, register_audit_commands
+from enji_guard_cli.delivery.cli.gitlab_commands import GitLabCommandDeps, register_gitlab_commands
 from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION, CliPresentation, emit_text, json_projection
 from enji_guard_cli.delivery.cli.presenters import (
-    AUDIT_READ,
-    AUDIT_SUMMARY,
-    AUDIT_WAIT,
-    AUTOFIX,
-    EMAIL,
-    GITLAB_CREDENTIALS,
-    GITLAB_PROJECTS,
     OPERATION,
     PORTFOLIO,
     PROJECT_LIST,
     PROJECT_SETTINGS,
     REPOSITORY_STATUS,
-    SCHEDULE,
+)
+from enji_guard_cli.delivery.cli.subscription_commands import (
+    SubscriptionCommandApps,
+    SubscriptionCommandDeps,
+    register_subscription_commands,
 )
 from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
@@ -209,12 +207,6 @@ def _fail(code: str, message: str, *, as_json: bool, exit_code: int = 1) -> type
 
 
 SORT_HELP = f"Repository order: {', '.join(sorted(REPOSITORY_SORT_NAMES))}."
-
-FREQUENCY_HELP = f"Run cadence: {', '.join(AUDIT_CADENCES)}."
-
-TIMEZONE_HELP = "IANA timezone stored with each subscription, such as Asia/Almaty."
-
-ENABLED_HELP = "Turn the subscription on or off."
 
 
 def _repository_sort(value: str) -> RepositorySortName:
@@ -438,10 +430,6 @@ def _confirm_deletion(warning: str, *, as_json: bool, assume_yes: bool) -> None:
         raise _fail("ABORTED", "no change was made", as_json=as_json)
 
 
-REPO_SCOPE_HELP = "Write to one repository; mutually exclusive with --all-repos and --all-projects."
-
-REPO_FILTER_HELP = "Read one repository; omit to read every repository in scope."
-
 SCOPE_REQUIRED = "pass --repo REPO, --all-repos with --project, or --all-projects"
 
 
@@ -475,6 +463,70 @@ def _scope(
         if not typer.confirm(f"{ALL_PROJECTS_WARNING}. Continue?"):
             raise _fail("ABORTED", "no change was made", as_json=as_json)
     return AutofixWriteScope(all_repos=all_repos, all_projects=all_projects)
+
+
+def _write_scope(
+    all_repos: bool, all_projects: bool, repo: str | None, as_json: bool, assume_yes: bool
+) -> AutofixWriteScope:
+    return _scope(all_repos, all_projects, repo=repo, as_json=as_json, assume_yes=assume_yes)
+
+
+def _command_application() -> Application:
+    return _application()
+
+
+def _command_selected_project(local: str | None) -> str | None:
+    return _selected_project(local)
+
+
+def _command_json_output(local: bool) -> bool:
+    return _json_output(local)
+
+
+def _command_run[PayloadT](
+    action: Callable[[], PayloadT], as_json: bool, presentation: CliPresentation[PayloadT]
+) -> None:
+    _run(action, as_json, presentation)
+
+
+def _command_switch(value: Literal["on", "off"] | None) -> bool | None:
+    return _switch(value)
+
+
+def _command_fail(code: str, message: str, as_json: bool) -> typer.Exit:
+    return _fail(code, message, as_json=as_json)
+
+
+register_audit_commands(
+    AuditCommandApps(root_app=app, audit_app=audit_app),
+    AuditCommandDeps(
+        application=_command_application,
+        selected_project=_command_selected_project,
+        json_output=_command_json_output,
+        run_command=_command_run,
+        fail=_command_fail,
+        parse_duration=_parse_duration,
+    ),
+)
+register_gitlab_commands(
+    gitlab_app,
+    GitLabCommandDeps(
+        application=_command_application,
+        json_output=_command_json_output,
+        run_command=_command_run,
+    ),
+)
+register_subscription_commands(
+    SubscriptionCommandApps(schedule_app=schedule_app, autofix_app=autofix_app, email_app=email_app),
+    SubscriptionCommandDeps(
+        application=_command_application,
+        selected_project=_command_selected_project,
+        json_output=_command_json_output,
+        run_command=_command_run,
+        scope=_write_scope,
+        switch=_command_switch,
+    ),
+)
 
 
 @auth_app.command("import-cookie")
@@ -516,53 +568,6 @@ def auth_status(
 @project_app.command("list")
 def project_list(json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
     _run(lambda: _application().portfolio.list_projects(), _json_output(json_output), PROJECT_LIST)
-
-
-@gitlab_app.command("credentials")
-def gitlab_credentials(
-    scope_type: Annotated[str | None, typer.Option("--scope-type")] = None,
-    scope_owner: Annotated[str | None, typer.Option("--scope-owner")] = None,
-    limit: Annotated[int, typer.Option("--limit", min=1)] = 50,
-    offset: Annotated[int, typer.Option("--offset", min=0)] = 0,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().gitlab.gitlab_credentials(
-            scope_type=scope_type,
-            scope_owner=scope_owner,
-            limit=limit,
-            offset=offset,
-        ),
-        _json_output(json_output),
-        GITLAB_CREDENTIALS,
-    )
-
-
-@gitlab_app.command("projects")
-def gitlab_projects(  # noqa: PLR0913
-    *,
-    credential_id: Annotated[str | None, typer.Option("--credential-id")] = None,
-    search: Annotated[str | None, typer.Option("--search")] = None,
-    page: Annotated[int, typer.Option("--page", min=1)] = 1,
-    per_page: Annotated[int, typer.Option("--per-page", min=1)] = 50,
-    all_pages: Annotated[bool, typer.Option("--all-pages", "--all")] = False,
-    scope_type: Annotated[str | None, typer.Option("--scope-type")] = None,
-    scope_owner: Annotated[str | None, typer.Option("--scope-owner")] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().gitlab.gitlab_projects(
-            credential_id=credential_id,
-            search=search,
-            page=page,
-            per_page=per_page,
-            all_pages=all_pages,
-            scope_type=scope_type,
-            scope_owner=scope_owner,
-        ),
-        _json_output(json_output),
-        GITLAB_PROJECTS,
-    )
 
 
 @project_app.command("create")
@@ -674,77 +679,6 @@ def recon_start(
     )
 
 
-def _audit_selectors(audits: list[str] | None) -> list[str]:
-    return [item.removeprefix("audit.") for item in (audits or [])]
-
-
-def _explicit_audit_selectors(audits: list[str] | None, *, all_audits: bool, as_json: bool) -> list[str]:
-    """Reject a selector list combined with --all instead of letting --all win."""
-    selectors = _audit_selectors(audits)
-    if all_audits and selectors:
-        raise _fail("VALIDATION", "pass audit selectors or --all, not both", as_json=as_json)
-    return selectors
-
-
-@audit_app.command("start")
-def audit_start(
-    repo: str,
-    audits: Annotated[list[str] | None, typer.Argument(help="Audit selector suffixes.")] = None,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    all_audits: Annotated[bool, typer.Option("--all", help="Start every published audit.")] = False,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    selectors = _explicit_audit_selectors(audits, all_audits=all_audits, as_json=_json_output(json_output))
-    _run(
-        lambda: _application().audit.audit_start(
-            repo,
-            _selected_project(project),
-            selectors,
-            all_audits=all_audits,
-        ),
-        _json_output(json_output),
-        OPERATION,
-    )
-
-
-@audit_app.command("read")
-def audit_read(
-    repo: str,
-    audits: Annotated[list[str] | None, typer.Argument(help="Audit selector suffixes.")] = None,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    all_audits: Annotated[bool, typer.Option("--all", help="Read every published audit.")] = False,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    selectors = _explicit_audit_selectors(audits, all_audits=all_audits, as_json=_json_output(json_output))
-    _run(
-        lambda: _application().audit.audit_read(
-            repo,
-            selectors,
-            project=_selected_project(project),
-            all_audits=all_audits,
-        ),
-        _json_output(json_output),
-        AUDIT_READ,
-    )
-
-
-@audit_app.command("summary")
-def audit_summary(
-    repo: str,
-    audits: Annotated[
-        list[str] | None,
-        typer.Argument(help="Optional audit selector suffixes; omit to summarize every published audit."),
-    ] = None,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().audit.audit_summary(repo, _audit_selectors(audits), project=_selected_project(project)),
-        _json_output(json_output),
-        AUDIT_SUMMARY,
-    )
-
-
 @app.command(
     "health",
     help=(
@@ -832,196 +766,6 @@ def status(
         ),
         _json_output(json_output),
         PORTFOLIO,
-    )
-
-
-@app.command("wait", help="Block until repository audits finish. Do not use short timeouts as refresh.")
-def wait(
-    repo: str,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    timeout: Annotated[str, typer.Option("--timeout")] = default_settings().audit_wait.timeout_text,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().audit.audit_wait(
-            repo, project=_selected_project(project), timeout_seconds=_parse_duration(timeout)
-        ),
-        _json_output(json_output),
-        AUDIT_WAIT,
-    )
-
-
-@schedule_app.command("list")
-def schedule_list(
-    repo: Annotated[str | None, typer.Option("--repo", help=REPO_FILTER_HELP)] = None,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().subscriptions.list_schedules(repo, _selected_project(project)),
-        _json_output(json_output),
-        SCHEDULE,
-    )
-
-
-@schedule_app.command("set")
-def schedule_set(  # noqa: PLR0913
-    *,
-    repo: Annotated[str | None, typer.Option("--repo", help=REPO_SCOPE_HELP)] = None,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
-    all_projects: Annotated[
-        bool, typer.Option("--all-projects", help="Every repository in every project; requires --yes when not a TTY.")
-    ] = False,
-    yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
-    enabled: Annotated[Literal["on", "off"] | None, typer.Option("--enabled", help=ENABLED_HELP)] = None,
-    frequency: Annotated[str | None, typer.Option("--frequency", help=FREQUENCY_HELP)] = None,
-    timezone: Annotated[str | None, typer.Option("--timezone", help=TIMEZONE_HELP)] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
-    _run(
-        lambda: _application().subscriptions.set_schedules(
-            repo,
-            _selected_project(project),
-            enabled=_switch(enabled),
-            cadence=frequency,
-            timezone=timezone,
-            scope=scope,
-        ),
-        _json_output(json_output),
-        OPERATION,
-    )
-
-
-@schedule_app.command("auto-time")
-def schedule_auto_time(  # noqa: PLR0913
-    *,
-    repo: Annotated[str | None, typer.Option("--repo", help=REPO_SCOPE_HELP)] = None,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
-    all_projects: Annotated[
-        bool, typer.Option("--all-projects", help="Every repository in every project; requires --yes when not a TTY.")
-    ] = False,
-    yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
-    _run(
-        lambda: _application().subscriptions.schedule_auto_time(repo, _selected_project(project), scope=scope),
-        _json_output(json_output),
-        OPERATION,
-    )
-
-
-@schedule_app.command("timezone")
-def schedule_timezone(  # noqa: PLR0913
-    *,
-    timezone: Annotated[str, typer.Argument(help=TIMEZONE_HELP)],
-    repo: Annotated[str | None, typer.Option("--repo", help=REPO_SCOPE_HELP)] = None,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
-    all_projects: Annotated[
-        bool, typer.Option("--all-projects", help="Every repository in every project; requires --yes when not a TTY.")
-    ] = False,
-    yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
-    _run(
-        lambda: _application().subscriptions.set_schedules(
-            repo, _selected_project(project), timezone=timezone, scope=scope
-        ),
-        _json_output(json_output),
-        OPERATION,
-    )
-
-
-@autofix_app.command("list")
-def autofix_list(
-    repo: Annotated[str | None, typer.Option("--repo", help=REPO_FILTER_HELP)] = None,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().subscriptions.list_autofixes(repo, _selected_project(project)),
-        _json_output(json_output),
-        AUTOFIX,
-    )
-
-
-@autofix_app.command("set")
-def autofix_set(  # noqa: PLR0913
-    *,
-    repo: Annotated[str | None, typer.Option("--repo", help=REPO_SCOPE_HELP)] = None,
-    autofixes: Annotated[list[str] | None, typer.Argument(help="Autofix selectors.")] = None,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    all_autofixes: Annotated[bool, typer.Option("--all", help="Every supported autofix selector.")] = False,
-    all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
-    all_projects: Annotated[
-        bool, typer.Option("--all-projects", help="Every repository in every project; requires --yes when not a TTY.")
-    ] = False,
-    yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
-    enabled: Annotated[Literal["on", "off"] | None, typer.Option("--enabled", help=ENABLED_HELP)] = None,
-    frequency: Annotated[str | None, typer.Option("--frequency", help=FREQUENCY_HELP)] = None,
-    timezone: Annotated[str | None, typer.Option("--timezone", help=TIMEZONE_HELP)] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    selectors = ["__all__"] if all_autofixes else (autofixes or [])
-    scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
-    _run(
-        lambda: _application().subscriptions.set_autofixes(
-            repo,
-            _selected_project(project),
-            selectors,
-            enabled=_switch(enabled),
-            frequency=frequency,
-            timezone=timezone,
-            scope=scope,
-        ),
-        _json_output(json_output),
-        OPERATION,
-    )
-
-
-@email_app.command("list")
-def email_list(
-    repo: Annotated[str | None, typer.Option("--repo", help=REPO_FILTER_HELP)] = None,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    _run(
-        lambda: _application().subscriptions.list_email_preferences(repo, _selected_project(project)),
-        _json_output(json_output),
-        EMAIL,
-    )
-
-
-@email_app.command("set")
-def email_set(  # noqa: PLR0913
-    *,
-    repo: Annotated[str | None, typer.Option("--repo", help=REPO_SCOPE_HELP)] = None,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
-    all_projects: Annotated[
-        bool, typer.Option("--all-projects", help="Every repository in every project; requires --yes when not a TTY.")
-    ] = False,
-    yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
-    manual: Annotated[
-        Literal["on", "off"] | None, typer.Option("--manual", help="Email on manually started audit runs.")
-    ] = None,
-    scheduled: Annotated[
-        Literal["on", "off"] | None, typer.Option("--scheduled", help="Email on scheduled audit runs.")
-    ] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    scope = _scope(all_repos, all_projects, repo=repo, as_json=_json_output(json_output), assume_yes=yes)
-    _run(
-        lambda: _application().subscriptions.set_email_preferences(
-            repo, _selected_project(project), manual=_switch(manual), scheduled=_switch(scheduled), scope=scope
-        ),
-        _json_output(json_output),
-        EMAIL,
     )
 
 

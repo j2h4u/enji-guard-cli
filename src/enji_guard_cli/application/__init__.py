@@ -65,8 +65,11 @@ from enji_guard_cli.application.subscriptions import (
     AUDIT_CADENCES,
     AutofixListing,
     AutofixListingItem,
+    AutofixWriteRequest,
     AutofixWriteScope,
+    EmailPreferencesWriteRequest,
     ScheduleListing,
+    ScheduleWriteRequest,
     SubscriptionsFacade,
 )
 from enji_guard_cli.application.views import RepositoryIdentityView
@@ -104,8 +107,10 @@ __all__ = [
     "AuthFacade",
     "AutofixListing",
     "AutofixListingItem",
+    "AutofixWriteRequest",
     "AutofixWriteScope",
     "CatalogObservationScope",
+    "EmailPreferencesWriteRequest",
     "GitLabCredentialPageView",
     "GitLabCredentialView",
     "GitLabCredentialsView",
@@ -126,6 +131,7 @@ __all__ = [
     "RepositoryRefView",
     "RepositoryStatusView",
     "ScheduleListing",
+    "ScheduleWriteRequest",
     "SubscriptionsFacade",
     "exit_code_for_error",
 ]

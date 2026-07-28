@@ -503,10 +503,6 @@ class AuditCatalogPort(Protocol):
 class AuditLedgerPort(Protocol):
     def record_started(self, entry: AuditLedgerEntry) -> None: ...
 
-    def active_for(
-        self, repo_id: str, audit_key: str | None = None, *, now: datetime | None = None
-    ) -> tuple[AuditLedgerEntry, ...]: ...
-
     def reconcile(
         self,
         repo_id: str,

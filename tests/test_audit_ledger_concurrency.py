@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from enji_guard_cli.audit.ledger import FileAuditLedger, new_entry
-from enji_guard_cli.audit.ports import AuditLedgerEntry, AuditRunStart
+from enji_guard_cli.audit.ports import AuditLedgerEntry, AuditRunStart, AuditTaskDetail
 
 ROOT = Path(__file__).parents[1]
 WORKER_COUNT = 4
@@ -71,7 +71,15 @@ def _entry(audit_key: str, task_id: str) -> AuditLedgerEntry:
 
 
 def _recorded_task_ids(ledger: FileAuditLedger) -> set[str | None]:
-    return {entry.task_id for entry in ledger.active_for("repo", now=datetime(2026, 1, 1, 1, tzinfo=UTC))}
+    return {
+        run.task_id
+        for run in ledger.reconcile(
+            "repo",
+            (),
+            lambda task_id: AuditTaskDetail(task_id, "queued"),
+            now=datetime(2026, 1, 1, 1, tzinfo=UTC),
+        )
+    }
 
 
 def test_concurrent_threads_never_lose_a_started_run(tmp_path: Path) -> None:

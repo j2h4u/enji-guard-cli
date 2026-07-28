@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enji_guard_cli.application.views import RepositoryIdentityView, repository_identity_view
 from enji_guard_cli.gitlab import (
     GitLabCredential,
+    GitLabCredentialsQuery,
     GitLabCredentialsResult,
     GitLabDiscoveryPort,
     GitLabProject,
@@ -146,7 +147,7 @@ class GitLabFacade:
         offset: int = 0,
     ) -> GitLabCredentialsView:
         result: GitLabCredentialsResult = self.gateway.list_credentials(
-            scope_type=scope_type, scope_owner=scope_owner, limit=limit, offset=offset
+            GitLabCredentialsQuery(scope_type=scope_type, scope_owner=scope_owner, limit=limit, offset=offset)
         )
         return GitLabCredentialsView(
             scope=_scope_view(result.scope),

@@ -48,29 +48,6 @@ class RuntimeServiceOptions:
     mount_path: str | None = None
 
 
-@dataclass(slots=True)
-class RuntimeSupervisor:
-    """Injectable supervisor facade used by service composition and tests."""
-
-    runtime_auth: RuntimeAuthCoordinator | None = None
-    settings: EnjiGuardSettings | None = None
-
-    async def run_async(
-        self,
-        *,
-        options: RuntimeServiceOptions,
-        mcp_server_factory: McpServerFactory,
-        mcp_server_runner: McpServerRunner,
-    ) -> None:
-        await run_service_async(
-            options=options,
-            runtime_auth=self.runtime_auth,
-            settings=self.settings,
-            mcp_server_factory=mcp_server_factory,
-            mcp_server_runner=mcp_server_runner,
-        )
-
-
 async def run_service_async(
     *,
     options: RuntimeServiceOptions,
@@ -397,7 +374,6 @@ async def _cancel_tasks(tasks: set[asyncio.Task[None]]) -> None:
 
 __all__ = [
     "RuntimeServiceOptions",
-    "RuntimeSupervisor",
     "run_service",
     "run_service_async",
     "start_backend_readiness_task",

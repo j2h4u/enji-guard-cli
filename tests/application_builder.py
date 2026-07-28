@@ -53,7 +53,12 @@ from enji_guard_cli.audit.ports import (
 from enji_guard_cli.auth_session.models import AuthSessionStatus, ImportCredentialPayload
 from enji_guard_cli.auth_session.service import AuthSessionService
 from enji_guard_cli.fanout import BoundedFanout
-from enji_guard_cli.gitlab.models import GitLabCredentialsResult, GitLabProjectsQuery, GitLabProjectsResult
+from enji_guard_cli.gitlab.models import (
+    GitLabCredentialsQuery,
+    GitLabCredentialsResult,
+    GitLabProjectsQuery,
+    GitLabProjectsResult,
+)
 from enji_guard_cli.gitlab.ports import GitLabDiscoveryPort
 from enji_guard_cli.portfolio.models import (
     AccessInfo,
@@ -585,17 +590,10 @@ class RecordingGitLabGateway:
         self.projects_result = projects
         self.credentials_result = credentials
         self.queries: list[GitLabProjectsQuery] = []
-        self.credential_queries: list[tuple[str | None, str | None, int, int]] = []
+        self.credential_queries: list[GitLabCredentialsQuery] = []
 
-    def list_credentials(
-        self,
-        *,
-        scope_type: str | None = None,
-        scope_owner: str | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> GitLabCredentialsResult:
-        self.credential_queries.append((scope_type, scope_owner, limit, offset))
+    def list_credentials(self, query: GitLabCredentialsQuery | None = None) -> GitLabCredentialsResult:
+        self.credential_queries.append(query or GitLabCredentialsQuery())
         assert self.credentials_result is not None
         return self.credentials_result
 
