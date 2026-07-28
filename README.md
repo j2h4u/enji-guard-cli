@@ -1,12 +1,19 @@
 # enji-guard-cli
 
-Python 3.14 CLI and MCP bridge for Enji Guard.
+Enji Guard audits repositories, but driving it assumes a person in a browser.
+A local coding agent cannot start audits, work out which are worth reading, and
+act on the findings without someone clicking through a UI.
 
-This is a working Docker-first product for local coding agents that use Enji
-Guard as an external repository-audit backend. It provides typed Audit and
-Portfolio contexts behind one application facade, a
-validated Typer CLI operator surface, and a curated read-only FastMCP surface
-for portfolio and audit access.
+This is the command surface that closes that gap. Audits start, report, and
+read from the terminal, so an agent can run the whole loop unattended: kick off
+work across a portfolio, ask what is ready without blocking on what is not,
+read findings as text, and queue the fixes worth making. `--json` makes every
+answer machine-readable.
+
+Two surfaces, deliberately different in size: the CLI is the full operator
+surface, and MCP is a curated read-only view for agents that only need the
+picture. It ships as a Docker service so credentials and cookie refresh live in
+one place instead of in every agent's environment.
 
 See [ROADMAP.md](ROADMAP.md) for the current product status and remaining
 hardening work.
