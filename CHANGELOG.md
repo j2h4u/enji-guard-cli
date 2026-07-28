@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.2](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.1...v3.1.2) (2026-07-28)
+
+
+### Fixes
+
+* enforce auth settings and gitlab https ([46be106](https://github.com/j2h4u/enji-guard-cli/commit/46be106b9a1cfd2e169d8ee0d225004dde509a91))
+
 ## [3.1.1](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.0...v3.1.1) (2026-07-28)
 
 
