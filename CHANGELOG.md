@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.8](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.7...v3.1.8) (2026-07-28)
+
+
+### Fixes
+
+* tolerate status detail fields in release smoke ([07237a3](https://github.com/j2h4u/enji-guard-cli/commit/07237a3760ea622d6cbd1a718746cd6e25c50ad2))
+
 ## [3.1.7](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.6...v3.1.7) (2026-07-28)
 
 
