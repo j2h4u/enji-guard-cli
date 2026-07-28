@@ -2,93 +2,24 @@
 
 Python 3.14 Docker service exposing Enji Guard through core code, CLI, and MCP.
 
-Most people who clone this repository want to **run** the service, not change
-it. Assume that first: an agent reading this is usually helping an operator get
-the container up and authenticated, and `## Ops` is the section that serves
-them. `## Development` and `## QA` apply only once the task is actually to
-change the code. Do not answer an operator with development workflow, and do
-not hand back steps you can run yourself.
+Most readers here want to **run** the service. `## Ops` below is for them, and
+it is the only section that is always relevant. Everything else is a pointer:
+read it when the task actually calls for it.
 
-README.md carries the user-facing CLI model and workflows.
-docs/decisions.md captures the current architectural decisions and invariants.
-CONTRIBUTING.md carries change intake, acceptance, and handoff rules.
+| Read when | Document |
+| --- | --- |
+| changing the code | [docs/development.md](docs/development.md) |
+| changing architecture | [docs/decisions.md](docs/decisions.md) |
+| opening a PR | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| deploying the image | [docs/deployment.md](docs/deployment.md) |
+| using the CLI | [README.md](README.md) |
 
-## Development
+Three rules do not wait for a pointer:
 
-- Use `uv` only. Keep `uv.lock` current; use hardlink mode outside Docker.
-- Keep CLI and MCP thin. Put Enji/auth behavior behind the shared core/API layer.
-- MCP is curated read-only context, not a CLI mirror. Keep it focused on
-  portfolio overview and repository report reading. Do not expose auth
-  bootstrap, auth-file paths, project/repo writes, scheduling, email settings, or
-  other operator controls as MCP tools. MCP server code must use the narrow
-  MCP facade, not the broad core facade.
-- Treat the tach module graph as architecture policy, not style advice.
-- Keep runtime tuning in frozen settings dataclasses, not env. Env is for
-  credential/security ingress only.
-- Keep mutating batch writes explicit; never infer all-project or all-repo scope.
-- Mutating CLI commands must be safe to repeat. Return `unchanged`,
-  `already_present`, or `already_running` instead of duplicating work.
-- Treat `repo add` as idempotent project membership. If the repo is already
-  present, continue. It starts recon when baseline diagnostics are not ready;
-  the next step is `status REPO`.
-- For every report-aware top-level command, fetch `GET /api/ux/catalog` once;
-  do not cache or fall back. Treat `curatedActions` as authoritative so newly
-  published reports participate automatically. CLI report selectors are action
-  key suffixes without `audit.`; recon remains separate.
-- Treat catalog `auditAutofixes` as the source for curated autofix variants
-  (`actionKey`, `variantKey`, `title`, `description`, `fleetRunbookId`,
-  `status`, `sortOrder`). Manage them through canonical
-  `improvement-jobs` list/set operations on the operator CLI. The temporary
-  relationships are security/vuln-fix, tests/test-writing, and
-  dependency-hygiene/dependency-update; pentest is separate. MCP remains
-  read-only, and explicit `--repo REPO`, `--all-repos` with `--project`, or
-  `--all-projects` scope is required for batch writes. On the command line the
-  selector is the kind alone (`vuln-fix`), not the `audit/kind` pair.
-  `--all-projects` is the only unbounded scope and, like `project delete` and
-  `repo remove`, requires `--yes` from any non-TTY or `--json` caller.
-- Keep schedule timezone stored per schedule, run the container with the host
-  timezone, and use `schedule auto-time` to restore Enji-assigned run times.
-- Audit schedules use `audit-auto-runs/{actionKey}` with the exact action key
-  from `curatedActions`; `improvement-jobs` is autofix-only, never an audit
-  scheduling fallback. Batch scheduling must remain an explicit client-side
-  loop over the selected repositories and audits.
-- Surface stale/mixed report freshness explicitly; never hide it behind aggregate status.
-- Treat report language as account-wide; do not present redundant per-project
-  resolved values as independent settings.
-- Audit reads use report history and the selected Fleet task id, so prior usable
-  reports remain readable while newer audits run.
-- When reports are stale, compare audited and current git SHAs before judging
-  relevance. Use relevant stale or partial-ready reports immediately while fresh
-  audits run in parallel.
-- Enji audits are slow. Do not treat `wait` as a barrier before analysis. After
-  `audit start`, run `status`; read and summarize ready reports immediately,
-  then check running reports later with sparse polling.
-- For the simple question “are Enji audits ready?”, run exactly one
-  `status REPO` first. Do not call `wait`, `audit summary`, task-level
-  diagnostics, or extra cross-checks unless `status` shows a concrete anomaly
-  such as excessive runtime, mismatched current/audited SHA, contradictory
-  active-run/task state, reconciliation errors, or upstream unavailability.
-  Never use `wait --timeout 1s` as a refresh surrogate; `wait` is a blocking
-  completion wait, not a status probe.
-- `status` and `audit start` do not trust Enji active-runs alone; the service
-  keeps a short local started-task ledger and reconciles it with `task-by-id`
-  so incomplete active-runs projections do not trigger duplicate starts.
-- Cookie auth is temporary. Keep bearer/API-token support first-class.
+- `just verify` is the completion gate; never weaken, skip, or suppress a check
+  in it.
 - Never print secrets. Store credentials only in the configured auth file.
-
-## QA
-
-- `just verify` is the completion gate.
-- Run `just release-check` before `gh pr create`, and again with
-  `body=<file>` once the PR description exists. It runs the same three
-  validators CI runs, so a rejected commit message or a missing
-  `BEGIN_COMMIT_OVERRIDE` block is caught while it is still cheap to fix --
-  amending one commit rather than rewriting eight. Editing a PR body does not
-  re-run CI: `pull_request` fires on opened/synchronize/reopened, so a body-only
-  fix needs a close/reopen, and a plain re-run replays the stale payload.
-- Do not weaken, skip, or suppress Ruff, types, module boundaries, Vulture,
-  deptry, OpenAPI, CRAP, tests, or Docker build.
-- Update reconstructed OpenAPI, docs, and tests together when API behavior changes.
+- Run `just release-check` before `gh pr create`.
 
 ## Ops
 

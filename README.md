@@ -532,15 +532,15 @@ The Docker service starts a background cookie refresh loop. Keep
 just verify
 ```
 
-The completion gate includes Ruff, basedpyright, tach, Vulture,
-deptry, OpenAPI contract validation, CRAP <= 30 per function, tests, and Docker
-build. Keep CLI and MCP thin, keep product logic behind Application, and treat
-tach failures as architectural regressions rather than style nits.
-`just verify` also builds the image; release workflows additionally execute the
-credentialless runtime contract, while authenticated live smoke remains an
-operator gate because CI receives no Enji credentials.
+`just verify` is the completion gate and also builds the image. Release
+workflows additionally execute the credentialless runtime contract, while
+authenticated live smoke remains an operator gate because CI receives no Enji
+credentials.
 
-Use `CONTRIBUTING.md` for change intake, acceptance criteria, and handoff rules.
+See [docs/development.md](docs/development.md) for what the gate runs, the
+architecture constraints behind it, and the PR and release workflow.
+[CONTRIBUTING.md](CONTRIBUTING.md) covers change intake, acceptance criteria,
+and handoff rules.
 
 ## Security Notes
 
@@ -557,8 +557,10 @@ dependency/Docker/CI references.
   install notes.
 - [CONTRIBUTING.md](CONTRIBUTING.md): change intake, acceptance, and handoff
   rules.
-- [AGENTS.md](AGENTS.md): concise development, QA, and ops rules for coding
-  agents.
+- [AGENTS.md](AGENTS.md): entry point for coding agents — ops rules and
+  pointers to everything else.
+- [docs/development.md](docs/development.md): toolchain, architecture
+  constraints, product behavior contracts, gates, and the PR/release workflow.
 - [docs/decisions.md](docs/decisions.md): current architectural decision index
   and invariants.
 - [SECURITY.md](SECURITY.md): credential handling, supported versions, and MCP
