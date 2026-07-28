@@ -54,7 +54,7 @@ class FakeRunner:
             result = release_smoke.CommandResult(
                 0,
                 "repository: github@github.com:owner/repo\ncurrent_head: abc123\naudits: total=1 ready=1 active=0 stale=0 failed=0\n"
-                "  security  state=ready freshness=fresh\n",
+                "  security  state=ready freshness=fresh current_head=missing action=start_current_head_run\n",
                 "",
             )
         else:

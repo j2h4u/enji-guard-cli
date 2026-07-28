@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -23,6 +22,7 @@ from urllib.response import addinfourl
 EXIT_OK = 0
 EXIT_ASSERTION = 1
 EXIT_CONFIG = 2
+MIN_HUMAN_STATUS_AUDIT_PARTS = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,14 +184,18 @@ def _status_human_signature(output: str) -> tuple[str, str, dict[str, tuple[str,
             repository = line.removeprefix("repository: ").strip()
         elif line.startswith("current_head: "):
             head = line.removeprefix("current_head: ").strip()
-        elif match := re.fullmatch(
-            r"  (\S+)\s+state=(\S+)\s+freshness=(\S+)"
-            r"(?:\s+can_read=(\S+))?(?:\s+task_lifecycle=(\S+))?",
-            line,
-        ):
-            can_read = _status_bool(match.group(4))
-            task_lifecycle = match.group(5)
-            audits[match.group(1)] = (match.group(2), match.group(3), can_read, task_lifecycle)
+        elif line.startswith("  "):
+            parts = line.split()
+            if len(parts) < MIN_HUMAN_STATUS_AUDIT_PARTS:
+                continue
+            fields = dict(part.split("=", 1) for part in parts[1:] if "=" in part)
+            state = fields.get("state")
+            freshness = fields.get("freshness")
+            if state is None or freshness is None:
+                continue
+            can_read = _status_bool(fields.get("can_read"))
+            task_lifecycle = fields.get("task_lifecycle")
+            audits[parts[0]] = (state, freshness, can_read, task_lifecycle)
     if not repository or not head or not audits:
         raise SmokeFailure("human status omitted repository, head, or audits")
     return repository, head, audits
