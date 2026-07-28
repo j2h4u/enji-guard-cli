@@ -169,6 +169,39 @@ def test_gitlab_gateway_rejects_unsafe_project_url() -> None:
         )
 
 
+def test_gitlab_gateway_rejects_plaintext_provider_urls() -> None:
+    with pytest.raises(ValueError, match="unsafe"):
+        gateway_module._parse_credentials(
+            {
+                "data": [_credential(metadata={"api_base_url": "http://gitlab.example.com/api/v4"})],
+                "meta": {"limit": 50, "offset": 0, "total": 1},
+            },
+            scope=gateway_module.GitLabScope(),
+            limit=50,
+            offset=0,
+        )
+
+    credential_payload: JsonObjectPayload = {"data": [_credential()], "meta": {"limit": 50, "offset": 0, "total": 1}}
+    credential = gateway_module._parse_credentials(
+        credential_payload, scope=gateway_module.GitLabScope(), limit=50, offset=0
+    ).credentials[0]
+    with pytest.raises(ValueError, match="unsafe"):
+        gateway_module._parse_projects(
+            {
+                "data": [
+                    {
+                        "path_with_namespace": "team/service",
+                        "provider_project_id": 1,
+                        "web_url": "http://gitlab.example.com/team/service",
+                    }
+                ],
+                "meta": {"next_page": None},
+            },
+            credential=credential,
+            seen_project_ids=set(),
+        )
+
+
 def test_gitlab_http_endpoints_preserve_contract_queries(tmp_path: Path) -> None:
     class Client:
         def __init__(self) -> None:

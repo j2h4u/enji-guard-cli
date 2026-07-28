@@ -32,10 +32,10 @@ class AuthSessionService:
         self.settings = resolved_settings
 
     def import_cookie(self, raw_cookie: str) -> ImportCredentialPayload:
-        return _api.import_cookie(raw_cookie, self.auth_file)
+        return _api.import_cookie(raw_cookie, self.auth_file, base_url=self.settings.auth.base_url)
 
     def import_bearer_token(self, raw_token: str) -> ImportCredentialPayload:
-        return _api.import_bearer_token(raw_token, self.auth_file)
+        return _api.import_bearer_token(raw_token, self.auth_file, base_url=self.settings.auth.base_url)
 
     def load(self) -> AuthLoadResult:
         target = self.auth_file if self.auth_file is not None else _api.default_auth_file()

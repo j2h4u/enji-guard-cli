@@ -40,7 +40,13 @@ from enji_guard_cli.auth_session.store import (
     load_journal,
     stored_auth,
 )
-from enji_guard_cli.settings import DEFAULT_BASE_URL, AutoRefreshSettings, EnjiGuardSettings, default_settings
+from enji_guard_cli.settings import (
+    DEFAULT_BASE_URL,
+    AuthSettings,
+    AutoRefreshSettings,
+    EnjiGuardSettings,
+    default_settings,
+)
 from enji_guard_cli.transport import (
     EnjiHttpClient,
     EnjiHttpError,
@@ -332,7 +338,11 @@ def start_auto_refresh_task(
                 load_auth_fn=load_auth,
                 cookie_refresh_sleep_seconds_fn=cookie_refresh_sleep_seconds,
                 refresh_cookie_auth_fn=lambda path, auth, client: _refresh_cookie_auth(
-                    path, auth, cast(EnjiHttpClient, client), outcome_sink=outcome_sink
+                    path,
+                    auth,
+                    cast(EnjiHttpClient, client),
+                    settings=resolved_settings,
+                    outcome_sink=outcome_sink,
                 ),
                 adjudicate_unknown_outcome_fn=lambda path, client: adjudicate_unknown_outcome(
                     path, cast(EnjiHttpClient, client), event_sink=resolved_event_sink
@@ -493,8 +503,10 @@ async def _refresh_cookie_auth(
     stored_auth: StoredAuth,
     client: EnjiHttpClient,
     *,
+    settings: EnjiGuardSettings | None = None,
     outcome_sink: AuthOutcomeSink | None = None,
 ) -> StoredAuth:
+    auth_settings = (settings if settings is not None else default_settings()).auth
 
     class _HttpxRefreshExchange:
         async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
@@ -503,7 +515,7 @@ async def _refresh_cookie_auth(
                     method="POST",
                     url=f"{source['base_url']}{AUTH_REFRESH_PATH}",
                     operation="auth refresh",
-                    headers=_auth_refresh_headers(source),
+                    headers=_auth_refresh_headers(source, settings=auth_settings),
                     profile=RetryProfile.AUTH_REFRESH,
                 )
             )
@@ -534,8 +546,7 @@ def is_auth_invalid_response(response: EnjiHttpResponse) -> bool:
     return payload.get("code") == AUTH_INVALID_CODE
 
 
-def _auth_refresh_headers(stored_auth: StoredAuth) -> dict[str, str]:
-    settings = default_settings().auth
+def _auth_refresh_headers(stored_auth: StoredAuth, *, settings: AuthSettings) -> dict[str, str]:
     headers = auth_headers(stored_auth)
     headers.update(
         {
