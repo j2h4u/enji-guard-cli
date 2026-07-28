@@ -27,7 +27,6 @@ from enji_guard_cli.audit.tasks import AuditTaskContext, task_for_repo
 
 type AuditRunBatchResultItem = dict[str, object]
 type AuditRunBatchPayload = dict[str, object]
-type AuditRunSkippedPayload = dict[str, object]
 type GetRepoRerunState = Callable[[str], AuditRerunState]
 type StartAuditRun[TCreateRequest] = Callable[[TCreateRequest], object]
 type MakeAuditRunCreate[TCreateRequest] = Callable[[str, str, str, AuditTaskBody], TCreateRequest]
@@ -156,16 +155,6 @@ def _current_head_active_runs(active_runs: tuple[AuditRun, ...], current_sha: st
     if current_sha is None:
         return active_runs
     return tuple(run for run in active_runs if run.current_head_sha in {None, current_sha})
-
-
-def skipped_audit_payload(audit: str, action_key: str, active_runs: tuple[AuditRun, ...]) -> AuditRunSkippedPayload:
-    return {
-        "skipped": True,
-        "audit": audit,
-        "action_key": action_key,
-        "reason": "already_running",
-        "active_runs": list(active_runs),
-    }
 
 
 def _active_run_task(run: AuditRun) -> tuple[str | None, str | None]:

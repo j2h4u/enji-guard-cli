@@ -11,7 +11,7 @@ from enji_guard_cli.auth_session.api import (
     import_cookie,
 )
 from enji_guard_cli.auth_session.store import AuthLoaded, load_auth
-from enji_guard_cli.enji_gateway.client import get_json_object
+from enji_guard_cli.enji_gateway.client import ApiRequestSpec, normalize_json_object, request_json_object
 from enji_guard_cli.enji_gateway.http import (
     AuditRunCreate,
     EnjiApiError,
@@ -31,7 +31,6 @@ from enji_guard_cli.enji_gateway.http import (
     move_repo,
     preflight_repo_move,
     project_detail,
-    project_run_language,
     put_audit_auto_run,
     put_audit_email_preferences,
     put_user_language,
@@ -173,18 +172,15 @@ def test_report_language_endpoints_use_observed_paths_and_payloads(tmp_path: Pat
     client = FakeEnjiHttpClient(
         [
             json_response({"preferences": {"language": "ru"}}),
-            json_response({"language": "ru"}),
             json_response({"preferences": {"language": "en"}}),
         ]
     )
 
     assert user_preferences(auth_file, client, auth_port=AUTH_PORT) == {"preferences": {"language": "ru"}}
-    assert project_run_language("project_1", auth_file, client, auth_port=AUTH_PORT) == {"language": "ru"}
     assert put_user_language("en", auth_file, client, auth_port=AUTH_PORT) == {"preferences": {"language": "en"}}
 
     assert [(request.method, request.url, request.json_body) for request in client.requests] == [
         ("GET", "https://fleet.enji.ai/api/ux/user-preferences", None),
-        ("GET", "https://fleet.enji.ai/api/ux/projects/project_1/run-language", None),
         ("PUT", "https://fleet.enji.ai/api/ux/user-preferences", {"language": "en"}),
     ]
 
@@ -581,8 +577,20 @@ def test_gateway_concurrent_auth_invalid_requests_issue_no_refresh_posts(tmp_pat
 
     async def run() -> None:
         results = await asyncio.gather(
-            get_json_object(session, client, path="/api/ux/me/access", operation="access"),
-            get_json_object(session, client, path="/api/ux/me/access", operation="access"),
+            request_json_object(
+                session,
+                client,
+                ApiRequestSpec(
+                    method="GET", path="/api/ux/me/access", operation="access", parser=normalize_json_object
+                ),
+            ),
+            request_json_object(
+                session,
+                client,
+                ApiRequestSpec(
+                    method="GET", path="/api/ux/me/access", operation="access", parser=normalize_json_object
+                ),
+            ),
             return_exceptions=True,
         )
         assert all(isinstance(result, EnjiHttpError) for result in results)

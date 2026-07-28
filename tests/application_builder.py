@@ -266,9 +266,6 @@ class RecordingTargetService:
             return self.repositories
         return self._scoped(repo, project)
 
-    def linked_website_mapping(self, _project_id: str) -> Mapping[str, tuple[str, ...]]:
-        return {}
-
     def _scoped(self, repo: str | None, project: str | None) -> tuple[RepositoryRef, ...]:
         scoped = tuple(
             target

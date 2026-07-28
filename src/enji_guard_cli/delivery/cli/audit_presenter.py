@@ -1,6 +1,17 @@
 """Pure human-text presenters for Audit delivery DTOs."""
 
+import re
+
 from enji_guard_cli.application import AuditReadView
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~]|[@-Z\\-_])")
+_UNSAFE_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x0d\x0e-\x1f\x7f]")
+
+
+def terminal_safe_report_body(body: str) -> str:
+    """Strip terminal control sequences from upstream report Markdown."""
+
+    return _UNSAFE_CONTROL_RE.sub("", _ANSI_ESCAPE_RE.sub("", body))
 
 
 def render_audit_read(read: AuditReadView) -> str:
@@ -28,7 +39,6 @@ def render_audit_read(read: AuditReadView) -> str:
             metadata.append(f"score: {item.artifact.score:g}")
         if item.artifact.generated_at is not None:
             metadata.append(f"generated_at: {item.artifact.generated_at}")
-        sections.append(
-            "\n".join((f"## {selector}", *([warning] if warning else []), *metadata, "", item.artifact.body.strip()))
-        )
+        body = terminal_safe_report_body(item.artifact.body).strip()
+        sections.append("\n".join((f"## {selector}", *([warning] if warning else []), *metadata, "", body)))
     return "\n\n".join(sections)

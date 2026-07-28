@@ -1,6 +1,5 @@
 """Application ports for Portfolio and its narrow Audit dependency."""
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -73,8 +72,6 @@ class PortfolioTargetService(Protocol):
         all_projects: bool = False,
         operation: str = "mutation",
     ) -> tuple[RepositoryRef, ...]: ...
-
-    def linked_website_mapping(self, project_id: str) -> Mapping[str, tuple[str, ...]]: ...
 
 
 @dataclass(frozen=True, slots=True)

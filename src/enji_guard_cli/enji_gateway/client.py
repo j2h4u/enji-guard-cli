@@ -204,26 +204,6 @@ async def request_no_content(
     return normalize_json_object(payload)
 
 
-async def get_json_object(
-    session: EnjiApiSession,
-    client: EnjiHttpClient,
-    *,
-    path: str,
-    operation: str,
-) -> dict[str, object]:
-    return await request_json_object(
-        session,
-        client,
-        ApiRequestSpec(
-            method="GET",
-            path=path,
-            operation=operation,
-            retry_profile=RetryProfile.READ,
-            parser=normalize_json_object,
-        ),
-    )
-
-
 async def request_json_object[T](
     session: EnjiApiSession,
     client: EnjiHttpClient,

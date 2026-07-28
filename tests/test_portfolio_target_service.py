@@ -75,9 +75,3 @@ def test_target_service_rejects_conflicting_batch_scope() -> None:
 
     with pytest.raises(ValueError, match="all-repos or --all-projects"):
         service.write_targets(None, "p1", all_repos=True, all_projects=True)
-
-
-def test_target_service_preserves_linked_website_mapping() -> None:
-    service = GatewayPortfolioTargetService(cast(PortfolioGatewayPort, Gateway()))
-
-    assert service.linked_website_mapping("p1") == {"https://pets.example": ("r1",)}

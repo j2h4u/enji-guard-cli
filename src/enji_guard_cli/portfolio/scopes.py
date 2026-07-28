@@ -39,9 +39,3 @@ class MutationScope:
         if repo is None:
             raise ValueError(f"{operation}: pass REPO, --all-repos with --project, or --all-projects")
         return cls("repo", repo=repo, project=project)
-
-
-def validate_write_scope(
-    repo: str | None, project: str | None, *, all_repos: bool, all_projects: bool, operation: str
-) -> MutationScope:
-    return MutationScope.from_args(repo, project, all_repos=all_repos, all_projects=all_projects, operation=operation)

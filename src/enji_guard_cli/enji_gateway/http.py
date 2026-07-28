@@ -34,7 +34,6 @@ from enji_guard_cli.enji_gateway.contract import (
     PROJECT_REPO_CONNECTION_ENDPOINT_SPEC,
     PROJECT_REPO_DELETE_ENDPOINT_SPEC,
     PROJECT_REPOS_ADD_ENDPOINT_SPEC,
-    PROJECT_RUN_LANGUAGE_ENDPOINT_SPEC,
     PROJECTS_ENDPOINT_SPEC,
     REPO_ACTIVE_RUNS_ENDPOINT_SPEC,
     REPO_AUDIT_REPORTS_ENDPOINT_SPEC,
@@ -308,21 +307,6 @@ def put_user_language(
         auth_file,
         client,
         USER_PREFERENCES_PUT_ENDPOINT.request(json_body=cast(EnjiJsonValue, request)),
-        auth_port=auth_port,
-    )
-
-
-def project_run_language(
-    project_id: str,
-    auth_file: Path | None = None,
-    client: EnjiHttpClient | None = None,
-    *,
-    auth_port: CredentialReader,
-) -> JsonObjectPayload:
-    return run_api_request(
-        auth_file,
-        client,
-        PROJECT_RUN_LANGUAGE_ENDPOINT.request(path_params={"projectId": project_id}),
         auth_port=auth_port,
     )
 
@@ -856,10 +840,6 @@ PROJECT_DETAIL_ENDPOINT = ApiEndpoint(
 )
 PROJECT_ACTIVE_RUNS_ENDPOINT = ApiEndpoint(
     spec=PROJECT_ACTIVE_RUNS_ENDPOINT_SPEC,
-    parser=_parse_json_object_payload,
-)
-PROJECT_RUN_LANGUAGE_ENDPOINT = ApiEndpoint(
-    spec=PROJECT_RUN_LANGUAGE_ENDPOINT_SPEC,
     parser=_parse_json_object_payload,
 )
 FLEET_PROJECT_CREATE_ENDPOINT = ApiEndpoint(
