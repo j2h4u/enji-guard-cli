@@ -2,7 +2,7 @@
 
 FROM python:3.14.6-slim-trixie@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.17@sha256:c8e5089d066253e105538cd1d77ad4c124631bfcb7ed918f25b2ee1b8b0903fb \
+COPY --from=ghcr.io/astral-sh/uv:0.11.18@sha256:78bc42400d77b0678ba95765305c826652ed5431f399257271dda681d0318f03 \
     /uv /usr/local/bin/uv
 
 ENV UV_COMPILE_BYTECODE=1 \

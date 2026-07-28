@@ -11,7 +11,7 @@ import asyncio
 import threading
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from typing import cast
@@ -26,7 +26,7 @@ from enji_guard_cli.application.errors import ApplicationCommandError
 from enji_guard_cli.delivery.mcp.server import MCP_TOOL_NAMES, create_mcp_server, run_mcp_server_async
 from enji_guard_cli.mcp_facade import McpQueryFacade
 from enji_guard_cli.runtime_observability.journey import AgentJourney, JourneyBody, run_agent_journey
-from enji_guard_cli.settings import RepositorySortName
+from enji_guard_cli.settings import RepoSettings, RepositorySortName, default_settings
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +158,17 @@ def test_portfolio_overview_treats_a_blank_project_as_account_wide(monkeypatch: 
     assert facade.overview_calls[0].project is None
     assert facade.overview_calls[0].sort == "default"
     assert served.journeys == [RecordedJourney(MCP_TOOL_NAMES[0], "mcp", "mcp", "unknown")]
+
+
+def test_portfolio_overview_uses_configured_default_sort(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = replace(default_settings(), repo=RepoSettings(default_sort="weakest"))
+    monkeypatch.setattr(server_module, "default_settings", lambda: settings)
+    facade = RecordingQueryFacade(payload={"projects": []})
+    served = _served(monkeypatch, facade)
+
+    _call(served, MCP_TOOL_NAMES[0], {"project": ""})
+
+    assert facade.overview_calls[0].sort == "weakest"
 
 
 def test_portfolio_overview_reports_a_project_selector_when_one_is_named(

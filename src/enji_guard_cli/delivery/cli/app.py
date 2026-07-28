@@ -816,7 +816,7 @@ def run(
 def status(
     repo: Annotated[str | None, typer.Argument()] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
-    sort: Annotated[str, typer.Option("--sort", help=SORT_HELP)] = "default",
+    sort: Annotated[str | None, typer.Option("--sort", help=SORT_HELP)] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     if repo is not None:
@@ -827,7 +827,9 @@ def status(
         )
         return
     _run(
-        lambda: _application().portfolio.portfolio_overview(_selected_project(project), _repository_sort(sort)),
+        lambda: _application().portfolio.portfolio_overview(
+            _selected_project(project), _repository_sort(sort or default_settings().repo.default_sort)
+        ),
         _json_output(json_output),
         PORTFOLIO,
     )

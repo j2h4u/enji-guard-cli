@@ -8,6 +8,7 @@ from one that translated them wrongly.
 
 import importlib
 import json
+from dataclasses import replace
 from typing import cast
 
 import pytest
@@ -58,6 +59,7 @@ from enji_guard_cli.gitlab.models import (
 )
 from enji_guard_cli.portfolio.models import ProjectDetail
 from enji_guard_cli.runtime_observability.supervisor import RuntimeServiceOptions
+from enji_guard_cli.settings import RepoSettings, default_settings
 
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
 
@@ -291,6 +293,28 @@ def test_portfolio_status_applies_the_requested_repository_sort(monkeypatch: pyt
     Ports(portfolio=portfolio).install(monkeypatch)
 
     result = CliRunner().invoke(app, ["--project", "Pets", "status", "--sort", "weakest", "--json"])
+
+    assert result.exit_code == 0
+    payload = cast(dict[str, object], json.loads(result.stdout))
+    projects = cast(list[dict[str, object]], payload["projects"])
+    repositories = cast(list[dict[str, object]], projects[0]["repositories"])
+    locators = [
+        cast(dict[str, object], cast(dict[str, object], item["repository"])["identity"])["locator"]
+        for item in repositories
+    ]
+    assert locators == ["acme/weak", "acme/strong"]
+
+
+def test_portfolio_status_uses_configured_default_repository_sort(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The repo settings default is the delivery default, not decorative configuration."""
+    strong = repository("acme/strong", repo_id="r-strong", scores={"tests": 90, "vulns": 80})
+    weak = repository("acme/weak", repo_id="r-weak", scores={"tests": 70, "vulns": 10})
+    portfolio = RecordingPortfolioGateway((ProjectDetail(PETS, (strong, weak)),))
+    Ports(portfolio=portfolio).install(monkeypatch)
+    settings = replace(default_settings(), repo=RepoSettings(default_sort="weakest"))
+    monkeypatch.setattr(cli_module, "default_settings", lambda: settings)
+
+    result = CliRunner().invoke(app, ["--project", "Pets", "status", "--json"])
 
     assert result.exit_code == 0
     payload = cast(dict[str, object], json.loads(result.stdout))

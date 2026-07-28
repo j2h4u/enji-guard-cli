@@ -226,16 +226,17 @@ For audits:
 
 ```bash
 docker exec -i enji-guard-cli enji-guard audit start "$REPO" --all
-docker exec -i enji-guard-cli enji-guard wait "$REPO"
+docker exec -i enji-guard-cli enji-guard status "$REPO"
 docker exec -i enji-guard-cli enji-guard audit summary "$REPO"
 docker exec -i enji-guard-cli enji-guard audit read "$REPO"
 ```
 
-Recon and audit runs can take tens of minutes. Use `status` for a snapshot,
-`wait` as a follow-up completion check, `audit summary` for compact triage,
-and `audit read` after audits are ready. `status` shows stale audits
-explicitly and uses `audited=mixed` when
-audits were generated from different commits. `audit start --json`
+Recon and audit runs can take tens of minutes. Use `status` first for a
+snapshot and stop there when the answer is already clear. Use `wait` only when
+you intentionally want to block until completion; do not use short timeouts as
+a refresh mechanism. Use `audit summary` for compact triage, and `audit read`
+after reports are available. `status` shows stale audits explicitly and uses
+`audited=mixed` when audits were generated from different commits. `audit start --json`
 returns a `results` matrix, one item per requested audit, with states
 such as `started`, `queued`, `already_running`, `up_to_date`, or `failed`.
 Prefer reading audits through CLI/MCP instead of relying on email; disable
