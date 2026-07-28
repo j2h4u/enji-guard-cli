@@ -223,6 +223,24 @@ async def _wait_until_revision_changes(
     task to wake, because the task that must act is this one.
     """
 
+    if await _wait_for_credential_change(
+        auth_file=auth_file,
+        expected_revision=source_revision,
+        timeout_seconds=0,
+        poll_seconds=refresh_settings.revision_poll_seconds,
+        dependencies=dependencies,
+    ):
+        return
+    if await dependencies.adjudicate_unknown_outcome_fn(auth_file, client):
+        await _wait_for_credential_change(
+            auth_file=auth_file,
+            expected_revision=source_revision,
+            timeout_seconds=refresh_settings.adjudication_poll_seconds,
+            poll_seconds=refresh_settings.revision_poll_seconds,
+            dependencies=dependencies,
+        )
+        return
+
     while not await _wait_for_credential_change(
         auth_file=auth_file,
         expected_revision=source_revision,

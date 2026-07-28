@@ -536,6 +536,66 @@ def test_a_parked_refresh_loop_resumes_after_adjudication(tmp_path: Path) -> Non
     assert not pending_rotation_path(auth_file).exists()
 
 
+def test_parked_refresh_loop_adjudicates_before_sleeping_then_cools_down() -> None:
+    """Do not burn the whole access-token window before the first probe.
+
+    Refresh is scheduled one lead window before access-token expiry.  Waiting
+    for a full adjudication poll interval before the first probe can therefore
+    make the adjudication guardrail impossible to exercise with default
+    settings.
+    """
+
+    adjudications = 0
+    events: list[str] = []
+    sleeps: list[float] = []
+    clock = 0.0
+
+    async def adjudicate(_path: Path, _client: object) -> bool:
+        nonlocal adjudications
+        adjudications += 1
+        events.append("adjudicate")
+        return True
+
+    async def sleep(seconds: float) -> None:
+        nonlocal clock
+        events.append("sleep")
+        sleeps.append(seconds)
+        clock += seconds
+
+    def revision_reader(_path: Path) -> str:
+        events.append("revision")
+        return "r1"
+
+    async def exercise() -> None:
+        await auto_refresh_module._wait_until_revision_changes(
+            auth_file=Path("auth.json"),
+            source_revision="r1",
+            refresh_settings=AutoRefreshSettings(
+                enabled=True,
+                lead_seconds=600,
+                fallback_seconds=900,
+                adjudication_poll_seconds=300,
+                revision_poll_seconds=5,
+            ),
+            dependencies=_loop_dependencies(
+                changes=_never_changes,
+                overrides=_LoopOverrides(
+                    revision_reader=revision_reader,
+                    monotonic_fn=lambda: clock,
+                    sleep_fn=sleep,
+                    adjudicate_fn=adjudicate,
+                ),
+            ),
+            client=object(),
+        )
+
+    asyncio.run(exercise())
+
+    assert adjudications == 1
+    assert events[:2] == ["revision", "adjudicate"]
+    assert sum(sleeps) == 300
+
+
 @pytest.mark.parametrize(
     ("loaded", "expected_code"),
     [
