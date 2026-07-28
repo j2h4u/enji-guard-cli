@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.1.1](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.0...v3.1.1) (2026-07-28)
+
+
+### Build
+
+* reject an unparseable commit message when it is written ([5576e43](https://github.com/j2h4u/enji-guard-cli/commit/5576e433c763988a9d283525b07251ec024e2d08))
+
+
+### Documentation
+
+* **agents:** say who reads this file before saying what to do ([#210](https://github.com/j2h4u/enji-guard-cli/issues/210)) ([6e6a81a](https://github.com/j2h4u/enji-guard-cli/commit/6e6a81aa0f17dbb87ae82156a6c323f63b573ef0))
+* delete the architecture cleanup work order, which is finished ([5576e43](https://github.com/j2h4u/enji-guard-cli/commit/5576e433c763988a9d283525b07251ec024e2d08))
+* lead the README with the problem, not the implementation ([5576e43](https://github.com/j2h4u/enji-guard-cli/commit/5576e433c763988a9d283525b07251ec024e2d08))
+* make the package metadata say what the tool is for ([5576e43](https://github.com/j2h4u/enji-guard-cli/commit/5576e433c763988a9d283525b07251ec024e2d08))
+* split development rules out of AGENTS.md into docs/development.md ([5576e43](https://github.com/j2h4u/enji-guard-cli/commit/5576e433c763988a9d283525b07251ec024e2d08))
+* stop duplicating release-note rules and make README navigable ([5576e43](https://github.com/j2h4u/enji-guard-cli/commit/5576e433c763988a9d283525b07251ec024e2d08))
+
 ## [3.1.0](https://github.com/j2h4u/enji-guard-cli/compare/v3.0.5...v3.1.0) (2026-07-27)
 
 
