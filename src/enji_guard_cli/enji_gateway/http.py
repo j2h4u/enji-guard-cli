@@ -196,25 +196,43 @@ def projects(
     return run_api_request(auth_file, client, PROJECTS_ENDPOINT.request(), auth_port=auth_port)
 
 
-def gitlab_credentials(  # noqa: PLR0913
+@dataclass(frozen=True, slots=True)
+class GitLabCredentialsHttpRequest:
+    scope_type: str | None = None
+    scope_owner: str | None = None
+    limit: int = 50
+    offset: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class GitLabProjectsHttpRequest:
+    credential_id: str
+    host: str | None = None
+    api_base_url: str | None = None
+    search: str | None = None
+    page: int = 1
+    per_page: int = 50
+    scope_type: str | None = None
+    scope_owner: str | None = None
+
+
+def gitlab_credentials(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    scope_type: str | None = None,
-    scope_owner: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    request: GitLabCredentialsHttpRequest | None = None,
     auth_port: CredentialReader,
 ) -> JsonObjectPayload:
+    resolved = request or GitLabCredentialsHttpRequest()
     query: dict[str, str] = {
         "credential_type": "git",
         "provider": "gitlab",
     }
     for key, value in (
-        ("scope_type", scope_type),
-        ("scope_owner", scope_owner),
-        ("limit", str(limit)),
-        ("offset", str(offset)),
+        ("scope_type", resolved.scope_type),
+        ("scope_owner", resolved.scope_owner),
+        ("limit", str(resolved.limit)),
+        ("offset", str(resolved.offset)),
     ):
         normalized = _optional_query_value(value)
         if normalized is not None:
@@ -227,31 +245,24 @@ def gitlab_credentials(  # noqa: PLR0913
     )
 
 
-def gitlab_projects(  # noqa: PLR0913
+def gitlab_projects(
     auth_file: Path | None = None,
     client: EnjiHttpClient | None = None,
     *,
-    credential_id: str,
-    host: str | None = None,
-    api_base_url: str | None = None,
-    search: str | None = None,
-    page: int = 1,
-    per_page: int = 50,
-    scope_type: str | None = None,
-    scope_owner: str | None = None,
+    request: GitLabProjectsHttpRequest,
     auth_port: CredentialReader,
 ) -> JsonObjectPayload:
     query: dict[str, str] = {
-        "credential_id": credential_id,
+        "credential_id": request.credential_id,
     }
     for key, value in (
-        ("host", host),
-        ("api_base_url", api_base_url),
-        ("search", search),
-        ("page", str(page)),
-        ("per_page", str(per_page)),
-        ("scope_type", scope_type),
-        ("scope_owner", scope_owner),
+        ("host", request.host),
+        ("api_base_url", request.api_base_url),
+        ("search", request.search),
+        ("page", str(request.page)),
+        ("per_page", str(request.per_page)),
+        ("scope_type", request.scope_type),
+        ("scope_owner", request.scope_owner),
     ):
         normalized = _optional_query_value(value)
         if normalized is not None:

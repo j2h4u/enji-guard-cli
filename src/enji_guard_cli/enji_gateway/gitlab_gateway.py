@@ -11,6 +11,7 @@ from enji_guard_cli.enji_gateway import http
 from enji_guard_cli.gitlab import (
     GitLabCredential,
     GitLabCredentialPage,
+    GitLabCredentialsQuery,
     GitLabCredentialsResult,
     GitLabProject,
     GitLabProjectPage,
@@ -38,27 +39,25 @@ class GitLabGateway:
             raise RuntimeError("GitLab gateway auth port is not configured")
         return self.auth_port
 
-    def list_credentials(
-        self,
-        *,
-        scope_type: str | None = None,
-        scope_owner: str | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> GitLabCredentialsResult:
-        if limit <= 0 or offset < 0:
+    def list_credentials(self, query: GitLabCredentialsQuery | None = None) -> GitLabCredentialsResult:
+        resolved = query or GitLabCredentialsQuery()
+        if resolved.limit <= 0 or resolved.offset < 0:
             raise ValueError("credential limit must be positive and offset must be non-negative")
-        scope_type, scope_owner = _normalize_scope(scope_type, scope_owner)
+        scope_type, scope_owner = _normalize_scope(resolved.scope_type, resolved.scope_owner)
         payload = http.gitlab_credentials(
             self.auth_file,
             self.client,
-            scope_type=scope_type,
-            scope_owner=scope_owner,
-            limit=limit,
-            offset=offset,
+            request=http.GitLabCredentialsHttpRequest(
+                scope_type=scope_type,
+                scope_owner=scope_owner,
+                limit=resolved.limit,
+                offset=resolved.offset,
+            ),
             auth_port=self._auth_port(),
         )
-        return _parse_credentials(payload, scope=GitLabScope(scope_type, scope_owner), limit=limit, offset=offset)
+        return _parse_credentials(
+            payload, scope=GitLabScope(scope_type, scope_owner), limit=resolved.limit, offset=resolved.offset
+        )
 
     def discover_projects(self, query: GitLabProjectsQuery) -> GitLabProjectsResult:
         if query.page <= 0 or query.per_page <= 0:
@@ -82,14 +81,16 @@ class GitLabGateway:
             payload = http.gitlab_projects(
                 self.auth_file,
                 self.client,
-                credential_id=credential.id,
-                host=credential.git_host,
-                api_base_url=credential.api_base_url,
-                search=query.search,
-                page=next_page,
-                per_page=query.per_page,
-                scope_type=scope_type,
-                scope_owner=scope_owner,
+                request=http.GitLabProjectsHttpRequest(
+                    credential_id=credential.id,
+                    host=credential.git_host,
+                    api_base_url=credential.api_base_url,
+                    search=query.search,
+                    page=next_page,
+                    per_page=query.per_page,
+                    scope_type=scope_type,
+                    scope_owner=scope_owner,
+                ),
                 auth_port=self._auth_port(),
             )
             parsed_projects, returned_next = _parse_projects(
@@ -125,7 +126,7 @@ class GitLabGateway:
         scope_owner: str | None,
     ) -> GitLabCredential:
         requested_id = _optional_str(credential_id)
-        first = self.list_credentials(scope_type=scope_type, scope_owner=scope_owner, limit=50, offset=0)
+        first = self.list_credentials(GitLabCredentialsQuery(scope_type=scope_type, scope_owner=scope_owner))
         expected_total = first.pagination.total
         expected_limit = first.pagination.limit
         credentials = list(first.credentials)
@@ -138,10 +139,12 @@ class GitLabGateway:
                 raise ValueError("GitLab credential pagination repeated an offset")
             seen_offsets.add(offset)
             current = self.list_credentials(
-                scope_type=scope_type,
-                scope_owner=scope_owner,
-                limit=expected_limit,
-                offset=offset,
+                GitLabCredentialsQuery(
+                    scope_type=scope_type,
+                    scope_owner=scope_owner,
+                    limit=expected_limit,
+                    offset=offset,
+                )
             )
             if current.pagination.total != expected_total:
                 raise ValueError("GitLab credential pagination has inconsistent total")

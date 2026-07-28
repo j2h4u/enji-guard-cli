@@ -2,17 +2,15 @@
 
 from typing import Protocol
 
-from enji_guard_cli.gitlab.models import GitLabCredentialsResult, GitLabProjectsQuery, GitLabProjectsResult
+from enji_guard_cli.gitlab.models import (
+    GitLabCredentialsQuery,
+    GitLabCredentialsResult,
+    GitLabProjectsQuery,
+    GitLabProjectsResult,
+)
 
 
 class GitLabDiscoveryPort(Protocol):
-    def list_credentials(
-        self,
-        *,
-        scope_type: str | None = None,
-        scope_owner: str | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> GitLabCredentialsResult: ...
+    def list_credentials(self, query: GitLabCredentialsQuery | None = None) -> GitLabCredentialsResult: ...
 
     def discover_projects(self, query: GitLabProjectsQuery) -> GitLabProjectsResult: ...

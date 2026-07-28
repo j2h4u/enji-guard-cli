@@ -137,7 +137,7 @@ def test_retry_after_seconds_accepts_delta_seconds() -> None:
 
 
 def test_retry_config_build_defaults_to_bounded_retries() -> None:
-    retry = RetryConfig().build()
+    retry = RetryConfig()
 
     assert retry.total == 3
     assert retry.backoff_factor == 0.5

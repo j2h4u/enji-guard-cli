@@ -41,10 +41,6 @@ class RetryConfig:
     status_forcelist: tuple[int, ...] = DEFAULT_TRANSPORT_RETRYABLE_STATUS_CODES
     respect_retry_after_header: bool = DEFAULT_TRANSPORT_RESPECT_RETRY_AFTER_HEADER
 
-    def build(self) -> Self:
-        """Keep a small policy object for callers; execution is owned by Tenacity below."""
-        return self
-
 
 @dataclass(frozen=True, slots=True)
 class EnjiHttpRequest:

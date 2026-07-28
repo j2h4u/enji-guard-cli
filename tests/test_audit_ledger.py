@@ -154,7 +154,7 @@ def test_reconcile_terminal_detail_suppresses_only_same_task_id(tmp_path: Path) 
     )
 
     assert [run.task_id for run in runs] == ["task-new"]
-    assert ledger.active_for("repo") == ()
+    assert ledger.reconcile("repo", (), lambda task_id: AuditTaskDetail(task_id, "completed"), now=now) == ()
 
 
 def test_reconcile_keeps_transient_lookup_guard_then_expires_it(tmp_path: Path) -> None:
@@ -182,7 +182,7 @@ def test_reconcile_keeps_transient_lookup_guard_then_expires_it(tmp_path: Path) 
 
     assert [run.task_id for run in within_grace] == ["task-1"]
     assert [run.task_id for run in after_grace] == ["task-1"]
-    assert ledger.active_for("repo") == ()
+    assert ledger.reconcile("repo", (), missing, now=observed + timedelta(seconds=62)) == ()
 
 
 def test_reconcile_transient_lookup_failure_keeps_guard_until_ttl(tmp_path: Path) -> None:
@@ -207,10 +207,9 @@ def test_reconcile_transient_lookup_failure_keeps_guard_until_ttl(tmp_path: Path
 
     runs = ledger.reconcile("repo", (), unavailable, now=observed + timedelta(seconds=90))
     assert [run.task_id for run in runs] == ["task-1"]
-    assert ledger.active_for("repo", now=observed + timedelta(seconds=90))
+    assert ledger.reconcile("repo", (), unavailable, now=observed + timedelta(seconds=90))
 
     assert ledger.reconcile("repo", (), unavailable, now=observed + timedelta(seconds=121)) == ()
-    assert ledger.active_for("repo", now=observed + timedelta(seconds=121)) == ()
 
 
 def test_idless_guard_survives_terminal_history(tmp_path: Path) -> None:
@@ -240,7 +239,7 @@ def test_idless_guard_survives_terminal_history(tmp_path: Path) -> None:
     )
 
     assert {run.task_id for run in runs} == {None, "old"}
-    assert ledger.active_for("repo", now=observed)
+    assert {run.task_id for run in ledger.reconcile("repo", (), unexpected, now=observed)} == {None}
 
 
 def test_reconcile_expired_entry_does_not_lookup(tmp_path: Path) -> None:

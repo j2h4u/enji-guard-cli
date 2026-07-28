@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 from typing import cast
 
@@ -50,6 +51,7 @@ TRIVY_ACTION = "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c
 PYTHON_UV_ACTION = ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
 PYTHON_VERSION = "3.14"
 UV_VERSION = "0.11.33"
+PYTHON_REQUIRES_PATTERN = re.compile(r"^>=([0-9]+[.][0-9]+)$")
 
 
 def _compose_common_service_fields(path: Path) -> dict[str, object]:
@@ -75,6 +77,15 @@ def _compose_config(path: Path, *, host_port: str | None = None) -> dict[str, ob
         text=True,
     )
     return cast(dict[str, object], json.loads(result.stdout))
+
+
+def _pyproject_python_version() -> str:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = cast(dict[str, object], pyproject["project"])
+    requires_python = cast(str, project["requires-python"])
+    match = PYTHON_REQUIRES_PATTERN.fullmatch(requires_python)
+    assert match is not None, "project.requires-python must stay an exact >=major.minor runtime contract"
+    return match.group(1)
 
 
 @pytest.mark.docker
@@ -280,6 +291,7 @@ def test_python_uv_setup_contract_matches_the_dockerfile_version() -> None:
     action = PYTHON_UV_ACTION.read_text(encoding="utf-8")
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
+    assert _pyproject_python_version() == PYTHON_VERSION
     assert f'python-version: "{PYTHON_VERSION}"' in action
     assert f'version: "{UV_VERSION}"' in action
     assert re.search(rf"^FROM python:{re.escape(PYTHON_VERSION)}[.]", dockerfile, flags=re.MULTILINE)

@@ -60,12 +60,6 @@ def cookie_value(cookie_header: str, name: str) -> str | None:
     return cookie[name].value
 
 
-def cookie_count(cookie_header: str) -> int:
-    cookie = SimpleCookie()
-    cookie.load(cookie_header)
-    return len(cookie)
-
-
 def jwt_expires_at(token: str) -> datetime | None:
     parts = token.split(".")
     if len(parts) < JWT_MIN_PART_COUNT:

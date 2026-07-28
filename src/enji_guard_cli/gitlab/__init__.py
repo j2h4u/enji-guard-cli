@@ -3,6 +3,7 @@
 from enji_guard_cli.gitlab.models import (
     GitLabCredential,
     GitLabCredentialPage,
+    GitLabCredentialsQuery,
     GitLabCredentialsResult,
     GitLabProject,
     GitLabProjectPage,
@@ -15,6 +16,7 @@ from enji_guard_cli.gitlab.ports import GitLabDiscoveryPort
 __all__ = [
     "GitLabCredential",
     "GitLabCredentialPage",
+    "GitLabCredentialsQuery",
     "GitLabCredentialsResult",
     "GitLabDiscoveryPort",
     "GitLabProject",
