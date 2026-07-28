@@ -58,6 +58,12 @@ operational hardening for maintenance and future releases.
   catch operational regressions before merge.
 - Refine MCP audit-reading ergonomics with real agents while keeping the
   surface centered on portfolio overview and concrete repository audits.
+- Add an agent feedback loop back into Enji Guard. The confirmed
+  `POST /api/ux/feedback` endpoint is not exposed by the CLI today; a future
+  operator command should let agents send structured feedback about audit
+  quality, false positives, missed findings, and autofix usefulness. The goal
+  is not another broad write surface, but a narrow channel for closing the loop
+  when Enji Guard suggestions or autofixes are low quality.
 - Add a protected production-deploy workflow for an already published immutable
   GHCR image. The current deployment path is intentionally manual; the next
   step is a `workflow_dispatch` promotion with protected-environment approval,
