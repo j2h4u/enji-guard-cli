@@ -100,6 +100,23 @@ class GitLabProjectsView:
     pagination: GitLabProjectPageView
 
 
+@dataclass(frozen=True, slots=True)
+class GitLabProjectsRequest:
+    """Operator request for listing GitLab projects.
+
+    This keeps the application facade cohesive while the Typer handler remains
+    endpoint-shaped for option reflection.
+    """
+
+    credential_id: str | None = None
+    search: str | None = None
+    page: int = 1
+    per_page: int = 50
+    all_pages: bool = False
+    scope_type: str | None = None
+    scope_owner: str | None = None
+
+
 def _scope_view(scope: GitLabScope) -> GitLabScopeView:
     return GitLabScopeView(scope_type=scope.scope_type, scope_owner=scope.scope_owner)
 
@@ -159,26 +176,17 @@ class GitLabFacade:
             ),
         )
 
-    def gitlab_projects(  # noqa: PLR0913
-        self,
-        *,
-        credential_id: str | None = None,
-        search: str | None = None,
-        page: int = 1,
-        per_page: int = 50,
-        all_pages: bool = False,
-        scope_type: str | None = None,
-        scope_owner: str | None = None,
-    ) -> GitLabProjectsView:
+    def gitlab_projects(self, request: GitLabProjectsRequest | None = None) -> GitLabProjectsView:
+        resolved = request or GitLabProjectsRequest()
         result: GitLabProjectsResult = self.gateway.discover_projects(
             GitLabProjectsQuery(
-                credential_id=credential_id,
-                search=search,
-                page=page,
-                per_page=per_page,
-                all_pages=all_pages,
-                scope_type=scope_type,
-                scope_owner=scope_owner,
+                credential_id=resolved.credential_id,
+                search=resolved.search,
+                page=resolved.page,
+                per_page=resolved.per_page,
+                all_pages=resolved.all_pages,
+                scope_type=resolved.scope_type,
+                scope_owner=resolved.scope_owner,
             )
         )
         return GitLabProjectsView(
@@ -200,6 +208,7 @@ __all__ = [
     "GitLabFacade",
     "GitLabProjectPageView",
     "GitLabProjectView",
+    "GitLabProjectsRequest",
     "GitLabProjectsView",
     "GitLabScopeView",
 ]

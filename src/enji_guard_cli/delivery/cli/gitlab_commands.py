@@ -6,7 +6,7 @@ from typing import Annotated, Protocol, TypeVar
 
 import typer
 
-from enji_guard_cli.application import Application
+from enji_guard_cli.application import Application, GitLabProjectsRequest
 from enji_guard_cli.delivery.cli.presentation import CliPresentation
 from enji_guard_cli.delivery.cli.presenters import GITLAB_CREDENTIALS, GITLAB_PROJECTS
 
@@ -62,13 +62,15 @@ def register_gitlab_commands(gitlab_app: typer.Typer, deps: GitLabCommandDeps) -
     ) -> None:
         deps.run_command(
             lambda: deps.application().gitlab.gitlab_projects(
-                credential_id=credential_id,
-                search=search,
-                page=page,
-                per_page=per_page,
-                all_pages=all_pages,
-                scope_type=scope_type,
-                scope_owner=scope_owner,
+                GitLabProjectsRequest(
+                    credential_id=credential_id,
+                    search=search,
+                    page=page,
+                    per_page=per_page,
+                    all_pages=all_pages,
+                    scope_type=scope_type,
+                    scope_owner=scope_owner,
+                )
             ),
             deps.json_output(json_output),
             GITLAB_PROJECTS,
