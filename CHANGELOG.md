@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.1.9](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.8...v3.1.9) (2026-07-28)
+
+
+### Fixes
+
+* prune dead code and typed request seams ([0c7567d](https://github.com/j2h4u/enji-guard-cli/commit/0c7567dea695f79e7804b0bda891d58326b49d5c))
+
+
+### Refactoring
+
+* use cohesive GitLab project request ([0c7567d](https://github.com/j2h4u/enji-guard-cli/commit/0c7567dea695f79e7804b0bda891d58326b49d5c))
+
 ## [3.1.8](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.7...v3.1.8) (2026-07-28)
 
 
