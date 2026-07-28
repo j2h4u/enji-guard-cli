@@ -1,7 +1,8 @@
 [project]
 name = "enji-guard-cli"
 dynamic = ["version"]
-description = "Command-line tools for Enji Guard."
+description = "Drive Enji Guard repository audits from an agent loop, without a browser."
+keywords = ["enji", "code-audit", "coding-agent", "mcp", "cli"]
 license = "PolyForm-Noncommercial-1.0.0"
 requires-python = ">=3.14"
 dependencies = [
@@ -11,6 +12,12 @@ dependencies = [
     "typer>=0.27.0",
     "watchfiles>=1.2.0,<2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/j2h4u/enji-guard-cli"
+Repository = "https://github.com/j2h4u/enji-guard-cli"
+Issues = "https://github.com/j2h4u/enji-guard-cli/issues"
+Changelog = "https://github.com/j2h4u/enji-guard-cli/blob/main/CHANGELOG.md"
 
 [project.scripts]
 enji-guard = "enji_guard_cli.delivery.cli:app"
