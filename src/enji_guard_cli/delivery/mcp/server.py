@@ -21,7 +21,6 @@ from enji_guard_cli.runtime_observability.telemetry import configure_logging
 from enji_guard_cli.settings import (
     DEFAULT_HTTP_HOST,
     DEFAULT_HTTP_PORT,
-    DEFAULT_REPO_SORT,
     RepositorySortName,
     default_settings,
 )
@@ -64,6 +63,7 @@ def create_mcp_server(
     client is always released.
     """
     active: McpQueryFacade | None = None
+    settings = default_settings()
 
     @asynccontextmanager
     async def lifespan(_server: FastMCP) -> AsyncIterator[None]:
@@ -99,7 +99,7 @@ def create_mcp_server(
     )
     async def portfolio_overview(
         project: str = "",
-        sort: RepositorySortName = DEFAULT_REPO_SORT,
+        sort: RepositorySortName = settings.repo.default_sort,
     ) -> dict[str, object]:
         result = cast(
             McpQueryResult,

@@ -58,6 +58,18 @@ operational hardening for maintenance and future releases.
   catch operational regressions before merge.
 - Refine MCP audit-reading ergonomics with real agents while keeping the
   surface centered on portfolio overview and concrete repository audits.
+- Add a protected production-deploy workflow for an already published immutable
+  GHCR image. The current deployment path is intentionally manual; the next
+  step is a `workflow_dispatch` promotion with protected-environment approval,
+  health checks, and a documented rollback to the previous digest.
+- Add a lightweight active task/spec and handoff template for multi-step agent
+  work. Keep it short: scope, user workflow, acceptance criteria, touched
+  boundaries, checks run, blockers, and the next action. This is for unfinished
+  work and larger changes, not routine PRs.
+- Formalize container vulnerability exceptions. Update pinned base/tool images
+  when a fixed digest exists; when Debian/Python rows remain unfixed, record a
+  deliberate VEX/ignore decision with owner, reason, and review trigger instead
+  of letting `ignore-unfixed` hide the risk forever.
 - **When Enji Guard ships API keys, delete the refresh daemon.** Not make it
   optional, not keep it as a fallback: browser-cookie auth is the only reason
   it exists, and an API key removes that reason entirely. The auth state

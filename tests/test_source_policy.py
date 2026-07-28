@@ -47,7 +47,7 @@ PRODUCT_SOURCE_ROOTS = (
 BUILD_PUSH_ACTION = "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
 SETUP_UV_ACTION = "astral-sh/setup-uv@"
 TRIVY_ACTION = "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25"
-UV_VERSION = "0.11.17"
+UV_VERSION = "0.11.18"
 
 
 def _compose_common_service_fields(path: Path) -> dict[str, object]:
