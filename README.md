@@ -11,6 +11,12 @@ for portfolio and audit access.
 See [ROADMAP.md](ROADMAP.md) for the current product status and remaining
 hardening work.
 
+**Running it:** [Runtime](#runtime) · [Authentication](#authentication) ·
+[CLI](#cli) · [MCP](#mcp)
+**Understanding it:** [Mental Model](#mental-model) · [Surfaces](#surfaces) ·
+[Agent Workflow](#agent-workflow)
+**Changing it:** [Development](#development) · [Documentation](#documentation)
+
 ## Mental Model
 
 Enji Guard groups repositories into projects. Repository identity is
