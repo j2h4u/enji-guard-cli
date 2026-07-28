@@ -116,15 +116,18 @@ rejected commit message or a missing `BEGIN_COMMIT_OVERRIDE` block is caught
 while it is still cheap to fix — amending one commit rather than rewriting
 eight.
 
-Two things that are easy to learn the expensive way:
+A Markdown bullet at column 0 in a commit body breaks release-please: it reads
+the marker as a commit type, fails to parse, and drops the entire commit from
+the changelog without reporting anything. Upstream that failure is silent, so
+this repository does not rely on remembering it. `just hooks` installs a
+`commit-msg` hook that rejects the message as you write it, naming the offending
+line; the same rule runs again over the whole branch in CI. Indent bullets by
+two spaces.
 
-- **A Markdown bullet at column 0 in a commit body breaks release-please.** It
-  reads the marker as a commit type, fails to parse, and drops the entire
-  commit from the changelog without reporting anything. Indent bullets by two
-  spaces.
-- **Editing a PR body does not re-run CI.** `pull_request` fires on
-  opened/synchronize/reopened, so a body-only fix needs a close/reopen; a plain
-  re-run replays the stale payload and will fail again on the old body.
+One thing no hook can catch: **editing a PR body does not re-run CI.**
+`pull_request` fires on opened/synchronize/reopened, so a body-only fix needs a
+close/reopen; a plain re-run replays the stale payload and fails again on the
+old body.
 
 A multi-commit PR squashes into one, so its title cannot describe everything it
 shipped. Give it a `BEGIN_COMMIT_OVERRIDE` / `END_COMMIT_OVERRIDE` block

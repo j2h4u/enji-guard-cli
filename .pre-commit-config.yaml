@@ -33,3 +33,17 @@ repos:
         pass_filenames: false
         files: ^(src/|tach\.toml$)
         require_serial: true
+
+      # Release parseability, judged when the message is written rather than
+      # when the PR is opened.  The same rule runs in CI over the whole branch,
+      # but by then a bad body costs a rebase; here it costs re-editing the
+      # message in front of you.  A column-0 bullet is the case that matters:
+      # release-please reads it as a commit type and drops the whole commit
+      # from the changelog without reporting anything.
+      - id: commit-message
+        name: commit message is releasable
+        entry: uv run python -m scripts.validate_pr_commits --message-file
+        language: system
+        stages: [commit-msg]
+        pass_filenames: true
+        require_serial: true

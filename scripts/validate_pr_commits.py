@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+from pathlib import Path
 from typing import cast
 
 from scripts.validate_pr_title import RELEASABLE_TYPES, TITLE_PATTERN
@@ -89,13 +90,47 @@ def validate_commit_messages(messages: list[str]) -> tuple[bool, list[str]]:
     return True, [f"All {len(messages)} commit message(s) are releasable."]
 
 
+SCISSORS = "# ------------------------ >8 ------------------------"
+
+
+def editable_message(raw: str) -> str:
+    """Reduce a commit-msg file to what git will actually record.
+
+    Two things in that file are not the message.  ``git commit -v`` appends the
+    staged diff below a scissors line, and every deletion in it starts with
+    ``-`` at column 0 -- checking those would reject a perfectly good commit for
+    the diff it contains.  Comment lines are dropped for the same reason: they
+    are stripped before the message is stored.
+    """
+
+    lines: list[str] = []
+    for line in raw.split("\n"):
+        if line.rstrip() == SCISSORS:
+            break
+        if not line.startswith("#"):
+            lines.append(line)
+    return "\n".join(lines).strip("\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-sha", required=True, help="Base commit the PR branches from.")
-    parser.add_argument("--head-sha", required=True, help="Head commit of the PR.")
+    # A range is what CI has; a single message is what `git commit` has.  The
+    # same rules applied at write time cost one amend instead of a rebase, so
+    # the commit-msg hook uses the second form.
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--base-sha", help="Base commit the PR branches from.")
+    source.add_argument("--message-file", help="File holding one commit message, as passed to a commit-msg hook.")
+    parser.add_argument("--head-sha", help="Head commit of the PR. Required with --base-sha.")
     args = parser.parse_args(argv)
 
-    messages = commit_messages(cast("str", args.base_sha), cast("str", args.head_sha))
+    message_file = cast("str | None", args.message_file)
+    head_sha = cast("str | None", args.head_sha)
+    if message_file is not None:
+        messages = [editable_message(Path(message_file).read_text(encoding="utf-8"))]
+    else:
+        if head_sha is None:
+            parser.error("--head-sha is required with --base-sha")
+        messages = commit_messages(cast("str", args.base_sha), head_sha)
     ok, reported = validate_commit_messages(messages)
     stream = sys.stdout if ok else sys.stderr
     for message in reported:

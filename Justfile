@@ -26,8 +26,10 @@ fmt-check:
     uv run ruff format --no-preview --check src scripts tests
 
 # Install the git pre-commit hooks (see .pre-commit-config.yaml).
+# Install both stages: pre-commit judges the files, commit-msg judges the
+# message.  Without --hook-type commit-msg the message check never runs.
 hooks:
-    uv run pre-commit install
+    uv run pre-commit install --hook-type pre-commit --hook-type commit-msg
 
 # Module boundaries, enforced by tach.  This is the architecture gate: tach.toml
 # declares the whole module graph, so an undeclared edge fails rather than
