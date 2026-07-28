@@ -1,9 +1,9 @@
 # Module boundaries, enforced by tach (https://github.com/tach-org/tach).
 #
-# This file declares the whole module graph, and the graph is now true: the
-# 41 violations inventoried in docs/architecture-cleanup.md are all closed, so
-# `just module-boundaries` is green and runs inside `just check`.  It is the
-# architecture gate -- import-linter is gone.
+# This file declares the whole module graph, and the graph is now true: the 41
+# violations it was written against are all closed, so `just module-boundaries`
+# is green and runs inside `just check`.  It is the architecture gate --
+# import-linter is gone.
 #
 # The reason tach replaced it: import-linter checks the contracts you remember
 # to write, so a new module with no contract about it is unconstrained by
@@ -28,8 +28,8 @@ exact = true
 # edge to be written down means the graph is a document, not a side effect.
 layers_explicit_depends_on = true
 
-# The auth_session <-> enji_gateway cycle is the single reason this is red
-# today; see docs/architecture-cleanup.md, fix #1.
+# The auth_session <-> enji_gateway cycle was the last thing keeping this red.
+# It is broken now, so the setting stays on to keep it broken.
 forbid_circular_dependencies = true
 
 # `if TYPE_CHECKING:` imports are real coupling: a type that leaks across a
