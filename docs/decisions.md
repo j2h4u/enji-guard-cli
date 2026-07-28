@@ -173,9 +173,22 @@ agents can orient quickly before making changes.
   it the probe can only return `401` whether or not the rotation landed, so
   continuing would invent a verdict and probe forever. The window closes, the
   loop stays parked, and a human is asked once. The oscillation cannot outlive
-  that deadline, and it costs no timer and no configuration: the deadline is
-  data already in the credential, read by `cookie_access_expires_at`. An expiry
-  that cannot be read is not a window that can be proven open, so it closes too.
+  that deadline, and it costs no state beyond the credential itself: the
+  deadline is data already in the credential, read by
+  `cookie_access_expires_at`. An expiry that cannot be read is not a window
+  that can be proven open, so it closes too.
+
+  That deadline makes timer placement part of the invariant. The refresh loop
+  must attempt adjudication immediately after it parks on `OUTCOME_UNKNOWN`,
+  before any polling sleep, and the polling interval must be shorter than the
+  refresh lead window. Otherwise a refresh attempted `lead_seconds` before JWT
+  expiry can sleep away the entire evidence window and ask for a browser import
+  even when `/api/v1/auth/me` would have shown that the held credential was
+  still usable. A successful `200` adjudication also waits one bounded
+  adjudication polling interval before redispatching refresh, unless a
+  credential revision change wakes it first. That keeps backend-recovery probes
+  timely without turning a still-unhealthy refresh endpoint into a tight
+  `POST /auth/refresh` → `GET /auth/me` loop.
 
   Ownership here is pinned by `tests/test_side_effect_ownership.py`, not by
   `tach`: `tach` governs imports, and mutating credential state is a call.
