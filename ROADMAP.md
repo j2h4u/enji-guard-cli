@@ -40,6 +40,10 @@ surface.
   gone. The suite grew from 428 to over 900 tests behind a coverage floor.
 - Pinned the release notes themselves: a squash merge that would silently drop
   what shipped now fails CI instead.
+- Made an ambiguous cookie refresh recoverable without an operator. A gateway
+  `502` used to be terminal; the refresh loop now asks the backend what the
+  rotation actually did and resumes when the held credential is still alive,
+  bounded by that credential's own expiry.
 
 ## Current State
 

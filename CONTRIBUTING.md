@@ -33,7 +33,8 @@ A change is ready when:
 Leave durable context only when it changes future work:
 
 - update `README.md` for user/operator workflow and CLI/MCP ontology changes;
-- update `AGENTS.md` for developer/QA/Ops rules;
+- update `AGENTS.md` only for ops rules and for the pointers it carries;
+- update `docs/development.md` for toolchain, product-behavior, and gate rules;
 - update `docs/decisions.md` for architectural decisions and invariants;
 - keep schedule, catalog-driven audit/autofix behavior, and auth/runtime wording aligned across docs when those workflows change;
 - keep the v2 auth revision/journal, observer-only boundary, single-host storage contract, and at-least-once telemetry wording aligned across README, decisions, and deployment docs;
