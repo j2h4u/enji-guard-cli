@@ -228,6 +228,47 @@ def test_improvement_job_endpoint_operations_use_the_autofix_ontology() -> None:
     assert IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC.operation == "autofix set"
 
 
+def test_improvement_job_update_contract_matches_autofix_scheduler_payload() -> None:
+    contract = cast(object, json.loads(CONTRACT_PATH.read_text(encoding="utf-8")))
+    assert isinstance(contract, dict)
+    paths = contract.get("paths")
+    assert isinstance(paths, dict)
+    action = paths.get("/api/ux/improvement-jobs/{repoId}/{kind}")
+    assert isinstance(action, dict)
+    action_put = action.get("put")
+    assert isinstance(action_put, dict)
+    assert _request_body_ref(action_put) == "#/components/schemas/ImprovementJobUpdate"
+
+    components = contract.get("components")
+    assert isinstance(components, dict)
+    schemas = components.get("schemas")
+    assert isinstance(schemas, dict)
+    update = schemas.get("ImprovementJobUpdate")
+    assert isinstance(update, dict)
+    assert set(update.get("required", [])) == {
+        "enabled",
+        "autoFix",
+        "autofixVariantKey",
+        "frequency",
+        "daysOfWeek",
+        "scheduleTimeSource",
+        "timezone",
+    }
+    properties = update.get("properties")
+    assert isinstance(properties, dict)
+    assert set(properties) >= {
+        "enabled",
+        "autoFix",
+        "autofixVariantKey",
+        "frequency",
+        "daysOfWeek",
+        "scheduleTime",
+        "scheduleTimeSource",
+        "timezone",
+        "pentestMode",
+    }
+
+
 def test_audit_auto_run_contract_models_dynamic_action_keys_and_subscriptions() -> None:
     contract = cast(object, json.loads(CONTRACT_PATH.read_text(encoding="utf-8")))
     assert isinstance(contract, dict)

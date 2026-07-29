@@ -78,7 +78,10 @@ class AutofixWriteRequest:
     project: str | None
     selectors: tuple[str, ...]
     enabled: bool | None = None
+    auto_fix: bool | None = None
     frequency: str | None = None
+    days_of_week: tuple[str, ...] | None = None
+    schedule_time: str | None = None
     timezone: str | None = None
     scope: AutofixWriteScope | None = None
 
@@ -147,7 +150,14 @@ class SubscriptionsFacade:
 
     def set_autofixes(self, request: AutofixWriteRequest) -> tuple[object, ...]:
         """Apply one improvement-job change, given the operator's argv values."""
-        update = AuditAutofixUpdate(enabled=request.enabled, frequency=request.frequency, timezone=request.timezone)
+        update = AuditAutofixUpdate(
+            enabled=request.enabled,
+            frequency=request.frequency,
+            timezone=request.timezone,
+            days_of_week=request.days_of_week,
+            schedule_time=request.schedule_time,
+            auto_fix=request.auto_fix,
+        )
         selected = select_autofixes(request.selectors, autofix_definitions(self.catalog.catalog()))
         result: list[object] = []
         for target in self._write_targets(request.repo, request.project, request.scope):

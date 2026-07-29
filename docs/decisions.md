@@ -60,10 +60,13 @@ agents can orient quickly before making changes.
 - **Curated autofix management**: the mental model is audit -> findings ->
   optional improvement. `auditAutofixes` is the typed catalog of available
   variants, while `improvement-jobs` is the canonical CLI operator resource
-  for list/set. The temporary typed relationships are `security`/`vuln-fix`,
-  `tests`/`test-writing`, and `dependency-hygiene`/`dependency-update`;
-  pentest remains separate. MCP stays read-only, and the registry is removable
-  when Enji publishes relationships directly.
+  for list/set. Autofix jobs have their own scheduler state: enabled state,
+  automatic-fix state, cadence, weekdays, time, time source, and timezone are
+  read and written through `improvement-jobs`, never through audit `schedule`.
+  The temporary typed relationships are `security`/`vuln-fix`,
+  `tests`/`test-writing`, and `dependency-hygiene`/`dependency-update`; pentest
+  remains separate. MCP stays read-only, and the registry is removable when
+  Enji publishes relationships directly.
 - **Report language scope**: language is an account-wide `en`/`ru` preference,
   not a project mutation. CLI reads and writes user preferences idempotently;
   it does not expose redundant per-project resolved values.

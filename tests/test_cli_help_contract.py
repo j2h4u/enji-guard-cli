@@ -72,3 +72,13 @@ def test_frequency_help_lists_every_legal_cadence(path: list[str]) -> None:
         assert cadence in rendered
     assert "IANA timezone" in rendered
     assert "Turn the subscription on or off" in rendered
+
+
+def test_improvement_jobs_help_lists_schedule_controls() -> None:
+    result = CliRunner().invoke(app, ["improvement-jobs", "set", "--help"])
+
+    assert result.exit_code == 0
+    rendered = _rendered(result.stdout)
+    for option in ("--auto-fix", "--days", "--time"):
+        assert option in rendered
+    assert "HH:MM" in rendered
