@@ -20,6 +20,8 @@ class BackendReadinessProbe:
     failure_message: str | None = None
     failure_status_code: int | None = None
     credential_type: str | None = None
+    refresh_state: str | None = None
+    reauth_required: bool = False
     elapsed_ms: int | None = None
     bypass_grace: bool = False
 
@@ -34,7 +36,9 @@ class BackendReadinessState:
     failure_message: str | None
     failure_status_code: int | None
     credential_type: str | None
-    consecutive_failures: int
+    refresh_state: str | None = None
+    reauth_required: bool = False
+    consecutive_failures: int = 0
     bypass_grace: bool = False
 
 
@@ -54,6 +58,8 @@ INITIAL_BACKEND_READINESS_STATE = BackendReadinessState(
     failure_message=None,
     failure_status_code=None,
     credential_type=None,
+    refresh_state=None,
+    reauth_required=False,
     consecutive_failures=0,
 )
 
@@ -75,6 +81,8 @@ def backend_readiness_state_after_probe(
             failure_message=None,
             failure_status_code=None,
             credential_type=probe.credential_type,
+            refresh_state=probe.refresh_state,
+            reauth_required=probe.reauth_required,
             consecutive_failures=0,
             bypass_grace=False,
         )
@@ -87,6 +95,8 @@ def backend_readiness_state_after_probe(
         failure_message=probe.failure_message,
         failure_status_code=probe.failure_status_code,
         credential_type=probe.credential_type,
+        refresh_state=probe.refresh_state,
+        reauth_required=probe.reauth_required,
         consecutive_failures=previous.consecutive_failures + 1,
         bypass_grace=probe.bypass_grace,
     )
@@ -102,6 +112,8 @@ def backend_readiness_starting_state(*, checked_at: datetime) -> BackendReadines
         failure_message="backend readiness has not succeeded yet",
         failure_status_code=None,
         credential_type=None,
+        refresh_state=None,
+        reauth_required=False,
         consecutive_failures=0,
         bypass_grace=False,
     )
@@ -203,6 +215,8 @@ def _backend_readiness_state_from_payload(payload: dict[str, object]) -> Backend
         failure_message=_optional_str(payload.get("failure_message")),
         failure_status_code=_optional_int(payload.get("failure_status_code")),
         credential_type=_optional_str(payload.get("credential_type")),
+        refresh_state=_optional_str(payload.get("refresh_state")),
+        reauth_required=_optional_bool(payload.get("reauth_required")),
         consecutive_failures=consecutive_failures,
         bypass_grace=_optional_bool(payload.get("bypass_grace")),
     )

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TypedDict
 
@@ -8,6 +9,8 @@ class AuthStatusPayload(TypedDict):
     message: str | None
     auth_file: str
     credential_type: str | None
+    refresh_state: str | None
+    reauth_required: bool
     email: str | None
     name: str | None
     user_id: str | None
@@ -17,6 +20,17 @@ class AuthenticatedProfile(TypedDict):
     email: str | None
     name: str | None
     user_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class AuthPayloadRenewal:
+    refresh_state: str | None = None
+    reauth_required: bool = False
+    message: str | None = None
+
+
+AUTH_RENEWAL_OK = AuthPayloadRenewal()
+AUTH_RENEWAL_REAUTH_REQUIRED = AuthPayloadRenewal(reauth_required=True)
 
 
 class ResponseAdapter(Protocol):
@@ -38,13 +52,17 @@ def _authenticated_payload(
     auth_file: Path,
     credential_type: str,
     profile: AuthenticatedProfile,
+    *,
+    renewal: AuthPayloadRenewal = AUTH_RENEWAL_OK,
 ) -> AuthStatusPayload:
     return {
         "authenticated": True,
         "code": None,
-        "message": None,
+        "message": renewal.message,
         "auth_file": str(auth_file),
         "credential_type": credential_type,
+        "refresh_state": renewal.refresh_state,
+        "reauth_required": renewal.reauth_required,
         "email": profile["email"],
         "name": profile["name"],
         "user_id": profile["user_id"],
@@ -56,6 +74,8 @@ def _unauthenticated_payload(
     credential_type: str | None,
     code: str,
     message: str,
+    *,
+    renewal: AuthPayloadRenewal = AUTH_RENEWAL_REAUTH_REQUIRED,
 ) -> AuthStatusPayload:
     return {
         "authenticated": False,
@@ -63,6 +83,8 @@ def _unauthenticated_payload(
         "message": message,
         "auth_file": str(auth_file),
         "credential_type": credential_type,
+        "refresh_state": renewal.refresh_state,
+        "reauth_required": renewal.reauth_required,
         "email": None,
         "name": None,
         "user_id": None,

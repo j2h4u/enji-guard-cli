@@ -130,6 +130,15 @@ class AuthProjectionError(Exception):
     message: str
 
 
+@dataclass(frozen=True, slots=True)
+class RefreshProjectionStatus:
+    """Non-secret renewal state surfaced beside access authentication."""
+
+    refresh_state: str | None
+    reauth_required: bool
+    message: str | None = None
+
+
 def project_auth(auth_result: AuthLoadResult, journal_result: JournalLoadResult) -> AuthProjection:
     """Classify a typed storage snapshot without collapsing observer states."""
 
@@ -170,17 +179,13 @@ def network_credential(projection: AuthProjection) -> StoredAuth:
     """Return an observationally usable credential without mutating storage."""
 
     match projection:
-        case CredentialReady(auth=auth) | RotationReserved(auth=auth) | RotationInProgress(auth=auth):
+        case (
+            CredentialReady(auth=auth)
+            | RotationReserved(auth=auth)
+            | RotationInProgress(auth=auth)
+            | ReimportRequired(auth=auth)
+        ):
             return auth
-        case ReimportRequired(state=Rejected(reason=reason)):
-            raise AuthProjectionError(
-                "AUTH_REFRESH_REJECTED", f"refresh was rejected ({reason}); import a fresh browser credential"
-            )
-        case ReimportRequired(state=OutcomeUnknown(reason=reason)):
-            raise AuthProjectionError(
-                "AUTH_REFRESH_OUTCOME_UNKNOWN",
-                f"refresh outcome is unknown ({reason}); import a fresh browser credential",
-            )
         case _:
             error = _STATIC_PROJECTION_ERRORS.get(type(projection))
             if error is not None:
@@ -188,13 +193,43 @@ def network_credential(projection: AuthProjection) -> StoredAuth:
             raise AssertionError(f"unexpected auth projection: {type(projection).__name__}")
 
 
+def refresh_projection_status(projection: AuthProjection) -> RefreshProjectionStatus:
+    """Project cookie renewal state without changing access authentication."""
+
+    match projection:
+        case CredentialReady():
+            status = RefreshProjectionStatus(None, False)
+        case RotationReserved():
+            status = RefreshProjectionStatus("reserved", False)
+        case RotationInProgress():
+            status = RefreshProjectionStatus("requested", False)
+        case RotationRecoveryAvailable():
+            status = RefreshProjectionStatus(
+                "rotated",
+                False,
+                "auth rotation recovery is pending; restart the service or import a fresh browser credential",
+            )
+        case ReimportRequired(state=Rejected(reason=reason)):
+            status = RefreshProjectionStatus(
+                "rejected", True, f"refresh was rejected ({reason}); import a fresh browser credential"
+            )
+        case ReimportRequired(state=OutcomeUnknown(reason=reason)):
+            status = RefreshProjectionStatus(
+                "outcome_unknown",
+                True,
+                f"refresh outcome is unknown ({reason}); import a fresh browser credential",
+            )
+        case _:
+            status = RefreshProjectionStatus(None, True)
+    return status
+
+
 def adjudication_credential(projection: AuthProjection) -> tuple[StoredAuth, OutcomeUnknown] | None:
     """Return the credential to probe with when a refresh outcome is unknown.
 
-    Deliberately separate from :func:`network_credential`, which still refuses
-    this projection.  An unadjudicated credential may be used only to ask the
-    backend what already happened -- never to serve traffic.  Callers must not
-    relax anything until that probe answers ``200``.
+    Deliberately separate from :func:`network_credential`: observers may still
+    serve ordinary access with the stored credential, but only the refresh loop
+    may try to clear an ambiguous refresh outcome.
     """
 
     match projection:

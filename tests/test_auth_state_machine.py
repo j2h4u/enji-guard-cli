@@ -886,10 +886,10 @@ def test_import_progresses_with_stale_unacknowledged_outbox(tmp_path: Path) -> N
             ),
             Rejected,
         ),
-        (EnjiHttpResponse(status_code=401, headers={}, content=b"<html>proxy</html>"), OutcomeUnknown),
+        (EnjiHttpResponse(status_code=401, headers={}, content=b"<html>proxy</html>"), Rejected),
     ],
 )
-def test_refresh_rejection_requires_confirmed_enji_protocol_response(
+def test_refresh_rejection_is_confirmed_by_status_code(
     tmp_path: Path, response: EnjiHttpResponse, expected_type: type[Rejected | OutcomeUnknown]
 ) -> None:
     auth_file = tmp_path / "auth.json"

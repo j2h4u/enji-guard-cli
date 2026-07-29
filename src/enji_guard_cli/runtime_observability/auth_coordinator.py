@@ -45,6 +45,8 @@ class RuntimeAuthCoordinatorAdapter(RuntimeAuthCoordinatorPort):
             failure_message=result.failure_message,
             failure_status_code=result.failure_status_code,
             credential_type=result.credential_type,
+            refresh_state=result.refresh_state,
+            reauth_required=result.reauth_required,
             elapsed_ms=result.elapsed_ms,
             bypass_grace=result.bypass_grace,
         )

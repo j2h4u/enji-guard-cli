@@ -108,9 +108,15 @@ agents can orient quickly before making changes.
   implicit: a valid credential with no applicable journal. Startup reconciles a
   matching `RESERVED` safely, recovers `ROTATED`, and durably converts an
   abandoned `REQUESTED` to `OUTCOME_UNKNOWN` before ordinary readiness starts.
-  `REJECTED` is terminal: it remains visible and requires an operator to import
-  a fresh browser credential, which supersedes the old revision and clears its
-  journal. No automatic POST follows `REQUESTED`; a
+  `REJECTED` is terminal for refresh automation: it remains visible and requires
+  an operator to import a fresh browser credential, which supersedes the old
+  revision and clears its journal. Terminal refresh state is not local logout:
+  gateway requests, `auth status`, health/readiness, and MCP may continue using
+  the stored access cookie while `GET /api/v1/auth/me` still accepts it. Public
+  status surfaces that as authenticated access plus a degraded `refresh_state`
+  and `reauth_required`, so operators see the upcoming browser-import need
+  without the CLI pretending the session is already unusable. No automatic POST
+  follows `REQUESTED`; a
   failure after dispatch, malformed response, cancellation, timeout, transport
   failure, or 429/5xx is conservatively unknown. Transport retries do not cover
   cookie refresh.
@@ -122,20 +128,26 @@ agents can orient quickly before making changes.
   stored `Cookie` header like every other cookie. What makes the probe safe is
   the *endpoint*: a read that does not consume refresh tokens.
 
-  Deciding inside the loop is not a detail, it is the whole reason this works.
+  Deciding whether to clear the renewal journal still belongs inside the loop.
   An earlier design put adjudication in the readiness probe, which both broke
   the observer rule above and silently did nothing: clearing the journal does
   not change the credential revision, the loop waits on that revision, and the
-  credential watcher is filtered to the auth file alone. Readiness would report
-  ready while the loop stayed parked until the access token expired. The loop
+  credential watcher is filtered to the auth file alone. Readiness may report
+  ready while renewal is degraded, but it must not mutate credential state or
+  pretend that readiness cleared the refresh loop's parked generation. The loop
   needs no waking, because the task that must act is the one deciding.
 
-  `401`/`403` proves the source is dead — the rotation landed and its
-  replacement was lost with the ambiguous response — so the loop stays parked
-  for an import. Anything else decides nothing and retries on the next pass,
-  which is also how the loop learns the backend returned. Adjudication is never
-  attempted with a credential that is not still usable, and readiness keeps
-  refusing an unadjudicated credential exactly as before.
+  Any `401`/`403` returned by `POST /api/v1/auth/refresh` is a confirmed refresh
+  rejection, regardless of JSON, HTML, empty, malformed, or proxy-shaped body.
+  Body content may enrich diagnostics, but it must never decide retry
+  eligibility. A refresh rejection parks the refresh loop for an import and
+  must not be converted to `OUTCOME_UNKNOWN` just because the body was not the
+  expected Enji JSON protocol. Other post-dispatch failures decide nothing and
+  retry adjudication on the next pass, which is also how the loop learns the
+  backend returned. Adjudication is never attempted with a credential that is
+  not still usable, and readiness remains observer-only: it checks ordinary
+  access and surfaces renewal degradation, but it does not adjudicate or
+  refresh.
 
   **A `200` is weaker evidence than it looks, and the design depends on knowing
   that.** `/api/v1/auth/me` authenticates the `access_token` JWT, which stays
