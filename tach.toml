@@ -275,6 +275,7 @@ expose = [
     "wait\\..*",
     "workflows\\..*",
     "schedules\\..*",
+    "scheduling\\..*",
     "autofixes\\..*",
     "email\\..*",
     "observation\\..*",

@@ -71,7 +71,9 @@ These are contracts the CLI owes its users, not implementation preferences.
 - Autofix scheduler controls live on `improvement-jobs set`, not `schedule`.
   Keep the operator semantics parallel to audit schedules: explicit scope,
   idempotent partial updates, IANA timezone, known cadence values, validated
-  weekdays, and `auto` versus user-selected time source.
+  weekdays, and `auto` versus user-selected time source. Shared scheduler
+  business policy belongs in `audit/scheduling.py`; audit schedules and autofix
+  jobs stay separate entities that consume it.
 
 ### Reading audits
 
