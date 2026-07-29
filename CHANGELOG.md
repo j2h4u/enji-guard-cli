@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.10](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.9...v3.1.10) (2026-07-29)
+
+
+### Fixes
+
+* keep live access usable after refresh rejection ([#235](https://github.com/j2h4u/enji-guard-cli/issues/235)) ([18bb5b8](https://github.com/j2h4u/enji-guard-cli/commit/18bb5b818997c33223122802905551629dc2c347))
+
 ## [3.1.9](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.8...v3.1.9) (2026-07-28)
 
 
