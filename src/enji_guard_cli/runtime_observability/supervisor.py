@@ -308,6 +308,8 @@ def _readiness_probe(observation: BackendReadinessObservation) -> BackendReadine
         failure_message=observation.failure_message,
         failure_status_code=observation.failure_status_code,
         credential_type=observation.credential_type,
+        refresh_state=observation.refresh_state,
+        reauth_required=observation.reauth_required,
         elapsed_ms=observation.elapsed_ms,
         bypass_grace=observation.bypass_grace,
     )

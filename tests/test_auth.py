@@ -216,7 +216,7 @@ def test_future_credential_import_timestamp_has_stable_clock_anomaly_classificat
         (lambda revision: OutcomeUnknown(revision, "timeout"), "AUTH_REFRESH_OUTCOME_UNKNOWN"),
     ],
 )
-def test_terminal_auth_projection_bypasses_status_network(
+def test_terminal_auth_projection_keeps_live_access_authenticated(
     tmp_path: Path,
     state_factory: Callable[[str], RotationState],
     expected_code: str,
@@ -226,19 +226,29 @@ def test_terminal_auth_projection_bypasses_status_network(
     loaded = load_auth(auth_file)
     assert isinstance(loaded, AuthLoaded)
     write_journal(auth_file, state_factory(loaded.auth["revision"]))
+    requests: list[EnjiHttpRequest] = []
 
     class Client:
         async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
-            raise AssertionError("terminal auth projection must not perform HTTP")
+            requests.append(request)
+            return EnjiHttpResponse(
+                status_code=200,
+                headers={},
+                content=b'{"email":"user@example.com","name":"User","user_id":"user_1"}',
+            )
 
     status = asyncio.run(auth_status_async(auth_file, Client()))
 
-    assert status["code"] == expected_code
-    assert "import a fresh browser credential" in cast(str, status["message"])
+    assert status["authenticated"] is True
+    assert status["code"] is None
+    assert status["refresh_state"] == expected_code.removeprefix("AUTH_REFRESH_").lower()
+    assert status["reauth_required"] is True
+    assert status["email"] == "user@example.com"
+    assert [(request.method, request.url) for request in requests] == [("GET", "https://fleet.enji.ai/api/v1/auth/me")]
 
 
-def test_rejected_projection_bypasses_readiness_network(tmp_path: Path) -> None:
-    """A confirmed rejection is an answer, so there is nothing to adjudicate."""
+def test_rejected_projection_keeps_readiness_ready_when_access_is_live(tmp_path: Path) -> None:
+    """A confirmed refresh rejection does not mean the access cookie is dead."""
 
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=old", auth_file)
@@ -250,13 +260,15 @@ def test_rejected_projection_bypasses_readiness_network(tmp_path: Path) -> None:
     class Client:
         async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
             requests.append(request)
-            raise AssertionError("a rejected projection must not perform HTTP")
+            return EnjiHttpResponse(status_code=200, headers={}, content=b"{}")
 
     readiness = asyncio.run(backend_readiness_probe_async(auth_file, Client()))
 
-    assert readiness.failure_code == "AUTH_REFRESH_REJECTED"
-    assert readiness.bypass_grace is True
-    assert requests == []
+    assert readiness.ready is True
+    assert readiness.refresh_state == "rejected"
+    assert readiness.reauth_required is True
+    assert readiness.bypass_grace is False
+    assert [(request.method, request.url) for request in requests] == [("GET", "https://fleet.enji.ai/api/v1/auth/me")]
 
 
 @pytest.mark.parametrize(
@@ -281,14 +293,19 @@ def test_terminal_auth_status_surfaces_the_journal_reason(
     loaded = load_auth(auth_file)
     assert isinstance(loaded, AuthLoaded)
     write_journal(auth_file, state_factory(loaded.auth["revision"]))
+    requests: list[EnjiHttpRequest] = []
 
     class Client:
         async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
-            raise AssertionError("terminal auth projection must not perform HTTP")
+            requests.append(request)
+            return EnjiHttpResponse(status_code=200, headers={}, content=b'{"email":"operator@example.com"}')
 
     status = asyncio.run(auth_status_async(auth_file, Client()))
 
+    assert status["authenticated"] is True
     assert expected_reason in cast(str, status["message"])
+    assert status["reauth_required"] is True
+    assert [(request.method, request.url) for request in requests] == [("GET", "https://fleet.enji.ai/api/v1/auth/me")]
 
 
 def _unknown_outcome_auth_file(tmp_path: Path, *, access_token_lifetime: timedelta = timedelta(minutes=5)) -> Path:
@@ -362,19 +379,23 @@ def test_adjudication_never_replays_the_refresh_exchange(tmp_path: Path) -> None
 
 
 def test_readiness_reports_ready_again_once_the_loop_adjudicated(tmp_path: Path) -> None:
-    """Readiness needs no adjudication logic of its own; clearing is enough."""
+    """Adjudication clears renewal degradation; it no longer gates access readiness."""
 
     auth_file = _unknown_outcome_auth_file(tmp_path)
     client = _RecordingClient(EnjiHttpResponse(200, {}, b'{"email": "operator@example.com"}'))
 
     before = asyncio.run(backend_readiness_probe_async(auth_file, client))
-    assert before.ready is False
-    assert before.bypass_grace is True
+    assert before.ready is True
+    assert before.refresh_state == "outcome_unknown"
+    assert before.reauth_required is True
+    assert before.bypass_grace is False
 
     assert _adjudicate(auth_file, client) is True
 
     after = asyncio.run(backend_readiness_probe_async(auth_file, client))
     assert after.ready is True
+    assert after.refresh_state is None
+    assert after.reauth_required is False
 
 
 @pytest.mark.parametrize("status_code", [401, 403])

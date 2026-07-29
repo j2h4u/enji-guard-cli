@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
@@ -21,6 +22,7 @@ from enji_guard_cli.auth_session.coordinator import (
 from enji_guard_cli.auth_session.credential_changes import credential_changes
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
 from enji_guard_cli.auth_session.payloads import (
+    AuthPayloadRenewal,
     AuthStatusPayload,
     _authenticated_payload,
     _profile_from_response,
@@ -29,9 +31,11 @@ from enji_guard_cli.auth_session.payloads import (
 from enji_guard_cli.auth_session.ports import AuthEventSink, AuthOutcomeSink
 from enji_guard_cli.auth_session.projection import (
     AuthProjectionError,
+    RefreshProjectionStatus,
     adjudication_credential,
     network_credential,
     project_auth,
+    refresh_projection_status,
 )
 from enji_guard_cli.auth_session.store import (
     CredentialType,
@@ -78,11 +82,29 @@ def _event_sink_or_noop(event_sink: AuthEventSink | None) -> AuthEventSink:
     return event_sink if event_sink is not None else _noop_event_sink
 
 
+def _auth_payload_renewal(refresh_status: RefreshProjectionStatus) -> AuthPayloadRenewal:
+    return AuthPayloadRenewal(
+        refresh_state=refresh_status.refresh_state,
+        reauth_required=refresh_status.reauth_required,
+        message=refresh_status.message,
+    )
+
+
+def _reauth_payload_renewal(refresh_status: RefreshProjectionStatus) -> AuthPayloadRenewal:
+    return AuthPayloadRenewal(refresh_state=refresh_status.refresh_state, reauth_required=True)
+
+
 class AuthError(Exception):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+@dataclass(frozen=True, slots=True)
+class AuthInvalidStatus:
+    code: str
+    message: str
 
 
 class ImportCredentialPayload(TypedDict):
@@ -180,16 +202,24 @@ async def auth_status_async(
     client: EnjiHttpClient | None = None,
 ) -> AuthStatusPayload:
     target = auth_file if auth_file is not None else default_auth_file()
+    projection = _auth_projection(target)
+    refresh_status = refresh_projection_status(projection)
     try:
-        stored_auth = network_credential(_auth_projection(target))
+        stored_auth = network_credential(projection)
     except AuthProjectionError as exc:
-        return _unauthenticated_payload(target, None, exc.code, exc.message)
+        return _unauthenticated_payload(
+            target,
+            None,
+            exc.code,
+            exc.message,
+            renewal=_reauth_payload_renewal(refresh_status),
+        )
 
     if client is not None:
-        return await _auth_status_with_client(target, stored_auth, client)
+        return await _auth_status_with_client(target, stored_auth, client, refresh_status=refresh_status)
 
     async with HttpxEnjiHttpClient(event_sink=discard_transport_event) as owned_client:
-        return await _auth_status_with_client(target, stored_auth, owned_client)
+        return await _auth_status_with_client(target, stored_auth, owned_client, refresh_status=refresh_status)
 
 
 async def backend_readiness_probe_async(
@@ -198,8 +228,10 @@ async def backend_readiness_probe_async(
 ) -> AuthBackendReadinessResult:
     started_at = time.monotonic()
     target = auth_file if auth_file is not None else default_auth_file()
+    projection = _auth_projection(target)
+    refresh_status = refresh_projection_status(projection)
     try:
-        stored_auth = network_credential(_auth_projection(target))
+        stored_auth = network_credential(projection)
     except AuthProjectionError as exc:
         return _backend_readiness_failure(
             started_at,
@@ -208,12 +240,19 @@ async def backend_readiness_probe_async(
                 failure_kind="storage",
                 failure_code=exc.code,
                 failure_message=exc.message,
+                refresh_state=refresh_status.refresh_state,
+                reauth_required=True,
                 bypass_grace=True,
             ),
         )
 
     if client is not None:
-        return await _backend_readiness_probe_with_client(stored_auth, client, started_at=started_at)
+        return await _backend_readiness_probe_with_client(
+            stored_auth,
+            client,
+            started_at=started_at,
+            refresh_status=refresh_status,
+        )
 
     settings = default_settings()
     async with HttpxEnjiHttpClient(event_sink=discard_transport_event) as owned_client:
@@ -222,6 +261,7 @@ async def backend_readiness_probe_async(
             owned_client,
             started_at=started_at,
             timeout_seconds=settings.readiness.heartbeat_timeout_seconds,
+            refresh_status=refresh_status,
         )
 
 
@@ -382,21 +422,34 @@ async def _auth_status_with_client(
     target: Path,
     stored_auth: StoredAuth,
     client: EnjiHttpClient,
+    *,
+    refresh_status: RefreshProjectionStatus,
 ) -> AuthStatusPayload:
     credential_type = stored_auth["credential"]["type"]
     try:
         response = await _request_auth_status(stored_auth, client)
     except EnjiHttpError as exc:
-        return _unauthenticated_payload(target, credential_type, exc.code, exc.message)
+        return _unauthenticated_payload(
+            target,
+            credential_type,
+            exc.code,
+            exc.message,
+            renewal=_auth_payload_renewal(refresh_status),
+        )
 
     if response.status_code == HTTP_OK:
-        return _authenticated_payload(target, credential_type, _profile_from_response(response))
+        return _authenticated_payload(
+            target,
+            credential_type,
+            _profile_from_response(response),
+            renewal=_auth_payload_renewal(refresh_status),
+        )
     return _auth_status_payload_from_response(
         target,
         credential_type,
         response,
-        auth_invalid_code="AUTH_REQUIRED",
-        auth_invalid_message="stored credential is not authenticated",
+        auth_invalid=AuthInvalidStatus("AUTH_REQUIRED", "stored credential is not authenticated"),
+        refresh_status=refresh_status,
     )
 
 
@@ -405,16 +458,31 @@ def _auth_status_payload_from_response(
     credential_type: str,
     response: EnjiHttpResponse,
     *,
-    auth_invalid_code: str,
-    auth_invalid_message: str,
+    auth_invalid: AuthInvalidStatus,
+    refresh_status: RefreshProjectionStatus,
 ) -> AuthStatusPayload:
     if response.status_code == HTTP_OK:
-        return _authenticated_payload(target, credential_type, _profile_from_response(response))
+        return _authenticated_payload(
+            target,
+            credential_type,
+            _profile_from_response(response),
+            renewal=_auth_payload_renewal(refresh_status),
+        )
     if is_auth_invalid_response(response):
-        return _unauthenticated_payload(target, credential_type, auth_invalid_code, auth_invalid_message)
+        return _unauthenticated_payload(
+            target,
+            credential_type,
+            auth_invalid.code,
+            auth_invalid.message,
+            renewal=_reauth_payload_renewal(refresh_status),
+        )
     if response.status_code in HTTP_AUTH_FAILURE_CODES:
         return _unauthenticated_payload(
-            target, credential_type, "AUTH_REQUIRED", "stored credential is not authenticated"
+            target,
+            credential_type,
+            "AUTH_REQUIRED",
+            "stored credential is not authenticated",
+            renewal=_reauth_payload_renewal(refresh_status),
         )
     try:
         raise_for_response_status(
@@ -423,8 +491,20 @@ def _auth_status_payload_from_response(
             expected_statuses=HTTP_AUTH_FAILURE_CODES | {HTTP_OK},
         )
     except EnjiHttpError as exc:
-        return _unauthenticated_payload(target, credential_type, exc.code, exc.message)
-    return _unauthenticated_payload(target, credential_type, "UPSTREAM", "auth status failed")
+        return _unauthenticated_payload(
+            target,
+            credential_type,
+            exc.code,
+            exc.message,
+            renewal=_auth_payload_renewal(refresh_status),
+        )
+    return _unauthenticated_payload(
+        target,
+        credential_type,
+        "UPSTREAM",
+        "auth status failed",
+        renewal=_auth_payload_renewal(refresh_status),
+    )
 
 
 async def _backend_readiness_probe_with_client(
@@ -433,6 +513,7 @@ async def _backend_readiness_probe_with_client(
     *,
     started_at: float,
     timeout_seconds: float | None = None,
+    refresh_status: RefreshProjectionStatus,
 ) -> AuthBackendReadinessResult:
     credential_type = stored_auth["credential"]["type"]
     try:
@@ -447,12 +528,16 @@ async def _backend_readiness_probe_with_client(
                 failure_message=exc.message,
                 failure_status_code=exc.status_code,
                 credential_type=credential_type,
+                refresh_state=refresh_status.refresh_state,
+                reauth_required=refresh_status.reauth_required,
             ),
         )
     if response.status_code == HTTP_OK:
         return AuthBackendReadinessResult(
             ready=True,
             credential_type=credential_type,
+            refresh_state=refresh_status.refresh_state,
+            reauth_required=refresh_status.reauth_required,
             elapsed_ms=_elapsed_ms(started_at),
         )
     if response.status_code in HTTP_AUTH_FAILURE_CODES or is_auth_invalid_response(response):
@@ -465,6 +550,8 @@ async def _backend_readiness_probe_with_client(
                 failure_message="stored credential is not authenticated",
                 failure_status_code=response.status_code,
                 credential_type=credential_type,
+                refresh_state=refresh_status.refresh_state,
+                reauth_required=True,
             ),
         )
     try:
@@ -483,6 +570,8 @@ async def _backend_readiness_probe_with_client(
                 failure_message=exc.message,
                 failure_status_code=exc.status_code,
                 credential_type=credential_type,
+                refresh_state=refresh_status.refresh_state,
+                reauth_required=refresh_status.reauth_required,
             ),
         )
     return _backend_readiness_failure(
@@ -494,6 +583,8 @@ async def _backend_readiness_probe_with_client(
             failure_message="backend readiness failed",
             failure_status_code=response.status_code,
             credential_type=credential_type,
+            refresh_state=refresh_status.refresh_state,
+            reauth_required=refresh_status.reauth_required,
         ),
     )
 
@@ -585,6 +676,8 @@ def _backend_readiness_failure(started_at: float, probe: AuthBackendReadinessRes
         failure_message=probe.failure_message,
         failure_status_code=probe.failure_status_code,
         credential_type=probe.credential_type,
+        refresh_state=probe.refresh_state,
+        reauth_required=probe.reauth_required,
         elapsed_ms=_elapsed_ms(started_at),
         bypass_grace=probe.bypass_grace,
     )

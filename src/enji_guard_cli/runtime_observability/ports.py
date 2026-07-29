@@ -16,6 +16,8 @@ class BackendReadinessObservation:
     failure_message: str | None = None
     failure_status_code: int | None = None
     credential_type: str | None = None
+    refresh_state: str | None = None
+    reauth_required: bool = False
     elapsed_ms: int | None = None
     bypass_grace: bool = False
 

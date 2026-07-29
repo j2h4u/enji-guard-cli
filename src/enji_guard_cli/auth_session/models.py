@@ -39,6 +39,8 @@ class AuthBackendReadinessResult:
     failure_message: str | None = None
     failure_status_code: int | None = None
     credential_type: str | None = None
+    refresh_state: str | None = None
+    reauth_required: bool = False
     elapsed_ms: int | None = None
     bypass_grace: bool = False
 
@@ -55,6 +57,8 @@ class AuthSessionStatus:
     name: str | None = None
     user_id: str | None = None
     auth_file: Path | None = None
+    refresh_state: str | None = None
+    reauth_required: bool = False
 
     @classmethod
     def from_payload(cls, payload: AuthStatusPayload) -> AuthSessionStatus:
@@ -67,6 +71,8 @@ class AuthSessionStatus:
             name=payload["name"],
             user_id=payload["user_id"],
             auth_file=Path(payload["auth_file"]),
+            refresh_state=payload["refresh_state"],
+            reauth_required=payload["reauth_required"],
         )
 
 

@@ -531,14 +531,4 @@ def _successful_replacement(source: StoredAuth, response: EnjiHttpResponse) -> s
 
 
 def _is_confirmed_refresh_rejection(response: EnjiHttpResponse) -> bool:
-    if response.status_code not in {401, 403}:
-        return False
-    try:
-        payload = response.json(operation="auth refresh rejection")
-    except EnjiHttpError:
-        return False
-    if not isinstance(payload, dict):
-        return False
-    error = payload.get("error")
-    code = error.get("code") if isinstance(error, dict) else payload.get("code")
-    return code in {"AUTH_REQUIRED", "AUTH_INVALID", "UNAUTHENTICATED"}
+    return response.status_code in {401, 403}
