@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.2.0](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.10...v3.2.0) (2026-07-29)
+
+
+### Features
+
+* **cli:** configure autofix schedules ([#237](https://github.com/j2h4u/enji-guard-cli/issues/237)) ([8b8c4bb](https://github.com/j2h4u/enji-guard-cli/commit/8b8c4bb401f156f87e8744746698aaed58038193))
+
+
+### Refactoring
+
+* extract scheduler policy ([#239](https://github.com/j2h4u/enji-guard-cli/issues/239)) ([bb5f2f8](https://github.com/j2h4u/enji-guard-cli/commit/bb5f2f8442c1c1e94e975d67a1ffb1e2e4093497))
+
 ## [3.1.10](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.9...v3.1.10) (2026-07-29)
 
 
