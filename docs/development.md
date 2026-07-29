@@ -68,6 +68,10 @@ These are contracts the CLI owes its users, not implementation preferences.
   from `curatedActions`; `improvement-jobs` is autofix-only, never an audit
   scheduling fallback. Batch scheduling must remain an explicit client-side
   loop over the selected repositories and audits.
+- Autofix scheduler controls live on `improvement-jobs set`, not `schedule`.
+  Keep the operator semantics parallel to audit schedules: explicit scope,
+  idempotent partial updates, IANA timezone, known cadence values, validated
+  weekdays, and `auto` versus user-selected time source.
 
 ### Reading audits
 

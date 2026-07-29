@@ -1,6 +1,6 @@
 import pytest
 
-from enji_guard_cli.audit.autofixes import definitions, desired_job, select, set_one
+from enji_guard_cli.audit.autofixes import definitions, desired_job, select, set_one, validate_autofix_update
 from enji_guard_cli.audit.ports import (
     AuditAutofixDefinition,
     AuditAutofixJob,
@@ -100,3 +100,86 @@ def test_set_one_treats_enji_short_action_key_as_same_job() -> None:
     )
 
     assert result.status == "unchanged"
+
+
+def test_existing_autofix_job_accepts_schedule_only_update() -> None:
+    existing = AuditAutofixJob(
+        action_key="improvement.vuln-fix",
+        variant_key="default",
+        kind="vuln-fix",
+        enabled=True,
+        auto_fix=True,
+        autofix_variant_key="default",
+        frequency="weekly",
+        days_of_week=("mon",),
+        schedule_time="09:00",
+        schedule_time_source="auto",
+        timezone="UTC",
+        pentest_mode="off",
+    )
+
+    desired = desired_job(
+        existing,
+        _definition(),
+        AuditAutofixUpdate(
+            enabled=None,
+            auto_fix=False,
+            frequency="workdays",
+            days_of_week=("tue", "thu"),
+            schedule_time="10:30",
+        ),
+    )
+
+    assert desired is not None
+    assert desired.enabled is True
+    assert desired.auto_fix is False
+    assert desired.frequency == "workdays"
+    assert desired.days_of_week == ("tue", "thu")
+    assert desired.schedule_time == "10:30"
+    assert desired.schedule_time_source == "user"
+    assert desired.timezone == "UTC"
+
+
+def test_autofix_auto_time_restores_auto_source_without_moving_existing_clock() -> None:
+    existing = AuditAutofixJob(
+        action_key="improvement.vuln-fix",
+        variant_key="default",
+        kind="vuln-fix",
+        enabled=True,
+        auto_fix=True,
+        autofix_variant_key="default",
+        frequency="weekly",
+        days_of_week=("mon",),
+        schedule_time="11:15",
+        schedule_time_source="user",
+        timezone="UTC",
+        pentest_mode="off",
+    )
+
+    desired = desired_job(existing, _definition(), AuditAutofixUpdate(enabled=None, schedule_time="auto"))
+
+    assert desired is not None
+    assert desired.schedule_time == "11:15"
+    assert desired.schedule_time_source == "auto"
+
+
+@pytest.mark.parametrize(
+    ("update", "message"),
+    [
+        (AuditAutofixUpdate(enabled=None), "pass --enabled"),
+        (AuditAutofixUpdate(enabled=None, frequency="never"), "unknown autofix frequency"),
+        (AuditAutofixUpdate(enabled=None, days_of_week=()), "one or more autofix days"),
+        (AuditAutofixUpdate(enabled=None, days_of_week=("noday",)), "unknown autofix day"),
+        (AuditAutofixUpdate(enabled=None, days_of_week=("mon", "mon")), "duplicate autofix day"),
+        (AuditAutofixUpdate(enabled=None, schedule_time="25:00"), "schedule time"),
+    ],
+)
+def test_autofix_update_validation_rejects_invalid_values(update: AuditAutofixUpdate, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        validate_autofix_update(update)
+
+
+def test_autofix_update_validation_accepts_scheduler_controls() -> None:
+    validate_autofix_update(AuditAutofixUpdate(enabled=None, auto_fix=False))
+    validate_autofix_update(AuditAutofixUpdate(enabled=None, days_of_week=("sat",)))
+    validate_autofix_update(AuditAutofixUpdate(enabled=None, schedule_time="auto"))

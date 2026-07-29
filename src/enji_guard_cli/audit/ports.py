@@ -440,6 +440,9 @@ class AuditAutofixUpdate:
     enabled: bool | None
     frequency: str | None = None
     timezone: str | None = None
+    days_of_week: tuple[str, ...] | None = None
+    schedule_time: str | None = None
+    auto_fix: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

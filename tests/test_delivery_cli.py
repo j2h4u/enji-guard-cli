@@ -700,6 +700,63 @@ def test_batch_schedule_write_reaches_every_published_audit_of_the_scope(ports: 
     assert written == [("r1", "audit.security", True, "daily"), ("r1", "audit.tests", True, "daily")]
 
 
+def test_operator_can_disable_audit_schedule_and_enable_weekly_autofixes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audit = RecordingAuditGateway(
+        catalog=AUTOFIX_CATALOG,
+        schedules={
+            "r1": (
+                AuditSchedule("audit.security", True, "workdays", None, None, "09:00", "auto", "Asia/Almaty"),
+                AuditSchedule("audit.tests", True, "workdays", None, None, "09:00", "auto", "Asia/Almaty"),
+                AuditSchedule("audit.dependency-hygiene", True, "workdays", None, None, "09:00", "auto", "Asia/Almaty"),
+            )
+        },
+    )
+    installed = Ports(audit=audit)
+    installed.install(monkeypatch)
+
+    audit_result = CliRunner().invoke(
+        app,
+        ["--project", "Pets", "schedule", "set", "--all-repos", "--enabled", "off"],
+    )
+    autofix_result = CliRunner().invoke(
+        app,
+        [
+            "--project",
+            "Pets",
+            "improvement-jobs",
+            "set",
+            "--all",
+            "--all-repos",
+            "--enabled",
+            "on",
+            "--auto-fix",
+            "on",
+            "--frequency",
+            "weekly",
+            "--days",
+            "sat",
+            "--time",
+            "auto",
+            "--timezone",
+            "Asia/Almaty",
+        ],
+    )
+
+    assert audit_result.exit_code == 0
+    assert autofix_result.exit_code == 0
+    assert {item.schedule.enabled for item in audit.schedule_writes} == {False}
+    assert {item.job.enabled for item in audit.autofix_writes} == {True}
+    assert {item.job.auto_fix for item in audit.autofix_writes} == {True}
+    assert {item.job.frequency for item in audit.autofix_writes} == {"weekly"}
+    assert {item.job.days_of_week for item in audit.autofix_writes} == {("sat",)}
+    assert {(item.job.schedule_time, item.job.schedule_time_source) for item in audit.autofix_writes} == {
+        ("09:00", "auto")
+    }
+    assert {item.job.timezone for item in audit.autofix_writes} == {"Asia/Almaty"}
+
+
 def test_autofix_write_reaches_the_gateway_with_the_selected_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     """The selector chooses which improvement job is rewritten, and only it."""
     audit = RecordingAuditGateway(catalog=AUTOFIX_CATALOG)
@@ -717,8 +774,14 @@ def test_autofix_write_reaches_the_gateway_with_the_selected_kind(monkeypatch: p
             "--all-repos",
             "--enabled",
             "on",
+            "--auto-fix",
+            "off",
             "--frequency",
             "weekly",
+            "--days",
+            "mon,wed,fri",
+            "--time",
+            "10:30",
             "--timezone",
             "Asia/Almaty",
         ],
@@ -729,7 +792,17 @@ def test_autofix_write_reaches_the_gateway_with_the_selected_kind(monkeypatch: p
     assert [(item.repo_id, item.kind) for item in audit.autofix_writes] == [("r1", "test-writing")]
     written = audit.autofix_writes[0].job
     assert (written.action_key, written.variant_key) == ("improvement.test-writing", "default")
-    assert (written.enabled, written.frequency, written.timezone) == (True, "weekly", "Asia/Almaty")
+    assert (written.enabled, written.auto_fix, written.frequency, written.timezone) == (
+        True,
+        False,
+        "weekly",
+        "Asia/Almaty",
+    )
+    assert (written.days_of_week, written.schedule_time, written.schedule_time_source) == (
+        ("mon", "wed", "fri"),
+        "10:30",
+        "user",
+    )
 
 
 def test_autofix_write_keeps_the_existing_job_of_the_selected_kind(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -779,6 +852,33 @@ def test_autofix_write_keeps_the_existing_job_of_the_selected_kind(monkeypatch: 
     assert (written.schedule_time, written.days_of_week) == ("23:00", ("fri",))
     assert (written.timezone, written.pentest_mode, written.frequency) == ("Asia/Almaty", "off", "monthly")
     assert written.enabled is True
+
+
+def test_autofix_write_can_update_time_without_requiring_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    stored = (
+        AuditAutofixJob(
+            "improvement.vuln-fix",
+            "default",
+            "vuln-fix",
+            True,
+            True,
+            frequency="weekly",
+            days_of_week=("mon",),
+            schedule_time="01:00",
+            schedule_time_source="auto",
+            timezone="UTC",
+            pentest_mode="off",
+        ),
+    )
+    audit = RecordingAuditGateway(catalog=AUTOFIX_CATALOG, autofix_jobs={"r1": stored})
+    Ports(audit=audit).install(monkeypatch)
+
+    result = CliRunner().invoke(app, ["improvement-jobs", "set", "--repo", REPO, "vuln-fix", "--time", "08:05"])
+
+    assert result.exit_code == 0
+    written = audit.autofix_writes[0].job
+    assert written.enabled is True
+    assert (written.schedule_time, written.schedule_time_source) == ("08:05", "user")
 
 
 def test_batch_write_rejects_ambiguous_scope_before_application(ports: Ports) -> None:

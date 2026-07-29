@@ -29,6 +29,9 @@ class CommandRunner(Protocol):
 FREQUENCY_HELP = f"Run cadence: {', '.join(AUDIT_CADENCES)}."
 TIMEZONE_HELP = "IANA timezone stored with each subscription, such as Asia/Almaty."
 ENABLED_HELP = "Turn the subscription on or off."
+AUTO_FIX_HELP = "Turn automatic fix execution on or off for the improvement job."
+DAYS_HELP = "Comma-separated run days: mon,tue,wed,thu,fri,sat,sun."
+TIME_HELP = "Run time as HH:MM, or auto to use the automatic time source."
 REPO_SCOPE_HELP = "Write to one repository; mutually exclusive with --all-repos and --all-projects."
 REPO_FILTER_HELP = "Read one repository; omit to read every repository in scope."
 
@@ -171,7 +174,10 @@ def register_subscription_commands(apps: SubscriptionCommandApps, deps: Subscrip
         ] = False,
         yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
         enabled: Annotated[Literal["on", "off"] | None, typer.Option("--enabled", help=ENABLED_HELP)] = None,
+        auto_fix: Annotated[Literal["on", "off"] | None, typer.Option("--auto-fix", help=AUTO_FIX_HELP)] = None,
         frequency: Annotated[str | None, typer.Option("--frequency", help=FREQUENCY_HELP)] = None,
+        days: Annotated[str | None, typer.Option("--days", help=DAYS_HELP)] = None,
+        time: Annotated[str | None, typer.Option("--time", help=TIME_HELP)] = None,
         timezone: Annotated[str | None, typer.Option("--timezone", help=TIMEZONE_HELP)] = None,
         json_output: Annotated[bool, typer.Option("--json")] = False,
     ) -> None:
@@ -185,7 +191,10 @@ def register_subscription_commands(apps: SubscriptionCommandApps, deps: Subscrip
                     deps.selected_project(project),
                     selectors,
                     enabled=deps.switch(enabled),
+                    auto_fix=deps.switch(auto_fix),
                     frequency=frequency,
+                    days_of_week=_days(days),
+                    schedule_time=time,
                     timezone=timezone,
                     scope=write_scope,
                 )
@@ -240,3 +249,9 @@ def register_subscription_commands(apps: SubscriptionCommandApps, deps: Subscrip
             as_json,
             EMAIL,
         )
+
+
+def _days(value: str | None) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    return tuple(day.strip().lower() for day in value.split(",") if day.strip())

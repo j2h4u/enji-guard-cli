@@ -437,7 +437,8 @@ docker exec -i enji-guard-cli enji-guard --project Pets schedule list
 docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos --enabled on --frequency workdays --timezone Asia/Almaty
 docker exec -i enji-guard-cli enji-guard --project Pets schedule auto-time --all-repos
 docker exec -i enji-guard-cli enji-guard improvement-jobs list --repo github@github.com:j2h4u/enji-guard-cli
-docker exec -i enji-guard-cli enji-guard improvement-jobs set --repo github@github.com:j2h4u/enji-guard-cli vuln-fix --enabled on
+docker exec -i enji-guard-cli enji-guard improvement-jobs set --repo github@github.com:j2h4u/enji-guard-cli vuln-fix \
+  --enabled on --auto-fix on --frequency workdays --days mon,tue,wed,thu,fri --time auto --timezone Asia/Almaty
 docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --scheduled off
 ```
 
@@ -515,7 +516,13 @@ Enji-assigned run times. Autofix `improvement-jobs` are not audit schedules.
 Autofix management uses `improvement-jobs` as the canonical resource. Its
 operator workflow is list/set per repository or explicit batch scope; it does
 not create or replace an audit schedule. Audit schedules remain under
-`audit-auto-runs/{actionKey}`.
+`audit-auto-runs/{actionKey}`. `improvement-jobs list` shows the configured
+autofix scheduler state, including enabled state, automatic-fix state, cadence,
+days, time, time source, timezone, and pentest mode when Enji returns it.
+`improvement-jobs set` changes only the selected autofix selectors and supports
+partial updates with `--enabled`, `--auto-fix`, `--frequency`, `--days`,
+`--time`, and `--timezone`. Use `--time auto` to restore the automatic time
+source without changing the existing clock time.
 
 `language show` reports the account preference. `language set en|ru` is
 idempotent and changes the account-wide audit language; Enji does not expose
