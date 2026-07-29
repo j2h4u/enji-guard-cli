@@ -25,7 +25,8 @@ from enji_guard_cli.audit.ports import (
     AuditGatewayPort,
     AuditScheduleUpdate,
 )
-from enji_guard_cli.audit.schedules import CADENCES, auto_time_for_targets, list_for_targets, set_for_targets
+from enji_guard_cli.audit.schedules import auto_time_for_targets, list_for_targets, set_for_targets
+from enji_guard_cli.audit.scheduling import CADENCES
 from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.models import RepositoryRef
 from enji_guard_cli.portfolio.ports import PortfolioTargetService

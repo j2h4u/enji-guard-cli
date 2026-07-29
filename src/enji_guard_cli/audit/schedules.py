@@ -5,6 +5,12 @@ from dataclasses import dataclass, replace
 from typing import Literal, Protocol, cast
 
 from enji_guard_cli.audit.ports import AuditSchedule, AuditScheduleUpdate
+from enji_guard_cli.audit.scheduling import (
+    select_schedule_time,
+    validate_cadence,
+    validate_time_update,
+    validate_week_days,
+)
 from enji_guard_cli.fanout import BoundedFanout
 
 
@@ -80,13 +86,6 @@ def auto_time_for_targets(
     return tuple(result)
 
 
-CADENCES = frozenset({"daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"})
-WEEK_DAYS = frozenset({"mon", "tue", "wed", "thu", "fri", "sat", "sun"})
-TIME_PARTS = 2
-MAX_HOUR = 23
-MAX_MINUTE = 59
-
-
 def audit_auto_run_key(action_key: str) -> str:
     if not action_key.startswith("audit.") or len(action_key) == len("audit."):
         raise ValueError(f"schedule action key must be an exact audit action key: {action_key}")
@@ -97,8 +96,8 @@ def validate_schedule_update(update: AuditScheduleUpdate) -> None:
     if _is_empty_update(update):
         raise ValueError("pass --enabled, --frequency, or --timezone")
     _validate_window(update)
-    _validate_cadence(update.cadence)
-    _validate_time(update.schedule_time)
+    validate_cadence(update.cadence, subject="schedule")
+    validate_time_update(update.schedule_time)
 
 
 def _is_empty_update(update: AuditScheduleUpdate) -> bool:
@@ -113,42 +112,17 @@ def _validate_window(update: AuditScheduleUpdate) -> None:
         return
     if update.cadence is None:
         raise ValueError("pass --frequency when overriding window days")
-    invalid = [day for day in update.window_days if day not in WEEK_DAYS]
-    if invalid:
-        raise ValueError(f"unknown window day(s): {', '.join(invalid)}")
-    duplicate = sorted({day for day in update.window_days if update.window_days.count(day) > 1})
-    if duplicate:
-        raise ValueError(f"duplicate window day(s): {', '.join(duplicate)}")
-
-
-def _validate_cadence(cadence: str | None) -> None:
-    if cadence is not None and cadence not in CADENCES:
-        raise ValueError(f"unknown schedule frequency: {cadence}")
-
-
-def _validate_time(schedule_time: str | None) -> None:
-    if schedule_time is not None and schedule_time != "auto":
-        validate_schedule_time(schedule_time)
-
-
-def validate_schedule_time(value: str) -> str:
-    parts = value.split(":", 1)
-    if len(parts) != TIME_PARTS or not all(part.isdigit() for part in parts):
-        raise ValueError("schedule time must be auto or HH:MM")
-    hour, minute = (int(part) for part in parts)
-    if hour > MAX_HOUR or minute > MAX_MINUTE:
-        raise ValueError("schedule time must be auto or HH:MM")
-    return f"{hour:02d}:{minute:02d}"
+    validate_week_days(update.window_days, subject="window")
 
 
 def selected_schedule_time(existing: AuditSchedule | None, update: AuditScheduleUpdate) -> tuple[str, str]:
-    if update.schedule_time == "auto":
-        return "00:00", "auto"
-    if update.schedule_time is not None:
-        return validate_schedule_time(update.schedule_time), "user"
-    if existing is not None and existing.schedule_time_source == "user":
-        return existing.schedule_time or "00:00", "user"
-    return "00:00", "auto"
+    selected = select_schedule_time(
+        update.schedule_time,
+        existing_time=existing.schedule_time if existing else None,
+        existing_source=existing.schedule_time_source if existing else None,
+        auto_default_time="00:00",
+    )
+    return selected.schedule_time, selected.schedule_time_source
 
 
 def plan_schedule_update(

@@ -2,7 +2,6 @@
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Literal, cast
 
 from enji_guard_cli.audit.ports import (
     AuditAutofixDefinition,
@@ -11,7 +10,14 @@ from enji_guard_cli.audit.ports import (
     AuditCatalogAutofix,
     AuditCatalogResult,
 )
-from enji_guard_cli.audit.schedules import CADENCES, WEEK_DAYS, validate_schedule_time
+from enji_guard_cli.audit.scheduling import (
+    DEFAULT_WORKDAYS,
+    ScheduleTimeSelection,
+    select_preserved_auto_time,
+    validate_cadence,
+    validate_time_update,
+    validate_week_days,
+)
 
 PUBLISHED = "published"
 RELATIONSHIPS = {
@@ -76,6 +82,7 @@ def desired_job(
     timezone = update.timezone or (existing.timezone if existing else None)
     if timezone is None:
         raise ValueError("pass --timezone when enabling an absent autofix")
+    timing = _selected_timing(existing, update)
     return AuditAutofixJob(
         action_key=definition.action_key,
         variant_key=definition.variant_key,
@@ -84,9 +91,9 @@ def desired_job(
         auto_fix=update.auto_fix if update.auto_fix is not None else (existing.auto_fix if existing else True),
         autofix_variant_key=(existing.autofix_variant_key if existing else None) or definition.variant_key,
         frequency=update.frequency or (existing.frequency if existing else None) or "workdays",
-        days_of_week=update.days_of_week if update.days_of_week is not None else (_days(existing) or _workdays()),
-        schedule_time=_selected_schedule_time(existing, update),
-        schedule_time_source=cast(Literal["auto", "user"], _selected_schedule_time_source(existing, update)),
+        days_of_week=update.days_of_week if update.days_of_week is not None else (_days(existing) or DEFAULT_WORKDAYS),
+        schedule_time=timing.schedule_time,
+        schedule_time_source=timing.schedule_time_source,
         timezone=timezone,
         pentest_mode=(existing.pentest_mode if existing else None) or "off",
         extensions=existing.extensions if existing else (),
@@ -155,10 +162,6 @@ def _days(job: AuditAutofixJob | None) -> tuple[str, ...] | None:
     return job.days_of_week if job and job.days_of_week else None
 
 
-def _workdays() -> tuple[str, ...]:
-    return ("mon", "tue", "wed", "thu", "fri")
-
-
 def _source(job: AuditAutofixJob | None) -> str | None:
     value = job.schedule_time_source if job else None
     return value if value in {"auto", "user"} else None
@@ -167,9 +170,9 @@ def _source(job: AuditAutofixJob | None) -> str | None:
 def validate_autofix_update(update: AuditAutofixUpdate) -> None:
     if _is_empty_update(update):
         raise ValueError("pass --enabled, --auto-fix, --frequency, --days, --time, or --timezone")
-    _validate_frequency(update.frequency)
-    _validate_days(update.days_of_week)
-    _validate_time(update.schedule_time)
+    validate_cadence(update.frequency, subject="autofix")
+    validate_week_days(update.days_of_week, subject="autofix")
+    validate_time_update(update.schedule_time)
 
 
 def _is_empty_update(update: AuditAutofixUpdate) -> bool:
@@ -186,40 +189,10 @@ def _is_empty_update(update: AuditAutofixUpdate) -> bool:
     )
 
 
-def _validate_frequency(frequency: str | None) -> None:
-    if frequency is not None and frequency not in CADENCES:
-        raise ValueError(f"unknown autofix frequency: {frequency}")
-
-
-def _validate_days(days: tuple[str, ...] | None) -> None:
-    if days is None:
-        return
-    if not days:
-        raise ValueError("pass one or more autofix days")
-    invalid = [day for day in days if day not in WEEK_DAYS]
-    if invalid:
-        raise ValueError(f"unknown autofix day(s): {', '.join(invalid)}")
-    duplicate = sorted({day for day in days if days.count(day) > 1})
-    if duplicate:
-        raise ValueError(f"duplicate autofix day(s): {', '.join(duplicate)}")
-
-
-def _validate_time(schedule_time: str | None) -> None:
-    if schedule_time is not None and schedule_time != "auto":
-        validate_schedule_time(schedule_time)
-
-
-def _selected_schedule_time(existing: AuditAutofixJob | None, update: AuditAutofixUpdate) -> str:
-    if update.schedule_time == "auto":
-        return existing.schedule_time if existing and existing.schedule_time else "09:00"
-    if update.schedule_time is not None:
-        return validate_schedule_time(update.schedule_time)
-    return (existing.schedule_time if existing else None) or "09:00"
-
-
-def _selected_schedule_time_source(existing: AuditAutofixJob | None, update: AuditAutofixUpdate) -> str:
-    if update.schedule_time == "auto":
-        return "auto"
-    if update.schedule_time is not None:
-        return "user"
-    return _source(existing) or "auto"
+def _selected_timing(existing: AuditAutofixJob | None, update: AuditAutofixUpdate) -> ScheduleTimeSelection:
+    return select_preserved_auto_time(
+        update.schedule_time,
+        existing_time=existing.schedule_time if existing else None,
+        existing_source=_source(existing),
+        auto_default_time="09:00",
+    )

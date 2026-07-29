@@ -6,7 +6,7 @@ from typer.main import get_command
 from typer.testing import CliRunner
 
 from cli_output import rendered as _rendered
-from enji_guard_cli.audit.schedules import CADENCES
+from enji_guard_cli.audit.scheduling import CADENCES
 from enji_guard_cli.delivery.cli.app import _repository_sort, app
 from enji_guard_cli.settings import REPOSITORY_SORT_NAMES
 

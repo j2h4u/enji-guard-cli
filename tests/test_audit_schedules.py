@@ -5,9 +5,9 @@ from enji_guard_cli.audit.schedules import (
     audit_auto_run_key,
     list_for_targets,
     plan_schedule_update,
-    validate_schedule_time,
     validate_schedule_update,
 )
+from enji_guard_cli.audit.scheduling import validate_schedule_time
 from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.models import RepositoryIdentity, RepositoryProvider, RepositoryRef
 from enji_guard_cli.settings import FanoutSettings
