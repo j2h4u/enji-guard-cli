@@ -19,7 +19,7 @@ def _action(
 
 
 def _catalog(*actions: AuditCatalogAction) -> AuditCatalogResult:
-    return AuditCatalogResult(actions=actions, autofixes=())
+    return AuditCatalogResult(actions=actions, improvements=())
 
 
 def test_catalog_selects_published_audits_and_recon() -> None:

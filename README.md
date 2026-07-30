@@ -93,10 +93,10 @@ selects `audit.security`). Recon is a separate `audit.recon` action and is not
 an audit selector.
 
 The workflow is audit -> findings -> optional improvement. The live catalog's
-`auditAutofixes` entries describe available variants. The supported typed
+The provider `auditAutofixes` entries describe available variants. The supported typed
 relationships are `security` -> `vuln-fix`, `tests` -> `test-writing`, and
 `dependency-hygiene` -> `dependency-update`; pentest is separate. The CLI is
-the operator surface for autofix management (`list` and `set`), while MCP
+the operator surface for improvement-job management (`list` and `set`), while MCP
 remains read-only. Use an explicit `--repo REPO`, `--all-repos` with `--project`, or
 `--all-projects` for batch scope. The relationship mapping is temporary and
 can be removed when Enji exposes relationships directly.
@@ -438,7 +438,7 @@ docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos
 docker exec -i enji-guard-cli enji-guard --project Pets schedule auto-time --all-repos
 docker exec -i enji-guard-cli enji-guard improvement-jobs list --repo github@github.com:j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard improvement-jobs set --repo github@github.com:j2h4u/enji-guard-cli vuln-fix \
-  --enabled on --auto-fix on --frequency workdays --days mon,tue,wed,thu,fri --time auto --timezone Asia/Almaty
+  --enabled on --automatic-execution on --frequency workdays --days mon,tue,wed,thu,fri --time auto --timezone Asia/Almaty
 docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --scheduled off
 ```
 
@@ -462,7 +462,7 @@ options.
 | `recon start REPO` | Baseline discovery run. |
 | `audit start\|read\|summary REPO` | Run audits, read bodies, read compact metadata. |
 | `schedule list\|set\|auto-time\|timezone` | Automatic audit schedules. |
-| `improvement-jobs list\|set` | Curated autofix jobs. |
+| `improvement-jobs list\|set` | Curated improvement jobs. |
 | `email list\|set` | Audit completion email preferences. |
 | `language show\|set` | Account-wide audit language. |
 | `gitlab credentials\|projects` | GitLab credential and project discovery. |
@@ -511,16 +511,16 @@ with each schedule; Enji assigns the run time by default. The service/container
 should run with the host timezone. Batch writes are explicit client-side loops:
 use `--repo REPO`, `--project NAME_OR_ID --all-repos`, or `--all-projects`.
 `schedule set` updates the selected scope, and `schedule auto-time` restores
-Enji-assigned run times. Autofix `improvement-jobs` are not audit schedules.
+Enji-assigned run times. Improvement jobs are not audit schedules.
 
-Autofix management uses `improvement-jobs` as the canonical resource. Its
+Improvement-job management uses `improvement-jobs` as the canonical resource. Its
 operator workflow is list/set per repository or explicit batch scope; it does
 not create or replace an audit schedule. Audit schedules remain under
 `audit-auto-runs/{actionKey}`. `improvement-jobs list` shows the configured
-autofix scheduler state, including enabled state, automatic-fix state, cadence,
+job scheduler state, including enabled state, automatic-execution state, cadence,
 days, time, time source, timezone, and pentest mode when Enji returns it.
-`improvement-jobs set` changes only the selected autofix selectors and supports
-partial updates with `--enabled`, `--auto-fix`, `--frequency`, `--days`,
+`improvement-jobs set` changes only the selected improvement selectors and supports
+partial updates with `--enabled`, `--automatic-execution`, `--frequency`, `--days`,
 `--time`, and `--timezone`. Use `--time auto` to restore the automatic time
 source without changing the existing clock time.
 

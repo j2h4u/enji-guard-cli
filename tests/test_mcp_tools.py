@@ -19,6 +19,9 @@ from typing import cast
 import pytest
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.lowlevel.server import Server, request_ctx
+from mcp.server.session import ServerSession
+from mcp.shared.context import RequestContext
 
 import enji_guard_cli.delivery.mcp.server as server_module
 from enji_guard_cli.application import ApplicationResult
@@ -40,6 +43,7 @@ class OverviewCall:
 class AuditsCall:
     repo: str
     project: str | None
+    audit_selectors: tuple[str, ...]
     thread_id: int
 
 
@@ -56,8 +60,10 @@ class RecordingQueryFacade:
         self.overview_calls.append(OverviewCall(project, sort, threading.get_ident()))
         return self._result()
 
-    def repository_audits(self, repo: str, project: str | None) -> ApplicationResult:
-        self.audits_calls.append(AuditsCall(repo, project, threading.get_ident()))
+    def repository_audits(
+        self, repo: str, project: str | None, audit_selectors: list[str] | None = None
+    ) -> ApplicationResult:
+        self.audits_calls.append(AuditsCall(repo, project, tuple(audit_selectors or ()), threading.get_ident()))
         return self._result()
 
     def _result(self) -> ApplicationResult:
@@ -100,17 +106,32 @@ def _served(monkeypatch: pytest.MonkeyPatch, facade: RecordingQueryFacade) -> _S
 
 
 @asynccontextmanager
-async def _running(server: FastMCP) -> AsyncIterator[None]:
-    mcp_server = server._mcp_server
-    async with mcp_server.lifespan(mcp_server):
+async def _running(server: FastMCP) -> AsyncIterator[McpQueryFacade]:
+    mcp_server = cast(Server[McpQueryFacade, object], server._mcp_server)
+    async with mcp_server.lifespan(mcp_server) as facade:
+        yield facade
+
+
+@asynccontextmanager
+async def _request_context(facade: McpQueryFacade) -> AsyncIterator[None]:
+    request = RequestContext(
+        request_id="test-request",
+        meta=None,
+        session=cast(ServerSession, object()),
+        lifespan_context=facade,
+    )
+    token = request_ctx.set(request)
+    try:
         yield
+    finally:
+        request_ctx.reset(token)
 
 
 def _call(served: _ServedTools, name: str, arguments: dict[str, object]) -> dict[str, object]:
     """Invoke one tool and return the structured content an MCP client receives."""
 
     async def exercise() -> object:
-        async with _running(served.server):
+        async with _running(served.server) as facade, _request_context(facade):
             return await served.server.call_tool(name, arguments)
 
     unstructured, structured = cast(tuple[object, dict[str, object]], asyncio.run(exercise()))
@@ -217,6 +238,39 @@ def test_repository_audits_treats_a_blank_project_as_account_wide(monkeypatch: p
     assert facade.audits_calls[0].project is None
 
 
+def test_repository_audits_forwards_explicit_selectors_for_full_report_bodies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    facade = RecordingQueryFacade(payload={"audits": []})
+    served = _served(monkeypatch, facade)
+
+    _call(served, MCP_TOOL_NAMES[1], {"repo": "repo_42", "audits": ["security"]})
+
+    assert facade.audits_calls[0].repo == "repo_42"
+    assert facade.audits_calls[0].audit_selectors == ("security",)
+
+
+def test_repository_audits_are_compact_until_an_audit_selector_is_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class CompactFirstFacade(RecordingQueryFacade):
+        def repository_audits(
+            self, repo: str, project: str | None, audit_selectors: list[str] | None = None
+        ) -> ApplicationResult:
+            super().repository_audits(repo, project, audit_selectors)
+            if audit_selectors:
+                return ApplicationResult(payload={"audits": [{"artifact": {"body": "# Security"}}]})
+            return ApplicationResult(payload={"audits": [{"score": 73, "freshness": "fresh"}]})
+
+    served = _served(monkeypatch, CompactFirstFacade())
+
+    compact = _call(served, MCP_TOOL_NAMES[1], {"repo": "repo_42"})
+    selected = _call(served, MCP_TOOL_NAMES[1], {"repo": "repo_42", "audits": ["security"]})
+
+    assert compact == {"audits": [{"score": 73, "freshness": "fresh"}]}
+    assert selected == {"audits": [{"artifact": {"body": "# Security"}}]}
+
+
 def test_tool_bodies_run_off_the_event_loop_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     """The query surface is blocking; running it inline would stall the server."""
     facade = RecordingQueryFacade(payload={"projects": []})
@@ -224,7 +278,7 @@ def test_tool_bodies_run_off_the_event_loop_thread(monkeypatch: pytest.MonkeyPat
     loop_threads: list[int] = []
 
     async def exercise() -> None:
-        async with _running(served.server):
+        async with _running(served.server) as facade, _request_context(facade):
             loop_threads.append(threading.get_ident())
             await served.server.call_tool(MCP_TOOL_NAMES[0], {"project": "acme"})
 
@@ -254,6 +308,58 @@ def test_the_tools_refuse_to_run_outside_the_server_lifespan(monkeypatch: pytest
 
     with pytest.raises(ToolError, match="only while the server lifespan is running"):
         asyncio.run(exercise())
+
+
+def test_concurrent_lifespans_keep_each_request_on_its_own_query_facade(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second MCP session must not replace the first session's query surface."""
+
+    class ScopedFacade(RecordingQueryFacade):
+        def portfolio_overview(self, project: str | None, sort: RepositorySortName) -> ApplicationResult:
+            barrier.wait()
+            return super().portfolio_overview(project, sort)
+
+    barrier = threading.Barrier(2)
+    facades = iter((ScopedFacade(payload={"scope": "one"}), ScopedFacade(payload={"scope": "two"})))
+
+    @contextmanager
+    def scoped_facade(auth_file: Path | None = None) -> Iterator[McpQueryFacade]:
+        del auth_file
+        yield cast(McpQueryFacade, next(facades))
+
+    monkeypatch.setattr(server_module, "mcp_query_facade", scoped_facade)
+    server = create_mcp_server()
+
+    async def exercise() -> list[dict[str, object]]:
+        facades: asyncio.Queue[McpQueryFacade] = asyncio.Queue()
+        release_lifespans = asyncio.Event()
+
+        async def lifespan_task() -> None:
+            async with _running(server) as facade:
+                await facades.put(facade)
+                await release_lifespans.wait()
+
+        lifespan_tasks = [asyncio.create_task(lifespan_task()) for _ in range(2)]
+        try:
+            first, second = await facades.get(), await facades.get()
+
+            async def request(facade: McpQueryFacade) -> dict[str, object]:
+                async with _request_context(facade):
+                    _, structured = cast(
+                        tuple[object, dict[str, object]],
+                        await server.call_tool(MCP_TOOL_NAMES[0], {"project": "acme"}),
+                    )
+                    return structured
+
+            return list(await asyncio.gather(request(first), request(second)))
+        finally:
+            release_lifespans.set()
+            await asyncio.gather(*lifespan_tasks)
+
+    results = asyncio.run(exercise())
+
+    assert {cast(str, result["scope"]) for result in results} == {"one", "two"}
 
 
 @dataclass

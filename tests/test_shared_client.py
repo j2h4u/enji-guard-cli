@@ -22,7 +22,6 @@ from enji_guard_cli.enji_gateway.shared_client import create_shared_http_client
 from enji_guard_cli.fanout import BoundedFanout
 from enji_guard_cli.portfolio.models import AccessInfo, AccessLimits
 from enji_guard_cli.runtime_observability import supervisor as supervisor_module
-from enji_guard_cli.runtime_observability.auth_coordinator import RuntimeAuthCoordinatorAdapter
 from enji_guard_cli.settings import FanoutSettings, default_settings
 from enji_guard_cli.transport import EnjiHttpRequest
 
@@ -224,6 +223,13 @@ def test_composition_injects_one_client_into_both_gateways_and_application_lifec
     monkeypatch.setattr(composition_module, "AuditGateway", Gateway)
     monkeypatch.setattr(composition_module, "PortfolioGateway", Gateway)
     monkeypatch.setattr(composition_module, "FileAuditLedger", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        composition_module,
+        "RuntimeAuthCoordinatorAdapter",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("CLI application must not compose runtime auth")
+        ),
+    )
 
     application = create_application(tmp_path / "auth.json")
     assert len(client_instances) == 1
@@ -231,8 +237,6 @@ def test_composition_injects_one_client_into_both_gateways_and_application_lifec
     assert cast(Gateway, application.portfolio.gateway).client is client_instances[0]
     assert client_instances[0].event_sink is composition_module.log_event
     assert application.auth.session.client is client_instances[0]
-    assert isinstance(application.auth.runtime_auth, RuntimeAuthCoordinatorAdapter)
-    assert application.auth.runtime_auth.client is client_instances[0]
     assert application.runner.lifecycle is client_instances[0]
 
 

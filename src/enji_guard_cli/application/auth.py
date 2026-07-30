@@ -9,15 +9,13 @@ from enji_guard_cli.auth_session import (
     AuthSessionStatus,
     ImportCredentialPayload,
 )
-from enji_guard_cli.runtime_observability.ports import RuntimeAuthCoordinator
 
 
 @dataclass(frozen=True, slots=True)
 class AuthFacade:
-    """Operator credential surface plus the coordinator the supervisor drives."""
+    """Operator credential import and status surface."""
 
     session: AuthSessionService
-    runtime_auth: RuntimeAuthCoordinator
 
     def import_cookie(self, raw_cookie: str) -> ImportCredentialPayload:
         try:

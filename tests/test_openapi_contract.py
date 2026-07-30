@@ -223,12 +223,12 @@ def test_improvement_job_summaries_describe_autofix_management() -> None:
         assert operation.get("summary") == summary
 
 
-def test_improvement_job_endpoint_operations_use_the_autofix_ontology() -> None:
-    assert IMPROVEMENT_JOBS_ENDPOINT_SPEC.operation == "autofix list"
-    assert IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC.operation == "autofix set"
+def test_improvement_job_endpoint_operations_use_the_product_ontology() -> None:
+    assert IMPROVEMENT_JOBS_ENDPOINT_SPEC.operation == "improvement jobs list"
+    assert IMPROVEMENT_JOB_PUT_ENDPOINT_SPEC.operation == "improvement jobs set"
 
 
-def test_improvement_job_update_contract_matches_autofix_scheduler_payload() -> None:
+def test_improvement_job_update_contract_matches_provider_scheduler_payload() -> None:
     contract = cast(object, json.loads(CONTRACT_PATH.read_text(encoding="utf-8")))
     assert isinstance(contract, dict)
     paths = contract.get("paths")

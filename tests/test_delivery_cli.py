@@ -33,15 +33,15 @@ from cli_output import rendered as _rendered
 from enji_guard_cli.application import ApplicationAuthError, ApplicationCommandError
 from enji_guard_cli.audit.ports import (
     AuditArtifact,
-    AuditAutofixJob,
     AuditCatalogAction,
-    AuditCatalogAutofix,
     AuditCatalogResult,
     AuditReportRef,
     AuditRerunState,
     AuditRun,
     AuditSchedule,
     AuditTaskLink,
+    CatalogImprovement,
+    ImprovementJob,
 )
 from enji_guard_cli.auth_session.api import AuthError
 from enji_guard_cli.delivery.cli.app import _command_exit_code, _json, _run, app
@@ -68,12 +68,12 @@ REPO = "github@github.com:acme/cat"
 REPORT_COMPLETED_AT = "2026-07-20T00:00:00Z"
 
 
-def _catalog(*published: AuditCatalogAction, autofixes: tuple[AuditCatalogAutofix, ...] = ()) -> AuditCatalogResult:
+def _catalog(*published: AuditCatalogAction, improvements: tuple[CatalogImprovement, ...] = ()) -> AuditCatalogResult:
     """Build a catalog around the mandatory recon action."""
     recon = AuditCatalogAction(
         "audit.recon", "Recon", "workflow", "draft", None, "recon", "runbook-recon", "recon", "1"
     )
-    return AuditCatalogResult(actions=(recon, *published), autofixes=autofixes)
+    return AuditCatalogResult(actions=(recon, *published), improvements=improvements)
 
 
 def _audit(selector: str, title: str) -> AuditCatalogAction:
@@ -511,7 +511,7 @@ def test_json_preserves_semantic_nulls_and_non_null_falsy_values() -> None:
             "connected": None,
             "recon_done": None,
             "enabled": None,
-            "auto_fix": None,
+            "automatic_execution": None,
             "score": None,
             "false": False,
             "zero": 0,
@@ -522,7 +522,7 @@ def test_json_preserves_semantic_nulls_and_non_null_falsy_values() -> None:
         "connected": None,
         "recon_done": None,
         "enabled": None,
-        "auto_fix": None,
+        "automatic_execution": None,
         "score": None,
         "false": False,
         "zero": 0,
@@ -573,28 +573,28 @@ def test_json_preserves_null_scores_from_typed_repository_dto() -> None:
     assert rendered["scores"] == {"audit.security": None, "audit.tests": 0}
 
 
-AUTOFIX_CATALOG = _catalog(
+IMPROVEMENT_CATALOG = _catalog(
     _audit("security", "Security"),
     _audit("tests", "Tests"),
     _audit("dependency-hygiene", "Dependencies"),
-    autofixes=(
-        AuditCatalogAutofix("improvement.vuln-fix", "default", "Vuln fix", None, "rb-1", "published", 1),
-        AuditCatalogAutofix("improvement.dependency-update", "default", "Deps", None, "rb-2", "published", 2),
-        AuditCatalogAutofix("improvement.test-writing", "default", "Tests", None, "rb-3", "published", 3),
+    improvements=(
+        CatalogImprovement("improvement.vuln-fix", "default", "Vuln fix", None, "rb-1", "published", 1),
+        CatalogImprovement("improvement.dependency-update", "default", "Deps", None, "rb-2", "published", 2),
+        CatalogImprovement("improvement.test-writing", "default", "Tests", None, "rb-3", "published", 3),
     ),
 )
 
 TEST_WRITING_ONLY = _catalog(
     _audit("tests", "Tests"),
-    autofixes=(AuditCatalogAutofix("improvement.test-writing", "default", "Tests", None, "rb-3", "published", 1),),
+    improvements=(CatalogImprovement("improvement.test-writing", "default", "Tests", None, "rb-3", "published", 1),),
 )
 
 
 def test_improvement_jobs_list_is_one_summary_line_per_repository(monkeypatch: pytest.MonkeyPatch) -> None:
-    job = AuditAutofixJob(
+    job = ImprovementJob(
         "improvement.test-writing", "default", "test-writing", True, True, frequency="workdays", timezone="UTC"
     )
-    Ports(audit=RecordingAuditGateway(catalog=TEST_WRITING_ONLY, autofix_jobs={"r1": (job,)})).install(monkeypatch)
+    Ports(audit=RecordingAuditGateway(catalog=TEST_WRITING_ONLY, improvement_jobs={"r1": (job,)})).install(monkeypatch)
 
     result = CliRunner().invoke(app, ["improvement-jobs", "list"])
 
@@ -604,10 +604,10 @@ def test_improvement_jobs_list_is_one_summary_line_per_repository(monkeypatch: p
         "github@github.com:acme/cat",
         "enabled=1/1",
         "configured=1/1",
-        "auto_fix=1/1",
+        "automatic_execution=1/1",
         "supported=test-writing",
         "enabled_state=true",
-        "auto_fix_state=true",
+        "automatic_execution_state=true",
         "frequency=workdays",
         "timezone=UTC",
     ):
@@ -616,7 +616,7 @@ def test_improvement_jobs_list_is_one_summary_line_per_repository(monkeypatch: p
 
 def test_improvement_jobs_text_preserves_mixed_dimensions_and_states(monkeypatch: pytest.MonkeyPatch) -> None:
     jobs = (
-        AuditAutofixJob(
+        ImprovementJob(
             "improvement.vuln-fix",
             "default",
             "vuln-fix",
@@ -628,7 +628,7 @@ def test_improvement_jobs_text_preserves_mixed_dimensions_and_states(monkeypatch
             schedule_time_source="auto",
             pentest_mode="off",
         ),
-        AuditAutofixJob(
+        ImprovementJob(
             "improvement.dependency-update",
             "default",
             "dependency-update",
@@ -641,14 +641,14 @@ def test_improvement_jobs_text_preserves_mixed_dimensions_and_states(monkeypatch
             pentest_mode="on",
         ),
     )
-    Ports(audit=RecordingAuditGateway(catalog=AUTOFIX_CATALOG, autofix_jobs={"r1": jobs})).install(monkeypatch)
+    Ports(audit=RecordingAuditGateway(catalog=IMPROVEMENT_CATALOG, improvement_jobs={"r1": jobs})).install(monkeypatch)
 
     result = CliRunner().invoke(app, ["improvement-jobs", "list"])
 
     assert result.exit_code == 0
-    assert "enabled=1/3 configured=2/3 auto_fix=0/3" in result.stdout
+    assert "enabled=1/3 configured=2/3 automatic_execution=0/3" in result.stdout
     assert "enabled_state=mixed[vuln-fix=true,dependency-update=false]" in result.stdout
-    assert "auto_fix_state=mixed[vuln-fix=false,dependency-update=unset]" in result.stdout
+    assert "automatic_execution_state=mixed[vuln-fix=false,dependency-update=unset]" in result.stdout
     assert "frequency=mixed[vuln-fix=daily,dependency-update=weekly]" in result.stdout
     assert "days=mixed[vuln-fix=mon,dependency-update=fri]" in result.stdout
     assert "schedule_time=mixed[vuln-fix=09:00,dependency-update=10:00]" in result.stdout
@@ -660,8 +660,8 @@ def test_improvement_jobs_text_preserves_mixed_dimensions_and_states(monkeypatch
 def test_improvement_jobs_text_does_not_report_unknown_enabled_state_as_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    job = AuditAutofixJob("improvement.test-writing", "default", "test-writing", None, True)
-    Ports(audit=RecordingAuditGateway(catalog=TEST_WRITING_ONLY, autofix_jobs={"r1": (job,)})).install(monkeypatch)
+    job = ImprovementJob("improvement.test-writing", "default", "test-writing", None, True)
+    Ports(audit=RecordingAuditGateway(catalog=TEST_WRITING_ONLY, improvement_jobs={"r1": (job,)})).install(monkeypatch)
 
     result = CliRunner().invoke(app, ["improvement-jobs", "list"])
 
@@ -706,11 +706,11 @@ def test_batch_schedule_write_reaches_every_published_audit_of_the_scope(ports: 
     assert written == [("r1", "audit.security", True, "daily"), ("r1", "audit.tests", True, "daily")]
 
 
-def test_operator_can_disable_audit_schedule_and_enable_weekly_autofixes(
+def test_operator_can_disable_audit_schedule_and_enable_weekly_improvement_jobs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     audit = RecordingAuditGateway(
-        catalog=AUTOFIX_CATALOG,
+        catalog=IMPROVEMENT_CATALOG,
         schedules={
             "r1": (
                 AuditSchedule("audit.security", True, "workdays", None, None, "09:00", "auto", "Asia/Almaty"),
@@ -726,7 +726,7 @@ def test_operator_can_disable_audit_schedule_and_enable_weekly_autofixes(
         app,
         ["--project", "Pets", "schedule", "set", "--all-repos", "--enabled", "off"],
     )
-    autofix_result = CliRunner().invoke(
+    improvement_job_result = CliRunner().invoke(
         app,
         [
             "--project",
@@ -737,7 +737,7 @@ def test_operator_can_disable_audit_schedule_and_enable_weekly_autofixes(
             "--all-repos",
             "--enabled",
             "on",
-            "--auto-fix",
+            "--automatic-execution",
             "on",
             "--frequency",
             "weekly",
@@ -751,21 +751,64 @@ def test_operator_can_disable_audit_schedule_and_enable_weekly_autofixes(
     )
 
     assert audit_result.exit_code == 0
-    assert autofix_result.exit_code == 0
+    assert improvement_job_result.exit_code == 0
     assert {item.schedule.enabled for item in audit.schedule_writes} == {False}
-    assert {item.job.enabled for item in audit.autofix_writes} == {True}
-    assert {item.job.auto_fix for item in audit.autofix_writes} == {True}
-    assert {item.job.frequency for item in audit.autofix_writes} == {"weekly"}
-    assert {item.job.days_of_week for item in audit.autofix_writes} == {("sat",)}
-    assert {(item.job.schedule_time, item.job.schedule_time_source) for item in audit.autofix_writes} == {
+    assert {item.job.enabled for item in audit.improvement_job_writes} == {True}
+    assert {item.job.automatic_execution for item in audit.improvement_job_writes} == {True}
+    assert {item.job.frequency for item in audit.improvement_job_writes} == {"weekly"}
+    assert {item.job.days_of_week for item in audit.improvement_job_writes} == {("sat",)}
+    assert {(item.job.schedule_time, item.job.schedule_time_source) for item in audit.improvement_job_writes} == {
         ("09:00", "auto")
     }
-    assert {item.job.timezone for item in audit.autofix_writes} == {"Asia/Almaty"}
+    assert {item.job.timezone for item in audit.improvement_job_writes} == {"Asia/Almaty"}
 
 
-def test_autofix_write_reaches_the_gateway_with_the_selected_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("command", "write_attribute"),
+    [
+        (
+            [
+                "schedule",
+                "set",
+                "--all-projects",
+                "--yes",
+                "--enabled",
+                "on",
+                "--timezone",
+                "Mars/Olympus_Mons",
+            ],
+            "schedule_writes",
+        ),
+        (
+            [
+                "improvement-jobs",
+                "set",
+                "--all",
+                "--all-projects",
+                "--yes",
+                "--enabled",
+                "on",
+                "--timezone",
+                "Mars/Olympus_Mons",
+            ],
+            "improvement_job_writes",
+        ),
+    ],
+)
+def test_invalid_timezone_stops_all_project_schedule_writes_before_target_resolution(
+    ports: Ports, command: list[str], write_attribute: str
+) -> None:
+    result = CliRunner().invoke(app, command)
+
+    assert result.exit_code == 1
+    assert "unknown IANA timezone: Mars/Olympus_Mons" in result.stderr
+    assert ports.targets.write_targets_calls == []
+    assert getattr(ports.audit, write_attribute) == []
+
+
+def test_improvement_job_write_reaches_the_gateway_with_the_selected_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     """The selector chooses which improvement job is rewritten, and only it."""
-    audit = RecordingAuditGateway(catalog=AUTOFIX_CATALOG)
+    audit = RecordingAuditGateway(catalog=IMPROVEMENT_CATALOG)
     installed = Ports(audit=audit)
     installed.install(monkeypatch)
 
@@ -780,7 +823,7 @@ def test_autofix_write_reaches_the_gateway_with_the_selected_kind(monkeypatch: p
             "--all-repos",
             "--enabled",
             "on",
-            "--auto-fix",
+            "--automatic-execution",
             "off",
             "--frequency",
             "weekly",
@@ -795,10 +838,10 @@ def test_autofix_write_reaches_the_gateway_with_the_selected_kind(monkeypatch: p
 
     assert result.exit_code == 0
     assert installed.targets.write_targets_calls == [WriteTargetsCall(None, "Pets", True, False, "mutation")]
-    assert [(item.repo_id, item.kind) for item in audit.autofix_writes] == [("r1", "test-writing")]
-    written = audit.autofix_writes[0].job
+    assert [(item.repo_id, item.kind) for item in audit.improvement_job_writes] == [("r1", "test-writing")]
+    written = audit.improvement_job_writes[0].job
     assert (written.action_key, written.variant_key) == ("improvement.test-writing", "default")
-    assert (written.enabled, written.auto_fix, written.frequency, written.timezone) == (
+    assert (written.enabled, written.automatic_execution, written.frequency, written.timezone) == (
         True,
         False,
         "weekly",
@@ -811,7 +854,7 @@ def test_autofix_write_reaches_the_gateway_with_the_selected_kind(monkeypatch: p
     )
 
 
-def test_autofix_write_keeps_the_existing_job_of_the_selected_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_improvement_job_write_keeps_the_existing_job_of_the_selected_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     """Picking the wrong existing job silently carries its settings forward.
 
     Each stored job here has a distinct schedule time, timezone and pentest
@@ -819,7 +862,7 @@ def test_autofix_write_keeps_the_existing_job_of_the_selected_kind(monkeypatch: 
     rewrites the wrong values and fails this test.
     """
     stored = (
-        AuditAutofixJob(
+        ImprovementJob(
             "improvement.vuln-fix",
             "default",
             "vuln-fix",
@@ -832,7 +875,7 @@ def test_autofix_write_keeps_the_existing_job_of_the_selected_kind(monkeypatch: 
             timezone="UTC",
             pentest_mode="on",
         ),
-        AuditAutofixJob(
+        ImprovementJob(
             "improvement.test-writing",
             "default",
             "test-writing",
@@ -846,23 +889,23 @@ def test_autofix_write_keeps_the_existing_job_of_the_selected_kind(monkeypatch: 
             pentest_mode="off",
         ),
     )
-    audit = RecordingAuditGateway(catalog=AUTOFIX_CATALOG, autofix_jobs={"r1": stored})
+    audit = RecordingAuditGateway(catalog=IMPROVEMENT_CATALOG, improvement_jobs={"r1": stored})
     Ports(audit=audit).install(monkeypatch)
 
     result = CliRunner().invoke(app, ["improvement-jobs", "set", "--repo", REPO, "test-writing", "--enabled", "on"])
 
     assert result.exit_code == 0
-    assert [(item.repo_id, item.kind) for item in audit.autofix_writes] == [("r1", "test-writing")]
-    written = audit.autofix_writes[0].job
+    assert [(item.repo_id, item.kind) for item in audit.improvement_job_writes] == [("r1", "test-writing")]
+    written = audit.improvement_job_writes[0].job
     assert written.action_key == "improvement.test-writing"
     assert (written.schedule_time, written.days_of_week) == ("23:00", ("fri",))
     assert (written.timezone, written.pentest_mode, written.frequency) == ("Asia/Almaty", "off", "monthly")
     assert written.enabled is True
 
 
-def test_autofix_write_can_update_time_without_requiring_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_improvement_job_write_can_update_time_without_requiring_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     stored = (
-        AuditAutofixJob(
+        ImprovementJob(
             "improvement.vuln-fix",
             "default",
             "vuln-fix",
@@ -876,13 +919,13 @@ def test_autofix_write_can_update_time_without_requiring_enabled(monkeypatch: py
             pentest_mode="off",
         ),
     )
-    audit = RecordingAuditGateway(catalog=AUTOFIX_CATALOG, autofix_jobs={"r1": stored})
+    audit = RecordingAuditGateway(catalog=IMPROVEMENT_CATALOG, improvement_jobs={"r1": stored})
     Ports(audit=audit).install(monkeypatch)
 
     result = CliRunner().invoke(app, ["improvement-jobs", "set", "--repo", REPO, "vuln-fix", "--time", "08:05"])
 
     assert result.exit_code == 0
-    written = audit.autofix_writes[0].job
+    written = audit.improvement_job_writes[0].job
     assert written.enabled is True
     assert (written.schedule_time, written.schedule_time_source) == ("08:05", "user")
 
@@ -918,17 +961,30 @@ def test_email_human_output_is_semantic_for_reads_and_mutations(ports: Ports) ->
         "  tests  manual=unset scheduled=unset\n"
     )
     assert changed.exit_code == 0
-    assert changed.stdout == "security  manual=on scheduled=off\ntests  manual=on scheduled=off\n"
+    assert changed.stdout == (
+        "status: completed\n"
+        "total: 2\n"
+        "completed: 2\n"
+        "remaining: 0\n"
+        "changed: 2\n"
+        "unchanged: 0\n"
+        "failed: 0\n"
+        "github@github.com:acme/cat security  status=changed reason=APPLIED\n"
+        "github@github.com:acme/cat tests  status=changed reason=APPLIED\n"
+    )
 
 
 def test_email_json_contract_stays_machine_readable(ports: Ports) -> None:
     result = CliRunner().invoke(app, ["email", "list", "--repo", REPO, "--json"])
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["audit_catalog"] == {"changes": []}
-    assert payload["items"][0][0]["identity"] == {"host": "github.com", "locator": "acme/cat", "provider": "github"}
-    assert payload["items"][0][1] == [
+    assert json.loads(result.stdout)["audit_catalog"] == {"changes": []}
+    assert json.loads(result.stdout)["items"][0][0]["identity"] == {
+        "host": "github.com",
+        "locator": "acme/cat",
+        "provider": "github",
+    }
+    assert json.loads(result.stdout)["items"][0][1] == [
         {"audit_key": "audit.security"},
         {"audit_key": "audit.tests"},
     ]

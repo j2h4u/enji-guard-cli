@@ -5,9 +5,7 @@ from typing import Literal, cast
 from enji_guard_cli.audit.errors import AuditMalformedError, AuditNotFoundError, AuditUpstreamError
 from enji_guard_cli.audit.ports import (
     AuditArtifact,
-    AuditAutofixJob,
     AuditCatalogAction,
-    AuditCatalogAutofix,
     AuditCatalogResult,
     AuditEmailPreference,
     AuditEmailPreferenceUpdate,
@@ -24,6 +22,8 @@ from enji_guard_cli.audit.ports import (
     AuditTaskDetail,
     AuditTaskLink,
     AuditTaskLinksResult,
+    CatalogImprovement,
+    ImprovementJob,
 )
 from enji_guard_cli.auth_session import CredentialReader
 from enji_guard_cli.enji_gateway.http import (
@@ -112,10 +112,10 @@ class AuditGateway(AuditGatewayPort):
                 for action in _object_list(payload.get("curatedActions"))
                 if (catalog_action := _catalog_action(action)) is not None
             ),
-            autofixes=tuple(
-                autofix
+            improvements=tuple(
+                improvement
                 for action in _object_list(payload.get("auditAutofixes"))
-                if (autofix := _catalog_autofix(action)) is not None
+                if (improvement := _catalog_improvement(action)) is not None
             ),
         )
 
@@ -295,15 +295,15 @@ class AuditGateway(AuditGatewayPort):
             scheduled=_optional_bool(resolved.get("scheduledRunCompletion")),
         )
 
-    def list_autofix_jobs(self, repo_id: str) -> tuple[AuditAutofixJob, ...]:
+    def list_improvement_jobs(self, repo_id: str) -> tuple[ImprovementJob, ...]:
         payload = _improvement_jobs(repo_id, self._auth_file, self._client, auth_port=self._auth_port)
-        return tuple(job for item in _object_list(payload.get("jobs")) if (job := _autofix_job(item)) is not None)
+        return tuple(job for item in _object_list(payload.get("jobs")) if (job := _improvement_job(item)) is not None)
 
-    def set_autofix_job(self, repo_id: str, kind: str, job: AuditAutofixJob) -> AuditAutofixJob:
+    def set_improvement_job(self, repo_id: str, kind: str, job: ImprovementJob) -> ImprovementJob:
         payload = _put_improvement_job(
-            repo_id, kind, _autofix_job_payload(job), self._auth_file, self._client, auth_port=self._auth_port
+            repo_id, kind, _improvement_job_payload(job), self._auth_file, self._client, auth_port=self._auth_port
         )
-        return _autofix_job(_object(payload.get("job")) or payload) or job
+        return _improvement_job(_object(payload.get("job")) or payload) or job
 
 
 def _audit_run(payload: dict[str, JsonValue]) -> AuditRun:
@@ -341,13 +341,13 @@ def _catalog_action(payload: dict[str, JsonValue]) -> AuditCatalogAction | None:
     )
 
 
-def _catalog_autofix(payload: dict[str, JsonValue]) -> AuditCatalogAutofix | None:
+def _catalog_improvement(payload: dict[str, JsonValue]) -> CatalogImprovement | None:
     action_key = payload.get("actionKey")
     variant_key = payload.get("variantKey")
     if not isinstance(action_key, str) or not isinstance(variant_key, str):
         return None
     sort_order = payload.get("sortOrder")
-    return AuditCatalogAutofix(
+    return CatalogImprovement(
         action_key=action_key,
         variant_key=variant_key,
         title=_optional_str(payload.get("title")),
@@ -392,51 +392,36 @@ def _optional_bool(value: JsonValue | None) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
-def _autofix_job(payload: dict[str, JsonValue]) -> AuditAutofixJob | None:
+def _improvement_job(payload: dict[str, JsonValue]) -> ImprovementJob | None:
     action_key = _optional_str(payload.get("actionKey")) or _optional_str(payload.get("kind"))
     variant_key = _optional_str(payload.get("variantKey")) or _optional_str(payload.get("autofixVariantKey"))
     if action_key is None or variant_key is None:
         return None
     days = payload.get("daysOfWeek")
     source = _optional_str(payload.get("scheduleTimeSource"))
-    known = {
-        "actionKey",
-        "variantKey",
-        "kind",
-        "enabled",
-        "autoFix",
-        "autofixVariantKey",
-        "frequency",
-        "daysOfWeek",
-        "scheduleTime",
-        "scheduleTimeSource",
-        "timezone",
-        "pentestMode",
-    }
-    return AuditAutofixJob(
+    return ImprovementJob(
         action_key=action_key,
         variant_key=variant_key,
         kind=_optional_str(payload.get("kind")),
         enabled=_optional_bool(payload.get("enabled")),
-        auto_fix=_optional_bool(payload.get("autoFix")),
-        autofix_variant_key=_optional_str(payload.get("autofixVariantKey")),
+        automatic_execution=_optional_bool(payload.get("autoFix")),
+        provider_variant_key=_optional_str(payload.get("autofixVariantKey")),
         frequency=_optional_str(payload.get("frequency")),
         days_of_week=tuple(item for item in days if isinstance(item, str)) if isinstance(days, list) else (),
         schedule_time=_optional_str(payload.get("scheduleTime")),
         schedule_time_source=cast(Literal["auto", "user"] | None, source if source in {"auto", "user"} else None),
         timezone=_optional_str(payload.get("timezone")),
         pentest_mode=_optional_str(payload.get("pentestMode")),
-        extensions=tuple((key, value) for key, value in payload.items() if key not in known),
     )
 
 
-def _autofix_job_payload(job: AuditAutofixJob) -> dict[str, JsonValue]:
+def _improvement_job_payload(job: ImprovementJob) -> dict[str, JsonValue]:
     payload: dict[str, JsonValue] = {
         "actionKey": job.action_key,
         "variantKey": job.variant_key,
         "enabled": job.enabled,
-        "autoFix": job.auto_fix,
-        "autofixVariantKey": job.autofix_variant_key,
+        "autoFix": job.automatic_execution,
+        "autofixVariantKey": job.provider_variant_key,
         "frequency": job.frequency,
         "daysOfWeek": list(job.days_of_week),
         "scheduleTime": job.schedule_time,
@@ -446,7 +431,6 @@ def _autofix_job_payload(job: AuditAutofixJob) -> dict[str, JsonValue]:
     }
     if job.kind is not None:
         payload["kind"] = job.kind
-    payload.update(dict(job.extensions))
     return payload
 
 

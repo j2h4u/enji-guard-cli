@@ -20,12 +20,12 @@ def test_schedule_time_validation_rejects_invalid_clock(value: str) -> None:
 
 
 def test_cadence_and_weekday_validation_use_domain_subject_in_errors() -> None:
-    with pytest.raises(ValueError, match="unknown autofix frequency"):
-        validate_cadence("never", subject="autofix")
+    with pytest.raises(ValueError, match="unknown improvement job frequency"):
+        validate_cadence("never", subject="improvement job")
     with pytest.raises(ValueError, match="pass one or more window days"):
         validate_week_days((), subject="window")
-    with pytest.raises(ValueError, match="duplicate autofix day"):
-        validate_week_days(("mon", "mon"), subject="autofix")
+    with pytest.raises(ValueError, match="duplicate improvement job day"):
+        validate_week_days(("mon", "mon"), subject="improvement job")
 
 
 def test_schedule_time_selection_preserves_user_time_and_restores_auto_default() -> None:
@@ -46,7 +46,7 @@ def test_schedule_time_selection_preserves_user_time_and_restores_auto_default()
     assert (restored.schedule_time, restored.schedule_time_source) == ("00:00", "auto")
 
 
-def test_preserved_auto_time_keeps_existing_clock_for_autofix_jobs() -> None:
+def test_preserved_auto_time_keeps_existing_clock_for_improvement_jobs() -> None:
     selected = select_preserved_auto_time(
         "auto",
         existing_time="11:15",

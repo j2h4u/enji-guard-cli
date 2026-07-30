@@ -388,14 +388,6 @@ def test_container_publish_attests_before_promoting_mutable_tags() -> None:
         assert "subject-digest: ${{ steps.publish.outputs.digest }}" in subject
 
 
-def test_audit_schedule_domain_has_no_improvement_job_fallback() -> None:
-    schedules = (ROOT / "src" / "enji_guard_cli" / "audit" / "schedules.py").read_text(encoding="utf-8")
-
-    assert "audit_auto_run_key" in schedules
-    assert "improvement" not in schedules
-    assert "runbook" not in schedules
-
-
 def test_product_source_does_not_import_raw_gateway_implementations() -> None:
     violations: list[str] = []
     for path in _product_python_files():

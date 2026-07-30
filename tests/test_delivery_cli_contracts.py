@@ -30,7 +30,7 @@ def test_application_surface_is_typed() -> None:
 
     surface = {
         AuditFacade: ("audit_start", "audit_read", "audit_summary", "audit_wait"),
-        SubscriptionsFacade: ("set_schedules", "set_autofixes", "set_email_preferences"),
+        SubscriptionsFacade: ("set_schedules", "set_improvement_jobs", "set_email_preferences"),
         PortfolioFacade: ("set_language",),
     }
     for facade, methods in surface.items():

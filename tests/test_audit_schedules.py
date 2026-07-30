@@ -5,6 +5,7 @@ from enji_guard_cli.audit.schedules import (
     audit_auto_run_key,
     list_for_targets,
     plan_schedule_update,
+    set_for_targets,
     validate_schedule_update,
 )
 from enji_guard_cli.audit.scheduling import validate_schedule_time
@@ -17,13 +18,20 @@ class _ScheduleGateway:
     def __init__(self, schedules: tuple[AuditSchedule, ...]) -> None:
         self.schedules = schedules
         self.list_calls: list[str] = []
+        self.schedule_writes: list[tuple[str, str, AuditSchedule]] = []
+        self.improvement_writes: list[object] = []
 
     def list_schedules(self, repo_id: str) -> tuple[AuditSchedule, ...]:
         self.list_calls.append(repo_id)
         return self.schedules
 
     def set_schedule(self, repo_id: str, audit_key: str, schedule: AuditSchedule) -> AuditSchedule:
-        raise AssertionError((repo_id, audit_key, schedule))
+        self.schedule_writes.append((repo_id, audit_key, schedule))
+        return schedule
+
+    def set_improvement_job(self, *_: object) -> None:
+        self.improvement_writes.append(object())
+        raise AssertionError("audit schedules must not delegate through the improvement-job port")
 
 
 def test_schedule_listing_fetches_each_repository_once() -> None:
@@ -85,3 +93,21 @@ def test_schedule_update_validation_rejects_invalid_values(update: AuditSchedule
 def test_schedule_update_validation_accepts_timezone_and_auto_time() -> None:
     validate_schedule_update(AuditScheduleUpdate(timezone="Asia/Almaty"))
     validate_schedule_update(AuditScheduleUpdate(schedule_time="auto"))
+
+
+def test_schedule_mutation_uses_only_the_audit_schedule_port() -> None:
+    gateway = _ScheduleGateway(())
+    target = RepositoryRef(
+        "repo-1",
+        "project-1",
+        "Pets",
+        RepositoryIdentity(RepositoryProvider.GITHUB, "acme/cat", "github.com"),
+        web_url="https://example.test/repository",
+        provider_repo_id="provider-test",
+    )
+
+    result = set_for_targets((target,), ("audit.security",), AuditScheduleUpdate(enabled=True), gateway)
+
+    assert result[0].audit_key == "audit.security"
+    assert [call[:2] for call in gateway.schedule_writes] == [("repo-1", "audit.security")]
+    assert gateway.improvement_writes == []

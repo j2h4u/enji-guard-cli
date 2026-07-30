@@ -79,6 +79,6 @@ def test_improvement_jobs_help_lists_schedule_controls() -> None:
 
     assert result.exit_code == 0
     rendered = _rendered(result.stdout)
-    for option in ("--auto-fix", "--days", "--time"):
+    for option in ("--automatic-execution", "--days", "--time"):
         assert option in rendered
     assert "HH:MM" in rendered

@@ -9,13 +9,13 @@ import typer
 from enji_guard_cli.application import (
     AUDIT_CADENCES,
     Application,
-    AutofixWriteRequest,
-    AutofixWriteScope,
     EmailPreferencesWriteRequest,
+    ImprovementJobWriteRequest,
     ScheduleWriteRequest,
+    SubscriptionWriteScope,
 )
 from enji_guard_cli.delivery.cli.presentation import CliPresentation
-from enji_guard_cli.delivery.cli.presenters import AUTOFIX, EMAIL, OPERATION, SCHEDULE
+from enji_guard_cli.delivery.cli.presenters import BATCH_MUTATION, EMAIL, IMPROVEMENT_JOBS, SCHEDULE
 
 PayloadT = TypeVar("PayloadT")
 
@@ -29,7 +29,7 @@ class CommandRunner(Protocol):
 FREQUENCY_HELP = f"Run cadence: {', '.join(AUDIT_CADENCES)}."
 TIMEZONE_HELP = "IANA timezone stored with each subscription, such as Asia/Almaty."
 ENABLED_HELP = "Turn the subscription on or off."
-AUTO_FIX_HELP = "Turn automatic fix execution on or off for the improvement job."
+AUTOMATIC_EXECUTION_HELP = "Turn automatic execution on or off for the improvement job."
 DAYS_HELP = "Comma-separated run days: mon,tue,wed,thu,fri,sat,sun."
 TIME_HELP = "Run time as HH:MM, or auto to use the automatic time source."
 REPO_SCOPE_HELP = "Write to one repository; mutually exclusive with --all-repos and --all-projects."
@@ -39,7 +39,7 @@ REPO_FILTER_HELP = "Read one repository; omit to read every repository in scope.
 @dataclass(frozen=True, slots=True)
 class SubscriptionCommandApps:
     schedule_app: typer.Typer
-    autofix_app: typer.Typer
+    improvement_jobs_app: typer.Typer
     email_app: typer.Typer
 
 
@@ -49,7 +49,7 @@ class SubscriptionCommandDeps:
     selected_project: Callable[[str | None], str | None]
     json_output: Callable[[bool], bool]
     run_command: CommandRunner
-    scope: Callable[[bool, bool, str | None, bool, bool], AutofixWriteScope]
+    scope: Callable[[bool, bool, str | None, bool, bool], SubscriptionWriteScope]
     switch: Callable[[Literal["on", "off"] | None], bool | None]
 
 
@@ -98,7 +98,7 @@ def register_subscription_commands(apps: SubscriptionCommandApps, deps: Subscrip
                 )
             ),
             as_json,
-            OPERATION,
+            BATCH_MUTATION,
         )
 
     @apps.schedule_app.command("auto-time")
@@ -121,7 +121,7 @@ def register_subscription_commands(apps: SubscriptionCommandApps, deps: Subscrip
                 repo, deps.selected_project(project), scope=write_scope
             ),
             as_json,
-            OPERATION,
+            BATCH_MUTATION,
         )
 
     @apps.schedule_app.command("timezone")
@@ -145,28 +145,28 @@ def register_subscription_commands(apps: SubscriptionCommandApps, deps: Subscrip
                 ScheduleWriteRequest(repo, deps.selected_project(project), timezone=timezone, scope=write_scope)
             ),
             as_json,
-            OPERATION,
+            BATCH_MUTATION,
         )
 
-    @apps.autofix_app.command("list")
-    def autofix_list(
+    @apps.improvement_jobs_app.command("list")
+    def improvement_job_list(
         repo: Annotated[str | None, typer.Option("--repo", help=REPO_FILTER_HELP)] = None,
         project: Annotated[str | None, typer.Option("--project")] = None,
         json_output: Annotated[bool, typer.Option("--json")] = False,
     ) -> None:
         deps.run_command(
-            lambda: deps.application().subscriptions.list_autofixes(repo, deps.selected_project(project)),
+            lambda: deps.application().subscriptions.list_improvement_jobs(repo, deps.selected_project(project)),
             deps.json_output(json_output),
-            AUTOFIX,
+            IMPROVEMENT_JOBS,
         )
 
-    @apps.autofix_app.command("set")
-    def autofix_set(  # noqa: PLR0913
+    @apps.improvement_jobs_app.command("set")
+    def improvement_job_set(  # noqa: PLR0913
         *,
         repo: Annotated[str | None, typer.Option("--repo", help=REPO_SCOPE_HELP)] = None,
-        autofixes: Annotated[list[str] | None, typer.Argument(help="Autofix selectors.")] = None,
+        improvements: Annotated[list[str] | None, typer.Argument(help="Improvement selectors.")] = None,
         project: Annotated[str | None, typer.Option("--project")] = None,
-        all_autofixes: Annotated[bool, typer.Option("--all", help="Every supported autofix selector.")] = False,
+        all_improvements: Annotated[bool, typer.Option("--all", help="Every supported improvement selector.")] = False,
         all_repos: Annotated[bool, typer.Option("--all-repos")] = False,
         all_projects: Annotated[
             bool,
@@ -174,24 +174,26 @@ def register_subscription_commands(apps: SubscriptionCommandApps, deps: Subscrip
         ] = False,
         yes: Annotated[bool, typer.Option("--yes", help="Confirm an --all-projects write without prompting.")] = False,
         enabled: Annotated[Literal["on", "off"] | None, typer.Option("--enabled", help=ENABLED_HELP)] = None,
-        auto_fix: Annotated[Literal["on", "off"] | None, typer.Option("--auto-fix", help=AUTO_FIX_HELP)] = None,
+        automatic_execution: Annotated[
+            Literal["on", "off"] | None, typer.Option("--automatic-execution", help=AUTOMATIC_EXECUTION_HELP)
+        ] = None,
         frequency: Annotated[str | None, typer.Option("--frequency", help=FREQUENCY_HELP)] = None,
         days: Annotated[str | None, typer.Option("--days", help=DAYS_HELP)] = None,
         time: Annotated[str | None, typer.Option("--time", help=TIME_HELP)] = None,
         timezone: Annotated[str | None, typer.Option("--timezone", help=TIMEZONE_HELP)] = None,
         json_output: Annotated[bool, typer.Option("--json")] = False,
     ) -> None:
-        selectors = ("__all__",) if all_autofixes else tuple(autofixes or ())
+        selectors = ("__all__",) if all_improvements else tuple(improvements or ())
         as_json = deps.json_output(json_output)
         write_scope = deps.scope(all_repos, all_projects, repo, as_json, yes)
         deps.run_command(
-            lambda: deps.application().subscriptions.set_autofixes(
-                AutofixWriteRequest(
+            lambda: deps.application().subscriptions.set_improvement_jobs(
+                ImprovementJobWriteRequest(
                     repo,
                     deps.selected_project(project),
                     selectors,
                     enabled=deps.switch(enabled),
-                    auto_fix=deps.switch(auto_fix),
+                    automatic_execution=deps.switch(automatic_execution),
                     frequency=frequency,
                     days_of_week=_days(days),
                     schedule_time=time,
@@ -200,7 +202,7 @@ def register_subscription_commands(apps: SubscriptionCommandApps, deps: Subscrip
                 )
             ),
             as_json,
-            OPERATION,
+            BATCH_MUTATION,
         )
 
     @apps.email_app.command("list")
@@ -247,7 +249,7 @@ def register_subscription_commands(apps: SubscriptionCommandApps, deps: Subscrip
                 )
             ),
             as_json,
-            EMAIL,
+            BATCH_MUTATION,
         )
 
 

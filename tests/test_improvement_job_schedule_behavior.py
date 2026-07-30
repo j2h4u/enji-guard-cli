@@ -9,7 +9,7 @@ from enji_guard_cli.auth_session.adapters import StoredCredentialReader
 from enji_guard_cli.enji_gateway.audit_gateway import AuditGateway
 
 
-def test_list_autofix_jobs_maps_variants_and_preserves_extensions(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_list_improvement_jobs_maps_provider_fields_without_leaking_extensions(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         gateway_module,
         "_improvement_jobs",
@@ -35,15 +35,15 @@ def test_list_autofix_jobs_maps_variants_and_preserves_extensions(monkeypatch: p
             ]
         },
     )
-    jobs = AuditGateway(auth_port=StoredCredentialReader()).list_autofix_jobs("repo-1")
+    jobs = AuditGateway(auth_port=StoredCredentialReader()).list_improvement_jobs("repo-1")
     assert len(jobs) == 2
     first, second = jobs
     assert first.action_key == "improvement.security"
     assert first.variant_key == "default"
-    assert first.enabled is True and first.auto_fix is False
+    assert first.enabled is True and first.automatic_execution is False
     assert first.days_of_week == ("mon", "fri")
     assert first.schedule_time_source == "user"
-    assert first.extensions == (("providerField", {"nested": True}),)
+    assert not hasattr(first, "extensions")
     assert second.action_key == "improvement.tests"
     assert second.variant_key == "draft"
     assert second.enabled is None

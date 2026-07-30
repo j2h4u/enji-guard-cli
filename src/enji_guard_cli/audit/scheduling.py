@@ -1,7 +1,8 @@
-"""Shared scheduling policy for audit subscriptions and autofix jobs."""
+"""Shared scheduling policy for audit subscriptions and improvement jobs."""
 
 from dataclasses import dataclass
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 CADENCES = frozenset({"daily", "workdays", "weekly-3x", "weekly-2x", "weekly", "monthly"})
 WEEK_DAYS = frozenset({"mon", "tue", "wed", "thu", "fri", "sat", "sun"})
@@ -19,6 +20,17 @@ class ScheduleTimeSelection:
 
     schedule_time: str
     schedule_time_source: Literal["auto", "user"]
+
+
+def validate_timezone(value: str | None) -> None:
+    """Require an explicit timezone to be an installed IANA identifier."""
+
+    if value is None:
+        return
+    try:
+        ZoneInfo(value)
+    except ValueError, ZoneInfoNotFoundError:
+        raise ValueError(f"unknown IANA timezone: {value}") from None
 
 
 def validate_cadence(value: str | None, *, subject: str) -> None:

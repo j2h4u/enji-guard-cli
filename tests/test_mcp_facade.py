@@ -19,9 +19,13 @@ class _FacadeSpy:
         self.calls.append(("portfolio_overview", project, sort))
         return {"scenario": "portfolio"}
 
-    def audit_read(self, repo: str, *, project: str | None, all_audits: bool) -> object:
-        self.calls.append(("audit_read", repo, project, all_audits))
+    def audit_read(self, repo: str, selectors: list[str], *, project: str | None, all_audits: bool) -> object:
+        self.calls.append(("audit_read", repo, selectors, project, all_audits))
         return {"scenario": "audits"}
+
+    def audit_summary(self, repo: str, *, project: str | None) -> object:
+        self.calls.append(("audit_summary", repo, project))
+        return {"scenario": "summary"}
 
 
 def test_mcp_facade_exposes_only_curated_query_scenarios() -> None:
@@ -34,14 +38,18 @@ def test_mcp_facade_exposes_only_curated_query_scenarios() -> None:
 
     overview = facade.portfolio_overview("project", "weakest")
     audits = facade.repository_audits("owner/repo", "project")
+    selected = facade.repository_audits("owner/repo", "project", [" audit.security "])
 
     assert overview.payload == {"scenario": "portfolio"}
-    assert audits.payload == {"scenario": "audits"}
+    assert audits.payload == {"scenario": "summary"}
+    assert selected.payload == {"scenario": "audits"}
     assert application.calls == [
         ("execute",),
         ("portfolio_overview", "project", "weakest"),
         ("execute",),
-        ("audit_read", "owner/repo", "project", True),
+        ("audit_summary", "owner/repo", "project"),
+        ("execute",),
+        ("audit_read", "owner/repo", ["security"], "project", False),
     ]
     assert {name for name in dir(facade) if not name.startswith("_")} == {
         "portfolio_overview",

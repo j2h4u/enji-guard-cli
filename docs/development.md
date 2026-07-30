@@ -50,10 +50,12 @@ These are contracts the CLI owes its users, not implementation preferences.
   do not cache or fall back. Treat `curatedActions` as authoritative so newly
   published reports participate automatically. CLI report selectors are action
   key suffixes without `audit.`; recon remains separate.
-- Treat catalog `auditAutofixes` as the source for curated autofix variants
-  (`actionKey`, `variantKey`, `title`, `description`, `fleetRunbookId`,
-  `status`, `sortOrder`). Manage them through canonical `improvement-jobs`
-  list/set operations on the operator CLI. The temporary relationships are
+- Treat provider catalog `auditAutofixes` as the transport source for curated
+  improvement variants (`actionKey`, `variantKey`, `title`, `description`,
+  `fleetRunbookId`, `status`, `sortOrder`). The application and operator
+  surface call the configured entity an improvement job; arbitrary provider
+  fields never cross that boundary. Manage jobs through canonical
+  `improvement-jobs` list/set operations on the operator CLI. The temporary relationships are
   security/vuln-fix, tests/test-writing, and dependency-hygiene/dependency-update;
   pentest is separate. MCP remains read-only, and explicit `--repo REPO`,
   `--all-repos` with `--project`, or `--all-projects` scope is required for
@@ -65,15 +67,16 @@ These are contracts the CLI owes its users, not implementation preferences.
 - Keep schedule timezone stored per schedule, run the container with the host
   timezone, and use `schedule auto-time` to restore Enji-assigned run times.
 - Audit schedules use `audit-auto-runs/{actionKey}` with the exact action key
-  from `curatedActions`; `improvement-jobs` is autofix-only, never an audit
+  from `curatedActions`; `improvement-jobs` is improvement-job-only, never an audit
   scheduling fallback. Batch scheduling must remain an explicit client-side
   loop over the selected repositories and audits.
-- Autofix scheduler controls live on `improvement-jobs set`, not `schedule`.
+- Improvement-job scheduler controls live on `improvement-jobs set`, not `schedule`.
   Keep the operator semantics parallel to audit schedules: explicit scope,
   idempotent partial updates, IANA timezone, known cadence values, validated
   weekdays, and `auto` versus user-selected time source. Shared scheduler
   business policy belongs in `audit/scheduling.py`; audit schedules and autofix
-  jobs stay separate entities that consume it.
+  jobs stay separate entities that consume it. The automatic-execution control
+  is `--automatic-execution`; provider `autoFix` remains a gateway-only field.
 
 ### Reading audits
 

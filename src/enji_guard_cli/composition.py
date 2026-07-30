@@ -85,17 +85,10 @@ def create_application(auth_file: Path | None = None) -> Application:
     http_client = create_shared_http_client(settings, event_sink=log_event)
     try:
         surface = _create_read_surface(auth_file, http_client, settings)
-        runtime_auth = RuntimeAuthCoordinatorAdapter(
-            auth_file,
-            settings=settings,
-            event_sink=log_event,
-            outcome_sink=persist_event,
-            client=http_client,
-        )
         return Application(
             runner=surface.runner,
             catalog=surface.catalog,
-            auth=AuthFacade(AuthSessionService(auth_file, http_client, settings=settings), runtime_auth),
+            auth=AuthFacade(AuthSessionService(auth_file, http_client, settings=settings)),
             audit=surface.audit,
             subscriptions=surface.subscriptions,
             portfolio=surface.portfolio,

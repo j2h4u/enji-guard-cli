@@ -1,20 +1,21 @@
 """Curated read-only MCP adapter.
 
 MCP deliberately exposes only portfolio overview and repository audit reading.
-Authentication, scheduling, autofix, and every mutating operation stay in the
+Authentication, scheduling, improvement-job mutation, and every other mutating operation stay in the
 CLI/runtime surfaces.
 """
 
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import date
 from pathlib import Path
 from typing import Literal, cast
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.session import ServerSession
 
 from enji_guard_cli.composition import mcp_query_facade
+from enji_guard_cli.delivery.presentation import json_projection
 from enji_guard_cli.mcp_facade import McpQueryFacade, McpQueryResult
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.telemetry import configure_logging
@@ -29,24 +30,18 @@ type McpTransport = Literal["stdio", "sse", "streamable-http"]
 MCP_TOOL_NAMES = ("enji_portfolio_overview", "enji_repo_audits")
 
 
+class McpToolContext(Context[ServerSession, McpQueryFacade]):
+    """Typed v1 tool context whose lifespan result is the narrow facade."""
+
+
 def _project_arg(project: str) -> str | None:
     value = project.strip()
     return value or None
 
 
 def _json(value: object) -> object:
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, (date, Path)):
-        return value.isoformat() if isinstance(value, date) else str(value)
-    if isinstance(value, dict):
-        return {str(key): _json(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json(item) for item in value]
-    fields = getattr(value, "__dataclass_fields__", None)
-    if isinstance(fields, dict):
-        return {name: _json(cast(object, getattr(value, name))) for name in fields}
-    return str(value)
+    """Compatibility seam for MCP projection tests and callers."""
+    return json_projection(value)
 
 
 def create_mcp_server(
@@ -62,24 +57,22 @@ def create_mcp_server(
     runner + portfolio + audit, bound to the server lifespan so its pooled
     client is always released.
     """
-    active: McpQueryFacade | None = None
     settings = default_settings()
 
     @asynccontextmanager
-    async def lifespan(_server: FastMCP) -> AsyncIterator[None]:
+    async def lifespan(_server: FastMCP) -> AsyncIterator[McpQueryFacade]:
         """Own a composed query surface for exactly as long as the server runs."""
-        nonlocal active
         with mcp_query_facade(auth_file) as owned:
-            active = owned
-            try:
-                yield
-            finally:
-                active = None
+            yield owned
 
-    def query_facade() -> McpQueryFacade:
-        if active is None:
+    def query_facade(context: McpToolContext) -> McpQueryFacade:
+        try:
+            facade = context.request_context.lifespan_context
+        except ValueError:
+            raise RuntimeError("the MCP query surface exists only while the server lifespan is running") from None
+        if facade is None:
             raise RuntimeError("the MCP query surface exists only while the server lifespan is running")
-        return active
+        return cast(McpQueryFacade, facade)
 
     server = FastMCP(
         name="enji-guard-cli",
@@ -98,6 +91,7 @@ def create_mcp_server(
         structured_output=True,
     )
     async def portfolio_overview(
+        context: McpToolContext,
         project: str = "",
         sort: RepositorySortName = settings.repo.default_sort,
     ) -> dict[str, object]:
@@ -105,7 +99,7 @@ def create_mcp_server(
             McpQueryResult,
             await asyncio.to_thread(
                 run_agent_journey,
-                lambda: query_facade().portfolio_overview(_project_arg(project), sort),
+                lambda: query_facade(context).portfolio_overview(_project_arg(project), sort),
                 AgentJourney(
                     event_prefix="mcp_tool",
                     operation=MCP_TOOL_NAMES[0],
@@ -119,15 +113,20 @@ def create_mcp_server(
 
     @server.tool(
         name=MCP_TOOL_NAMES[1],
-        description="Read the newest completed historical audit artifacts, typed freshness, and newer-run context for one repository.",
+        description="Read compact audit status and summaries; name audit selectors to include those Markdown report bodies.",
         structured_output=True,
     )
-    async def repository_audits(repo: str, project: str = "") -> dict[str, object]:
+    async def repository_audits(
+        context: McpToolContext,
+        repo: str,
+        project: str = "",
+        audits: list[str] | None = None,
+    ) -> dict[str, object]:
         result = cast(
             McpQueryResult,
             await asyncio.to_thread(
                 run_agent_journey,
-                lambda: query_facade().repository_audits(repo.strip(), _project_arg(project)),
+                lambda: query_facade(context).repository_audits(repo.strip(), _project_arg(project), audits),
                 AgentJourney(
                     event_prefix="mcp_tool",
                     operation=MCP_TOOL_NAMES[1],
@@ -137,7 +136,7 @@ def create_mcp_server(
                 ),
             ),
         )
-        return cast(dict[str, object], _json(result.payload))
+        return cast(dict[str, object], json_projection(result.payload))
 
     return server
 
@@ -169,4 +168,11 @@ def run_mcp_server(
     asyncio.run(run_mcp_server_async(server, transport=transport, mount_path=mount_path))
 
 
-__all__ = ["MCP_TOOL_NAMES", "McpTransport", "create_mcp_server", "run_mcp_server", "run_mcp_server_async"]
+__all__ = [
+    "MCP_TOOL_NAMES",
+    "McpToolContext",
+    "McpTransport",
+    "create_mcp_server",
+    "run_mcp_server",
+    "run_mcp_server_async",
+]

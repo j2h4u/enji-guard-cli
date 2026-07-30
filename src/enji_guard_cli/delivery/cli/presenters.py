@@ -9,10 +9,11 @@ from enji_guard_cli.application import (
     AuditReadView,
     AuditSummaryView,
     AuditWaitView,
-    AutofixListing,
-    AutofixListingItem,
+    BatchMutationResult,
     GitLabCredentialsView,
     GitLabProjectsView,
+    ImprovementJobListing,
+    ImprovementJobListingItem,
     PortfolioOverviewView,
     ProjectRefView,
     ProjectSettingsView,
@@ -21,7 +22,8 @@ from enji_guard_cli.application import (
     ScheduleListing,
 )
 from enji_guard_cli.delivery.cli.audit_presenter import render_audit_read
-from enji_guard_cli.delivery.cli.presentation import CliPresentation, json_projection, repository_selector
+from enji_guard_cli.delivery.cli.presentation import CliPresentation, json_projection
+from enji_guard_cli.delivery.presentation import repository_selector
 
 _EMAIL_LISTING_WIDTH = 2
 
@@ -190,21 +192,21 @@ def schedule_text(payload: tuple[ScheduleListing, ...]) -> str:
     return "\n".join(lines) or "No schedules found."
 
 
-def autofix_text(payload: tuple[AutofixListing, ...]) -> str:
+def improvement_jobs_text(payload: tuple[ImprovementJobListing, ...]) -> str:
     lines: list[str] = []
     for listing in payload:
         supported = [item for item in listing.items if item.definition.supported]
         configured = [item for item in supported if item.job is not None]
         enabled = sum(item.job is not None and item.job.enabled is True for item in supported)
-        auto_fix = sum(item.job is not None and item.job.auto_fix is True for item in supported)
+        automatic_execution = sum(item.job is not None and item.job.automatic_execution is True for item in supported)
         selectors = ",".join(item.definition.selector for item in supported) or "-"
         configured_selectors = [item.definition.selector for item in configured]
         fields = [
             f"enabled={enabled}/{len(supported)}",
             f"configured={len(configured)}/{len(supported)}",
-            f"auto_fix={auto_fix}/{len(supported)}",
+            f"automatic_execution={automatic_execution}/{len(supported)}",
             f"supported={selectors}",
-            _autofix_dimensions(configured, configured_selectors),
+            _improvement_job_dimensions(configured, configured_selectors),
         ]
         unconfigured = [item.definition.selector for item in supported if item.job is None]
         disabled = [item.definition.selector for item in configured if item.job and item.job.enabled is False]
@@ -219,7 +221,7 @@ def autofix_text(payload: tuple[AutofixListing, ...]) -> str:
     return "\n".join(lines) or "No improvement jobs found."
 
 
-def _autofix_dimensions(configured: list[AutofixListingItem], selectors: list[str]) -> str:
+def _improvement_job_dimensions(configured: list[ImprovementJobListingItem], selectors: list[str]) -> str:
     dimensions = (
         _dimension(
             "enabled_state",
@@ -227,9 +229,9 @@ def _autofix_dimensions(configured: list[AutofixListingItem], selectors: list[st
             selectors,
         ),
         _dimension(
-            "auto_fix_state",
+            "automatic_execution_state",
             [
-                "unset" if item.job.auto_fix is None else str(item.job.auto_fix).lower()
+                "unset" if item.job.automatic_execution is None else str(item.job.automatic_execution).lower()
                 for item in configured
                 if item.job
             ],
@@ -353,6 +355,31 @@ def operation_text(payload: object) -> str:
     return str(rendered)
 
 
+def batch_mutation_text(payload: BatchMutationResult) -> str:
+    """Describe a batch by its operator-visible targets, never raw wire DTOs."""
+    lines = [
+        f"status: {payload.status}",
+        f"total: {payload.total}",
+        f"completed: {payload.completed}",
+        f"remaining: {payload.remaining}",
+        f"changed: {payload.changed}",
+        f"unchanged: {payload.unchanged}",
+        f"failed: {payload.failed}",
+    ]
+    for outcome in payload.results:
+        details: list[str | None] = [
+            f"status={outcome.status}",
+            f"reason={outcome.reason}" if outcome.reason is not None else None,
+            f"code={outcome.code}" if outcome.code is not None else None,
+            f"message={outcome.message}" if outcome.message is not None else None,
+        ]
+        lines.append(
+            f"{repository_label(outcome.target.repository)} {outcome.target.selector}  "
+            + " ".join(item for item in details if item is not None)
+        )
+    return "\n".join(lines)
+
+
 PORTFOLIO = CliPresentation(portfolio_text)
 REPOSITORY_STATUS = CliPresentation(repository_status_text)
 AUDIT_SUMMARY = CliPresentation(audit_summary_text)
@@ -361,8 +388,9 @@ AUDIT_WAIT = CliPresentation(audit_wait_text)
 PROJECT_LIST = CliPresentation(project_list_text)
 PROJECT_SETTINGS = CliPresentation(project_settings_text)
 SCHEDULE = CliPresentation(schedule_text)
-AUTOFIX = CliPresentation(autofix_text)
+IMPROVEMENT_JOBS = CliPresentation(improvement_jobs_text)
 GITLAB_CREDENTIALS = CliPresentation(gitlab_credentials_text)
 GITLAB_PROJECTS = CliPresentation(gitlab_projects_text)
 EMAIL = CliPresentation(email_preferences_text)
 OPERATION = CliPresentation(operation_text)
+BATCH_MUTATION = CliPresentation(batch_mutation_text)

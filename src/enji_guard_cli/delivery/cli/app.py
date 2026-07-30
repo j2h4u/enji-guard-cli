@@ -23,7 +23,9 @@ from enji_guard_cli.application import (
     ApplicationCatalogChange,
     ApplicationCommandError,
     ApplicationResult,
-    AutofixWriteScope,
+    BatchMutationResult,
+    SubscriptionWriteScope,
+    exit_code_for_error,
 )
 from enji_guard_cli.composition import create_application, runtime_auth_service
 from enji_guard_cli.delivery.cli.audit_commands import AuditCommandApps, AuditCommandDeps, register_audit_commands
@@ -82,7 +84,7 @@ repo_app = typer.Typer(help="Manage connected repositories. To read them, use 's
 recon_app = typer.Typer(help="Run baseline repository discovery (separate from audits).")
 audit_app = typer.Typer(help=AUDIT_HELP)
 schedule_app = typer.Typer(help="Manage automatic audit schedules.")
-autofix_app = typer.Typer(help="Manage curated improvement jobs.")
+improvement_jobs_app = typer.Typer(help="Manage curated improvement jobs.")
 email_app = typer.Typer(help="Manage audit completion email preferences.")
 language_app = typer.Typer(help="Manage the account-wide audit language.")
 gitlab_app = typer.Typer(help="Discover GitLab credentials and projects.")
@@ -94,7 +96,7 @@ for group, name in (
     (recon_app, "recon"),
     (audit_app, "audit"),
     (schedule_app, "schedule"),
-    (autofix_app, "improvement-jobs"),
+    (improvement_jobs_app, "improvement-jobs"),
     (email_app, "email"),
     (language_app, "language"),
     (gitlab_app, "gitlab"),
@@ -174,7 +176,7 @@ for _group_name, _group in (
     ("recon", recon_app),
     ("audit", audit_app),
     ("schedule", schedule_app),
-    ("improvement-jobs", autofix_app),
+    ("improvement-jobs", improvement_jobs_app),
     ("email", email_app),
     ("language", language_app),
     ("gitlab", gitlab_app),
@@ -303,6 +305,9 @@ def _run[PayloadT](
         emit_text(presentation.human(payload))
         if changes:
             typer.echo(f"audit catalog changed: {'; '.join(_catalog_change_text(change) for change in changes)}")
+    if isinstance(payload, BatchMutationResult) and payload.status != "completed":
+        failed = next(outcome for outcome in payload.results if outcome.status == "failed")
+        raise typer.Exit(exit_code_for_error(failed.code or "UPSTREAM"))
 
 
 def _with_catalog_changes(payload: object, changes: list[ApplicationCatalogChange]) -> object:
@@ -440,7 +445,7 @@ def _scope(
     repo: str | None = None,
     as_json: bool = False,
     assume_yes: bool = False,
-) -> AutofixWriteScope:
+) -> SubscriptionWriteScope:
     """Validate write scope and gate the unbounded --all-projects blast radius.
 
     Interactive operators are asked to confirm; agents, MCP, CI, and any
@@ -462,12 +467,12 @@ def _scope(
             )
         if not typer.confirm(f"{ALL_PROJECTS_WARNING}. Continue?"):
             raise _fail("ABORTED", "no change was made", as_json=as_json)
-    return AutofixWriteScope(all_repos=all_repos, all_projects=all_projects)
+    return SubscriptionWriteScope(all_repos=all_repos, all_projects=all_projects)
 
 
 def _write_scope(
     all_repos: bool, all_projects: bool, repo: str | None, as_json: bool, assume_yes: bool
-) -> AutofixWriteScope:
+) -> SubscriptionWriteScope:
     return _scope(all_repos, all_projects, repo=repo, as_json=as_json, assume_yes=assume_yes)
 
 
@@ -517,7 +522,7 @@ register_gitlab_commands(
     ),
 )
 register_subscription_commands(
-    SubscriptionCommandApps(schedule_app=schedule_app, autofix_app=autofix_app, email_app=email_app),
+    SubscriptionCommandApps(schedule_app=schedule_app, improvement_jobs_app=improvement_jobs_app, email_app=email_app),
     SubscriptionCommandDeps(
         application=_command_application,
         selected_project=_command_selected_project,

@@ -66,9 +66,16 @@ depends_on = [
     "enji_guard_cli.application",
     "enji_guard_cli.runtime_observability",
     "enji_guard_cli.delivery.mcp",   # same-layer: `guard mcp serve` boots the server in-process
+    "enji_guard_cli.delivery.presentation",
     "enji_guard_cli.settings",
     "enji_guard_cli.version",
 ]
+
+[[modules]]
+# A transport-neutral projection keeps CLI and MCP machine output identical.
+path = "enji_guard_cli.delivery.presentation"
+layer = "delivery"
+visibility = ["enji_guard_cli.delivery.cli", "enji_guard_cli.delivery.mcp"]
 
 [[modules]]
 # The MCP server is a sibling delivery surface, not a consumer of the CLI.
@@ -78,6 +85,7 @@ depends_on = [
     "enji_guard_cli.composition",
     "enji_guard_cli.mcp_facade",
     "enji_guard_cli.runtime_observability",
+    "enji_guard_cli.delivery.presentation",
     "enji_guard_cli.settings",
 ]
 # Nothing may reach back into a delivery surface except the other one.
@@ -136,11 +144,9 @@ depends_on = [
     "enji_guard_cli.portfolio",
     "enji_guard_cli.gitlab",
     "enji_guard_cli.auth_session",
-    "enji_guard_cli.runtime_observability",
     "enji_guard_cli.fanout",
     "enji_guard_cli.settings",
     "enji_guard_cli.errors",
-    "enji_guard_cli.json_types",  # views carry provider passthrough as JSON, not as a domain type
 ]
 visibility = [
     "enji_guard_cli.composition",
@@ -173,15 +179,7 @@ depends_on = [
 visibility = [
     "enji_guard_cli.delivery.*",
     "enji_guard_cli.composition",
-    "enji_guard_cli.application",
 ]
-
-[[interfaces]]
-# Use cases may depend on the *shape* of runtime supervision (a port) and
-# nothing else -- never on the supervisor, the logger or the sink.
-from = ["enji_guard_cli.runtime_observability"]
-visibility = ["enji_guard_cli.application"]
-expose = ["ports\\..*"]
 
 [[interfaces]]
 # Delivery boots and observes the runtime, so it sees the entry points; the
@@ -276,7 +274,7 @@ expose = [
     "workflows\\..*",
     "schedules\\..*",
     "scheduling\\..*",
-    "autofixes\\..*",
+    "improvement_jobs\\.(definitions|select|set_one|validate_improvement_job_update)",
     "email\\..*",
     "observation\\..*",
     "catalog_observation\\.[A-Za-z]+Port",
