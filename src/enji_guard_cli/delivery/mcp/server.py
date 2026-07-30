@@ -14,11 +14,11 @@ from typing import Literal, cast
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
 
-from enji_guard_cli.composition import mcp_query_facade
 from enji_guard_cli.delivery.presentation import json_projection
 from enji_guard_cli.mcp_facade import McpQueryFacade, McpQueryResult
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.telemetry import configure_logging
+from enji_guard_cli.service_composition import mcp_query_facade
 from enji_guard_cli.settings import (
     DEFAULT_HTTP_HOST,
     DEFAULT_HTTP_PORT,

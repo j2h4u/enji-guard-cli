@@ -27,7 +27,7 @@ from enji_guard_cli.application import (
     SubscriptionWriteScope,
     exit_code_for_error,
 )
-from enji_guard_cli.composition import create_application, runtime_auth_service
+from enji_guard_cli.composition import create_application
 from enji_guard_cli.delivery.cli.audit_commands import AuditCommandApps, AuditCommandDeps, register_audit_commands
 from enji_guard_cli.delivery.cli.gitlab_commands import GitLabCommandDeps, register_gitlab_commands
 from enji_guard_cli.delivery.cli.presentation import FIELDS_PRESENTATION, CliPresentation, emit_text, json_projection
@@ -43,10 +43,8 @@ from enji_guard_cli.delivery.cli.subscription_commands import (
     SubscriptionCommandDeps,
     register_subscription_commands,
 )
-from enji_guard_cli.delivery.mcp.server import create_mcp_server, run_mcp_server_async
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
 from enji_guard_cli.runtime_observability.readiness import readiness_verdict
-from enji_guard_cli.runtime_observability.supervisor import RuntimeServiceOptions, run_service
 from enji_guard_cli.runtime_observability.telemetry import configure_logging
 from enji_guard_cli.settings import (
     DEFAULT_HTTP_HOST,
@@ -722,7 +720,7 @@ def access(json_output: Annotated[bool, typer.Option("--json")] = False) -> None
 
 @app.command(
     "run",
-    help="Run the long-lived MCP service. This is the container entrypoint, not an operator command.",
+    help="Lazy alias for the long-lived MCP service; requires the 'mcp' extra.",
 )
 def run(
     transport: Annotated[
@@ -733,22 +731,16 @@ def run(
     mount_path: Annotated[str | None, typer.Option("--mount-path")] = None,
     allow_external_host: Annotated[bool, typer.Option("--allow-external-host")] = False,
 ) -> None:
-    _validate_http_bind(host, transport, allow_external_host=allow_external_host)
+    """Forward the operator command to the optional service root lazily."""
+    from enji_guard_cli.delivery.service import RuntimeServiceOptions
+    from enji_guard_cli.delivery.service import run as run_service_command
+
     auth_file = cast(Path | None, _state["auth_file"])
-    # Two independent lifetimes, nested deliberately.  The MCP server composes
-    # and closes its own narrow read-only surface inside its lifespan, which
-    # ends when the supervised MCP task finishes.  The credential coordinator
-    # outlives it: this ``with`` closes only after ``run_service`` returns, so
-    # the refresh loop keeps a live client throughout supervise_tasks shutdown,
-    # and its pool is released on the success and the failure path alike.
-    with runtime_auth_service(auth_file) as runtime_auth:
-        run_service(
-            options=RuntimeServiceOptions(transport=transport, host=host, port=port, mount_path=mount_path),
-            runtime_auth=runtime_auth,
-            mcp_server_factory=lambda host, port: create_mcp_server(host, port, auth_file=auth_file),
-            mcp_server_runner=run_mcp_server_async,
-            settings=default_settings(),
-        )
+    run_service_command(
+        RuntimeServiceOptions(transport=transport, host=host, port=port, mount_path=mount_path),
+        allow_external_host=allow_external_host,
+        auth_file=auth_file,
+    )
 
 
 @app.command("status", help="Show portfolio status, or one repository audit snapshot when REPO is provided.")

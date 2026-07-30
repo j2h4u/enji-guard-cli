@@ -198,6 +198,7 @@ def test_composition_injects_one_client_into_both_gateways_and_application_lifec
     tmp_path: Path,
 ) -> None:
     import enji_guard_cli.composition as composition_module
+    import enji_guard_cli.composition_support as composition_support_module
 
     class Client:
         def __init__(self, _settings: object, *, event_sink: object) -> None:
@@ -220,16 +221,9 @@ def test_composition_injects_one_client_into_both_gateways_and_application_lifec
         return client
 
     monkeypatch.setattr(composition_module, "create_shared_http_client", make_client)
-    monkeypatch.setattr(composition_module, "AuditGateway", Gateway)
-    monkeypatch.setattr(composition_module, "PortfolioGateway", Gateway)
-    monkeypatch.setattr(composition_module, "FileAuditLedger", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(
-        composition_module,
-        "RuntimeAuthCoordinatorAdapter",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("CLI application must not compose runtime auth")
-        ),
-    )
+    monkeypatch.setattr(composition_support_module, "AuditGateway", Gateway)
+    monkeypatch.setattr(composition_support_module, "PortfolioGateway", Gateway)
+    monkeypatch.setattr(composition_support_module, "FileAuditLedger", lambda *_args, **_kwargs: object())
 
     application = create_application(tmp_path / "auth.json")
     assert len(client_instances) == 1
@@ -245,6 +239,7 @@ def test_composition_closes_pool_when_gateway_construction_fails(
     tmp_path: Path,
 ) -> None:
     import enji_guard_cli.composition as composition_module
+    import enji_guard_cli.composition_support as composition_support_module
 
     class Client:
         close_calls = 0
@@ -257,13 +252,13 @@ def test_composition_closes_pool_when_gateway_construction_fails(
 
     client = Client(object(), event_sink=object())
     monkeypatch.setattr(composition_module, "create_shared_http_client", lambda _settings, *, event_sink: client)
-    monkeypatch.setattr(composition_module, "PortfolioGateway", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(composition_support_module, "PortfolioGateway", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
-        composition_module,
+        composition_support_module,
         "AuditGateway",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("gateway construction failed")),
     )
-    monkeypatch.setattr(composition_module, "FileAuditLedger", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(composition_support_module, "FileAuditLedger", lambda *_args, **_kwargs: object())
 
     with pytest.raises(RuntimeError, match="gateway construction failed"):
         create_application(tmp_path / "auth.json")

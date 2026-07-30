@@ -11,8 +11,8 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from enji_guard_cli.application.errors import ApplicationCommandError
-from enji_guard_cli.composition import mcp_query_facade
 from enji_guard_cli.delivery.cli.app import app
+from enji_guard_cli.service_composition import mcp_query_facade
 from enji_guard_cli.settings import DEFAULT_REPO_SORT
 
 
