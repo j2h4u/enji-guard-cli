@@ -86,9 +86,13 @@ Bearer/API-token auth is preferred. Cookie refresh is a one-time-token flow:
 the supervisor records `RESERVED` then `REQUESTED` before one POST. It never
 replays a dispatched request. On restart it reconciles the v2 journal: a safe
 reservation is removed, a captured replacement is recovered, and abandoned
-dispatch becomes `OUTCOME_UNKNOWN`. `REJECTED` and `OUTCOME_UNKNOWN` require
-explicit operator re-import; there is no `auth refresh` command or retry
-workflow.
+dispatch becomes `OUTCOME_UNKNOWN`. `OUTCOME_UNKNOWN` is adjudicated while the
+old access token is still usable: if `/auth/me` confirms the source session is
+alive, the supervisor may attempt the next scheduled refresh; if the source is
+dead or the access-token window closes, operator re-import is required.
+`REJECTED` means Enji returned a protocol-confirmed `AUTH_INVALID` rejection and
+always requires operator re-import. There is no manual `auth refresh` command or
+retry workflow.
 
 After a real re-authentication, sign in at
 <https://guard.enji.ai/app/login> so the browser holds a current session,
