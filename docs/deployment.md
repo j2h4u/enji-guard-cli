@@ -53,6 +53,9 @@ The common Docker service contract lives in
 adds the build context and local image tag; `deploy/docker-compose.ghcr.yml`
 adds the immutable GHCR image reference. Do not duplicate runtime limits,
 ports, healthcheck, volumes, or command flags between those entrypoint files.
+The image starts the dedicated `enji-guard-service` entrypoint directly; the
+compose command supplies only its service options. `enji-guard` remains the
+operator CLI used by health checks and `docker exec` commands.
 
 Python and uv setup for GitHub Actions is centralized in
 `.github/actions/setup-python-uv/action.yml`. The Dockerfile still pins the
@@ -79,6 +82,13 @@ supervisor heartbeat: local MCP must listen, backend readiness must be fresh,
 and authenticated Enji checks must not fail repeatedly. Gateway calls,
 `auth status`, readiness, and MCP only observe auth; the supervisor is the sole
 automatic rotation owner.
+
+The Docker supervisor, not a standalone CLI request, owns long-lived cookie
+recovery. The wheel's base install deliberately contains no MCP dependency;
+the service requires the `mcp` extra. There is no PyPI upload or release-asset
+publication in this repository yet. Artifact CI proves build/install behavior,
+while trusted-publishing authority plus the current POSIX-only cookie-storage
+contract remain publishing blockers.
 
 ## Cookie-session recovery
 

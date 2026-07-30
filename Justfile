@@ -43,7 +43,10 @@ hooks:
 #                        keep a wider public surface open than the code uses.
 module-boundaries:
     uv run tach check
-    uv run tach check-external
+    # Tach 0.35 does not read PEP 621 optional extras. Exclude only the MCP
+    # adapter that is guarded by the `mcp` extra; deptry and package-check still
+    # validate its declaration and both base/extra install modes.
+    uv run tach check-external -e src/enji_guard_cli/delivery/mcp/server.py
     scripts/check_tach_interfaces.py
 
 # Validate GitHub Actions workflow syntax and expressions.
@@ -142,8 +145,21 @@ docker-up: docker-build
     source_commit="$(git rev-parse HEAD)"; \
     PACKAGE_VERSION="$package_version" SOURCE_COMMIT="$source_commit" docker compose up -d --force-recreate --remove-orphans --wait --wait-timeout 90
 
+# Build distribution artifacts into a caller-selected directory.
+package-build out_dir="dist":
+    uv build --clear --out-dir "{{out_dir}}"
+    rm -f "{{out_dir}}/.gitignore"
+
+# Install built artifacts in clean Python 3.14 environments and exercise both
+# the dependency-light CLI and the opt-in MCP service.
+package-check:
+    artifact_dir="$(mktemp -d /tmp/enji-guard-package.XXXXXX)"; \
+    trap 'rm -rf "$artifact_dir"' EXIT; \
+    just package-build "$artifact_dir"; \
+    uv run python -m scripts.package_contract "$artifact_dir"
+
 # Full local gate for agents before claiming completion.
-verify: check test-gate docker-tests docker-build
+verify: check test-gate package-check docker-tests docker-build
 
 # Everything the PR owes release-please, checked before pushing rather than
 # after a red CI.  The three validators already existed and already ran in CI;

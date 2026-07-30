@@ -105,7 +105,6 @@ def _start_args(settings: ContractSettings) -> list[str]:
         "--publish",
         f"127.0.0.1:{settings.host_port}:{CONTAINER_PORT}",
         settings.image,
-        "run",
         "--transport",
         "streamable-http",
         "--host",

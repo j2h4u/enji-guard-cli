@@ -11,6 +11,11 @@ hold, [CONTRIBUTING.md](../CONTRIBUTING.md) for change intake and handoff,
 ## Toolchain
 
 - Use `uv` only. Keep `uv.lock` current; use hardlink mode outside Docker.
+- The base wheel must stay free of MCP. Declare MCP only as the exact v1
+  `mcp[cli]>=1.28.1,<2` extra and retain that exact constraint in the dev group
+  so development and published service installs cannot drift. The dedicated
+  `enji-guard-service` entrypoint owns the optional long-lived service; the
+  normal `enji-guard` CLI must import without MCP installed.
 - Keep runtime tuning in frozen settings dataclasses, not env. Env is for
   credential and security ingress only.
 - Treat the tach module graph as architecture policy, not style advice. A tach
@@ -107,7 +112,10 @@ These are contracts the CLI owes its users, not implementation preferences.
 
 `just verify` is the completion gate. It runs Ruff, basedpyright, tach,
 Vulture, deptry, OpenAPI contract validation, CRAP <= 30 per function, tests,
-and the Docker build.
+the clean wheel/sdist build-install contract, and the Docker build. The package
+contract is deliberately separate from the Docker gate: it builds temporary
+artifacts, installs the base wheel and `mcp` extra into isolated Python 3.14
+venvs outside the checkout, and checks public CLI/client/service boundaries.
 
 - Do not weaken, skip, or suppress any of them. A failing check is information
   about the code, not an obstacle to green.

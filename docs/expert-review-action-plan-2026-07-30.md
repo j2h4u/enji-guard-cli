@@ -57,17 +57,19 @@
   **Evidence:** focused 97 passed; полный `just check` и module-boundaries green
   без прежней зависимости.
   **Области:** composition, application facade, Runtime/Auth boundaries.
-- [ ] Разделить composition CLI application и MCP service: обычный CLI при старте
+- [x] Разделить composition CLI application и MCP service: обычный CLI при старте
   не импортирует и не тянет MCP runtime. **Evidence:** import/startup test для
-  CLI без MCP dependency loading. **Области:** composition root, CLI delivery,
+  CLI без MCP dependency loading; isolated base-wheel import proof. **Области:** composition root, CLI delivery,
   MCP runtime.
-- [ ] Разделить base dependencies и optional MCP extra; обеспечить clean wheel
+- [x] Разделить base dependencies и optional MCP extra; обеспечить clean wheel
   install без Docker и отдельный/lazy MCP entrypoint. **Evidence:** build wheel,
-  isolated install base package, CLI smoke без Docker, MCP-extra smoke.
+  isolated install base package, CLI smoke без Docker, MCP-extra smoke через
+  `scripts/package_contract.py` в Python 3.14 venvs.
   **Области:** `pyproject.toml`, packaging, entrypoints, CI.
-- [ ] Предоставить узкий context-managed public package client; не публиковать
+- [x] Предоставить узкий context-managed public package client; не публиковать
   широкий `Application` и внутренние DTO как SDK. **Evidence:** public-import
-  contract, context-manager test, API-surface review. **Области:** public package,
+  contract, context-manager test, API-surface review и base-wheel lifecycle
+  smoke. **Области:** public package,
   application composition, packaging docs.
 
 ## Slice 4 — MCP lifecycle и качество разработки
@@ -110,10 +112,11 @@
   journal/outbox, watcher, refresh task и cached readiness plumbing; только
   roadmap в этой работе. **Evidence:** roadmap перечисляет delete-set и API-key
   blocker. **Области:** Auth Session, Runtime/Observability, Docker.
-- [ ] Добавить package artifact/build/install gates и подготовить publishing path
+- [x] Добавить package artifact/build/install gates и подготовить publishing path
   без фактической публикации, если не нужна внешняя authority; явно отделить от
-  Docker image gate. **Evidence:** CI/package gate design и publishing readiness
-  checklist без publish side effect. **Области:** packaging, CI, release docs.
+  Docker image gate. **Evidence:** `package-artifact` CI job builds, tests, and
+  uploads tested dist without Docker; package-check and publishing-blocker docs
+  have no publish side effect. **Области:** packaging, CI, release docs.
 
 ## Explicit non-actions
 

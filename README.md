@@ -19,7 +19,7 @@ See [ROADMAP.md](ROADMAP.md) for the current product status and remaining
 hardening work.
 
 **Running it:** [Runtime](#runtime) · [Authentication](#authentication) ·
-[CLI](#cli) · [MCP](#mcp)
+[CLI](#cli) · [MCP](#mcp) · [Package installs](#package-installs)
 **Understanding it:** [Mental Model](#mental-model) · [Surfaces](#surfaces) ·
 [Agent Workflow](#agent-workflow)
 **Changing it:** [Development](#development) · [Documentation](#documentation)
@@ -343,6 +343,39 @@ and [deployment recovery](docs/deployment.md#cookie-session-recovery).
 For registry-based deployment, use the GHCR image and compose example in
 `docs/deployment.md`.
 
+## Package installs
+
+The base wheel is a dependency-light CLI and public read-only Python client;
+the MCP server is an explicit `mcp` extra. Build artifacts locally and install
+only the surface you need:
+
+```bash
+uv build --clear --out-dir dist
+python3.14 -m pip install dist/*.whl
+enji-guard --help
+
+# Only when running the MCP service outside Docker:
+wheel="$(printf '%s\n' dist/*.whl)"
+python3.14 -m pip install "${wheel}[mcp]"
+enji-guard-service --help
+```
+
+The base install intentionally does not install or import MCP. Its public
+client is narrow and context-managed: `from enji_guard_cli.client import
+EnjiGuardClient`; use `with EnjiGuardClient() as client:` so its pooled
+transport is closed deterministically.
+
+Cookie-session recovery remains Docker's long-lived service responsibility.
+The supported production path is still the GHCR image because the cookie store
+requires one local POSIX host with `flock`, atomic rename, and directory fsync;
+NFS/CIFS, multi-host writers, and Windows are unsupported. There is no PyPI
+publication path yet: trusted-publishing ownership and the API-key/portability
+decisions remain release blockers. The committed artifact contract proves local
+wheel build and install only; it does not imply publication readiness.
+
+`enji-guard-service` is the dedicated service entrypoint. The `enji-guard run`
+subcommand remains a lazy operator convenience alias.
+
 ## Authentication
 
 Bearer/API-token auth is the preferred stable path:
@@ -455,7 +488,7 @@ options.
 | `wait REPO` | Block until the repository's audits finish. |
 | `health [--ready]` | Process liveness only; `--ready` probes the MCP listener and cached backend readiness. Healthchecks, probes, and CI gates must use `health --ready`, because bare `health` cannot fail while the process runs. |
 | `access` | Account plan and limits. |
-| `run` | Run the long-lived MCP service (used by the container entrypoint). |
+| `run` | Lazy alias for the optional long-lived MCP service; the dedicated `enji-guard-service` entrypoint is preferred. |
 | `auth import-bearer\|import-cookie --stdin`, `auth status` | Credential bootstrap and credential state. |
 | `project list\|create\|rename\|delete\|settings` | Project administration; `delete` requires `--yes`. |
 | `repo add\|remove\|move\|resolve` | Repository administration; `remove` requires `--yes`. |

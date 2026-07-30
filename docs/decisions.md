@@ -81,9 +81,16 @@ agents can orient quickly before making changes.
   extensions, or other operator controls. Stateless MCP describes protocol and
   session handling; it does not prohibit legitimate application state such as
   `FileAuditLedger` or `AuditCatalogObserver` persistence.
-- **Docker-first runtime with a supervisor**: the service runs in Docker and
-  `enji-guard run` owns MCP, background cookie refresh, and backend readiness
-  as sibling tasks.
+- **Base CLI with opt-in MCP service**: the base wheel contains the CLI and
+  narrow context-managed public client without importing MCP. The exact v1
+  `mcp[cli]>=1.28.1,<2` dependency is an optional extra, and the dedicated
+  `enji-guard-service` entrypoint owns MCP, background cookie refresh, and
+  backend readiness as sibling tasks. Docker installs that extra and owns the
+  long-lived cookie recovery lifecycle; standalone CLI requests remain
+  observers. Artifact CI validates both wheel modes in clean Python 3.14
+  environments, independently from Docker-image QA. This is not PyPI
+  readiness: trusted-publishing ownership and the POSIX-only cookie-storage
+  portability decision still block publication.
 - **Two-tier release QA through public surfaces**: credentialless CI starts the
   exact candidate image and validates its hardened Docker, CLI, health, and MCP
   contracts before publication. Authenticated pre-merge smoke and bounded soak
