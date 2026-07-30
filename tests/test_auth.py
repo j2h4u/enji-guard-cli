@@ -30,7 +30,13 @@ from enji_guard_cli.auth_session.api import (
 )
 from enji_guard_cli.auth_session.api import StoredAuth as RuntimeStoredAuth
 from enji_guard_cli.auth_session.cookies import merge_set_cookie_headers, set_cookie_names
-from enji_guard_cli.auth_session.coordinator import PreDispatchLocalError, TerminalRevisionRequiredError
+from enji_guard_cli.auth_session.coordinator import (
+    PostDispatchPersistenceError,
+    PreDispatchLocalError,
+    RetainedRefreshSuccessor,
+    RetainedSuccessorProjected,
+    TerminalRevisionRequiredError,
+)
 from enji_guard_cli.auth_session.models import AuthBackendReadinessResult
 from enji_guard_cli.auth_session.ports import AuthOutcomeSink
 from enji_guard_cli.auth_session.service import AuthSessionService
@@ -1266,6 +1272,132 @@ def test_requested_outcome_waits_for_import_without_retrying_dispatch() -> None:
     asyncio.run(exercise())
 
 
+def test_post_dispatch_storage_failure_is_retained_and_projected_without_terminal_park() -> None:
+    async def exercise() -> None:
+        clock = 0.0
+        refreshes = 0
+        projected = asyncio.Event()
+        successor = _test_cookie_auth("new")
+        retained = RetainedRefreshSuccessor("old", successor)
+        events: list[str] = []
+
+        async def changes(_auth_file: Path) -> AsyncGenerator[None]:
+            await asyncio.Event().wait()
+            yield
+
+        async def sleep(seconds: float) -> None:
+            nonlocal clock
+            clock += seconds
+
+        async def refresh(_path: Path, _auth: RuntimeStoredAuth, _client: object) -> RuntimeStoredAuth:
+            nonlocal refreshes
+            refreshes += 1
+            raise PostDispatchPersistenceError(retained, cause=OSError("storage write failed"))
+
+        def project(_path: Path, candidate: RetainedRefreshSuccessor) -> RetainedSuccessorProjected:
+            assert candidate.source_revision == "old"
+            assert candidate.auth["revision"] == "new"
+            projected.set()
+            return RetainedSuccessorProjected(candidate.auth)
+
+        dependencies = _loop_dependencies(
+            changes=changes,
+            overrides=_LoopOverrides(
+                revision_reader=lambda _path: "old",
+                monotonic_fn=lambda: clock,
+                sleep_fn=sleep,
+                refresh_fn=refresh,
+                project_retained_successor_fn=project,
+                cookie_refresh_sleep_seconds_fn=lambda **_kwargs: 0,
+                load_auth_fn=lambda _path: AuthLoaded(_test_cookie_auth("old")),
+                log_event_fn=lambda _logger, _level, event, _fields: events.append(event),
+            ),
+        )
+        task = asyncio.create_task(
+            auto_refresh_module._auto_refresh_loop(
+                auth_file=Path("auth.json"),
+                refresh_settings=_scheduler_settings(),
+                dependencies=dependencies,
+            )
+        )
+        try:
+            await asyncio.wait_for(projected.wait(), timeout=5)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        assert refreshes == 1
+        assert events[:3] == [
+            "enji_auth_auto_refresh_scheduled",
+            "enji_auth_auto_refresh_retained_after_storage_failure",
+            "enji_auth_auto_refresh_retained_projection_succeeded",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_retained_successor_projection_retries_generic_storage_errors() -> None:
+    async def exercise() -> None:
+        clock = 0.0
+        attempts = 0
+        projected = asyncio.Event()
+        retained = RetainedRefreshSuccessor("old", _test_cookie_auth("new"))
+        events: list[tuple[str, Mapping[str, object]]] = []
+
+        async def changes(_auth_file: Path) -> AsyncGenerator[None]:
+            await asyncio.Event().wait()
+            yield
+
+        async def sleep(seconds: float) -> None:
+            nonlocal clock
+            clock += seconds
+
+        async def refresh(_path: Path, _auth: RuntimeStoredAuth, _client: object) -> RuntimeStoredAuth:
+            raise PostDispatchPersistenceError(retained, cause=PermissionError("read-only auth mount"))
+
+        def project(_path: Path, _candidate: RetainedRefreshSuccessor) -> RetainedSuccessorProjected:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise PermissionError("read-only auth mount")
+            projected.set()
+            return RetainedSuccessorProjected(retained.auth)
+
+        dependencies = _loop_dependencies(
+            changes=changes,
+            overrides=_LoopOverrides(
+                revision_reader=lambda _path: "old",
+                monotonic_fn=lambda: clock,
+                sleep_fn=sleep,
+                refresh_fn=refresh,
+                project_retained_successor_fn=project,
+                cookie_refresh_sleep_seconds_fn=lambda **_kwargs: 0,
+                load_auth_fn=lambda _path: AuthLoaded(_test_cookie_auth("old")),
+                log_event_fn=lambda _logger, _level, event, fields: events.append((event, fields)),
+            ),
+        )
+        task = asyncio.create_task(
+            auto_refresh_module._auto_refresh_loop(
+                auth_file=Path("auth.json"),
+                refresh_settings=_scheduler_settings(),
+                dependencies=dependencies,
+            )
+        )
+        try:
+            await asyncio.wait_for(projected.wait(), timeout=5)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        retry_events = [
+            fields for event, fields in events if event == "enji_auth_auto_refresh_retained_projection_retry"
+        ]
+        assert attempts == 2
+        assert retry_events == [{"delay_seconds": 1.0, "error_type": "PermissionError"}]
+
+    asyncio.run(exercise())
+
+
 def test_wait_cancellation_closes_watcher_generator() -> None:
     async def exercise() -> None:
         closed = asyncio.Event()
@@ -1983,6 +2115,9 @@ class _LoopOverrides:
     load_auth_fn: Callable[[Path], AuthLoaded] = lambda _path: AuthLoaded(_test_cookie_auth())
     log_event_fn: Callable[..., None] = lambda *_args, **_kwargs: None
     adjudicate_fn: Callable[[Path, object], Awaitable[bool]] | None = None
+    project_retained_successor_fn: (
+        Callable[[Path, RetainedRefreshSuccessor], auto_refresh_module.RetainedSuccessorProjection] | None
+    ) = None
 
 
 def _loop_dependencies(
@@ -2011,6 +2146,11 @@ def _loop_dependencies(
         logger=auto_refresh_module.logging.getLogger("test"),
         client_factory=resolved_overrides.client_factory or _TestClient,
         credential_changes_fn=changes,
+        project_retained_successor_fn=(
+            resolved_overrides.project_retained_successor_fn
+            if resolved_overrides.project_retained_successor_fn is not None
+            else auto_refresh_module._project_retained_successor_default
+        ),
         revision_reader=resolved_overrides.revision_reader,
         monotonic_fn=resolved_overrides.monotonic_fn,
         random_fn=lambda: 0,

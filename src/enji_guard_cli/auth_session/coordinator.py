@@ -4,7 +4,8 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from http.cookies import CookieError
 from pathlib import Path
 from typing import Protocol
@@ -59,6 +60,7 @@ from enji_guard_cli.auth_session.store import (
     load_auth,
     load_journal,
     load_outbox,
+    stored_auth,
     write_auth_file,
     write_journal,
 )
@@ -93,6 +95,29 @@ class TerminalRevisionRequiredError(EnjiHttpError):
         self.source_revision = source_revision
 
 
+@dataclass(frozen=True, slots=True)
+class RetainedRefreshSuccessor:
+    """A post-dispatch replacement cookie held only in process memory."""
+
+    source_revision: str
+    auth: StoredAuth = field(repr=False)
+
+    def snapshot(self) -> RetainedRefreshSuccessor:
+        return RetainedRefreshSuccessor(self.source_revision, deepcopy(self.auth))
+
+
+class PostDispatchPersistenceError(TerminalRevisionRequiredError):
+    """A refresh succeeded but local storage could not persist the successor."""
+
+    def __init__(self, retained_successor: RetainedRefreshSuccessor, *, cause: OSError | TimeoutError) -> None:
+        super().__init__(
+            retained_successor.source_revision,
+            message="refresh dispatch completed; persist retained replacement credential when storage recovers",
+        )
+        self.retained_successor = retained_successor.snapshot()
+        self.__cause__ = cause
+
+
 def _stored_auth_revision(auth_path: Path) -> str | None:
     loaded = load_auth(auth_path)
     if isinstance(loaded, AuthLoaded):
@@ -107,6 +132,19 @@ class CoordinatorDependencies:
     monotonic_fn: Callable[[], float] = time.monotonic
     sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep
     revision_reader: Callable[[Path], str | None] = _stored_auth_revision
+
+
+@dataclass(frozen=True, slots=True)
+class RetainedSuccessorProjected:
+    auth: StoredAuth = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class RetainedSuccessorSuperseded:
+    current_revision: str | None
+
+
+RetainedSuccessorProjection = RetainedSuccessorProjected | RetainedSuccessorSuperseded
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,33 +206,38 @@ class RefreshCoordinator:
             if isinstance(prepared, _WaitForRevision):
                 return await self.wait_for_terminal_revision(prepared.source_revision)
 
+            return await self._dispatch_and_commit(prepared.auth)
+
+    async def _dispatch_and_commit(self, auth: StoredAuth) -> StoredAuth:
+        try:
+            response = await self._exchange.exchange_once(auth)
+        except asyncio.CancelledError:
             try:
-                response = await self._exchange.exchange_once(prepared.auth)
-            except asyncio.CancelledError:
-                try:
-                    await asyncio.to_thread(self._commit_unknown, prepared.auth["revision"], "refresh task cancelled")
-                except EnjiHttpError as exc:
-                    if exc.code != "AUTH_IMPORT_REQUIRED":
-                        raise
-                raise
+                await asyncio.to_thread(self._commit_unknown, auth["revision"], "refresh task cancelled")
             except EnjiHttpError as exc:
-                return await asyncio.to_thread(
-                    self._commit_unknown,
-                    prepared.auth["revision"],
-                    f"transport failure: {exc.code}",
-                )
-            except (OSError, TimeoutError) as exc:
-                return await asyncio.to_thread(
-                    self._commit_unknown,
-                    prepared.auth["revision"],
-                    f"transport failure: {type(exc).__name__}",
-                )
-            try:
-                return await asyncio.to_thread(self._commit_response, prepared.auth, response)
-            except (OSError, TimeoutError) as exc:
-                raise TerminalRevisionRequiredError(
-                    prepared.auth["revision"], message="refresh dispatch completed; import a fresh browser credential"
-                ) from exc
+                if exc.code != "AUTH_IMPORT_REQUIRED":
+                    raise
+            raise
+        except EnjiHttpError as exc:
+            return await asyncio.to_thread(
+                self._commit_unknown,
+                auth["revision"],
+                f"transport failure: {exc.code}",
+            )
+        except (OSError, TimeoutError) as exc:
+            return await asyncio.to_thread(
+                self._commit_unknown,
+                auth["revision"],
+                f"transport failure: {type(exc).__name__}",
+            )
+        try:
+            return await asyncio.to_thread(self._commit_response, auth, response)
+        except PostDispatchPersistenceError:
+            raise
+        except (OSError, TimeoutError) as exc:
+            raise TerminalRevisionRequiredError(
+                auth["revision"], message="refresh dispatch completed; import a fresh browser credential"
+            ) from exc
 
     async def wait_for_terminal_revision(self, source_revision: str) -> StoredAuth:
         """Wait for import/success to change a revision; never dispatch here."""
@@ -289,30 +332,68 @@ class RefreshCoordinator:
     def _commit_response(self, source: StoredAuth, response: EnjiHttpResponse) -> StoredAuth:
         cookie_header = _successful_replacement(source, response)
         if cookie_header is not None:
-            return self._commit_success(source["revision"], cookie_header)
+            return self._commit_success(source, cookie_header)
         if _is_confirmed_refresh_rejection(response):
             return self._commit_rejected(source["revision"], f"refresh rejected with HTTP {response.status_code}")
         return self._commit_unknown(source["revision"], f"ambiguous refresh response HTTP {response.status_code}")
 
-    def _commit_success(self, source_revision: str, cookie_header: str) -> StoredAuth:
-        with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
-            if _is_superseded(self._auth_path, source_revision):
+    def _commit_success(self, source: StoredAuth, cookie_header: str) -> StoredAuth:
+        source_revision = source["revision"]
+        state = Requested(source_revision)
+        rotated_transition = transition(state, ExchangeSucceeded(cookie_header))
+        assert isinstance(rotated_transition.state, Rotated)
+        successor = stored_auth(
+            source["base_url"],
+            {"type": "cookie", "cookie_header": cookie_header},
+            revision=rotated_transition.state.successor_revision,
+        )
+        retained = RetainedRefreshSuccessor(source_revision, successor)
+        try:
+            with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
+                if _is_superseded(self._auth_path, source_revision):
+                    return _loaded_or_raise(load_auth(self._auth_path))
+                write_journal(self._auth_path, rotated_transition.state, failpoint=self._storage_failpoint)
+                result = cas_replace_cookie(
+                    self._auth_path,
+                    source_revision,
+                    cookie_header,
+                    successor_revision=rotated_transition.state.successor_revision,
+                    failpoint=self._storage_failpoint,
+                )
+                if isinstance(result, CasWritten):
+                    self._record_terminal_outcome(rotated_transition.state, outbox_enqueued=False)
+                    return result.auth
                 return _loaded_or_raise(load_auth(self._auth_path))
-            state = Requested(source_revision)
-            rotated_transition = transition(state, ExchangeSucceeded(cookie_header))
-            assert isinstance(rotated_transition.state, Rotated)
-            write_journal(self._auth_path, rotated_transition.state, failpoint=self._storage_failpoint)
+        except (OSError, TimeoutError) as exc:
+            raise PostDispatchPersistenceError(retained, cause=exc) from exc
+
+    def project_retained_successor(
+        self,
+        retained_successor: RetainedRefreshSuccessor,
+    ) -> RetainedSuccessorProjection:
+        """CAS-project a retained post-dispatch successor after storage recovers."""
+
+        with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
+            loaded = load_auth(self._auth_path)
+            projected_auth = _projected_auth_or_none(loaded, retained_successor)
+            state = _retained_rotated_state(retained_successor)
+            if projected_auth is not None:
+                self._record_terminal_outcome(state, outbox_enqueued=False)
+                return RetainedSuccessorProjected(projected_auth)
+            if not isinstance(loaded, AuthLoaded) or loaded.auth["revision"] != retained_successor.source_revision:
+                return RetainedSuccessorSuperseded(_current_revision(loaded))
+            write_journal(self._auth_path, state, failpoint=self._storage_failpoint)
             result = cas_replace_cookie(
                 self._auth_path,
-                source_revision,
-                cookie_header,
-                successor_revision=rotated_transition.state.successor_revision,
+                retained_successor.source_revision,
+                state.replacement_cookie_header,
+                successor_revision=state.successor_revision,
                 failpoint=self._storage_failpoint,
             )
             if isinstance(result, CasWritten):
-                self._record_terminal_outcome(rotated_transition.state, outbox_enqueued=False)
-                return result.auth
-            return _loaded_or_raise(load_auth(self._auth_path))
+                self._record_terminal_outcome(state, outbox_enqueued=False)
+                return RetainedSuccessorProjected(result.auth)
+            return RetainedSuccessorSuperseded(result.current_revision)
 
     def _commit_rejected(self, source_revision: str, reason: str) -> StoredAuth:
         with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
@@ -430,6 +511,29 @@ class RefreshCoordinator:
             )
         except OSError, RuntimeError, ValueError:
             return False
+
+
+def _retained_rotated_state(retained_successor: RetainedRefreshSuccessor) -> Rotated:
+    credential = retained_successor.auth["credential"]
+    if credential["type"] != "cookie":
+        raise EnjiHttpError("AUTH_UNSUPPORTED", "retained refresh successor is not cookie based")
+    return Rotated(
+        retained_successor.source_revision,
+        credential["cookie_header"],
+        retained_successor.auth["revision"],
+    )
+
+
+def _projected_auth_or_none(loaded: object, retained_successor: RetainedRefreshSuccessor) -> StoredAuth | None:
+    if isinstance(loaded, AuthLoaded) and loaded.auth["revision"] == retained_successor.auth["revision"]:
+        return loaded.auth
+    return None
+
+
+def _current_revision(loaded: object) -> str | None:
+    if isinstance(loaded, AuthLoaded):
+        return loaded.auth["revision"]
+    return None
 
 
 def adjudicate_source_revision_alive(auth_path: Path, source_revision: str) -> bool:
