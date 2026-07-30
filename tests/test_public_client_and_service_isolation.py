@@ -1,5 +1,6 @@
 """Public client lifecycle and optional-service import contracts."""
 
+import inspect
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -10,9 +11,16 @@ import pytest
 from typer.testing import CliRunner
 
 import enji_guard_cli.client as client_module
+import enji_guard_cli.composition as composition_module
+import enji_guard_cli.composition_support as composition_support_module
 import enji_guard_cli.delivery.service as service_module
 from enji_guard_cli.client import ClientResult, EnjiGuardClient, EnjiGuardError
 from enji_guard_cli.client_facade import ClientQueryCatalogChange, ClientQueryError, ClientQueryResult
+from enji_guard_cli.delivery.cli.app import app as cli_app
+from enji_guard_cli.enji_gateway.shared_client import create_shared_http_client
+from enji_guard_cli.portfolio.errors import PortfolioUpstreamError
+from enji_guard_cli.settings import EnjiGuardSettings
+from enji_guard_cli.transport import HttpxEnjiHttpClient, TransportEventSink
 
 
 class _Facade:
@@ -112,6 +120,76 @@ def test_client_normalizes_explicit_audit_selectors_and_rejects_empty_ones(
     assert string_raised.value.code == "VALIDATION"
 
 
+def test_client_optional_query_arguments_are_keyword_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    facade = _Facade(ClientQueryResult({"audits": []}, False, ()))
+    monkeypatch.setattr(client_module, "client_query_facade", lambda _auth_file: _scope(facade, []))
+
+    signatures = (
+        (inspect.signature(EnjiGuardClient.portfolio_overview), ("project", "sort")),
+        (inspect.signature(EnjiGuardClient.repository_status), ("project",)),
+        (inspect.signature(EnjiGuardClient.audit_summary), ("project",)),
+        (inspect.signature(EnjiGuardClient.audit_read), ("project",)),
+    )
+    for signature, optional_names in signatures:
+        parameters = signature.parameters
+        assert tuple(parameters)[:1] == ("self",)
+        assert all(parameters[name].kind is inspect.Parameter.KEYWORD_ONLY for name in optional_names)
+
+    with EnjiGuardClient() as client:
+        assert client.portfolio_overview(project="pets", sort="weakest").data == {"audits": []}
+        assert client.repository_status("github@github.com:owner/repo", project="pets").data == {"audits": []}
+        assert client.audit_summary("github@github.com:owner/repo", project="pets").data == {"audits": []}
+        assert client.audit_read("github@github.com:owner/repo", ["security"], project="pets").data == {"audits": []}
+
+        with pytest.raises(TypeError):
+            client.portfolio_overview("pets")  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            client.repository_status("github@github.com:owner/repo", "pets")  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            client.audit_summary("github@github.com:owner/repo", "pets")  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            client.audit_read("github@github.com:owner/repo", ["security"], "pets")  # type: ignore[call-arg]
+
+
+def test_public_client_real_composition_closes_pool_after_normal_exit_and_query_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The public client owns the real composed HTTP pool on every exit path."""
+    clients: list[HttpxEnjiHttpClient] = []
+
+    def recording_client(settings: EnjiGuardSettings | None, *, event_sink: TransportEventSink) -> HttpxEnjiHttpClient:
+        client = create_shared_http_client(settings, event_sink=event_sink)
+        clients.append(client)
+        return client
+
+    class FailingPortfolioGateway:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def list_projects(self) -> tuple[object, ...]:
+            raise PortfolioUpstreamError("query failed without a network request")
+
+    monkeypatch.setattr(composition_module, "create_shared_http_client", recording_client)
+
+    with EnjiGuardClient(tmp_path / "normal.json"):
+        assert clients[-1].is_closed is False
+    assert clients[-1].is_closed is True
+
+    monkeypatch.setattr(composition_support_module, "PortfolioGateway", FailingPortfolioGateway)
+    with (
+        pytest.raises(EnjiGuardError, match="query failed") as raised,
+        EnjiGuardClient(tmp_path / "error.json") as client,
+    ):
+        assert clients[-1].is_closed is False
+        client.portfolio_overview()
+
+    assert raised.value.code == "UPSTREAM"
+    assert clients[-1].is_closed is True
+
+
 def test_service_reports_missing_mcp_extra_without_masking_other_import_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -130,6 +208,22 @@ def test_service_reports_missing_mcp_extra_without_masking_other_import_errors(
     monkeypatch.setattr(service_module, "_mcp_implementation", broken_implementation)
     with pytest.raises(ModuleNotFoundError, match="broken dependency"):
         service_module.run(service_module.RuntimeServiceOptions(transport="stdio", host="127.0.0.1", port=18081))
+
+
+def test_enji_guard_run_reports_missing_mcp_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The public ``enji-guard run`` alias preserves the service-extra error."""
+    monkeypatch.setattr(
+        service_module,
+        "_mcp_implementation",
+        lambda: (_ for _ in ()).throw(service_module.EnjiGuardMcpExtraRequiredError),
+    )
+
+    result = CliRunner().invoke(cli_app, ["run"])
+
+    assert result.exit_code == 2
+    assert result.stderr == "MCP_EXTRA_REQUIRED: install 'enji-guard-cli[mcp]' to run the MCP service\n"
 
 
 def test_cli_import_does_not_load_the_optional_mcp_dependency() -> None:

@@ -17,7 +17,6 @@ from mcp.server.session import ServerSession
 from enji_guard_cli.delivery.presentation import json_projection
 from enji_guard_cli.mcp_facade import McpQueryFacade, McpQueryResult
 from enji_guard_cli.runtime_observability.journey import AgentJourney, run_agent_journey
-from enji_guard_cli.runtime_observability.telemetry import configure_logging
 from enji_guard_cli.service_composition import mcp_query_facade
 from enji_guard_cli.settings import (
     DEFAULT_HTTP_HOST,
@@ -158,21 +157,10 @@ async def run_mcp_server_async(
         raise ValueError(f"Unknown transport: {transport}")
 
 
-def run_mcp_server(
-    server: object,
-    *,
-    transport: McpTransport = "stdio",
-    mount_path: str | None = None,
-) -> None:
-    configure_logging(default_settings().telemetry, provenance="mcp")
-    asyncio.run(run_mcp_server_async(server, transport=transport, mount_path=mount_path))
-
-
 __all__ = [
     "MCP_TOOL_NAMES",
     "McpToolContext",
     "McpTransport",
     "create_mcp_server",
-    "run_mcp_server",
     "run_mcp_server_async",
 ]

@@ -75,16 +75,16 @@ class EnjiGuardClient:
         if scope is not None:
             scope.__exit__(exc_type, exc_value, traceback)
 
-    def portfolio_overview(self, project: str | None = None, sort: RepositorySort = "default") -> ClientResult:
+    def portfolio_overview(self, *, project: str | None = None, sort: RepositorySort = "default") -> ClientResult:
         return self._execute(lambda facade: facade.portfolio_overview(project, sort))
 
-    def repository_status(self, repository: str, project: str | None = None) -> ClientResult:
+    def repository_status(self, repository: str, *, project: str | None = None) -> ClientResult:
         return self._execute(lambda facade: facade.repository_status(repository, project))
 
-    def audit_summary(self, repository: str, project: str | None = None) -> ClientResult:
+    def audit_summary(self, repository: str, *, project: str | None = None) -> ClientResult:
         return self._execute(lambda facade: facade.audit_summary(repository, project))
 
-    def audit_read(self, repository: str, audits: Sequence[str], project: str | None = None) -> ClientResult:
+    def audit_read(self, repository: str, audits: Sequence[str], *, project: str | None = None) -> ClientResult:
         if isinstance(audits, str):
             raise EnjiGuardError("VALIDATION", "pass audit selectors as a sequence, not a string")
         selectors = _selectors(audits)
