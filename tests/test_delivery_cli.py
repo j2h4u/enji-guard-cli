@@ -63,6 +63,7 @@ from enji_guard_cli.runtime_observability.supervisor import RuntimeServiceOption
 from enji_guard_cli.settings import RepoSettings, default_settings
 
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
+service_module = importlib.import_module("enji_guard_cli.delivery.service")
 
 REPO = "github@github.com:acme/cat"
 REPORT_COMPLETED_AT = "2026-07-20T00:00:00Z"
@@ -183,10 +184,12 @@ def test_audit_read_and_summary_are_public_commands() -> None:
 def test_run_defaults_to_long_lived_http_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_run_service(**kwargs: object) -> None:
-        captured.update(kwargs)
+    def fake_service_run(
+        options: RuntimeServiceOptions, *, allow_external_host: bool = False, auth_file: object = None
+    ) -> None:
+        captured.update(options=options, allow_external_host=allow_external_host, auth_file=auth_file)
 
-    monkeypatch.setattr(cli_module, "run_service", fake_run_service)
+    monkeypatch.setattr(service_module, "run", fake_service_run)
 
     result = CliRunner().invoke(app, ["run", "--port", "18080"])
 
@@ -200,10 +203,12 @@ def test_run_defaults_to_long_lived_http_transport(monkeypatch: pytest.MonkeyPat
 def test_run_keeps_stdio_as_an_explicit_interactive_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_run_service(**kwargs: object) -> None:
-        captured.update(kwargs)
+    def fake_service_run(
+        options: RuntimeServiceOptions, *, allow_external_host: bool = False, auth_file: object = None
+    ) -> None:
+        captured.update(options=options, allow_external_host=allow_external_host, auth_file=auth_file)
 
-    monkeypatch.setattr(cli_module, "run_service", fake_run_service)
+    monkeypatch.setattr(service_module, "run", fake_service_run)
 
     result = CliRunner().invoke(app, ["run", "--transport", "stdio"])
 

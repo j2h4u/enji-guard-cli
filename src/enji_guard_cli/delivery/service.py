@@ -1,5 +1,6 @@
 """Dedicated root for the optional long-lived MCP service."""
 
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
 
@@ -25,12 +26,22 @@ class McpServerBuilder(Protocol):
 
 
 def _validate_http_bind(host: str, transport: str, *, allow_external_host: bool) -> None:
-    if transport == "stdio" or allow_external_host or host.strip().lower() in {"localhost", "127.0.0.1", "::1"}:
+    if transport == "stdio" or allow_external_host or _is_loopback_host(host):
         return
     raise typer.BadParameter(
         "HTTP MCP transports may only bind to loopback by default; pass --allow-external-host to bind externally",
         param_hint="--host",
     )
+
+
+def _is_loopback_host(host: str) -> bool:
+    normalized = host.strip().lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 def _mcp_implementation() -> tuple[McpServerBuilder, McpServerRunner]:

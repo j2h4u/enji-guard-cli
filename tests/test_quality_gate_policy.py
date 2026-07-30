@@ -41,6 +41,11 @@ def test_verify_uses_one_parallel_non_docker_suite_for_coverage_and_crap() -> No
     assert "pytest -q -n auto --cov=src/enji_guard_cli" in test_gate.group("body")
     assert '--cov-report=json:"$coverage_file"' in test_gate.group("body")
     assert "scripts/crap_gate.py" in test_gate.group("body")
-    assert re.search(r"^verify: check test-gate docker-tests docker-build$", justfile, flags=re.MULTILINE)
+    verify = re.search(r"^verify:\s*(?P<dependencies>[^\n]+)$", justfile, flags=re.MULTILINE)
+    assert verify is not None
+    dependencies = verify.group("dependencies").split()
+    assert set(dependencies) == {"check", "test-gate", "package-check", "docker-tests", "docker-build"}
+    assert len(dependencies) == len(set(dependencies))
+    assert dependencies.count("test-gate") == 1
     assert "run: just test-gate" in ci
     assert not re.search(r"^  crap:$", ci, flags=re.MULTILINE)

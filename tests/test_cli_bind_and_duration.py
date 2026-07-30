@@ -10,17 +10,13 @@ observable behaviour: the guard through the real ``run`` command, the
 parser on the value it returns.
 """
 
-import importlib
-from typing import cast
-
 import pytest
 import typer
 from typer.testing import CliRunner
 
-from enji_guard_cli.delivery.cli.app import _parse_duration, _validate_http_bind, app
+from enji_guard_cli.delivery import service as service_module
+from enji_guard_cli.delivery.cli.app import _parse_duration, app
 from enji_guard_cli.runtime_observability.supervisor import RuntimeServiceOptions
-
-cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
 
 HTTP_TRANSPORTS = ["sse", "streamable-http"]
 LOOPBACK_HOSTS = ["127.0.0.1", "127.53.1.9", "::1", "localhost", "LOCALHOST", "  127.0.0.1  "]
@@ -32,55 +28,53 @@ BIND_REFUSAL = "HTTP MCP transports may only bind to loopback by default"
 @pytest.mark.parametrize("transport", HTTP_TRANSPORTS)
 @pytest.mark.parametrize("host", LOOPBACK_HOSTS)
 def test_http_transports_may_bind_to_loopback(host: str, transport: str) -> None:
-    _validate_http_bind(host, transport, allow_external_host=False)
+    service_module._validate_http_bind(host, transport, allow_external_host=False)
 
 
 @pytest.mark.parametrize("transport", HTTP_TRANSPORTS)
 @pytest.mark.parametrize("host", EXTERNAL_HOSTS)
 def test_http_transports_refuse_a_non_loopback_bind(host: str, transport: str) -> None:
     """A hostname is refused too: it cannot be proven loopback without DNS."""
-    with pytest.raises(typer.Exit):
-        _validate_http_bind(host, transport, allow_external_host=False)
+    with pytest.raises(typer.BadParameter):
+        service_module._validate_http_bind(host, transport, allow_external_host=False)
 
 
 @pytest.mark.parametrize("host", EXTERNAL_HOSTS)
 def test_stdio_never_binds_a_socket_so_the_host_is_irrelevant(host: str) -> None:
-    _validate_http_bind(host, "stdio", allow_external_host=False)
+    service_module._validate_http_bind(host, "stdio", allow_external_host=False)
 
 
 @pytest.mark.parametrize("transport", HTTP_TRANSPORTS)
 @pytest.mark.parametrize("host", EXTERNAL_HOSTS)
 def test_the_explicit_opt_in_allows_an_external_bind(host: str, transport: str) -> None:
-    _validate_http_bind(host, transport, allow_external_host=True)
+    service_module._validate_http_bind(host, transport, allow_external_host=True)
 
 
-def _run_service_calls(monkeypatch: pytest.MonkeyPatch) -> list[RuntimeServiceOptions]:
-    """Record the options the entrypoint hands the supervisor, if it gets there."""
-    calls: list[RuntimeServiceOptions] = []
+def _service_run_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[RuntimeServiceOptions, bool]]:
+    """Record the real CLI alias's call into the optional service boundary."""
+    calls: list[tuple[RuntimeServiceOptions, bool]] = []
 
-    def fake_run_service(**kwargs: object) -> None:
-        calls.append(cast(RuntimeServiceOptions, kwargs["options"]))
+    def fake_service_run(
+        options: RuntimeServiceOptions, *, allow_external_host: bool = False, auth_file: object = None
+    ) -> None:
+        del auth_file
+        calls.append((options, allow_external_host))
 
-    monkeypatch.setattr(cli_module, "run_service", fake_run_service)
+    monkeypatch.setattr(service_module, "run", fake_service_run)
     return calls
 
 
-def test_the_run_command_refuses_an_external_http_bind_before_starting(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = _run_service_calls(monkeypatch)
-
+def test_the_run_command_refuses_an_external_http_bind_before_starting() -> None:
     result = CliRunner().invoke(app, ["run", "--transport", "streamable-http", "--host", "0.0.0.0"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == 2
     assert BIND_REFUSAL in result.stderr
-    assert calls == []
 
 
 def test_the_run_command_starts_an_external_bind_once_it_is_opted_into(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls = _run_service_calls(monkeypatch)
+    calls = _service_run_calls(monkeypatch)
 
     result = CliRunner().invoke(
         app,
@@ -88,18 +82,22 @@ def test_the_run_command_starts_an_external_bind_once_it_is_opted_into(
     )
 
     assert result.exit_code == 0, result.output
-    assert [(options.transport, options.host) for options in calls] == [("streamable-http", "0.0.0.0")]
+    assert [(options.transport, options.host, allow_external) for options, allow_external in calls] == [
+        ("streamable-http", "0.0.0.0", True)
+    ]
 
 
 def test_the_run_command_starts_a_loopback_bind_without_any_opt_in(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls = _run_service_calls(monkeypatch)
+    calls = _service_run_calls(monkeypatch)
 
     result = CliRunner().invoke(app, ["run", "--transport", "streamable-http", "--host", "127.0.0.1"])
 
     assert result.exit_code == 0, result.output
-    assert [(options.transport, options.host) for options in calls] == [("streamable-http", "127.0.0.1")]
+    assert [(options.transport, options.host, allow_external) for options, allow_external in calls] == [
+        ("streamable-http", "127.0.0.1", False)
+    ]
 
 
 @pytest.mark.parametrize(

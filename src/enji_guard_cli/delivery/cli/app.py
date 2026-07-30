@@ -12,7 +12,6 @@ import json
 import socket
 import sys
 from collections.abc import Callable
-from ipaddress import ip_address
 from pathlib import Path
 from typing import Annotated, Literal, cast
 
@@ -384,26 +383,6 @@ def _parse_duration(value: str) -> int:
     if not amount.isdigit():
         raise ValueError("duration must be an integer optionally followed by s, m, h, or d")
     return int(amount) * multiplier
-
-
-def _is_loopback_host(host: str) -> bool:
-    normalized = host.strip().lower()
-    if normalized == "localhost":
-        return True
-    try:
-        return ip_address(normalized).is_loopback
-    except ValueError:
-        return False
-
-
-def _validate_http_bind(host: str, transport: str, *, allow_external_host: bool) -> None:
-    if transport == "stdio" or allow_external_host or _is_loopback_host(host):
-        return
-    raise _fail(
-        "VALIDATION",
-        "HTTP MCP transports may only bind to loopback by default; pass --allow-external-host to bind externally",
-        as_json=_json_output(),
-    )
 
 
 ALL_PROJECTS_WARNING = "--all-projects rewrites this setting for every repository in every project of the account"
