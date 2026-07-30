@@ -64,6 +64,7 @@ def _one_artifact(dist_dir: Path, pattern: str, label: str) -> Path:
 
 
 def _artifacts(dist_dir: Path) -> tuple[Path, Path]:
+    dist_dir = dist_dir.resolve()
     if not dist_dir.is_dir():
         raise ContractError(f"artifact directory does not exist: {dist_dir}")
     wheel = _one_artifact(dist_dir, "*.whl", "wheel")
