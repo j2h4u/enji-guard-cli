@@ -1476,6 +1476,17 @@ def test_cookie_refresh_sleep_seconds_refreshes_before_access_expiration(tmp_pat
     assert cookie_refresh_sleep_seconds(stored_auth, now, settings=auto_refresh_settings()) == 420
 
 
+def test_default_cookie_refresh_schedule_stays_clear_of_observed_server_boundary(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    now = datetime(2026, 6, 29, 12, 0, tzinfo=UTC)
+    expires_at = now + timedelta(minutes=15)
+    import_cookie(f"access_token={unsigned_jwt({'exp': int(expires_at.timestamp())})}; refresh_token=long", auth_file)
+    stored_auth = load_stored_auth(auth_file)
+
+    assert stored_auth is not None
+    assert cookie_refresh_sleep_seconds(stored_auth, now, settings=default_settings().auto_refresh) == 420
+
+
 def test_cookie_refresh_sleep_seconds_returns_zero_inside_refresh_window(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     now = datetime(2026, 6, 29, 12, 0, tzinfo=UTC)

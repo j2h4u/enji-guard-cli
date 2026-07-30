@@ -146,17 +146,19 @@ agents can orient quickly before making changes.
   malformed, or otherwise proxy-shaped auth failure is ambiguous after
   dispatch. Such responses become `OUTCOME_UNKNOWN` and use the same bounded
   adjudication path as timeouts and 5xx. `REJECTED` is reserved for an
-  Enji-protocol rejection, currently the authenticated JSON envelope carrying
-  `AUTH_INVALID`; that parks the refresh loop for an import and must not be
-  retried automatically. Adjudication is never attempted with a credential that
-  is not still usable, and readiness remains observer-only: it checks ordinary
-  access and surfaces renewal degradation, but it does not adjudicate or
-  refresh.
+  Enji-protocol rejection: either the structured `AUTH_INVALID` envelope or the
+  live refresh endpoint's JSON `{"error":"invalid refresh token"}` response.
+  Those park the refresh loop for an import and must not be retried
+  automatically. HTML, empty, and unrecognized JSON auth failures remain
+  ambiguous. Adjudication is never attempted with a credential that is not
+  still usable, and readiness remains observer-only: it checks ordinary access
+  and surfaces renewal degradation, but it does not adjudicate or refresh.
 
   **A `200` is weaker evidence than it looks, and the design depends on knowing
   that.** `/api/v1/auth/me` authenticates the `access_token` JWT, which stays
   valid until its own expiry whether or not the refresh token was consumed — and
-  refresh is scheduled `auto_refresh.lead_seconds` (300s) *before* that expiry,
+  refresh is scheduled `auto_refresh.lead_seconds` (480s by default) *before*
+  that expiry,
   so the probe runs while the old JWT is still good in both worlds. `200`
   therefore means "the access token still works", not "the rotation never
   landed". No endpoint can prove the latter; only spending the refresh token
