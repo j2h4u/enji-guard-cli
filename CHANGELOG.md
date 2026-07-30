@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.2](https://github.com/j2h4u/enji-guard-cli/compare/v3.2.1...v3.2.2) (2026-07-30)
+
+
+### Fixes
+
+* retain refresh successor across storage failures ([bf49421](https://github.com/j2h4u/enji-guard-cli/commit/bf49421e4ecd6edbbe87dceaeb24f7f142366cfb))
+
 ## [3.2.1](https://github.com/j2h4u/enji-guard-cli/compare/v3.2.0...v3.2.1) (2026-07-30)
 
 
