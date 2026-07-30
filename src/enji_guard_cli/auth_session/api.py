@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import NotRequired, TypedDict, cast
 
 from enji_guard_cli.auth_session import auto_refresh as auto_refresh_impl
+from enji_guard_cli.auth_session.auth_protocol import (
+    AUTH_INVALID_CODE,
+    HTTP_AUTH_FAILURE_CODES,
+    HTTP_OK,
+    is_auth_invalid_response,
+)
 from enji_guard_cli.auth_session.cookies import (
     cookie_value,
     jwt_expires_at,
@@ -63,14 +69,9 @@ from enji_guard_cli.transport import (
 from enji_guard_cli.transport_types import RetryProfile
 
 AUTH_REFRESH_PATH = "/api/v1/auth/refresh"
-AUTH_INVALID_CODE = "AUTH_INVALID"
 AUTH_REFRESH_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
 )
-HTTP_OK = 200
-HTTP_UNAUTHORIZED = 401
-HTTP_FORBIDDEN = 403
-HTTP_AUTH_FAILURE_CODES = frozenset({401, 403})
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -620,21 +621,6 @@ async def _refresh_cookie_auth(
 
 def _auth_projection(path: Path):
     return project_auth(load_auth(path), load_journal(path))
-
-
-def is_auth_invalid_response(response: EnjiHttpResponse) -> bool:
-    if response.status_code != HTTP_UNAUTHORIZED:
-        return False
-    try:
-        payload = response.json(operation="auth invalid check")
-    except EnjiHttpError:
-        return False
-    if not isinstance(payload, dict):
-        return False
-    error = payload.get("error")
-    if isinstance(error, dict):
-        return error.get("code") == AUTH_INVALID_CODE
-    return payload.get("code") == AUTH_INVALID_CODE
 
 
 def _auth_refresh_headers(stored_auth: StoredAuth, *, settings: AuthSettings) -> dict[str, str]:

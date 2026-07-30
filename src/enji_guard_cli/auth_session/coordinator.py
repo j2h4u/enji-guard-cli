@@ -9,6 +9,11 @@ from http.cookies import CookieError
 from pathlib import Path
 from typing import Protocol
 
+from enji_guard_cli.auth_session.auth_protocol import (
+    HTTP_AUTH_FAILURE_CODES,
+    HTTP_OK,
+    is_auth_invalid_response,
+)
 from enji_guard_cli.auth_session.cookies import merge_set_cookie_headers, set_cookie_names
 from enji_guard_cli.auth_session.ports import AuthOutcomeSink
 from enji_guard_cli.auth_session.state_machine import (
@@ -59,7 +64,6 @@ from enji_guard_cli.auth_session.store import (
 )
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpResponse
 
-HTTP_OK = 200
 TERMINAL_POLL_SECONDS = 0.05
 _LOGGER = logging.getLogger(__name__)
 
@@ -531,4 +535,4 @@ def _successful_replacement(source: StoredAuth, response: EnjiHttpResponse) -> s
 
 
 def _is_confirmed_refresh_rejection(response: EnjiHttpResponse) -> bool:
-    return response.status_code in {401, 403}
+    return response.status_code in HTTP_AUTH_FAILURE_CODES and is_auth_invalid_response(response)

@@ -140,15 +140,16 @@ agents can orient quickly before making changes.
   pretend that readiness cleared the refresh loop's parked generation. The loop
   needs no waking, because the task that must act is the one deciding.
 
-  Any `401`/`403` returned by `POST /api/v1/auth/refresh` is a confirmed refresh
-  rejection, regardless of JSON, HTML, empty, malformed, or proxy-shaped body.
-  Body content may enrich diagnostics, but it must never decide retry
-  eligibility. A refresh rejection parks the refresh loop for an import and
-  must not be converted to `OUTCOME_UNKNOWN` just because the body was not the
-  expected Enji JSON protocol. Other post-dispatch failures decide nothing and
-  retry adjudication on the next pass, which is also how the loop learns the
-  backend returned. Adjudication is never attempted with a credential that is
-  not still usable, and readiness remains observer-only: it checks ordinary
+  A `401`/`403` returned by `POST /api/v1/auth/refresh` is not enough, by
+  itself, to prove refresh-token rejection. The CLI talks to a public endpoint
+  behind reverse proxies and deployment machinery, so a hop-level, HTML, empty,
+  malformed, or otherwise proxy-shaped auth failure is ambiguous after
+  dispatch. Such responses become `OUTCOME_UNKNOWN` and use the same bounded
+  adjudication path as timeouts and 5xx. `REJECTED` is reserved for an
+  Enji-protocol rejection, currently the authenticated JSON envelope carrying
+  `AUTH_INVALID`; that parks the refresh loop for an import and must not be
+  retried automatically. Adjudication is never attempted with a credential that
+  is not still usable, and readiness remains observer-only: it checks ordinary
   access and surfaces renewal degradation, but it does not adjudicate or
   refresh.
 
@@ -177,12 +178,13 @@ agents can orient quickly before making changes.
   nobody fixed. `adjudicated_alive` is an outbox-only outcome — no journal state
   carries it, so a journal claiming it is corrupt.
 
-  This rests on one backend coupling, pinned by
-  `test_a_false_clear_terminates_cleanly_at_the_next_refresh`: a consumed
-  refresh token must draw a protocol-confirmed `401`/`403`, which lands in
-  `REJECTED` and asks for an import exactly once. If the backend instead
-  answered `5xx` for a consumed token, adjudication would oscillate
-  (clear → refresh → `OUTCOME_UNKNOWN` → probe `200` → clear).
+  This rests on one backend coupling, pinned by tests for incident recovery and
+  dead-source behavior: a consumed refresh token must eventually draw the
+  Enji-protocol `AUTH_INVALID` rejection, which lands in `REJECTED` and asks for
+  an import exactly once. Proxy-shaped 401/403 responses do not qualify. If the
+  backend instead answered only ambiguous failures for a consumed token,
+  adjudication could oscillate (clear → refresh → `OUTCOME_UNKNOWN` → probe
+  `200` → clear) until the access-token deadline closes.
 
   **Adjudication is therefore bounded by the access token's own expiry.** Past
   it the probe can only return `401` whether or not the rotation landed, so
