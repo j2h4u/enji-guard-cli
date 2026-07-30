@@ -3,50 +3,12 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass, is_dataclass
-from datetime import date, datetime
-from pathlib import Path
+from collections.abc import Callable
+from dataclasses import dataclass
 
 import typer
 
-_JSON_NULL_FIELDS = frozenset({"job", "connected", "recon_done", "enabled", "auto_fix", "score"})
-
-
-def repository_selector(value: object) -> str | None:
-    """Render a repository identity without importing portfolio domain types."""
-    if type(value).__name__ != "RepositoryIdentity":
-        return None
-    provider = getattr(getattr(value, "provider", None), "value", None)
-    host = getattr(value, "host", None)
-    locator = getattr(value, "locator", None)
-    if not all(isinstance(part, str) for part in (provider, host, locator)):
-        return None
-    return f"{provider}@{host}:{locator}"
-
-
-def json_projection(value: object, *, preserve_mapping_nulls: bool = False) -> object:  # noqa: PLR0911
-    """Convert application DTOs to stable JSON-safe values."""
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    selector = repository_selector(value)
-    if selector is not None:
-        return selector
-    if isinstance(value, Mapping):
-        return {
-            str(key): json_projection(item, preserve_mapping_nulls=preserve_mapping_nulls or str(key) == "scores")
-            for key, item in value.items()
-            if item is not None or str(key) in _JSON_NULL_FIELDS or preserve_mapping_nulls
-        }
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return [json_projection(item, preserve_mapping_nulls=preserve_mapping_nulls) for item in value]
-    if is_dataclass(value) and not isinstance(value, type):
-        return json_projection(asdict(value), preserve_mapping_nulls=preserve_mapping_nulls)
-    return str(value)
+from enji_guard_cli.delivery.presentation import json_projection
 
 
 def _field_value_text(value: object) -> str:

@@ -51,6 +51,39 @@ def test_run_emits_catalog_changes_from_the_command_application(
     assert payload["audit_catalog"]["changes"][0]["action_key"] == "audit.security"
 
 
+def test_run_emits_an_empty_catalog_section_after_an_unchanged_catalog_observation(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class CatalogGateway:
+        def catalog(self) -> AuditCatalogResult:
+            return AuditCatalogResult(actions=())
+
+    application = ApplicationStubs(audit_gateway=CatalogGateway()).build()
+    monkeypatch.setattr(cli_module, "create_application", lambda _auth_file=None: application)
+    monkeypatch.setitem(cli_module._state, "application", None)
+    monkeypatch.setitem(cli_module._state, "application_auth_file", None)
+
+    cli_module._run(lambda: cli_module._application().catalog.catalog(), True, FIELDS_PRESENTATION)
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["audit_catalog"] == {"changes": []}
+
+
+def test_run_does_not_add_catalog_section_without_a_catalog_observation(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    application = ApplicationStubs().build()
+    monkeypatch.setattr(cli_module, "create_application", lambda _auth_file=None: application)
+    monkeypatch.setitem(cli_module._state, "application", None)
+    monkeypatch.setitem(cli_module._state, "application_auth_file", None)
+
+    cli_module._run(lambda: {"value": "no catalog"}, True, FIELDS_PRESENTATION)
+
+    assert json.loads(capsys.readouterr().out) == {"value": "no catalog"}
+
+
 def test_application_keeps_catalog_observation_isolated_per_execution() -> None:
     barrier = threading.Barrier(2)
 

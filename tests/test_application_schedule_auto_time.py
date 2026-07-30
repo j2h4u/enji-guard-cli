@@ -1,4 +1,5 @@
 from application_builder import ApplicationStubs, RecordingTargetService, WriteTargetsCall, repository
+from enji_guard_cli.application.mutations import MutationReason
 from enji_guard_cli.audit.ports import AuditCatalogAction, AuditCatalogResult, AuditSchedule
 
 _REPOSITORY = repository("acme/cat", repo_id="repo-1")
@@ -34,6 +35,9 @@ def test_schedule_auto_time_skips_write_when_already_auto() -> None:
 
     result = application.subscriptions.schedule_auto_time("repo-1")
 
-    assert result == (current,)
+    assert result.status == "completed"
+    assert (result.total, result.changed, result.unchanged, result.failed) == (1, 0, 1, 0)
+    assert result.results[0].target.selector == "security"
+    assert result.results[0].reason is MutationReason.ALREADY_EFFECTIVE
     assert gateway.set_calls == 0
     assert targets.write_targets_calls == [WriteTargetsCall("repo-1", None, False, False, "mutation")]

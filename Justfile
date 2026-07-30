@@ -43,7 +43,10 @@ hooks:
 #                        keep a wider public surface open than the code uses.
 module-boundaries:
     uv run tach check
-    uv run tach check-external
+    # Tach 0.35 does not read PEP 621 optional extras. Exclude only the MCP
+    # adapter that is guarded by the `mcp` extra; deptry and package-check still
+    # validate its declaration and both base/extra install modes.
+    uv run tach check-external -e src/enji_guard_cli/delivery/mcp/server.py
     scripts/check_tach_interfaces.py
 
 # Validate GitHub Actions workflow syntax and expressions.
@@ -61,13 +64,19 @@ openapi-schema-contract:
 # Validate the reconstructed Enji OpenAPI contract.
 openapi-contract: openapi-semantic-contract openapi-schema-contract
 
-# Run the canonical static type checker on production code.
+# Run the production-only basedpyright ratchet.  The locked baseline represents
+# the current unknown-type debt; every new or moved production unknown fails.
 typecheck:
-    uv run basedpyright src/enji_guard_cli scripts
+    uv run basedpyright --project basedpyright.production.json --baselinemode=lock
+
+# Scripts keep the repository's existing standard-mode checks without being
+# folded into the production-package unknown-type baseline.
+typecheck-scripts:
+    uv run basedpyright --project pyproject.toml scripts
 
 # Type-check tests separately so production and fixture issues stay easy to read.
 typecheck-tests:
-    uv run basedpyright tests --warnings
+    uv run basedpyright --project pyproject.toml tests --warnings
 
 # Scan for dead code with vulture.
 dead-code:
@@ -83,7 +92,7 @@ fix:
     uv run ruff format --no-preview src scripts tests
 
 # Static quality gate.
-check: fmt-check lint preview-complexity-lint print-lint typecheck typecheck-tests module-boundaries actionlint openapi-contract compile dead-code dependency-lint
+check: fmt-check lint preview-complexity-lint print-lint typecheck typecheck-scripts typecheck-tests module-boundaries actionlint openapi-contract compile dead-code dependency-lint
 
 # Unit tests.  Docker-marked packaging tests are excluded by default addopts.
 unit:
@@ -101,12 +110,17 @@ coverage:
 crap:
     uv run pytest --cov=src/enji_guard_cli --cov-report=term-missing --crap --crap-threshold=30 --crap-top-n=30
 
-# Hard CRAP gate: every function must stay at or below CRAP 30.
-crap-check:
+# One parallel unit-suite invocation that also writes branch coverage and
+# enforces CRAP <= 30.  Keep this combined: `verify` used to execute the same
+# non-Docker suite once here and again through `unit`.
+test-gate:
     coverage_file="$(mktemp /tmp/enji-guard-crap-coverage.XXXXXX.json)"; \
     trap 'rm -f "$coverage_file"' EXIT; \
-    uv run pytest --cov=src/enji_guard_cli --cov-report=json:"$coverage_file"; \
+    uv run pytest -q -n auto --cov=src/enji_guard_cli --cov-report=term-missing --cov-report=json:"$coverage_file"; \
     scripts/crap_gate.py --coverage "$coverage_file" --src src/enji_guard_cli --threshold 30
+
+# Hard CRAP gate: every function must stay at or below CRAP 30.
+crap-check: test-gate
 
 # Validate Dockerfile and Compose files without running containers.
 docker-check:
@@ -131,8 +145,21 @@ docker-up: docker-build
     source_commit="$(git rev-parse HEAD)"; \
     PACKAGE_VERSION="$package_version" SOURCE_COMMIT="$source_commit" docker compose up -d --force-recreate --remove-orphans --wait --wait-timeout 90
 
+# Build distribution artifacts into a caller-selected directory.
+package-build out_dir="dist":
+    uv build --clear --out-dir "{{out_dir}}"
+    rm -f "{{out_dir}}/.gitignore"
+
+# Install built artifacts in clean Python 3.14 environments and exercise both
+# the dependency-light CLI and the opt-in MCP service.
+package-check:
+    artifact_dir="$(mktemp -d /tmp/enji-guard-package.XXXXXX)"; \
+    trap 'rm -rf "$artifact_dir"' EXIT; \
+    just package-build "$artifact_dir"; \
+    uv run python -m scripts.package_contract "$artifact_dir"
+
 # Full local gate for agents before claiming completion.
-verify: check crap-check unit docker-tests docker-build
+verify: check test-gate package-check docker-tests docker-build
 
 # Everything the PR owes release-please, checked before pushing rather than
 # after a red CI.  The three validators already existed and already ran in CI;

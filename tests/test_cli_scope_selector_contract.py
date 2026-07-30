@@ -22,7 +22,7 @@ from application_builder import (
     repository,
 )
 from cli_output import rendered as _rendered
-from enji_guard_cli.audit.ports import AuditAutofixJob
+from enji_guard_cli.audit.ports import ImprovementJob
 from enji_guard_cli.delivery.cli.app import app
 
 cli_module = importlib.import_module("enji_guard_cli.delivery.cli.app")
@@ -38,8 +38,8 @@ BATCH_WRITE_COMMANDS = [
 ]
 
 EXISTING_JOBS = (
-    AuditAutofixJob("improvement.vuln-fix", "default", "vuln-fix", True, True, timezone="UTC"),
-    AuditAutofixJob("improvement.test-writing", "default", "test-writing", True, True, timezone="UTC"),
+    ImprovementJob("improvement.vuln-fix", "default", "vuln-fix", True, True, timezone="UTC"),
+    ImprovementJob("improvement.test-writing", "default", "test-writing", True, True, timezone="UTC"),
 )
 
 
@@ -48,7 +48,7 @@ def targets(monkeypatch: pytest.MonkeyPatch) -> RecordingTargetService:
     """Install one CLI application whose write scope is observable."""
     service = RecordingTargetService((repository("owner/name"),))
     application = recording_application(
-        audit=RecordingAuditGateway(autofix_jobs={"r1": EXISTING_JOBS}),
+        audit=RecordingAuditGateway(improvement_jobs={"r1": EXISTING_JOBS}),
         targets=service,
     )
     monkeypatch.setattr(cli_module, "_application", lambda auth_file=None: application)
@@ -101,7 +101,7 @@ def test_documented_improvement_jobs_example_targets_the_named_repository(
     assert targets.write_targets_calls == [WriteTargetsCall(REPO_SELECTOR, None, False, False, "mutation")]
 
 
-def test_repo_selector_is_never_swallowed_as_an_autofix_selector(
+def test_repo_selector_is_never_swallowed_as_an_improvement_selector(
     targets: RecordingTargetService,
 ) -> None:
     result = CliRunner().invoke(app, ["improvement-jobs", "set", REPO_SELECTOR, "vuln-fix", "--enabled", "on"])

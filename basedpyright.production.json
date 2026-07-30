@@ -1,0 +1,19 @@
+{
+    "include": ["src/enji_guard_cli"],
+    "baselineFile": "basedpyright.production-baseline.json",
+    "pythonVersion": "3.14",
+    "typeCheckingMode": "standard",
+    "reportAny": "error",
+    "reportExplicitAny": "error",
+    "reportUnknownVariableType": "error",
+    "reportUnknownArgumentType": "error",
+    "reportUnknownMemberType": "error",
+    "reportUnknownParameterType": "error",
+    "reportUnknownLambdaType": "error",
+    "reportMissingParameterType": "error",
+    "reportMissingTypeArgument": "none",
+    "reportUnannotatedClassAttribute": "none",
+    "reportUnusedCallResult": "none",
+    "reportImplicitStringConcatenation": "none",
+    "reportPrivateUsage": "none"
+}

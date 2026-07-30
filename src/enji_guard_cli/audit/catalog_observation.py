@@ -62,7 +62,7 @@ class AuditCatalogObserver:
         if previous is None or changes:
             self.repository.save(current)
         self._changes = changes
-        return AuditCatalogResult(result.actions, result.autofixes, changes)
+        return AuditCatalogResult(result.actions, result.improvements, changes)
 
 
 def _is_published_audit(action: AuditCatalogAction) -> bool:

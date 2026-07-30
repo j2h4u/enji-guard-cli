@@ -9,6 +9,7 @@ from enji_guard_cli.audit.scheduling import (
     select_schedule_time,
     validate_cadence,
     validate_time_update,
+    validate_timezone,
     validate_week_days,
 )
 from enji_guard_cli.fanout import BoundedFanout
@@ -98,6 +99,7 @@ def validate_schedule_update(update: AuditScheduleUpdate) -> None:
     _validate_window(update)
     validate_cadence(update.cadence, subject="schedule")
     validate_time_update(update.schedule_time)
+    validate_timezone(update.timezone)
 
 
 def _is_empty_update(update: AuditScheduleUpdate) -> bool:

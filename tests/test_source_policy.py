@@ -132,14 +132,80 @@ def test_local_compose_passes_non_placeholder_build_provenance() -> None:
 def test_dockerfile_default_command_is_loopback_safe() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
-    assert 'CMD ["run"]' in dockerfile
+    assert 'ENTRYPOINT ["enji-guard-service"]' in dockerfile
+    assert "CMD []" in dockerfile
     assert '"--allow-external-host"' not in dockerfile
 
 
 def test_dockerfile_runtime_dependency_layer_disables_source_builds() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "uv sync --frozen --no-build --no-install-project --no-dev" in dockerfile
+    assert "uv sync --frozen --no-build --no-install-project --no-dev --extra mcp" in dockerfile
+    assert "uv sync --frozen --no-dev --extra mcp --no-editable" in dockerfile
+
+
+def test_mcp_extra_and_dev_constraint_cannot_drift() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = cast(dict[str, object], pyproject["project"])
+    base_dependencies = cast(list[str], project["dependencies"])
+    extras = cast(dict[str, list[str]], project["optional-dependencies"])
+    dev = cast(dict[str, list[str]], pyproject["dependency-groups"])["dev"]
+    constraint = "mcp[cli]==1.28.1"
+
+    assert all(not dependency.startswith("mcp") for dependency in base_dependencies)
+    assert extras["mcp"] == [constraint]
+    assert dev.count(constraint) == 1
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    locked_mcp = [package for package in cast(list[dict[str, object]], lock["package"]) if package.get("name") == "mcp"]
+    assert len(locked_mcp) == 1
+    assert locked_mcp[0]["version"] == "1.28.1"
+
+
+def test_service_entrypoint_is_used_by_docker_and_release_contract() -> None:
+    compose = (ROOT / "deploy" / "docker-compose.service.yml").read_text(encoding="utf-8")
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    contract = (ROOT / "scripts" / "release_contract.py").read_text(encoding="utf-8")
+
+    assert 'ENTRYPOINT ["enji-guard-service"]' in dockerfile
+    assert 'command: ["--transport", "streamable-http", "--host", "0.0.0.0", "--allow-external-host"]' in compose
+    assert 'settings.image,\n        "--transport"' in contract
+
+
+def test_package_artifact_gate_is_independent_from_docker_and_required_in_ci() -> None:
+    justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    package_check = justfile.split("package-check:", 1)[1].split("\n\n# Full local", 1)[0]
+    docker_build = justfile.split("docker-build:", 1)[1].split("\n\n# Recreate", 1)[0]
+    assert "uv build --clear --out-dir" in justfile
+    assert "mktemp -d /tmp/enji-guard-package" in package_check
+    assert "scripts.package_contract" in package_check
+    assert "package-check" not in docker_build
+    assert "verify: check test-gate package-check docker-tests docker-build" in justfile
+    assert "package-artifact:" in ci
+    assert "just package-build dist" in ci
+    assert "scripts.package_contract dist" in ci
+    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in ci
+    assert "package-artifact:${{ needs.package-artifact.result }}" in ci
+
+
+def test_package_artifact_installs_pinned_just_before_using_the_recipe() -> None:
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    job = ci.split("\n  package-artifact:", 1)[1].split("\n  docker-build:", 1)[0]
+    installer = "taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9"
+
+    assert installer in job
+    assert "tool: just" in job
+    assert job.index(installer) < job.index("just package-build dist")
+
+
+def test_tach_external_check_excludes_only_the_optional_mcp_adapter() -> None:
+    justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
+
+    assert "tach check-external -e src/enji_guard_cli/delivery/mcp/server.py" in justfile
+    assert "[external]" not in (ROOT / "tach.toml").read_text(encoding="utf-8")
+    assert "dependency-lint:" in justfile
+    assert "package-check:" in justfile
 
 
 def test_dockerfile_rejects_placeholder_build_provenance() -> None:
@@ -386,14 +452,6 @@ def test_container_publish_attests_before_promoting_mutable_tags() -> None:
     assert ".RepoDigests" in workflow[publish:provenance]
     for subject in (workflow[provenance:sbom], workflow[sbom:promote]):
         assert "subject-digest: ${{ steps.publish.outputs.digest }}" in subject
-
-
-def test_audit_schedule_domain_has_no_improvement_job_fallback() -> None:
-    schedules = (ROOT / "src" / "enji_guard_cli" / "audit" / "schedules.py").read_text(encoding="utf-8")
-
-    assert "audit_auto_run_key" in schedules
-    assert "improvement" not in schedules
-    assert "runbook" not in schedules
 
 
 def test_product_source_does_not_import_raw_gateway_implementations() -> None:

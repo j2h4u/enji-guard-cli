@@ -14,8 +14,7 @@ being true.
 from dataclasses import dataclass
 from typing import Literal
 
-from enji_guard_cli.audit.ports import AuditAutofixDefinition, AuditAutofixJob, AuditSchedule
-from enji_guard_cli.json_types import JsonValue
+from enji_guard_cli.audit.ports import AuditSchedule, ImprovementDefinition, ImprovementJob
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +36,7 @@ class AuditScheduleView:
 
 
 @dataclass(frozen=True, slots=True)
-class AuditAutofixDefinitionView:
+class ImprovementDefinitionView:
     """An improvement the catalog offers, whether or not it is configured."""
 
     action_key: str
@@ -57,22 +56,21 @@ class AuditAutofixDefinitionView:
 
 
 @dataclass(frozen=True, slots=True)
-class AuditAutofixJobView:
+class ImprovementJobView:
     """The recurring settings attached to a configured improvement."""
 
     action_key: str
     variant_key: str
     kind: str | None = None
     enabled: bool | None = None
-    auto_fix: bool | None = None
-    autofix_variant_key: str | None = None
+    automatic_execution: bool | None = None
+    provider_variant_key: str | None = None
     frequency: str | None = None
     days_of_week: tuple[str, ...] = ()
     schedule_time: str | None = None
     schedule_time_source: Literal["auto", "user"] | None = None
     timezone: str | None = None
     pentest_mode: str | None = None
-    extensions: tuple[tuple[str, JsonValue], ...] = ()
 
 
 def schedule_view(schedule: AuditSchedule) -> AuditScheduleView:
@@ -92,8 +90,8 @@ def schedule_view(schedule: AuditSchedule) -> AuditScheduleView:
     )
 
 
-def autofix_definition_view(definition: AuditAutofixDefinition) -> AuditAutofixDefinitionView:
-    return AuditAutofixDefinitionView(
+def improvement_definition_view(definition: ImprovementDefinition) -> ImprovementDefinitionView:
+    return ImprovementDefinitionView(
         action_key=definition.action_key,
         variant_key=definition.variant_key,
         title=definition.title,
@@ -106,29 +104,28 @@ def autofix_definition_view(definition: AuditAutofixDefinition) -> AuditAutofixD
     )
 
 
-def autofix_job_view(job: AuditAutofixJob) -> AuditAutofixJobView:
-    return AuditAutofixJobView(
+def improvement_job_view(job: ImprovementJob) -> ImprovementJobView:
+    return ImprovementJobView(
         action_key=job.action_key,
         variant_key=job.variant_key,
         kind=job.kind,
         enabled=job.enabled,
-        auto_fix=job.auto_fix,
-        autofix_variant_key=job.autofix_variant_key,
+        automatic_execution=job.automatic_execution,
+        provider_variant_key=job.provider_variant_key,
         frequency=job.frequency,
         days_of_week=job.days_of_week,
         schedule_time=job.schedule_time,
         schedule_time_source=job.schedule_time_source,
         timezone=job.timezone,
         pentest_mode=job.pentest_mode,
-        extensions=job.extensions,
     )
 
 
 __all__ = [
-    "AuditAutofixDefinitionView",
-    "AuditAutofixJobView",
     "AuditScheduleView",
-    "autofix_definition_view",
-    "autofix_job_view",
+    "ImprovementDefinitionView",
+    "ImprovementJobView",
+    "improvement_definition_view",
+    "improvement_job_view",
     "schedule_view",
 ]

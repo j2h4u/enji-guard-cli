@@ -65,31 +65,63 @@ depends_on = [
     "enji_guard_cli.composition",
     "enji_guard_cli.application",
     "enji_guard_cli.runtime_observability",
-    "enji_guard_cli.delivery.mcp",   # same-layer: `guard mcp serve` boots the server in-process
+    "enji_guard_cli.delivery.service", # same-layer: legacy `guard run` forwards lazily
+    "enji_guard_cli.delivery.presentation",
     "enji_guard_cli.settings",
     "enji_guard_cli.version",
 ]
+
+[[modules]]
+# The optional MCP process has its own root.  Keeping it apart means normal
+# operator CLI import/startup never loads the MCP extra.
+path = "enji_guard_cli.delivery.service"
+layer = "delivery"
+depends_on = [
+    "enji_guard_cli.delivery.mcp",
+    "enji_guard_cli.service_composition",
+    "enji_guard_cli.runtime_observability",
+    "enji_guard_cli.settings",
+]
+
+[[modules]]
+# This is the supported Python SDK surface, not a shortcut to Application.
+path = "enji_guard_cli.client"
+layer = "delivery"
+depends_on = [
+    "enji_guard_cli.client_facade",
+    "enji_guard_cli.composition",
+    "enji_guard_cli.delivery.presentation",
+    "enji_guard_cli.json_types",
+    "enji_guard_cli.settings",
+]
+
+[[modules]]
+# A transport-neutral projection keeps CLI and MCP machine output identical.
+path = "enji_guard_cli.delivery.presentation"
+layer = "delivery"
+visibility = ["enji_guard_cli.client", "enji_guard_cli.delivery.cli", "enji_guard_cli.delivery.mcp"]
 
 [[modules]]
 # The MCP server is a sibling delivery surface, not a consumer of the CLI.
 path = "enji_guard_cli.delivery.mcp"
 layer = "delivery"
 depends_on = [
-    "enji_guard_cli.composition",
+    "enji_guard_cli.service_composition",
     "enji_guard_cli.mcp_facade",
     "enji_guard_cli.runtime_observability",
+    "enji_guard_cli.delivery.presentation",
     "enji_guard_cli.settings",
 ]
-# Nothing may reach back into a delivery surface except the other one.
-visibility = ["enji_guard_cli.delivery.cli"]
+# Only the service root owns the optional MCP implementation.
+visibility = ["enji_guard_cli.delivery.service"]
 
 [[interfaces]]
-# `guard mcp serve` boots the server in-process, so the CLI needs the two
-# entry points and nothing else.  Without this the whole server module is
+# The service root loads the two entry points and nothing else.  Without this
+# the whole server module is
 # reachable, private helpers included -- which tach reports as fine, because
 # the module edge is declared and only the symbol is wrong.
 from = ["enji_guard_cli.delivery.mcp"]
-visibility = ["enji_guard_cli.delivery.cli"]
+visibility = ["enji_guard_cli.delivery.service"]
 expose = ["server\\.(create_mcp_server|run_mcp_server_async)"]
 
 # ---------------------------------------------------------------------------
@@ -101,8 +133,22 @@ path = "enji_guard_cli.composition"
 layer = "composition"
 depends_on = [
     "enji_guard_cli.application",
-    "enji_guard_cli.mcp_facade",
+    "enji_guard_cli.client_facade",
+    "enji_guard_cli.composition_support",
     "enji_guard_cli.runtime_observability",
+    "enji_guard_cli.enji_gateway",
+    "enji_guard_cli.auth_session",
+    "enji_guard_cli.settings",
+]
+# Only a delivery surface may boot the process.
+visibility = ["enji_guard_cli.client", "enji_guard_cli.delivery.*"]
+
+[[modules]]
+# The shared read construction is deliberately invisible to delivery roots.
+path = "enji_guard_cli.composition_support"
+layer = "composition"
+depends_on = [
+    "enji_guard_cli.application",
     "enji_guard_cli.enji_gateway",
     "enji_guard_cli.audit",
     "enji_guard_cli.portfolio",
@@ -110,8 +156,20 @@ depends_on = [
     "enji_guard_cli.fanout",
     "enji_guard_cli.settings",
 ]
-# Only a delivery surface may boot the process.
-visibility = ["enji_guard_cli.delivery.*"]
+visibility = ["enji_guard_cli.composition", "enji_guard_cli.service_composition"]
+
+[[modules]]
+# MCP/runtime wiring is not part of normal CLI or public client composition.
+path = "enji_guard_cli.service_composition"
+layer = "composition"
+depends_on = [
+    "enji_guard_cli.composition_support",
+    "enji_guard_cli.mcp_facade",
+    "enji_guard_cli.runtime_observability",
+    "enji_guard_cli.enji_gateway",
+    "enji_guard_cli.settings",
+]
+visibility = ["enji_guard_cli.delivery.service", "enji_guard_cli.delivery.mcp"]
 
 # ---------------------------------------------------------------------------
 # facade -- a read-only projection for MCP; strictly above application.
@@ -122,7 +180,13 @@ path = "enji_guard_cli.mcp_facade"
 layer = "facade"
 depends_on = ["enji_guard_cli.application", "enji_guard_cli.settings"]
 # Only the MCP surface and the wiring root; the CLI must not shortcut through it.
-visibility = ["enji_guard_cli.delivery.mcp", "enji_guard_cli.composition"]
+visibility = ["enji_guard_cli.delivery.mcp", "enji_guard_cli.service_composition"]
+
+[[modules]]
+path = "enji_guard_cli.client_facade"
+layer = "facade"
+depends_on = ["enji_guard_cli.application", "enji_guard_cli.settings"]
+visibility = ["enji_guard_cli.client", "enji_guard_cli.composition"]
 
 # ---------------------------------------------------------------------------
 # application -- use cases.  The only layer allowed to orchestrate the domain.
@@ -136,14 +200,14 @@ depends_on = [
     "enji_guard_cli.portfolio",
     "enji_guard_cli.gitlab",
     "enji_guard_cli.auth_session",
-    "enji_guard_cli.runtime_observability",
     "enji_guard_cli.fanout",
     "enji_guard_cli.settings",
     "enji_guard_cli.errors",
-    "enji_guard_cli.json_types",  # views carry provider passthrough as JSON, not as a domain type
 ]
 visibility = [
     "enji_guard_cli.composition",
+    "enji_guard_cli.composition_support",
+    "enji_guard_cli.client_facade",
     "enji_guard_cli.mcp_facade",
     "enji_guard_cli.delivery.cli",
 ]
@@ -173,21 +237,14 @@ depends_on = [
 visibility = [
     "enji_guard_cli.delivery.*",
     "enji_guard_cli.composition",
-    "enji_guard_cli.application",
+    "enji_guard_cli.service_composition",
 ]
-
-[[interfaces]]
-# Use cases may depend on the *shape* of runtime supervision (a port) and
-# nothing else -- never on the supervisor, the logger or the sink.
-from = ["enji_guard_cli.runtime_observability"]
-visibility = ["enji_guard_cli.application"]
-expose = ["ports\\..*"]
 
 [[interfaces]]
 # Delivery boots and observes the runtime, so it sees the entry points; the
 # telemetry sink stays private to the package.
 from = ["enji_guard_cli.runtime_observability"]
-visibility = ["enji_guard_cli.delivery.*", "enji_guard_cli.composition"]
+visibility = ["enji_guard_cli.delivery.*", "enji_guard_cli.composition", "enji_guard_cli.service_composition"]
 expose = [
     "journey\\..*",
     "readiness\\..*",
@@ -217,7 +274,7 @@ depends_on = [
 # Concrete adapters exist to be wired, and only the wiring root wires them.
 # In particular auth_session must NOT see this module: credentials are the
 # lower concept, the gateway is what consumes them.
-visibility = ["enji_guard_cli.composition"]
+visibility = ["enji_guard_cli.composition", "enji_guard_cli.composition_support", "enji_guard_cli.service_composition"]
 
 [[interfaces]]
 # The gateway publishes the three adapters named in its `__all__`, plus the
@@ -247,6 +304,7 @@ visibility = [
     "enji_guard_cli.enji_gateway",
     "enji_guard_cli.portfolio",
     "enji_guard_cli.composition",
+    "enji_guard_cli.composition_support",
 ]
 
 [[interfaces]]
@@ -276,17 +334,16 @@ expose = [
     "workflows\\..*",
     "schedules\\..*",
     "scheduling\\..*",
-    "autofixes\\..*",
+    "improvement_jobs\\.(definitions|select|set_one|validate_improvement_job_update)",
     "email\\..*",
     "observation\\..*",
     "catalog_observation\\.[A-Za-z]+Port",
 ]
 
 [[interfaces]]
-# Wiring may reach concretes; that is the whole job of a composition root.
 from = ["enji_guard_cli.audit"]
-visibility = ["enji_guard_cli.composition"]
-expose = [".*"]
+visibility = ["enji_guard_cli.composition_support"]
+expose = ["catalog_observation\\..*", "ledger\\..*"]
 
 [[modules]]
 path = "enji_guard_cli.portfolio"
@@ -301,6 +358,7 @@ visibility = [
     "enji_guard_cli.enji_gateway",
     "enji_guard_cli.gitlab",
     "enji_guard_cli.composition",
+    "enji_guard_cli.composition_support",
 ]
 
 [[interfaces]]
@@ -327,8 +385,8 @@ expose = [
 
 [[interfaces]]
 from = ["enji_guard_cli.portfolio"]
-visibility = ["enji_guard_cli.composition"]
-expose = [".*"]
+visibility = ["enji_guard_cli.composition_support"]
+expose = ["selectors\\..*"]
 
 [[modules]]
 # GitLab discovery reuses portfolio's repository identity rather than minting
@@ -367,6 +425,7 @@ visibility = [
     "enji_guard_cli.runtime_observability",
     "enji_guard_cli.enji_gateway",
     "enji_guard_cli.composition",
+    "enji_guard_cli.composition_support",
 ]
 
 [[interfaces]]
@@ -393,6 +452,11 @@ expose = ["[^.]+", "ports\\..*", "credential_changes\\..*"]
 from = ["enji_guard_cli.auth_session"]
 visibility = ["enji_guard_cli.composition"]
 expose = [".*"]
+
+[[interfaces]]
+from = ["enji_guard_cli.auth_session"]
+visibility = ["enji_guard_cli.composition_support"]
+expose = ["adapters\\..*"]
 
 # ---------------------------------------------------------------------------
 # transport -- HTTP mechanics.  No product vocabulary above `RetryProfile`.

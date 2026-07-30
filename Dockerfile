@@ -18,7 +18,7 @@ ENV SETUPTOOLS_SCM_PRETEND_VERSION=${PACKAGE_VERSION} \
 
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
-    uv sync --frozen --no-build --no-install-project --no-dev
+    uv sync --frozen --no-build --no-install-project --no-dev --extra mcp
 
 COPY src ./src
 RUN PACKAGE_VERSION="${PACKAGE_VERSION}" SOURCE_COMMIT="${SOURCE_COMMIT}" python - <<'PY'
@@ -38,7 +38,7 @@ Path("src/enji_guard_cli/_build_provenance.py").write_text(
 )
 PY
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
-    uv sync --frozen --no-dev --no-editable
+    uv sync --frozen --no-dev --extra mcp --no-editable
 
 FROM python:3.14.6-slim-trixie@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS runtime
 
@@ -61,5 +61,5 @@ USER 1000:1000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["enji-guard", "health", "--ready"]
 
-ENTRYPOINT ["enji-guard"]
-CMD ["run"]
+ENTRYPOINT ["enji-guard-service"]
+CMD []

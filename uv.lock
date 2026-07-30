@@ -349,10 +349,14 @@ name = "enji-guard-cli"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
-    { name = "mcp", extra = ["cli"] },
     { name = "tenacity" },
     { name = "typer" },
     { name = "watchfiles" },
+]
+
+[package.optional-dependencies]
+mcp = [
+    { name = "mcp", extra = ["cli"] },
 ]
 
 [package.dev-dependencies]
@@ -360,6 +364,7 @@ dev = [
     { name = "actionlint-py" },
     { name = "basedpyright" },
     { name = "deptry" },
+    { name = "mcp", extra = ["cli"] },
     { name = "openapi-spec-validator" },
     { name = "pip-audit" },
     { name = "pre-commit" },
@@ -376,17 +381,19 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1,<1" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.28.1,<2" },
+    { name = "mcp", extras = ["cli"], marker = "extra == 'mcp'", specifier = "==1.28.1" },
     { name = "tenacity", specifier = ">=9.1.2,<10" },
     { name = "typer", specifier = ">=0.27.0" },
     { name = "watchfiles", specifier = ">=1.2.0,<2" },
 ]
+provides-extras = ["mcp"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "actionlint-py", specifier = ">=1.7.12.24" },
     { name = "basedpyright", specifier = ">=1.39.8" },
     { name = "deptry", specifier = ">=0.25" },
+    { name = "mcp", extras = ["cli"], specifier = "==1.28.1" },
     { name = "openapi-spec-validator", specifier = ">=0.9.0" },
     { name = "pip-audit", specifier = ">=2.10.1" },
     { name = "pre-commit", specifier = ">=4.4.0" },

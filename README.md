@@ -19,7 +19,7 @@ See [ROADMAP.md](ROADMAP.md) for the current product status and remaining
 hardening work.
 
 **Running it:** [Runtime](#runtime) · [Authentication](#authentication) ·
-[CLI](#cli) · [MCP](#mcp)
+[CLI](#cli) · [MCP](#mcp) · [Package installs](#package-installs)
 **Understanding it:** [Mental Model](#mental-model) · [Surfaces](#surfaces) ·
 [Agent Workflow](#agent-workflow)
 **Changing it:** [Development](#development) · [Documentation](#documentation)
@@ -93,10 +93,10 @@ selects `audit.security`). Recon is a separate `audit.recon` action and is not
 an audit selector.
 
 The workflow is audit -> findings -> optional improvement. The live catalog's
-`auditAutofixes` entries describe available variants. The supported typed
+The provider `auditAutofixes` entries describe available variants. The supported typed
 relationships are `security` -> `vuln-fix`, `tests` -> `test-writing`, and
 `dependency-hygiene` -> `dependency-update`; pentest is separate. The CLI is
-the operator surface for autofix management (`list` and `set`), while MCP
+the operator surface for improvement-job management (`list` and `set`), while MCP
 remains read-only. Use an explicit `--repo REPO`, `--all-repos` with `--project`, or
 `--all-projects` for batch scope. The relationship mapping is temporary and
 can be removed when Enji exposes relationships directly.
@@ -343,6 +343,39 @@ and [deployment recovery](docs/deployment.md#cookie-session-recovery).
 For registry-based deployment, use the GHCR image and compose example in
 `docs/deployment.md`.
 
+## Package installs
+
+The base wheel is a dependency-light CLI and public read-only Python client;
+the MCP server is an explicit, reviewed-and-pinned `mcp[cli]==1.28.1` extra.
+Build artifacts locally and install only the surface you need:
+
+```bash
+uv build --clear --out-dir dist
+python3.14 -m pip install dist/*.whl
+enji-guard --help
+
+# Only when running the MCP service outside Docker:
+wheel="$(printf '%s\n' dist/*.whl)"
+python3.14 -m pip install "${wheel}[mcp]"
+enji-guard-service --help
+```
+
+The base install intentionally does not install or import MCP. Its public
+client is narrow and context-managed: `from enji_guard_cli.client import
+EnjiGuardClient`; use `with EnjiGuardClient() as client:` so its pooled
+transport is closed deterministically.
+
+Cookie-session recovery remains Docker's long-lived service responsibility.
+The supported production path is still the GHCR image because the cookie store
+requires one local POSIX host with `flock`, atomic rename, and directory fsync;
+NFS/CIFS, multi-host writers, and Windows are unsupported. There is no PyPI
+publication path yet: trusted-publishing ownership and the API-key/portability
+decisions remain release blockers. The committed artifact contract proves local
+wheel build and install only; it does not imply publication readiness.
+
+`enji-guard-service` is the dedicated service entrypoint. The `enji-guard run`
+subcommand remains a lazy operator convenience alias.
+
 ## Authentication
 
 Bearer/API-token auth is the preferred stable path:
@@ -438,7 +471,7 @@ docker exec -i enji-guard-cli enji-guard --project Pets schedule set --all-repos
 docker exec -i enji-guard-cli enji-guard --project Pets schedule auto-time --all-repos
 docker exec -i enji-guard-cli enji-guard improvement-jobs list --repo github@github.com:j2h4u/enji-guard-cli
 docker exec -i enji-guard-cli enji-guard improvement-jobs set --repo github@github.com:j2h4u/enji-guard-cli vuln-fix \
-  --enabled on --auto-fix on --frequency workdays --days mon,tue,wed,thu,fri --time auto --timezone Asia/Almaty
+  --enabled on --automatic-execution on --frequency workdays --days mon,tue,wed,thu,fri --time auto --timezone Asia/Almaty
 docker exec -i enji-guard-cli enji-guard --project Pets email set --all-repos --scheduled off
 ```
 
@@ -455,14 +488,14 @@ options.
 | `wait REPO` | Block until the repository's audits finish. |
 | `health [--ready]` | Process liveness only; `--ready` probes the MCP listener and cached backend readiness. Healthchecks, probes, and CI gates must use `health --ready`, because bare `health` cannot fail while the process runs. |
 | `access` | Account plan and limits. |
-| `run` | Run the long-lived MCP service (used by the container entrypoint). |
+| `run` | Lazy alias for the optional long-lived MCP service; the dedicated `enji-guard-service` entrypoint is preferred. |
 | `auth import-bearer\|import-cookie --stdin`, `auth status` | Credential bootstrap and credential state. |
 | `project list\|create\|rename\|delete\|settings` | Project administration; `delete` requires `--yes`. |
 | `repo add\|remove\|move\|resolve` | Repository administration; `remove` requires `--yes`. |
 | `recon start REPO` | Baseline discovery run. |
 | `audit start\|read\|summary REPO` | Run audits, read bodies, read compact metadata. |
 | `schedule list\|set\|auto-time\|timezone` | Automatic audit schedules. |
-| `improvement-jobs list\|set` | Curated autofix jobs. |
+| `improvement-jobs list\|set` | Curated improvement jobs. |
 | `email list\|set` | Audit completion email preferences. |
 | `language show\|set` | Account-wide audit language. |
 | `gitlab credentials\|projects` | GitLab credential and project discovery. |
@@ -511,16 +544,16 @@ with each schedule; Enji assigns the run time by default. The service/container
 should run with the host timezone. Batch writes are explicit client-side loops:
 use `--repo REPO`, `--project NAME_OR_ID --all-repos`, or `--all-projects`.
 `schedule set` updates the selected scope, and `schedule auto-time` restores
-Enji-assigned run times. Autofix `improvement-jobs` are not audit schedules.
+Enji-assigned run times. Improvement jobs are not audit schedules.
 
-Autofix management uses `improvement-jobs` as the canonical resource. Its
+Improvement-job management uses `improvement-jobs` as the canonical resource. Its
 operator workflow is list/set per repository or explicit batch scope; it does
 not create or replace an audit schedule. Audit schedules remain under
 `audit-auto-runs/{actionKey}`. `improvement-jobs list` shows the configured
-autofix scheduler state, including enabled state, automatic-fix state, cadence,
+job scheduler state, including enabled state, automatic-execution state, cadence,
 days, time, time source, timezone, and pentest mode when Enji returns it.
-`improvement-jobs set` changes only the selected autofix selectors and supports
-partial updates with `--enabled`, `--auto-fix`, `--frequency`, `--days`,
+`improvement-jobs set` changes only the selected improvement selectors and supports
+partial updates with `--enabled`, `--automatic-execution`, `--frequency`, `--days`,
 `--time`, and `--timezone`. Use `--time auto` to restore the automatic time
 source without changing the existing clock time.
 

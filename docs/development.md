@@ -11,6 +11,11 @@ hold, [CONTRIBUTING.md](../CONTRIBUTING.md) for change intake and handoff,
 ## Toolchain
 
 - Use `uv` only. Keep `uv.lock` current; use hardlink mode outside Docker.
+- The base wheel must stay free of MCP. Declare MCP only as the exact v1
+  `mcp[cli]==1.28.1` extra and retain that exact constraint in the dev group
+  so development and published service installs cannot drift. The dedicated
+  `enji-guard-service` entrypoint owns the optional long-lived service; the
+  normal `enji-guard` CLI must import without MCP installed.
 - Keep runtime tuning in frozen settings dataclasses, not env. Env is for
   credential and security ingress only.
 - Treat the tach module graph as architecture policy, not style advice. A tach
@@ -50,10 +55,12 @@ These are contracts the CLI owes its users, not implementation preferences.
   do not cache or fall back. Treat `curatedActions` as authoritative so newly
   published reports participate automatically. CLI report selectors are action
   key suffixes without `audit.`; recon remains separate.
-- Treat catalog `auditAutofixes` as the source for curated autofix variants
-  (`actionKey`, `variantKey`, `title`, `description`, `fleetRunbookId`,
-  `status`, `sortOrder`). Manage them through canonical `improvement-jobs`
-  list/set operations on the operator CLI. The temporary relationships are
+- Treat provider catalog `auditAutofixes` as the transport source for curated
+  improvement variants (`actionKey`, `variantKey`, `title`, `description`,
+  `fleetRunbookId`, `status`, `sortOrder`). The application and operator
+  surface call the configured entity an improvement job; arbitrary provider
+  fields never cross that boundary. Manage jobs through canonical
+  `improvement-jobs` list/set operations on the operator CLI. The temporary relationships are
   security/vuln-fix, tests/test-writing, and dependency-hygiene/dependency-update;
   pentest is separate. MCP remains read-only, and explicit `--repo REPO`,
   `--all-repos` with `--project`, or `--all-projects` scope is required for
@@ -65,15 +72,16 @@ These are contracts the CLI owes its users, not implementation preferences.
 - Keep schedule timezone stored per schedule, run the container with the host
   timezone, and use `schedule auto-time` to restore Enji-assigned run times.
 - Audit schedules use `audit-auto-runs/{actionKey}` with the exact action key
-  from `curatedActions`; `improvement-jobs` is autofix-only, never an audit
+  from `curatedActions`; `improvement-jobs` is improvement-job-only, never an audit
   scheduling fallback. Batch scheduling must remain an explicit client-side
   loop over the selected repositories and audits.
-- Autofix scheduler controls live on `improvement-jobs set`, not `schedule`.
+- Improvement-job scheduler controls live on `improvement-jobs set`, not `schedule`.
   Keep the operator semantics parallel to audit schedules: explicit scope,
   idempotent partial updates, IANA timezone, known cadence values, validated
   weekdays, and `auto` versus user-selected time source. Shared scheduler
   business policy belongs in `audit/scheduling.py`; audit schedules and autofix
-  jobs stay separate entities that consume it.
+  jobs stay separate entities that consume it. The automatic-execution control
+  is `--automatic-execution`; provider `autoFix` remains a gateway-only field.
 
 ### Reading audits
 
@@ -104,7 +112,10 @@ These are contracts the CLI owes its users, not implementation preferences.
 
 `just verify` is the completion gate. It runs Ruff, basedpyright, tach,
 Vulture, deptry, OpenAPI contract validation, CRAP <= 30 per function, tests,
-and the Docker build.
+the clean wheel/sdist build-install contract, and the Docker build. The package
+contract is deliberately separate from the Docker gate: it builds temporary
+artifacts, installs the base wheel and `mcp` extra into isolated Python 3.14
+venvs outside the checkout, and checks public CLI/client/service boundaries.
 
 - Do not weaken, skip, or suppress any of them. A failing check is information
   about the code, not an obstacle to green.

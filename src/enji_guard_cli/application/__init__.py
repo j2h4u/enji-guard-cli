@@ -43,6 +43,13 @@ from enji_guard_cli.application.gitlab import (
     GitLabProjectView,
     GitLabScopeView,
 )
+from enji_guard_cli.application.mutations import (
+    BatchMutationResult,
+    MutationDecision,
+    MutationOutcome,
+    MutationReason,
+    MutationTargetView,
+)
 from enji_guard_cli.application.portfolio import PortfolioFacade
 from enji_guard_cli.application.portfolio_views import (
     AccountPreferencesView,
@@ -58,20 +65,20 @@ from enji_guard_cli.application.portfolio_views import (
 )
 from enji_guard_cli.application.projects import AuditProjectSource
 from enji_guard_cli.application.subscription_views import (
-    AuditAutofixDefinitionView,
-    AuditAutofixJobView,
     AuditScheduleView,
+    ImprovementDefinitionView,
+    ImprovementJobView,
 )
 from enji_guard_cli.application.subscriptions import (
     AUDIT_CADENCES,
-    AutofixListing,
-    AutofixListingItem,
-    AutofixWriteRequest,
-    AutofixWriteScope,
     EmailPreferencesWriteRequest,
+    ImprovementJobListing,
+    ImprovementJobListingItem,
+    ImprovementJobWriteRequest,
     ScheduleListing,
     ScheduleWriteRequest,
     SubscriptionsFacade,
+    SubscriptionWriteScope,
 )
 from enji_guard_cli.application.views import RepositoryIdentityView
 
@@ -86,8 +93,6 @@ __all__ = [
     "ApplicationResult",
     "ApplicationRunner",
     "AuditArtifactView",
-    "AuditAutofixDefinitionView",
-    "AuditAutofixJobView",
     "AuditCatalogService",
     "AuditCurrentHeadView",
     "AuditFacade",
@@ -106,10 +111,7 @@ __all__ = [
     "AuditSummaryView",
     "AuditWaitView",
     "AuthFacade",
-    "AutofixListing",
-    "AutofixListingItem",
-    "AutofixWriteRequest",
-    "AutofixWriteScope",
+    "BatchMutationResult",
     "CatalogObservationScope",
     "EmailPreferencesWriteRequest",
     "GitLabCredentialPageView",
@@ -121,6 +123,15 @@ __all__ = [
     "GitLabProjectsRequest",
     "GitLabProjectsView",
     "GitLabScopeView",
+    "ImprovementDefinitionView",
+    "ImprovementJobListing",
+    "ImprovementJobListingItem",
+    "ImprovementJobView",
+    "ImprovementJobWriteRequest",
+    "MutationDecision",
+    "MutationOutcome",
+    "MutationReason",
+    "MutationTargetView",
     "PortfolioActiveRunView",
     "PortfolioAuditStatusView",
     "PortfolioFacade",
@@ -134,6 +145,7 @@ __all__ = [
     "RepositoryStatusView",
     "ScheduleListing",
     "ScheduleWriteRequest",
+    "SubscriptionWriteScope",
     "SubscriptionsFacade",
     "exit_code_for_error",
 ]

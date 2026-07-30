@@ -46,7 +46,7 @@ agents can orient quickly before making changes.
 - **Audit scheduling identity**: automatic audit schedules use
   `audit-auto-runs/{actionKey}` with the exact catalog action key. Each
   subscription stores its cadence, IANA timezone, and auto or user-selected
-  time. `improvement-jobs` is autofix-only and is never a scheduling fallback;
+  time. `improvement-jobs` owns improvement jobs and is never a scheduling fallback;
   project-wide operations are explicit client-side batches.
 - **Bounded read fan-out**: upstream Enji currently exposes several resources
   only at project, repository, or repository-plus-audit granularity. Independent
@@ -57,11 +57,12 @@ agents can orient quickly before making changes.
   explicit sequential loops so idempotency and partial-failure behavior stay
   understandable. A future upstream batch endpoint replaces client fan-out at
   its gateway seam rather than changing domain workflows.
-- **Curated autofix management**: the mental model is audit -> findings ->
-  optional improvement. `auditAutofixes` is the typed catalog of available
-  variants, while `improvement-jobs` is the canonical CLI operator resource
-  for list/set. Autofix jobs have their own scheduler state: enabled state,
-  automatic-fix state, cadence, weekdays, time, time source, and timezone are
+- **Curated improvement jobs**: the mental model is audit -> findings ->
+  optional improvement. The provider `auditAutofixes` field is translated into
+  typed catalog improvements, while `improvement-jobs` is the canonical CLI
+  operator resource for list/set. Improvement jobs have their own scheduler
+  state: enabled state, automatic-execution state, cadence, weekdays, time,
+  time source, and timezone are
   read and written through `improvement-jobs`, never through audit `schedule`.
   The temporary typed relationships are `security`/`vuln-fix`,
   `tests`/`test-writing`, and `dependency-hygiene`/`dependency-update`; pentest
@@ -72,11 +73,24 @@ agents can orient quickly before making changes.
   it does not expose redundant per-project resolved values.
 - **Narrow read-only MCP facade**: MCP stays curated and read-only. MCP
   delivery imports only `McpQueryFacade`, which exposes portfolio overview and
-  repository audit reading. It does not surface auth bootstrap, project/repo
-  writes, scheduling, improvement-job mutation, or other operator controls.
-- **Docker-first runtime with a supervisor**: the service runs in Docker and
-  `enji-guard run` owns MCP, background cookie refresh, and backend readiness
-  as sibling tasks.
+  repository audit reading. Repository audits are compact-first: the default
+  DTO is status/summary metadata, and Markdown report bodies require explicit
+  audit selectors. CLI and MCP use one deterministic, provider-neutral JSON
+  projection with semantic nulls. It does not surface auth bootstrap,
+  project/repo writes, scheduling, improvement-job mutation, provider
+  extensions, or other operator controls. Stateless MCP describes protocol and
+  session handling; it does not prohibit legitimate application state such as
+  `FileAuditLedger` or `AuditCatalogObserver` persistence.
+- **Base CLI with opt-in MCP service**: the base wheel contains the CLI and
+  narrow context-managed public client without importing MCP. The exact v1
+  `mcp[cli]==1.28.1` dependency is an optional extra, and the dedicated
+  `enji-guard-service` entrypoint owns MCP, background cookie refresh, and
+  backend readiness as sibling tasks. Docker installs that extra and owns the
+  long-lived cookie recovery lifecycle; standalone CLI requests remain
+  observers. Artifact CI validates both wheel modes in clean Python 3.14
+  environments, independently from Docker-image QA. This is not PyPI
+  readiness: trusted-publishing ownership and the POSIX-only cookie-storage
+  portability decision still block publication.
 - **Two-tier release QA through public surfaces**: credentialless CI starts the
   exact candidate image and validates its hardened Docker, CLI, health, and MCP
   contracts before publication. Authenticated pre-merge smoke and bounded soak

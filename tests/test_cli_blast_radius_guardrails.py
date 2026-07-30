@@ -21,7 +21,7 @@ from application_builder import (
     recording_application,
     repository,
 )
-from enji_guard_cli.audit.ports import AuditAutofixJob
+from enji_guard_cli.audit.ports import ImprovementJob
 from enji_guard_cli.delivery.cli.app import app
 from enji_guard_cli.portfolio.models import ProjectDetail
 
@@ -36,8 +36,8 @@ BATCH_WRITES = [
 ]
 
 EXISTING_JOBS = (
-    AuditAutofixJob("improvement.vuln-fix", "default", "vuln-fix", True, True, timezone="UTC"),
-    AuditAutofixJob("improvement.test-writing", "default", "test-writing", True, True, timezone="UTC"),
+    ImprovementJob("improvement.vuln-fix", "default", "vuln-fix", True, True, timezone="UTC"),
+    ImprovementJob("improvement.test-writing", "default", "test-writing", True, True, timezone="UTC"),
 )
 
 BIRDS_REPOSITORY = repository("owner/name", repo_id="r2", project=BIRDS)
@@ -55,7 +55,7 @@ class Ports:
 def ports(monkeypatch: pytest.MonkeyPatch) -> Ports:
     installed = Ports()
     application = recording_application(
-        audit=RecordingAuditGateway(autofix_jobs={"r2": EXISTING_JOBS}),
+        audit=RecordingAuditGateway(improvement_jobs={"r2": EXISTING_JOBS}),
         portfolio=installed.portfolio,
         targets=installed.targets,
     )

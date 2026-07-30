@@ -78,7 +78,7 @@ class AuditCatalogAction:
 
 
 @dataclass(frozen=True, slots=True)
-class AuditCatalogAutofix:
+class CatalogImprovement:
     action_key: str
     variant_key: str
     title: str | None = None
@@ -102,7 +102,7 @@ class AuditCatalogResult:
     """Published Audit actions available from the account catalog."""
 
     actions: tuple[AuditCatalogAction, ...]
-    autofixes: tuple[AuditCatalogAutofix, ...] = ()
+    improvements: tuple[CatalogImprovement, ...] = ()
     changes: tuple[AuditCatalogChange, ...] = ()
 
 
@@ -419,7 +419,7 @@ class AuditScheduleUpdate:
 
 
 @dataclass(frozen=True, slots=True)
-class AuditAutofixDefinition:
+class ImprovementDefinition:
     action_key: str
     variant_key: str
     title: str | None
@@ -436,36 +436,31 @@ class AuditAutofixDefinition:
 
 
 @dataclass(frozen=True, slots=True)
-class AuditAutofixUpdate:
+class ImprovementJobUpdate:
     enabled: bool | None
     frequency: str | None = None
     timezone: str | None = None
     days_of_week: tuple[str, ...] | None = None
     schedule_time: str | None = None
-    auto_fix: bool | None = None
+    automatic_execution: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class AuditAutofixJob:
-    """Typed improvement job crossing the Audit gateway boundary.
-
-    ``extensions`` preserves provider fields without exposing a JSON object to
-    Audit workflows.  Known fields remain product-language values.
-    """
+class ImprovementJob:
+    """Typed improvement job crossing the Audit gateway boundary."""
 
     action_key: str
     variant_key: str
     kind: str | None = None
     enabled: bool | None = None
-    auto_fix: bool | None = None
-    autofix_variant_key: str | None = None
+    automatic_execution: bool | None = None
+    provider_variant_key: str | None = None
     frequency: str | None = None
     days_of_week: tuple[str, ...] = ()
     schedule_time: str | None = None
     schedule_time_source: Literal["auto", "user"] | None = None
     timezone: str | None = None
     pentest_mode: str | None = None
-    extensions: tuple[tuple[str, JsonValue], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -566,6 +561,6 @@ class AuditGatewayPort(Protocol):
         self, repo_id: str, audit_key: str, update: AuditEmailPreferenceUpdate
     ) -> AuditEmailPreference: ...
 
-    def list_autofix_jobs(self, repo_id: str) -> tuple[AuditAutofixJob, ...]: ...
+    def list_improvement_jobs(self, repo_id: str) -> tuple[ImprovementJob, ...]: ...
 
-    def set_autofix_job(self, repo_id: str, kind: str, job: AuditAutofixJob) -> AuditAutofixJob: ...
+    def set_improvement_job(self, repo_id: str, kind: str, job: ImprovementJob) -> ImprovementJob: ...

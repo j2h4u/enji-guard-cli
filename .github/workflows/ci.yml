@@ -105,10 +105,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
-      - name: Unit tests
-        run: just unit
+      # This one xdist-enabled invocation is the full non-Docker suite and
+      # produces the branch-coverage JSON consumed immediately by the hard
+      # CRAP validator. Keeping them together avoids a second full pytest run.
+      - name: Unit, branch-coverage, and CRAP gates
+        run: just test-gate
 
-  crap:
+  package-artifact:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -123,8 +126,17 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
-      - name: CRAP gate
-        run: just crap-check
+      - name: Build and test distribution artifacts
+        run: |
+          just package-build dist
+          uv run --locked python -m scripts.package_contract dist
+
+      - name: Upload tested distribution artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: enji-guard-cli-dist
+          path: dist/*
+          if-no-files-found: error
 
   docker-build:
     runs-on: ubuntu-latest
@@ -170,7 +182,7 @@ jobs:
   ci:
     if: always()
     runs-on: ubuntu-latest
-    needs: [pr-title, quality, test, crap, docker-build]
+    needs: [pr-title, quality, test, package-artifact, docker-build]
     steps:
       - name: Check required jobs
         env:
@@ -179,7 +191,7 @@ jobs:
           REQUIRED_RESULTS: >-
             quality:${{ needs.quality.result }}
             test:${{ needs.test.result }}
-            crap:${{ needs.crap.result }}
+            package-artifact:${{ needs.package-artifact.result }}
             docker-build:${{ needs.docker-build.result }}
         run: |
           status=0

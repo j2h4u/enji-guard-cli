@@ -29,9 +29,7 @@ from enji_guard_cli.application import (
 from enji_guard_cli.audit.catalog_observation import AuditCatalogObservationPort
 from enji_guard_cli.audit.ports import (
     AuditArtifact,
-    AuditAutofixJob,
     AuditCatalogAction,
-    AuditCatalogAutofix,
     AuditCatalogResult,
     AuditEmailPreference,
     AuditEmailPreferenceUpdate,
@@ -49,6 +47,8 @@ from enji_guard_cli.audit.ports import (
     AuditTaskDetail,
     AuditTaskLink,
     AuditTaskLinksResult,
+    CatalogImprovement,
+    ImprovementJob,
 )
 from enji_guard_cli.auth_session.models import AuthSessionStatus, ImportCredentialPayload
 from enji_guard_cli.auth_session.service import AuthSessionService
@@ -74,7 +74,6 @@ from enji_guard_cli.portfolio.models import (
 )
 from enji_guard_cli.portfolio.ports import PortfolioGatewayPort, PortfolioTargetService
 from enji_guard_cli.portfolio.selectors import resolve_project, resolve_repository
-from enji_guard_cli.runtime_observability.ports import RuntimeAuthCoordinator
 from enji_guard_cli.settings import default_settings
 
 
@@ -118,7 +117,6 @@ class ApplicationStubs:
     ledger: object = field(default_factory=PassthroughLedger)
     catalog_observer: object = field(default_factory=UnobservedCatalog)
     target_service: object = field(default_factory=object)
-    runtime_auth: object = field(default_factory=object)
     gitlab_gateway: object = field(default_factory=object)
     lifecycle: object = field(default_factory=RecordingLifecycle)
 
@@ -141,7 +139,7 @@ class ApplicationStubs:
         return Application(
             runner=ApplicationRunner(scope, cast(ApplicationLifecyclePort, self.lifecycle)),
             catalog=catalog,
-            auth=AuthFacade(cast(AuthSessionService, self.auth), cast(RuntimeAuthCoordinator, self.runtime_auth)),
+            auth=AuthFacade(cast(AuthSessionService, self.auth)),
             audit=audit,
             subscriptions=SubscriptionsFacade(catalog=catalog, gateway=audit_gateway, targets=targets, fanout=fanout),
             portfolio=PortfolioFacade(
@@ -194,9 +192,9 @@ CATALOG = AuditCatalogResult(
             "audit.tests", "Tests", "audit", "published", "tests", "audit", "runbook-tests", "tests", "1"
         ),
     ),
-    autofixes=(
-        AuditCatalogAutofix("improvement.vuln-fix", "default", "Vuln fix", None, "runbook-vuln", "published", 1),
-        AuditCatalogAutofix("improvement.test-writing", "default", "Tests", None, "runbook-tests", "published", 2),
+    improvements=(
+        CatalogImprovement("improvement.vuln-fix", "default", "Vuln fix", None, "runbook-vuln", "published", 1),
+        CatalogImprovement("improvement.test-writing", "default", "Tests", None, "runbook-tests", "published", 2),
     ),
 )
 """Two published audits plus the two improvement jobs their relationships allow."""
@@ -290,10 +288,10 @@ class ScheduleWrite:
 
 
 @dataclass(frozen=True, slots=True)
-class AutofixWrite:
+class ImprovementJobWrite:
     repo_id: str
     kind: str
-    job: AuditAutofixJob
+    job: ImprovementJob
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,7 +322,7 @@ class RecordingAuditGateway:
         *,
         catalog: AuditCatalogResult = CATALOG,
         schedules: Mapping[str, tuple[AuditSchedule, ...]] | None = None,
-        autofix_jobs: Mapping[str, tuple[AuditAutofixJob, ...]] | None = None,
+        improvement_jobs: Mapping[str, tuple[ImprovementJob, ...]] | None = None,
         email_preferences: Mapping[tuple[str, str], AuditEmailPreference] | None = None,
         reports: Mapping[tuple[str, str], tuple[AuditReportRef, ...]] | None = None,
         artifacts: Mapping[tuple[str, str], AuditArtifact] | None = None,
@@ -335,7 +333,7 @@ class RecordingAuditGateway:
     ) -> None:
         self.catalog_result = catalog
         self.schedules = dict(schedules or {})
-        self.autofix_jobs = dict(autofix_jobs or {})
+        self.improvement_jobs = dict(improvement_jobs or {})
         self.email_preferences = dict(email_preferences or {})
         self.reports = dict(reports or {})
         self.artifacts = dict(artifacts or {})
@@ -348,10 +346,10 @@ class RecordingAuditGateway:
         self.listed_reports: list[tuple[str, str]] = []
         self.snapshot_reads: list[SnapshotRead] = []
         self.schedule_writes: list[ScheduleWrite] = []
-        self.autofix_writes: list[AutofixWrite] = []
+        self.improvement_job_writes: list[ImprovementJobWrite] = []
         self.email_writes: list[EmailWrite] = []
         self.listed_schedules: list[str] = []
-        self.listed_autofix_jobs: list[str] = []
+        self.listed_improvement_jobs: list[str] = []
 
     def catalog(self) -> AuditCatalogResult:
         self.catalog_calls += 1
@@ -405,12 +403,12 @@ class RecordingAuditGateway:
         self.email_writes.append(EmailWrite(repo_id, audit_key, update))
         return AuditEmailPreference(audit_key, update.manual, update.scheduled)
 
-    def list_autofix_jobs(self, repo_id: str) -> tuple[AuditAutofixJob, ...]:
-        self.listed_autofix_jobs.append(repo_id)
-        return self.autofix_jobs.get(repo_id, ())
+    def list_improvement_jobs(self, repo_id: str) -> tuple[ImprovementJob, ...]:
+        self.listed_improvement_jobs.append(repo_id)
+        return self.improvement_jobs.get(repo_id, ())
 
-    def set_autofix_job(self, repo_id: str, kind: str, job: AuditAutofixJob) -> AuditAutofixJob:
-        self.autofix_writes.append(AutofixWrite(repo_id, kind, job))
+    def set_improvement_job(self, repo_id: str, kind: str, job: ImprovementJob) -> ImprovementJob:
+        self.improvement_job_writes.append(ImprovementJobWrite(repo_id, kind, job))
         return job
 
 

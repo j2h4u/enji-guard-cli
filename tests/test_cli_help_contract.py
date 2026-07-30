@@ -37,6 +37,15 @@ def test_health_help_points_probes_at_the_ready_mode() -> None:
     assert "healthchecks" in rendered
 
 
+def test_run_help_identifies_the_lazy_optional_service_alias() -> None:
+    result = CliRunner().invoke(app, ["run", "--help"])
+
+    assert result.exit_code == 0
+    rendered = _rendered(result.stdout)
+    assert "Lazy alias" in rendered
+    assert "mcp" in rendered
+
+
 @pytest.mark.parametrize("path", [["status"]])
 def test_sort_help_lists_every_legal_value(path: list[str]) -> None:
     result = CliRunner().invoke(app, [*path, "--help"])
@@ -79,6 +88,6 @@ def test_improvement_jobs_help_lists_schedule_controls() -> None:
 
     assert result.exit_code == 0
     rendered = _rendered(result.stdout)
-    for option in ("--auto-fix", "--days", "--time"):
+    for option in ("--automatic-execution", "--days", "--time"):
         assert option in rendered
     assert "HH:MM" in rendered
