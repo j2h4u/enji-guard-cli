@@ -189,6 +189,16 @@ def test_package_artifact_gate_is_independent_from_docker_and_required_in_ci() -
     assert "package-artifact:${{ needs.package-artifact.result }}" in ci
 
 
+def test_package_artifact_installs_pinned_just_before_using_the_recipe() -> None:
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    job = ci.split("\n  package-artifact:", 1)[1].split("\n  docker-build:", 1)[0]
+    installer = "taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9"
+
+    assert installer in job
+    assert "tool: just" in job
+    assert job.index(installer) < job.index("just package-build dist")
+
+
 def test_tach_external_check_excludes_only_the_optional_mcp_adapter() -> None:
     justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
 
