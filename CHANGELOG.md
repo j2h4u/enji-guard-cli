@@ -1,5 +1,29 @@
 # Changelog
 
+## [3.3.0](https://github.com/j2h4u/enji-guard-cli/compare/v3.2.3...v3.3.0) (2026-07-30)
+
+
+### Features
+
+* **cli:** stabilize read and batch mutation contracts ([d9c5372](https://github.com/j2h4u/enji-guard-cli/commit/d9c5372a6d7097a218374b44f4595ebea7e68489))
+* **mcp:** make audit reads compact and request-isolated ([d9c5372](https://github.com/j2h4u/enji-guard-cli/commit/d9c5372a6d7097a218374b44f4595ebea7e68489))
+* **package:** add a narrow client and optional MCP service ([d9c5372](https://github.com/j2h4u/enji-guard-cli/commit/d9c5372a6d7097a218374b44f4595ebea7e68489))
+
+
+### Fixes
+
+* **client:** enforce the public query and service-boundary contracts ([d9c5372](https://github.com/j2h4u/enji-guard-cli/commit/d9c5372a6d7097a218374b44f4595ebea7e68489))
+
+
+### Build
+
+* validate package artifacts and ratchet quality gates ([d9c5372](https://github.com/j2h4u/enji-guard-cli/commit/d9c5372a6d7097a218374b44f4595ebea7e68489))
+
+
+### Documentation
+
+* record the completed expert-review plan and deferred migrations ([d9c5372](https://github.com/j2h4u/enji-guard-cli/commit/d9c5372a6d7097a218374b44f4595ebea7e68489))
+
 ## [3.2.3](https://github.com/j2h4u/enji-guard-cli/compare/v3.2.2...v3.2.3) (2026-07-30)
 
 
