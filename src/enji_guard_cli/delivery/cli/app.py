@@ -298,7 +298,7 @@ def _run[PayloadT](
     payload = cast(PayloadT, result.payload)
     if as_json:
         rendered = presentation.json(payload)
-        _emit(_with_catalog_changes(rendered, changes) if changes else rendered, True)
+        _emit(_with_catalog_changes(rendered, changes) if result.catalog_observed else rendered, True)
     else:
         emit_text(presentation.human(payload))
         if changes:

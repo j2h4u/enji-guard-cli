@@ -332,7 +332,9 @@ def test_status_for_one_repository_keeps_detailed_status(ports: Ports) -> None:
     result = CliRunner().invoke(app, ["--project", "Pets", "status", REPO, "--json"])
 
     assert result.exit_code == 0
-    payload = cast(list[dict[str, object]], json.loads(result.stdout))
+    envelope = cast(dict[str, object], json.loads(result.stdout))
+    assert envelope["audit_catalog"] == {"changes": []}
+    payload = cast(list[dict[str, object]], envelope["items"])
     repository_payload = cast(dict[str, object], payload[0]["repository"])
     identity = cast(dict[str, object], repository_payload["identity"])
     summary = cast(dict[str, object], cast(dict[str, object], payload[0]["audit"])["summary"])
@@ -393,7 +395,9 @@ def test_repository_status_marks_a_run_without_head_evidence_as_unverified(
     assert "current_head=unverified action=inspect_unverified_run" in text_result.stdout
     assert "wait_for_current_head_run" not in text_result.stdout
     assert json_result.exit_code == 0
-    payload = cast(list[dict[str, object]], json.loads(json_result.stdout))
+    envelope = cast(dict[str, object], json.loads(json_result.stdout))
+    assert envelope["audit_catalog"] == {"changes": []}
+    payload = cast(list[dict[str, object]], envelope["items"])
     audit_section = cast(dict[str, object], payload[0]["audit"])
     summary = cast(dict[str, object], audit_section["summary"])
     items = cast(list[dict[str, object]], summary["items"])
@@ -554,7 +558,9 @@ def test_schedule_list_is_one_summary_line_per_repository(monkeypatch: pytest.Mo
     ):
         assert field in output
     assert json_result.exit_code == 0
-    payload = cast(list[dict[str, object]], json.loads(json_result.stdout))
+    envelope = cast(dict[str, object], json.loads(json_result.stdout))
+    assert envelope["audit_catalog"] == {"changes": []}
+    payload = cast(list[dict[str, object]], envelope["items"])
     identity = cast(dict[str, object], cast(dict[str, object], payload[0]["repository"])["identity"])
     assert identity["locator"] == "acme/cat"
     assert len(cast(list[object], payload[0]["schedules"])) == 2
@@ -899,6 +905,33 @@ def test_email_write_reaches_every_published_audit_of_the_repository(ports: Port
         ("r1", "audit.tests"),
     ]
     assert {(item.update.manual, item.update.scheduled) for item in ports.audit.email_writes} == {(True, False)}
+
+
+def test_email_human_output_is_semantic_for_reads_and_mutations(ports: Ports) -> None:
+    listed = CliRunner().invoke(app, ["email", "list", "--repo", REPO])
+    changed = CliRunner().invoke(app, ["email", "set", "--repo", REPO, "--manual", "on", "--scheduled", "off"])
+
+    assert listed.exit_code == 0
+    assert listed.stdout == (
+        "repository: github@github.com:acme/cat\n"
+        "  security  manual=unset scheduled=unset\n"
+        "  tests  manual=unset scheduled=unset\n"
+    )
+    assert changed.exit_code == 0
+    assert changed.stdout == "security  manual=on scheduled=off\ntests  manual=on scheduled=off\n"
+
+
+def test_email_json_contract_stays_machine_readable(ports: Ports) -> None:
+    result = CliRunner().invoke(app, ["email", "list", "--repo", REPO, "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["audit_catalog"] == {"changes": []}
+    assert payload["items"][0][0]["identity"] == {"host": "github.com", "locator": "acme/cat", "provider": "github"}
+    assert payload["items"][0][1] == [
+        {"audit_key": "audit.security"},
+        {"audit_key": "audit.tests"},
+    ]
 
 
 def test_auth_import_bearer_requires_stdin_and_never_prints_credential(ports: Ports) -> None:

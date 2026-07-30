@@ -8,12 +8,12 @@
 
 ## Slice 1 — контракты чтения и представления
 
-- [ ] Всегда включать `audit_catalog.changes` в catalog-aware JSON, в том числе
+- [x] Всегда включать `audit_catalog.changes` в catalog-aware JSON, в том числе
   пустой массив. **Evidence:** контрактные CLI-тесты для changed и unchanged
-  catalog; JSON-снимки. **Области:** Audit Catalog, Application, CLI JSON.
-- [ ] Добавить семантический human presenter для email, отдельный от сырой JSON
+  catalog; JSON-снимки; focused pytest 58 passed. **Области:** Audit Catalog, Application, CLI JSON.
+- [x] Добавить семантический human presenter для email, отдельный от сырой JSON
   проекции. **Evidence:** golden-тесты читаемого вывода и сохранённого JSON
-  контракта. **Области:** email preferences, CLI presentation, tests.
+  контракта; focused pytest 58 passed. **Области:** email preferences, CLI presentation, tests.
 - [ ] Сделать MCP compact-first: по умолчанию status/summary, полные Markdown
   bodies — только по явным audit selectors. **Evidence:** MCP contract-тесты
   default и explicit selector. **Области:** MCP facade, MCP delivery, Audit reads.

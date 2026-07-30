@@ -29,6 +29,7 @@ class ApplicationCatalogChange:
 class ApplicationResult:
     payload: object
     catalog_changes: tuple[ApplicationCatalogChange, ...] = ()
+    catalog_observed: bool = False
 
 
 class ApplicationLifecyclePort(Protocol):
@@ -64,6 +65,10 @@ class CatalogObservationScope:
         return tuple(
             ApplicationCatalogChange(change.action_key, change.changed_fields, change.kind) for change in changes
         )
+
+    def was_observed(self) -> bool:
+        """Whether this execution fetched the Audit Catalog at all."""
+        return self._current.get() is not None
 
 
 @dataclass(slots=True)
@@ -106,7 +111,7 @@ class ApplicationRunner:
             raise ApplicationCommandError("STORAGE", str(exc)) from exc
         except ValueError as exc:
             raise ApplicationCommandError("VALIDATION", str(exc)) from exc
-        return ApplicationResult(payload, self.catalog_scope.observed())
+        return ApplicationResult(payload, self.catalog_scope.observed(), self.catalog_scope.was_observed())
 
     def _command_error(self, code: str, message: str) -> ApplicationCommandError:
         """Translate one context failure into a surface-neutral command error.

@@ -21,7 +21,9 @@ from enji_guard_cli.application import (
     ScheduleListing,
 )
 from enji_guard_cli.delivery.cli.audit_presenter import render_audit_read
-from enji_guard_cli.delivery.cli.presentation import CliPresentation, json_projection
+from enji_guard_cli.delivery.cli.presentation import CliPresentation, json_projection, repository_selector
+
+_EMAIL_LISTING_WIDTH = 2
 
 
 def repository_label(repository: RepositoryRefView) -> str:
@@ -265,10 +267,39 @@ def gitlab_projects_text(payload: GitLabProjectsView) -> str:
 
 
 def email_preferences_text(payload: object) -> str:
-    rendered = json_projection(payload)
-    if isinstance(rendered, (list, tuple)):
-        return "\n".join(json.dumps(item, sort_keys=True) for item in rendered)
-    return json.dumps(rendered, sort_keys=True)
+    if isinstance(payload, (list, tuple)):
+        listings = [_email_listing(item) for item in payload]
+        if all(item is not None for item in listings):
+            return "\n".join(_email_listing_text(item) for item in listings if item is not None)
+        return "\n".join(_email_preference_text(item) for item in payload)
+    return _email_preference_text(payload)
+
+
+def _email_listing(item: object) -> tuple[object, tuple[object, ...]] | None:
+    if not isinstance(item, tuple) or len(item) != _EMAIL_LISTING_WIDTH or not isinstance(item[1], tuple):
+        return None
+    return item[0], item[1]
+
+
+def _email_listing_text(listing: tuple[object, tuple[object, ...]]) -> str:
+    target, preferences = listing
+    identity = repository_selector(getattr(target, "identity", None))
+    repository = identity or str(getattr(target, "repo_id", "unknown"))
+    lines = [f"repository: {repository}"]
+    lines.extend(f"  {_email_preference_text(preference)}" for preference in preferences)
+    return "\n".join(lines)
+
+
+def _email_preference_text(preference: object) -> str:
+    audit_key = getattr(preference, "audit_key", None)
+    manual = getattr(preference, "manual", None)
+    scheduled = getattr(preference, "scheduled", None)
+    selector = audit_key.removeprefix("audit.") if isinstance(audit_key, str) else "audit"
+    return f"{selector}  manual={_email_switch(manual)} scheduled={_email_switch(scheduled)}"
+
+
+def _email_switch(value: object) -> str:
+    return "on" if value is True else "off" if value is False else "unset"
 
 
 _OPERATION_SELECTOR_FIELDS = ("audit_key", "action_key", "selector")
