@@ -58,12 +58,12 @@ operational hardening for maintenance and future releases.
   catch operational regressions before merge.
 - Refine MCP audit-reading ergonomics with real agents while keeping the
   surface centered on portfolio overview and concrete repository audits.
-- Add an agent feedback loop back into Enji Guard. The confirmed
-  `POST /api/ux/feedback` endpoint is not exposed by the CLI today; a future
-  operator command should let agents send structured feedback about audit
-  quality, false positives, missed findings, and autofix usefulness. The goal
-  is not another broad write surface, but a narrow channel for closing the loop
-  when Enji Guard suggestions or autofixes are low quality.
+- Add one narrow agent-feedback use case. The confirmed `POST /api/ux/feedback`
+  endpoint is not exposed by the CLI today; a future operator command may send
+  structured signals about confirmed audit quality (false positives, missed
+  findings, and autofix usefulness). Keep it a dedicated future Application
+  boundary: do not expand the existing Audit or Subscriptions contexts or add a
+  broad write surface.
 - Add a protected production-deploy workflow for an already published immutable
   GHCR image. The current deployment path is intentionally manual; the next
   step is a `workflow_dispatch` promotion with protected-environment approval,
@@ -76,16 +76,28 @@ operational hardening for maintenance and future releases.
   when a fixed digest exists; when Debian/Python rows remain unfixed, record a
   deliberate VEX/ignore decision with owner, reason, and review trigger instead
   of letting `ignore-unfixed` hide the risk forever.
-- **When Enji Guard ships API keys, delete the refresh daemon.** Not make it
-  optional, not keep it as a fallback: browser-cookie auth is the only reason
-  it exists, and an API key removes that reason entirely. The auth state
-  machine, the rotation outbox, the supervisor task that owns refresh, and the
-  readiness plumbing that watches it all go with it.
-- **Make the MCP container optional in the same move.** The default becomes a
-  standalone CLI with no Docker, no supervisor and no background process —
-  packaged as a normal Python distribution and installable with `pip`/`pipx`
-  without any container bootstrap. Anyone who wants the curated MCP surface for
-  agents opts into the container; nobody has to run one to use the tool.
+- **API-key cutover is the blocker for deleting daemon auth/readiness.** Once
+  Enji ships the supported API-key flow, delete—not disable or retain as a
+  fallback—the browser-cookie credential variant, refresh FSM, rotation
+  journal/outbox, auth-file watcher, supervisor refresh task, and cached backend
+  readiness plumbing. In that same change, redefine health for the opt-in MCP
+  service or remove readiness from the standalone CLI; do not preserve a
+  daemon-auth readiness contract after its owner is gone. No fallback or
+  compatibility archaeology survives this cutover.
+- **Make the MCP container optional after that cutover.** The default becomes a
+  standalone API-key CLI with no Docker, supervisor, or background process,
+  packaged for `pip`/`pipx`/`uv tool install`. This package-first stage requires
+  a distribution artifact/build/install gate (separate from the Docker-image
+  gate), PyPI trusted-publishing setup by its external owner, and an explicit
+  Windows/`fcntl` portability decision (portable replacement or declared
+  non-Windows support) before release. Anyone who wants the curated MCP surface
+  opts into its container.
+- **Defer MCP 2026-07-28 and Python SDK v2.** Do not change the dependency now.
+  Consider it only after the repository dependency-quarantine exit criteria are
+  met (7–14 days, or earlier owner approval; reviewed lock/provenance and
+  lifecycle policy). The later upgrade deletes legacy SSE, mount-path,
+  `initialize`/`initialized`, and session-header compatibility, then rewrites
+  release smoke and protocol-contract coverage around the new protocol.
 
 After that, the project should move into maintenance mode rather than broad
 feature development.
@@ -103,8 +115,8 @@ into separate CLI and service products.
   want it, and only for them.
 
 The Docker service exists today because browser-cookie auth needs a process
-that keeps rotating credentials. That is its whole justification. Once an API
-key removes it, the refresh daemon is deleted rather than demoted to a
-fallback: a credential path nobody uses is one nobody tests, and it would keep
-the supervisor, the rotation state machine and their readiness plumbing alive
-for no one.
+that keeps rotating credentials. That is its whole justification. After the
+API-key cutover, the browser-cookie credential variant and its refresh daemon
+are deleted rather than demoted to a fallback; a credential path nobody uses is
+one nobody tests. The replacement design must first explicitly retain a
+meaningful MCP-service health contract or remove standalone CLI readiness.
