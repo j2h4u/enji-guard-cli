@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.1](https://github.com/j2h4u/enji-guard-cli/compare/v3.2.0...v3.2.1) (2026-07-30)
+
+
+### Fixes
+
+* **auth:** survive proxy-shaped refresh failures ([#240](https://github.com/j2h4u/enji-guard-cli/issues/240)) ([2b814c6](https://github.com/j2h4u/enji-guard-cli/commit/2b814c62f59d8177c3b9e21a631a4de31cff69de))
+
 ## [3.2.0](https://github.com/j2h4u/enji-guard-cli/compare/v3.1.10...v3.2.0) (2026-07-29)
 
 
