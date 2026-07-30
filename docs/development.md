@@ -12,7 +12,7 @@ hold, [CONTRIBUTING.md](../CONTRIBUTING.md) for change intake and handoff,
 
 - Use `uv` only. Keep `uv.lock` current; use hardlink mode outside Docker.
 - The base wheel must stay free of MCP. Declare MCP only as the exact v1
-  `mcp[cli]>=1.28.1,<2` extra and retain that exact constraint in the dev group
+  `mcp[cli]==1.28.1` extra and retain that exact constraint in the dev group
   so development and published service installs cannot drift. The dedicated
   `enji-guard-service` entrypoint owns the optional long-lived service; the
   normal `enji-guard` CLI must import without MCP installed.

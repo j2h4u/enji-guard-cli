@@ -83,7 +83,7 @@ agents can orient quickly before making changes.
   `FileAuditLedger` or `AuditCatalogObserver` persistence.
 - **Base CLI with opt-in MCP service**: the base wheel contains the CLI and
   narrow context-managed public client without importing MCP. The exact v1
-  `mcp[cli]>=1.28.1,<2` dependency is an optional extra, and the dedicated
+  `mcp[cli]==1.28.1` dependency is an optional extra, and the dedicated
   `enji-guard-service` entrypoint owns MCP, background cookie refresh, and
   backend readiness as sibling tasks. Docker installs that extra and owns the
   long-lived cookie recovery lifecycle; standalone CLI requests remain

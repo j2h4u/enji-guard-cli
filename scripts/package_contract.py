@@ -27,7 +27,8 @@ EXPECTED_ENTRYPOINTS: Final = {
     "enji-guard": "enji_guard_cli.delivery.cli:app",
     "enji-guard-service": "enji_guard_cli.delivery.service:app",
 }
-EXPECTED_MCP_REQUIREMENT: Final = "mcp[cli]>=1.28.1,<2"
+EXPECTED_MCP_REQUIREMENT: Final = "mcp[cli]==1.28.1"
+EXPECTED_MCP_VERSION: Final = "1.28.1"
 EXPECTED_MCP_TOOLS: Final = ("enji_portfolio_overview", "enji_repo_audits")
 WHEEL_LEAK_COMPONENTS: Final = frozenset({"tests", ".planning", "__pycache__", ".git", "src"})
 
@@ -115,11 +116,7 @@ def _assert_metadata(wheel: Path) -> None:
     if len(mcp_requirements) != 1:
         raise ContractError(f"wheel must contain one conditional MCP requirement, found {mcp_requirements}")
     normalized = mcp_requirements[0].replace(" ", "").replace('"', "'")
-    allowed = {
-        "mcp[cli]<2,>=1.28.1;extra=='mcp'",
-        "mcp[cli]>=1.28.1,<2;extra=='mcp'",
-    }
-    if normalized not in allowed:
+    if normalized != "mcp[cli]==1.28.1;extra=='mcp'":
         raise ContractError(f"wheel MCP requirement must remain {EXPECTED_MCP_REQUIREMENT} behind the mcp extra")
 
 
@@ -175,7 +172,9 @@ def _mcp_contract(python: Path, wheel: Path, *, cwd: Path, env: dict[str, str]) 
             "-I",
             "-c",
             "import asyncio, importlib.util; "
+            "from importlib.metadata import version; "
             "assert importlib.util.find_spec('mcp') is not None; "
+            f"assert version('mcp') == {EXPECTED_MCP_VERSION!r}; "
             "from enji_guard_cli.delivery.mcp.server import create_mcp_server; "
             "names = tuple(sorted(tool.name for tool in asyncio.run(create_mcp_server().list_tools()))); "
             f"assert names == {EXPECTED_MCP_TOOLS!r}, names",

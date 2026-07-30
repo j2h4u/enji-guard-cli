@@ -346,8 +346,8 @@ For registry-based deployment, use the GHCR image and compose example in
 ## Package installs
 
 The base wheel is a dependency-light CLI and public read-only Python client;
-the MCP server is an explicit `mcp` extra. Build artifacts locally and install
-only the surface you need:
+the MCP server is an explicit, reviewed-and-pinned `mcp[cli]==1.28.1` extra.
+Build artifacts locally and install only the surface you need:
 
 ```bash
 uv build --clear --out-dir dist

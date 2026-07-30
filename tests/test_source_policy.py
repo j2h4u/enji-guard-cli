@@ -150,11 +150,15 @@ def test_mcp_extra_and_dev_constraint_cannot_drift() -> None:
     base_dependencies = cast(list[str], project["dependencies"])
     extras = cast(dict[str, list[str]], project["optional-dependencies"])
     dev = cast(dict[str, list[str]], pyproject["dependency-groups"])["dev"]
-    constraint = "mcp[cli]>=1.28.1,<2"
+    constraint = "mcp[cli]==1.28.1"
 
     assert all(not dependency.startswith("mcp") for dependency in base_dependencies)
     assert extras["mcp"] == [constraint]
     assert dev.count(constraint) == 1
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    locked_mcp = [package for package in cast(list[dict[str, object]], lock["package"]) if package.get("name") == "mcp"]
+    assert len(locked_mcp) == 1
+    assert locked_mcp[0]["version"] == "1.28.1"
 
 
 def test_service_entrypoint_is_used_by_docker_and_release_contract() -> None:

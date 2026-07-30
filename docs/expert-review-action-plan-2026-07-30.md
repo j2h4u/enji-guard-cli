@@ -106,7 +106,8 @@
   не внедрять SDK v2 в этой работе; после quarantine удалить legacy
   SSE/mount-path/initialize/initialized/session-header и переписать release
   smoke/contract. **Evidence:** deferred checklist с quarantine exit criteria и
-  обновлённым post-upgrade smoke scope. **Области:** roadmap, MCP dependency,
+  обновлённым post-upgrade smoke scope; package extra закреплён на проверенной
+  v1 `mcp[cli]==1.28.1`, без SDK v2. **Области:** roadmap, MCP dependency,
   release QA.
 - [x] После API keys буквально удалить cookie variant, refresh state machine,
   journal/outbox, watcher, refresh task и cached readiness plumbing; только

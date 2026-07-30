@@ -85,10 +85,10 @@ automatic rotation owner.
 
 The Docker supervisor, not a standalone CLI request, owns long-lived cookie
 recovery. The wheel's base install deliberately contains no MCP dependency;
-the service requires the `mcp` extra. There is no PyPI upload or release-asset
-publication in this repository yet. Artifact CI proves build/install behavior,
-while trusted-publishing authority plus the current POSIX-only cookie-storage
-contract remain publishing blockers.
+the service requires the reviewed-and-pinned `mcp[cli]==1.28.1` extra. There
+is no PyPI upload or release-asset publication in this repository yet. Artifact
+CI proves build/install behavior, while trusted-publishing authority plus the
+current POSIX-only cookie-storage contract remain publishing blockers.
 
 ## Cookie-session recovery
 
