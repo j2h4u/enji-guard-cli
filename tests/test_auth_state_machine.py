@@ -12,8 +12,9 @@ import enji_guard_cli.auth_session.cookies as cookies_module
 from enji_guard_cli.auth_session.api import import_cookie
 from enji_guard_cli.auth_session.coordinator import (
     CoordinatorDependencies,
+    PostDispatchPersistenceError,
     RefreshCoordinator,
-    TerminalRevisionRequiredError,
+    RetainedSuccessorProjected,
     adjudicate_source_revision_alive,
     import_credential,
 )
@@ -641,7 +642,7 @@ def test_failure_before_durable_requested_sends_zero_posts(tmp_path: Path, targe
     assert calls == 0
 
 
-def test_post_dispatch_persistence_failure_is_terminal_and_never_replayed(tmp_path: Path) -> None:
+def test_post_dispatch_persistence_failure_retains_successor_for_later_projection(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=old", auth_file)
     dispatches = 0
@@ -671,15 +672,23 @@ def test_post_dispatch_persistence_failure_is_terminal_and_never_replayed(tmp_pa
         auth_file, exchange, terminal_wait_seconds=0, dependencies=CoordinatorDependencies(storage_failpoint=failpoint)
     )
 
-    with pytest.raises(TerminalRevisionRequiredError, match="import a fresh browser credential"):
+    with pytest.raises(PostDispatchPersistenceError) as raised:
         asyncio.run(coordinator.refresh())
-    with pytest.raises(EnjiHttpError, match="outcome is terminal"):
-        asyncio.run(RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0).refresh())
 
     assert dispatches == 1
     journal = load_journal(auth_file)
     assert isinstance(journal, JournalLoaded)
     assert isinstance(journal.state, Requested)
+
+    projection = RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0).project_retained_successor(
+        raised.value.retained_successor
+    )
+
+    assert isinstance(projection, RetainedSuccessorProjected)
+    assert projection.auth["revision"] == raised.value.retained_successor.auth["revision"]
+    assert projection.auth["credential"]["type"] == "cookie"
+    assert "access_token=new" in projection.auth["credential"]["cookie_header"]
+    assert dispatches == 1
 
 
 def test_rotated_successor_recovery_is_idempotent(tmp_path: Path) -> None:
