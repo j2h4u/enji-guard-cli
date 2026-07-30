@@ -46,6 +46,15 @@ deduplicate concurrent refresh attempts, and retry the failed request once. It
 must never recursively refresh a failed refresh request. Expiry of the refresh
 cookie requires a new OAuth login.
 
+Live verification on 2026-07-30 found that both rotated cookies are session
+cookies: the response includes neither `Max-Age` nor `Expires`. The refresh
+token's server-side lifetime therefore cannot be derived from cookie metadata.
+The same verification observed a spent refresh token returning HTTP 401 with
+`{"error":"invalid refresh token"}`. The CLI schedules rotation well before the
+observed server-side boundary and treats only that exact JSON shape (plus the
+structured `AUTH_INVALID` envelope) as a confirmed rejection; proxy-shaped
+auth failures remain ambiguous.
+
 The current `app-core-M6Hsa8zn.js` auth helpers also use:
 
 - `GET /api/v1/auth/me`, reading `user_id`, `email`, `name`, and `role`;

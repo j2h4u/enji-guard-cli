@@ -13,7 +13,7 @@ from typing import Protocol
 from enji_guard_cli.auth_session.auth_protocol import (
     HTTP_AUTH_FAILURE_CODES,
     HTTP_OK,
-    is_auth_invalid_response,
+    is_refresh_token_invalid_response,
 )
 from enji_guard_cli.auth_session.cookies import merge_set_cookie_headers, set_cookie_names
 from enji_guard_cli.auth_session.ports import AuthOutcomeSink
@@ -639,4 +639,4 @@ def _successful_replacement(source: StoredAuth, response: EnjiHttpResponse) -> s
 
 
 def _is_confirmed_refresh_rejection(response: EnjiHttpResponse) -> bool:
-    return response.status_code in HTTP_AUTH_FAILURE_CODES and is_auth_invalid_response(response)
+    return response.status_code in HTTP_AUTH_FAILURE_CODES and is_refresh_token_invalid_response(response)

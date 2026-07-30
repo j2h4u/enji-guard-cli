@@ -903,11 +903,23 @@ def test_import_progresses_with_stale_unacknowledged_outbox(tmp_path: Path) -> N
             ),
             Rejected,
         ),
+        (
+            EnjiHttpResponse(
+                status_code=401,
+                headers={"content-type": "application/json; charset=utf-8"},
+                content=b'{"error":"invalid refresh token"}',
+            ),
+            Rejected,
+        ),
         (EnjiHttpResponse(status_code=401, headers={}, content=b"<html>proxy</html>"), OutcomeUnknown),
+        (
+            EnjiHttpResponse(status_code=401, headers={}, content=b'{"error":"proxy authorization failed"}'),
+            OutcomeUnknown,
+        ),
         (EnjiHttpResponse(status_code=403, headers={}, content=b""), OutcomeUnknown),
     ],
 )
-def test_refresh_rejection_requires_auth_invalid_protocol_body(
+def test_refresh_rejection_requires_known_backend_protocol_body(
     tmp_path: Path, response: EnjiHttpResponse, expected_type: type[Rejected | OutcomeUnknown]
 ) -> None:
     auth_file = tmp_path / "auth.json"
