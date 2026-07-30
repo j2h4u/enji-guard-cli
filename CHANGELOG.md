@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.3](https://github.com/j2h4u/enji-guard-cli/compare/v3.2.2...v3.2.3) (2026-07-30)
+
+
+### Fixes
+
+* keep cookie refresh inside server validity window ([#244](https://github.com/j2h4u/enji-guard-cli/issues/244)) ([990057b](https://github.com/j2h4u/enji-guard-cli/commit/990057b084e3e22e2d132afbf1c24eb9183edf94))
+
 ## [3.2.2](https://github.com/j2h4u/enji-guard-cli/compare/v3.2.1...v3.2.2) (2026-07-30)
 
 
