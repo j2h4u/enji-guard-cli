@@ -105,26 +105,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
-      - name: Unit tests
-        run: just unit
-
-  crap:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: ./.github/actions/setup-python-uv
-
-      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
-        with:
-          tool: just
-
-      - name: Install dependencies
-        run: uv sync --locked
-
-      - name: CRAP gate
-        run: just crap-check
+      # This one xdist-enabled invocation is the full non-Docker suite and
+      # produces the branch-coverage JSON consumed immediately by the hard
+      # CRAP validator. Keeping them together avoids a second full pytest run.
+      - name: Unit, branch-coverage, and CRAP gates
+        run: just test-gate
 
   docker-build:
     runs-on: ubuntu-latest
@@ -170,7 +155,7 @@ jobs:
   ci:
     if: always()
     runs-on: ubuntu-latest
-    needs: [pr-title, quality, test, crap, docker-build]
+    needs: [pr-title, quality, test, docker-build]
     steps:
       - name: Check required jobs
         env:
@@ -179,7 +164,6 @@ jobs:
           REQUIRED_RESULTS: >-
             quality:${{ needs.quality.result }}
             test:${{ needs.test.result }}
-            crap:${{ needs.crap.result }}
             docker-build:${{ needs.docker-build.result }}
         run: |
           status=0
