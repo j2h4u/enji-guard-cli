@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.3.1](https://github.com/j2h4u/enji-guard-cli/compare/v3.3.0...v3.3.1) (2026-07-31)
+
+
+### Fixes
+
+* **auth:** add safe refresh incident telemetry ([#248](https://github.com/j2h4u/enji-guard-cli/issues/248)) ([b652f60](https://github.com/j2h4u/enji-guard-cli/commit/b652f60e0c7447e22fefc69cc0c46a0b62454868))
+
 ## [3.3.0](https://github.com/j2h4u/enji-guard-cli/compare/v3.2.3...v3.3.0) (2026-07-30)
 
 
