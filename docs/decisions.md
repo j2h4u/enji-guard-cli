@@ -237,8 +237,12 @@ agents can orient quickly before making changes.
 - **Auth resilience observability**: terminal journal outcomes carry a stable,
   non-secret `event_key` and are delivered to telemetry at least once, not
   exactly once; consumers must tolerate duplicates by key. Outcome payloads
-  contain stable classifications only, never credentials, paths, or upstream
-  error messages. A failed telemetry delivery remains eligible for later
+  remain minimal and never contain credentials, paths, or upstream error
+  messages. A separate best-effort refresh observation carries only safe
+  diagnostic context: source/successor revisions, remaining access-token
+  lifetime, whether the refresh token changed, and bounded upstream request
+  identifiers. Failure to emit that diagnostic event never blocks credential
+  progress. A failed terminal-outcome delivery remains eligible for later
   reconciliation, and invariant/storage failures remain visible and unready.
 - **Supply-chain conservatism**: new Python packages stay quarantined for
   7 to 14 days unless an owner approves earlier adoption; lifecycle and

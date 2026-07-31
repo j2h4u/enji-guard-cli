@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import logging
 from collections.abc import Mapping
@@ -64,6 +65,11 @@ from enji_guard_cli.auth_session.store import (
     write_journal,
 )
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpResponse
+
+
+def _unsigned_access_token(expires_at: datetime) -> str:
+    payload = base64.urlsafe_b64encode(json.dumps({"exp": int(expires_at.timestamp())}).encode()).rstrip(b"=").decode()
+    return f"e30.{payload}.sig"
 
 
 @pytest.mark.parametrize(
@@ -524,6 +530,104 @@ def test_rotation_telemetry_is_terminal_once_and_redacts_sentinels(tmp_path: Pat
     assert events == [("enji_auth_rotation_rotated", {"event_key": f"auth-rotation:{loaded.auth['revision']}:rotated"})]
     assert secret not in repr(events)
     assert "SENTINEL_AUTH_PATH" not in repr(events)
+
+
+def test_refresh_observation_is_safe_and_cannot_block_rotation(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    now = datetime(2026, 7, 31, 5, 47, 12, tzinfo=UTC)
+    access_expiry = now + timedelta(seconds=481)
+    access_token = _unsigned_access_token(access_expiry)
+    refresh_token = "SENTINEL_REFRESH_SECRET"
+    import_cookie(f"access_token={access_token}; refresh_token={refresh_token}", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    events: list[tuple[str, dict[str, object]]] = []
+
+    def sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> None:
+        _ = logger, level
+        events.append((event, dict(fields)))
+        raise RuntimeError("telemetry unavailable after observing the event")
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            return EnjiHttpResponse(
+                status_code=200,
+                headers={"X-Request-ID": "request-123", "CF-Ray": "ray-456"},
+                content=b"{}",
+                set_cookie_headers=("access_token=new", "refresh_token=new"),
+            )
+
+    rotated = asyncio.run(
+        RefreshCoordinator(
+            auth_file,
+            Exchange(),
+            dependencies=CoordinatorDependencies(event_sink=sink, now_fn=lambda: now),
+        ).refresh(loaded.auth)
+    )
+
+    assert events == [
+        (
+            "enji_auth_refresh_observed",
+            {
+                "outcome": "rotated",
+                "source_revision": loaded.auth["revision"],
+                "successor_revision": rotated["revision"],
+                "refresh_token_changed": True,
+                "access_expires_in_seconds": 481,
+                "upstream_request_id": "request-123",
+                "cf_ray": "ray-456",
+            },
+        )
+    ]
+    assert access_token not in repr(events)
+    assert refresh_token not in repr(events)
+
+
+def test_rejected_rotation_telemetry_identifies_the_current_generation_and_upstream_request(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    now = datetime(2026, 7, 31, 5, 47, 12, tzinfo=UTC)
+    import_cookie(
+        f"access_token={_unsigned_access_token(now + timedelta(seconds=481))}; refresh_token=current",
+        auth_file,
+    )
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    events: list[tuple[str, dict[str, object]]] = []
+
+    def sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> None:
+        _ = logger, level
+        events.append((event, dict(fields)))
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            return EnjiHttpResponse(
+                status_code=401,
+                headers={"x-request-id": "rejected-request", "cf-ray": "rejected-ray"},
+                content=b'{"error":"invalid refresh token"}',
+            )
+
+    coordinator = RefreshCoordinator(
+        auth_file,
+        Exchange(),
+        dependencies=CoordinatorDependencies(event_sink=sink, now_fn=lambda: now),
+    )
+    with pytest.raises(EnjiHttpError, match="not authenticated"):
+        asyncio.run(coordinator.refresh(loaded.auth))
+
+    assert events == [
+        (
+            "enji_auth_refresh_observed",
+            {
+                "outcome": "rejected",
+                "source_revision": loaded.auth["revision"],
+                "access_expires_in_seconds": 481,
+                "upstream_request_id": "rejected-request",
+                "cf_ray": "rejected-ray",
+            },
+        )
+    ]
 
 
 def test_terminal_journal_redelivers_outcome_without_replaying_or_leaking(tmp_path: Path) -> None:
