@@ -128,10 +128,12 @@ fallback for bind mounts that do not deliver events.
 
 Telemetry is JSONL at `~/.config/enji-guard/logs/telemetry.jsonl`. Rotation
 events have stable non-secret `event_key` values and are at-least-once: dedupe
-by key if consuming them. They deliberately exclude credentials, auth paths,
-and upstream error messages. Treat telemetry, `auth status`, and `health
---ready` as runtime verification signals, not proof that an Enji session will
-remain valid.
+by key if consuming them. The best-effort `enji_auth_refresh_observed` event
+identifies source and successful successor revisions, the access-token window,
+refresh-token change, and upstream request IDs when available. Both event
+families deliberately exclude credentials, auth paths, and upstream error
+messages. Treat telemetry, `auth status`, and `health --ready` as runtime
+verification signals, not proof that an Enji session will remain valid.
 
 The runtime image defaults `/etc/localtime` to UTC, but the provided compose
 files bind-mount the host `/etc/localtime` so the running service inherits host

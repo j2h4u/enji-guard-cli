@@ -3,20 +3,26 @@
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from http.cookies import CookieError
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from enji_guard_cli.auth_session.auth_protocol import (
     HTTP_AUTH_FAILURE_CODES,
     HTTP_OK,
     is_refresh_token_invalid_response,
 )
-from enji_guard_cli.auth_session.cookies import merge_set_cookie_headers, set_cookie_names
-from enji_guard_cli.auth_session.ports import AuthOutcomeSink
+from enji_guard_cli.auth_session.cookies import (
+    cookie_value,
+    jwt_expires_at,
+    merge_set_cookie_headers,
+    set_cookie_names,
+)
+from enji_guard_cli.auth_session.ports import AuthEventSink, AuthOutcomeSink
 from enji_guard_cli.auth_session.state_machine import (
     Begin,
     DispatchBegun,
@@ -67,6 +73,8 @@ from enji_guard_cli.auth_session.store import (
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpResponse
 
 TERMINAL_POLL_SECONDS = 0.05
+MAX_DIAGNOSTIC_HEADER_LENGTH = 256
+RefreshObservationOutcome = Literal["rotated", "rejected", "outcome_unknown"]
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -125,13 +133,19 @@ def _stored_auth_revision(auth_path: Path) -> str | None:
     return None
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 @dataclass(frozen=True, slots=True)
 class CoordinatorDependencies:
     storage_failpoint: StorageFailpoint | None = None
+    event_sink: AuthEventSink | None = None
     outcome_sink: AuthOutcomeSink | None = None
     monotonic_fn: Callable[[], float] = time.monotonic
     sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep
     revision_reader: Callable[[Path], str | None] = _stored_auth_revision
+    now_fn: Callable[[], datetime] = _utc_now
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,10 +201,12 @@ class RefreshCoordinator:
         self._terminal_wait_seconds = terminal_wait_seconds
         resolved_dependencies = dependencies or CoordinatorDependencies()
         self._storage_failpoint = resolved_dependencies.storage_failpoint
+        self._event_sink = resolved_dependencies.event_sink
         self._outcome_sink = resolved_dependencies.outcome_sink
         self._monotonic_fn = resolved_dependencies.monotonic_fn
         self._sleep_fn = resolved_dependencies.sleep_fn
         self._revision_reader = resolved_dependencies.revision_reader
+        self._now_fn = resolved_dependencies.now_fn
         self._lock = asyncio.Lock()
 
     async def refresh(self, expected: StoredAuth | None = None) -> StoredAuth:
@@ -213,18 +229,21 @@ class RefreshCoordinator:
             response = await self._exchange.exchange_once(auth)
         except asyncio.CancelledError:
             try:
+                self._emit_refresh_observation(auth, None, None, outcome="outcome_unknown")
                 await asyncio.to_thread(self._commit_unknown, auth["revision"], "refresh task cancelled")
             except EnjiHttpError as exc:
                 if exc.code != "AUTH_IMPORT_REQUIRED":
                     raise
             raise
         except EnjiHttpError as exc:
+            self._emit_refresh_observation(auth, None, None, outcome="outcome_unknown")
             return await asyncio.to_thread(
                 self._commit_unknown,
                 auth["revision"],
                 f"transport failure: {exc.code}",
             )
         except (OSError, TimeoutError) as exc:
+            self._emit_refresh_observation(auth, None, None, outcome="outcome_unknown")
             return await asyncio.to_thread(
                 self._commit_unknown,
                 auth["revision"],
@@ -332,16 +351,62 @@ class RefreshCoordinator:
     def _commit_response(self, source: StoredAuth, response: EnjiHttpResponse) -> StoredAuth:
         cookie_header = _successful_replacement(source, response)
         if cookie_header is not None:
-            return self._commit_success(source, cookie_header)
+            return self._commit_success(source, cookie_header, response)
         if _is_confirmed_refresh_rejection(response):
+            self._emit_refresh_observation(source, response, None, outcome="rejected")
             return self._commit_rejected(source["revision"], f"refresh rejected with HTTP {response.status_code}")
+        self._emit_refresh_observation(source, response, None, outcome="outcome_unknown")
         return self._commit_unknown(source["revision"], f"ambiguous refresh response HTTP {response.status_code}")
 
-    def _commit_success(self, source: StoredAuth, cookie_header: str) -> StoredAuth:
+    def _emit_refresh_observation(
+        self,
+        source: StoredAuth,
+        response: EnjiHttpResponse | None,
+        replacement_cookie_header: str | None,
+        *,
+        outcome: RefreshObservationOutcome,
+        successor_revision: str | None = None,
+    ) -> None:
+        """Emit best-effort safe context without coupling auth progress to telemetry."""
+
+        if self._event_sink is None:
+            return
+        fields: dict[str, object] = {
+            "outcome": outcome,
+            "source_revision": source["revision"],
+        }
+        if successor_revision is not None:
+            fields["successor_revision"] = successor_revision
+        fields.update(
+            _refresh_diagnostic_fields(
+                source,
+                response,
+                replacement_cookie_header,
+                now=self._now_fn(),
+            )
+        )
+        try:
+            self._event_sink(
+                _LOGGER,
+                logging.INFO,
+                "enji_auth_refresh_observed",
+                fields,
+            )
+        except OSError, RuntimeError, ValueError:
+            return
+
+    def _commit_success(self, source: StoredAuth, cookie_header: str, response: EnjiHttpResponse) -> StoredAuth:
         source_revision = source["revision"]
         state = Requested(source_revision)
         rotated_transition = transition(state, ExchangeSucceeded(cookie_header))
         assert isinstance(rotated_transition.state, Rotated)
+        self._emit_refresh_observation(
+            source,
+            response,
+            cookie_header,
+            outcome="rotated",
+            successor_revision=rotated_transition.state.successor_revision,
+        )
         successor = stored_auth(
             source["base_url"],
             {"type": "cookie", "cookie_header": cookie_header},
@@ -636,6 +701,47 @@ def _successful_replacement(source: StoredAuth, response: EnjiHttpResponse) -> s
         # Once the refresh POST has returned, malformed cookie protocol data is
         # ambiguous: the server may already have consumed the one-time cookie.
         return None
+
+
+def _refresh_diagnostic_fields(
+    source: StoredAuth,
+    response: EnjiHttpResponse | None,
+    replacement_cookie_header: str | None,
+    *,
+    now: datetime,
+) -> dict[str, object]:
+    fields: dict[str, object] = {}
+    credential = source["credential"]
+    if credential["type"] != "cookie":
+        return fields
+    source_cookie_header = credential["cookie_header"]
+    access_token = cookie_value(source_cookie_header, "access_token")
+    access_expiry = jwt_expires_at(access_token) if access_token is not None else None
+    if access_expiry is not None:
+        fields["access_expires_in_seconds"] = int((access_expiry - now).total_seconds())
+
+    if replacement_cookie_header is not None:
+        source_refresh = cookie_value(source_cookie_header, "refresh_token")
+        replacement_refresh = cookie_value(replacement_cookie_header, "refresh_token")
+        if source_refresh is not None and replacement_refresh is not None:
+            fields["refresh_token_changed"] = source_refresh != replacement_refresh
+
+    headers: Mapping[str, str] = response.headers if response is not None else {}
+    upstream_request_id = _bounded_header(headers, "x-request-id")
+    if upstream_request_id is not None:
+        fields["upstream_request_id"] = upstream_request_id
+    cf_ray = _bounded_header(headers, "cf-ray")
+    if cf_ray is not None:
+        fields["cf_ray"] = cf_ray
+    return fields
+
+
+def _bounded_header(headers: Mapping[str, str], name: str) -> str | None:
+    for raw_name, raw_value in headers.items():
+        if raw_name.casefold() == name:
+            value = raw_value.strip()
+            return value[:MAX_DIAGNOSTIC_HEADER_LENGTH] if value else None
+    return None
 
 
 def _is_confirmed_refresh_rejection(response: EnjiHttpResponse) -> bool:

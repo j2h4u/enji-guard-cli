@@ -383,7 +383,10 @@ def start_auto_refresh_task(
                     auth,
                     cast(EnjiHttpClient, client),
                     settings=resolved_settings,
-                    outcome_sink=outcome_sink,
+                    dependencies=CoordinatorDependencies(
+                        event_sink=resolved_event_sink,
+                        outcome_sink=outcome_sink,
+                    ),
                 ),
                 adjudicate_unknown_outcome_fn=lambda path, client: adjudicate_unknown_outcome(
                     path, cast(EnjiHttpClient, client), event_sink=resolved_event_sink
@@ -596,7 +599,7 @@ async def _refresh_cookie_auth(
     client: EnjiHttpClient,
     *,
     settings: EnjiGuardSettings | None = None,
-    outcome_sink: AuthOutcomeSink | None = None,
+    dependencies: CoordinatorDependencies | None = None,
 ) -> StoredAuth:
     auth_settings = (settings if settings is not None else default_settings()).auth
 
@@ -615,7 +618,7 @@ async def _refresh_cookie_auth(
     return await RefreshCoordinator(
         path,
         _HttpxRefreshExchange(),
-        dependencies=CoordinatorDependencies(outcome_sink=outcome_sink),
+        dependencies=dependencies,
     ).refresh(stored_auth)
 
 

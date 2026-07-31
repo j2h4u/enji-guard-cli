@@ -424,10 +424,14 @@ run `auth import-cookie`; that explicit import is the only other credential
 writer.
 
 Telemetry at `~/.config/enji-guard/logs/telemetry.jsonl` records non-secret
-rotation outcomes with a stable `event_key`. Delivery is at-least-once, so
-duplicate records with the same key are possible. The detailed state, storage,
-and recovery contract is in [docs/decisions.md](docs/decisions.md); deployment
-verification is in [docs/deployment.md](docs/deployment.md#cookie-session-recovery).
+terminal rotation outcomes with a stable `event_key`. Delivery is
+at-least-once, so duplicate records with the same key are possible. A separate
+best-effort `enji_auth_refresh_observed` event records source/successor
+revisions, remaining access-token lifetime, whether the refresh token changed,
+and upstream request identifiers when supplied. No credential values are
+recorded. The detailed state, storage, and recovery contract is in
+[docs/decisions.md](docs/decisions.md); deployment verification is in
+[docs/deployment.md](docs/deployment.md#cookie-session-recovery).
 
 After a real cookie re-authentication, refresh the session in the browser,
 request `/api/v1/auth/me`, and import the current `Cookie` request header using

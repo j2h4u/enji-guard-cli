@@ -31,6 +31,7 @@ from enji_guard_cli.auth_session.api import (
 from enji_guard_cli.auth_session.api import StoredAuth as RuntimeStoredAuth
 from enji_guard_cli.auth_session.cookies import merge_set_cookie_headers, set_cookie_names
 from enji_guard_cli.auth_session.coordinator import (
+    CoordinatorDependencies,
     PostDispatchPersistenceError,
     PreDispatchLocalError,
     RetainedRefreshSuccessor,
@@ -115,7 +116,7 @@ async def _refresh_stored_cookie_auth(
         _loaded_auth(path),
         client,
         settings=cast(EnjiGuardSettings | None, settings),
-        outcome_sink=cast(AuthOutcomeSink | None, outcome_sink),
+        dependencies=CoordinatorDependencies(outcome_sink=cast(AuthOutcomeSink | None, outcome_sink)),
     )
 
 
@@ -620,7 +621,7 @@ def test_refresh_proxy_401_recovers_before_old_access_expires(tmp_path: Path) ->
             path,
             auth,
             cast(_ScriptedAuthClient, http_client),
-            outcome_sink=lambda *_args, **_kwargs: True,
+            dependencies=CoordinatorDependencies(outcome_sink=lambda *_args, **_kwargs: True),
         )
         if refreshed["revision"] != initial_revision:
             rotated.set()
