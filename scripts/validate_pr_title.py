@@ -37,8 +37,10 @@ def validate_pr_title(title: str) -> tuple[bool, str]:
     if match is None:
         return (
             False,
-            "PR title must look like 'fix: short description', 'feat(scope): short description', "
-            "or 'feat(scope)!: breaking description'.",
+            (
+                "PR title must look like 'fix: short description', 'feat(scope): short description', "
+                "or 'feat(scope)!: breaking description'."
+            ),
         )
 
     commit_type = match.group("type")

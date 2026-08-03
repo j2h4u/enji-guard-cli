@@ -10,7 +10,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Protocol
 
-type LogFieldValue = None | bool | int | float | str
+type LogFieldValue = bool | int | float | str | None
 _PRIVATE_DIRECTORY_MODE = 0o700
 _PRIVATE_FILE_MODE = 0o600
 

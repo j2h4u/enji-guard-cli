@@ -28,7 +28,7 @@ from enji_guard_cli.transport_types import RetryProfile
 RATE_LIMIT_STATUS_CODE = 429
 _LOGGER = logging.getLogger(__name__)
 
-type EnjiJsonScalar = None | bool | int | float | str
+type EnjiJsonScalar = bool | int | float | str | None
 type EnjiJsonValue = EnjiJsonScalar | list[EnjiJsonValue] | dict[str, EnjiJsonValue]
 
 

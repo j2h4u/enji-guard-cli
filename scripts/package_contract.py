@@ -144,22 +144,24 @@ def _base_contract(python: Path, wheel: Path, *, cwd: Path, env: dict[str, str])
             str(python),
             "-I",
             "-c",
-            "import importlib.util\n"
-            "import sys\n"
-            "assert importlib.util.find_spec('mcp') is None\n"
-            "from enji_guard_cli.auth_session import ApiKeyCredentialReader, api_key_from_environment\n"
-            "from enji_guard_cli.client import EnjiGuardClient\n"
-            "from enji_guard_cli.delivery.cli import app\n"
-            "assert app is not None\n"
-            "assert not any(name == 'mcp' or name.startswith('mcp.') for name in sys.modules)\n"
-            "key = api_key_from_environment({'ENJI_GUARD_API_KEY': 'artifact-contract-key'})\n"
-            "assert key is not None\n"
-            "credentials = ApiKeyCredentialReader(key, 'https://fleet.example.test').load()\n"
-            "assert credentials.headers == {'Authorization': 'Bearer artifact-contract-key'}\n"
-            "assert 'artifact-contract-key' not in repr(key)\n"
-            "assert 'artifact-contract-key' not in repr(credentials)\n"
-            "with EnjiGuardClient():\n"
-            "    pass\n",
+            (
+                "import importlib.util\n"
+                "import sys\n"
+                "assert importlib.util.find_spec('mcp') is None\n"
+                "from enji_guard_cli.auth_session import ApiKeyCredentialReader, api_key_from_environment\n"
+                "from enji_guard_cli.client import EnjiGuardClient\n"
+                "from enji_guard_cli.delivery.cli import app\n"
+                "assert app is not None\n"
+                "assert not any(name == 'mcp' or name.startswith('mcp.') for name in sys.modules)\n"
+                "key = api_key_from_environment({'ENJI_GUARD_API_KEY': 'artifact-contract-key'})\n"
+                "assert key is not None\n"
+                "credentials = ApiKeyCredentialReader(key, 'https://fleet.example.test').load()\n"
+                "assert credentials.headers == {'Authorization': 'Bearer artifact-contract-key'}\n"
+                "assert 'artifact-contract-key' not in repr(key)\n"
+                "assert 'artifact-contract-key' not in repr(credentials)\n"
+                "with EnjiGuardClient():\n"
+                "    pass\n"
+            ),
         ),
         cwd=cwd,
         env=env,
@@ -179,13 +181,15 @@ def _mcp_contract(python: Path, wheel: Path, *, cwd: Path, env: dict[str, str]) 
             str(python),
             "-I",
             "-c",
-            "import asyncio, importlib.util; "
-            "from importlib.metadata import version; "
-            "assert importlib.util.find_spec('mcp') is not None; "
-            f"assert version('mcp') == {EXPECTED_MCP_VERSION!r}; "
-            "from enji_guard_cli.delivery.mcp.server import create_mcp_server; "
-            "names = tuple(sorted(tool.name for tool in asyncio.run(create_mcp_server().list_tools()))); "
-            f"assert names == {EXPECTED_MCP_TOOLS!r}, names",
+            (
+                "import asyncio, importlib.util; "
+                "from importlib.metadata import version; "
+                "assert importlib.util.find_spec('mcp') is not None; "
+                f"assert version('mcp') == {EXPECTED_MCP_VERSION!r}; "
+                "from enji_guard_cli.delivery.mcp.server import create_mcp_server; "
+                "names = tuple(sorted(tool.name for tool in asyncio.run(create_mcp_server().list_tools()))); "
+                f"assert names == {EXPECTED_MCP_TOOLS!r}, names"
+            ),
         ),
         cwd=cwd,
         env=env,
