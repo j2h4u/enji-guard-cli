@@ -18,6 +18,7 @@ from enji_guard_cli.application import (
 )
 from enji_guard_cli.audit.catalog_observation import AuditCatalogObserver
 from enji_guard_cli.audit.ledger import FileAuditLedger
+from enji_guard_cli.auth_session import CredentialReader, EnvironmentCredentialReader
 from enji_guard_cli.auth_session.adapters import StoredCredentialReader
 from enji_guard_cli.enji_gateway import AuditGateway, PortfolioGateway
 from enji_guard_cli.enji_gateway.shared_client import SharedHttpClient
@@ -34,7 +35,7 @@ class ReadSurface:
     catalog: AuditCatalogService
     audit: AuditFacade
     portfolio: PortfolioFacade
-    credential_reader: StoredCredentialReader
+    credential_reader: CredentialReader
     audit_gateway: AuditGateway
     targets: GatewayPortfolioTargetService
     fanout: BoundedFanout
@@ -44,7 +45,10 @@ def create_read_surface(
     auth_file: Path | None, http_client: SharedHttpClient, settings: EnjiGuardSettings
 ) -> ReadSurface:
     """Wire portfolio and audit reads around one caller-owned HTTP client."""
-    credential_reader = StoredCredentialReader(auth_file, settings=settings)
+    credential_reader: CredentialReader = EnvironmentCredentialReader(
+        StoredCredentialReader(auth_file, settings=settings),
+        settings.auth.base_url,
+    )
     fanout = BoundedFanout(settings.fanout)
     ledger = FileAuditLedger(
         settings.active_run_ledger.state_file,

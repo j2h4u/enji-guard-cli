@@ -31,9 +31,9 @@ FILESYSTEM_WRITERS = frozenset(
     }
 )
 
-# Runtime tuning belongs in frozen settings, never in the environment.  The one
-# read left is test detection inside telemetry.
-ENVIRONMENT_READERS = frozenset({"runtime_observability/telemetry.py"})
+# Runtime tuning belongs in frozen settings, never in the environment.
+# Credential ingress and test detection inside telemetry are the exceptions.
+ENVIRONMENT_READERS = frozenset({"auth_session/api_key.py", "runtime_observability/telemetry.py"})
 
 # Only the transport and the client it hands to the gateway may name httpx.
 HTTP_CLIENT_OWNERS = frozenset({"enji_gateway/shared_client.py", "transport.py"})

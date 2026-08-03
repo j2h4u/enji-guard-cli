@@ -100,6 +100,31 @@ def test_health_ready_success_emits_ready_json(monkeypatch: pytest.MonkeyPatch) 
     assert calls == [((("127.0.0.1", 8000),), {"timeout": 2.0}), "backend"]
 
 
+def test_api_key_health_checks_only_the_mcp_listener(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENJI_GUARD_API_KEY", "secret-api-key")
+    monkeypatch.setattr(socket, "create_connection", lambda *_args, **_kwargs: _Connection())
+    monkeypatch.setattr(cli_module, "readiness_verdict", lambda: pytest.fail("cookie readiness used"))
+
+    result = CliRunner().invoke(app, ["health", "--ready", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"status": "ready"}
+
+
+def test_api_key_health_reports_configuration_error_without_traceback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENJI_GUARD_API_KEY", "contains whitespace")
+    monkeypatch.setattr(socket, "create_connection", lambda *_args, **_kwargs: _Connection())
+
+    result = CliRunner().invoke(app, ["health", "--ready", "--json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stderr) == {
+        "code": "API_KEY_INVALID",
+        "message": "the Enji API key is empty or contains whitespace",
+    }
+    assert "Traceback" not in result.stderr
+
+
 def test_health_ready_probes_explicit_listener_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[object] = []
 

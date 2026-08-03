@@ -113,7 +113,10 @@ def test_run_service_async_runs_without_refresh_when_disabled(monkeypatch: pytes
         captured["transport"] = transport
         captured["mount_path"] = mount_path
 
-    monkeypatch.setattr(runtime, "start_backend_readiness_task", lambda *, observer, settings: None)
+    def refuse_backend_readiness(**_kwargs: object) -> None:
+        raise AssertionError("API-key MCP mode must not start daemon readiness")
+
+    monkeypatch.setattr(runtime, "start_backend_readiness_task", refuse_backend_readiness)
 
     asyncio.run(
         runtime.run_service_async(

@@ -665,12 +665,14 @@ def recon_start(
     "health",
     help=(
         "Report process liveness. Pass --ready for the real dependency check: "
-        "it probes the MCP listener and the cached backend readiness state, and "
+        "it probes the MCP listener plus cached backend readiness in cookie mode, and "
         "is what container healthchecks and monitors must use."
     ),
 )
 def health(
-    ready: Annotated[bool, typer.Option("--ready", help="Check MCP listener and cached backend readiness.")] = False,
+    ready: Annotated[
+        bool, typer.Option("--ready", help="Check MCP listener and cookie-mode backend readiness.")
+    ] = False,
     host: Annotated[str, typer.Option("--host")] = DEFAULT_HTTP_HOST,
     port: Annotated[int, typer.Option("--port", min=1, max=65535)] = DEFAULT_HTTP_PORT,
     json_output: Annotated[bool, typer.Option("--json")] = False,
@@ -683,6 +685,15 @@ def health(
             pass
     except OSError as exc:
         raise _fail("UNREADY", f"MCP listener is not ready: {exc}", as_json=_json_output(json_output)) from None
+    from enji_guard_cli.delivery.service import ServiceCredentialConfigurationError, api_key_auth_configured
+
+    try:
+        api_key_mode = api_key_auth_configured()
+    except ServiceCredentialConfigurationError as exc:
+        raise _fail(exc.code, exc.message, as_json=_json_output(json_output)) from None
+    if api_key_mode:
+        _emit({"status": "ready"}, _json_output(json_output))
+        return
     verdict = readiness_verdict()
     if not verdict.ready:
         reason = verdict.reason or "backend readiness failed"
