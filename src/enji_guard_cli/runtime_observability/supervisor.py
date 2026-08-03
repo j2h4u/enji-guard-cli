@@ -71,7 +71,11 @@ async def run_service_async(
     )
     refresh_task = runtime_auth.start_background_refresh_task() if runtime_auth is not None else None
     resolved_settings = settings if settings is not None else default_settings()
-    readiness_task = start_backend_readiness_task(observer=runtime_auth, settings=resolved_settings)
+    readiness_task = (
+        start_backend_readiness_task(observer=runtime_auth, settings=resolved_settings)
+        if runtime_auth is not None
+        else None
+    )
     shutdown_event = asyncio.Event()
     installed_signals = _install_signal_handlers(shutdown_event)
     try:

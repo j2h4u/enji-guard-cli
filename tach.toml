@@ -163,6 +163,7 @@ visibility = ["enji_guard_cli.composition", "enji_guard_cli.service_composition"
 path = "enji_guard_cli.service_composition"
 layer = "composition"
 depends_on = [
+    "enji_guard_cli.auth_session",
     "enji_guard_cli.composition_support",
     "enji_guard_cli.mcp_facade",
     "enji_guard_cli.runtime_observability",
@@ -426,6 +427,7 @@ visibility = [
     "enji_guard_cli.enji_gateway",
     "enji_guard_cli.composition",
     "enji_guard_cli.composition_support",
+    "enji_guard_cli.service_composition",
 ]
 
 [[interfaces]]
@@ -456,7 +458,16 @@ expose = [".*"]
 [[interfaces]]
 from = ["enji_guard_cli.auth_session"]
 visibility = ["enji_guard_cli.composition_support"]
-expose = ["adapters\\..*"]
+expose = [
+    "adapters\\..*",
+    "CredentialReader",
+    "EnvironmentCredentialReader",
+]
+
+[[interfaces]]
+from = ["enji_guard_cli.auth_session"]
+visibility = ["enji_guard_cli.service_composition"]
+expose = ["CredentialError", "api_key_from_environment"]
 
 # ---------------------------------------------------------------------------
 # transport -- HTTP mechanics.  No product vocabulary above `RetryProfile`.

@@ -8,9 +8,10 @@ import asyncio
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from typing import cast
+from typing import Never, cast
 
 import pytest
+import typer
 from mcp.server.fastmcp import FastMCP
 
 import enji_guard_cli.composition as composition_module
@@ -216,6 +217,40 @@ def test_service_root_closes_runtime_pool_when_supervisor_fails(
         service_module.run(service_module.RuntimeServiceOptions(transport="stdio", host="127.0.0.1", port=18081))
 
     assert clients[0].is_closed is True
+
+
+def test_api_key_service_bypasses_cookie_runtime_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def refuse_runtime_auth(_auth_file: Path | None = None) -> Never:
+        raise AssertionError("API-key mode must not compose cookie refresh")
+
+    monkeypatch.setenv("ENJI_GUARD_API_KEY", "secret-api-key")
+    monkeypatch.setattr(service_module, "runtime_auth_service", refuse_runtime_auth)
+    monkeypatch.setattr(service_module, "api_key_auth_configured", lambda: True)
+    monkeypatch.setattr(service_module, "run_service", lambda **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(service_module, "_mcp_implementation", lambda: (lambda *_args, **_kwargs: object(), object()))
+
+    service_module.run(service_module.RuntimeServiceOptions(transport="stdio", host="127.0.0.1", port=18081))
+
+    assert "runtime_auth" not in captured
+
+
+def test_api_key_service_reports_configuration_errors_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("ENJI_GUARD_API_KEY", "contains whitespace")
+    monkeypatch.delenv("ENJI_GUARD_API_KEY_FILE", raising=False)
+    monkeypatch.setattr(service_module, "_mcp_implementation", lambda: (lambda *_args, **_kwargs: object(), object()))
+
+    with pytest.raises(typer.Exit) as caught:
+        service_module.run(service_module.RuntimeServiceOptions(transport="stdio", host="127.0.0.1", port=18081))
+
+    assert caught.value.exit_code == 2
+    assert capsys.readouterr().err == "API_KEY_INVALID: the Enji API key is empty or contains whitespace\n"
 
 
 def test_switching_auth_file_closes_the_displaced_application(tmp_path: Path) -> None:

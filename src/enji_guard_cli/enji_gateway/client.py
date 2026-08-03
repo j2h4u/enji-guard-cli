@@ -1,11 +1,11 @@
 import asyncio
 from collections.abc import Callable, Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 from urllib.parse import quote, urlencode
 
-from enji_guard_cli.auth_session import CredentialError, CredentialReader, StoredAuth
+from enji_guard_cli.auth_session import CredentialError, CredentialReader
 from enji_guard_cli.enji_gateway.contract import EnjiEndpointSpec, HttpMethod
 from enji_guard_cli.errors import EnjiApiError
 from enji_guard_cli.json_types import JsonObjectPayload, JsonValue
@@ -35,11 +35,8 @@ type ApiQueryParams = Mapping[str, str]
 
 @dataclass(slots=True)
 class EnjiApiSession:
-    auth_file: Path
     base_url: str
-    headers: dict[str, str]
-    stored_auth: StoredAuth
-    auth_port: CredentialReader
+    headers: dict[str, str] = field(repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,21 +86,14 @@ def load_api_session(
     port = auth_port
     target = auth_file if auth_file is not None else default_settings().auth.auth_file
     try:
-        stored_auth = port.load(target)
+        credentials = port.load(target)
     except CredentialError as exc:
         raise EnjiApiError(exc.code, exc.message) from exc
 
     return EnjiApiSession(
-        auth_file=target,
-        base_url=stored_auth["base_url"],
-        headers=api_headers(stored_auth, port),
-        stored_auth=stored_auth,
-        auth_port=port,
+        base_url=credentials.base_url,
+        headers=dict(credentials.headers),
     )
-
-
-def api_headers(stored_auth: StoredAuth, auth_port: CredentialReader) -> dict[str, str]:
-    return auth_port.headers(stored_auth)
 
 
 def run_api_request[T](

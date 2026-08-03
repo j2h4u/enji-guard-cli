@@ -1,6 +1,7 @@
 """Narrow ports consumed by the gateway and runtime."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from logging import Logger
 from pathlib import Path
 from typing import Protocol
@@ -18,12 +19,19 @@ class CredentialError(Exception):
         self.message = message
 
 
+@dataclass(frozen=True, slots=True)
+class RequestCredentials:
+    """Credential-neutral material needed to make an Enji API request."""
+
+    base_url: str
+    headers: Mapping[str, str] = field(repr=False)
+    credential_type: str
+
+
 class CredentialReader(Protocol):
     """Read-only credential capabilities required by credential consumers."""
 
-    def load(self, auth_file: Path | None = None) -> StoredAuth: ...
-
-    def headers(self, stored_auth: StoredAuth) -> dict[str, str]: ...
+    def load(self, auth_file: Path | None = None) -> RequestCredentials: ...
 
 
 class AuthHttpClient(Protocol):
@@ -71,4 +79,5 @@ __all__ = [
     "AuthStorePort",
     "CredentialError",
     "CredentialReader",
+    "RequestCredentials",
 ]

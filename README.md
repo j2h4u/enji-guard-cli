@@ -347,12 +347,18 @@ For registry-based deployment, use the GHCR image and compose example in
 
 The base wheel is a dependency-light CLI and public read-only Python client;
 the MCP server is an explicit, reviewed-and-pinned `mcp[cli]==1.28.1` extra.
-Build artifacts locally and install only the surface you need:
+It already accepts the future package-first credential contract through
+`ENJI_GUARD_API_KEY` or `ENJI_GUARD_API_KEY_FILE`; both produce the conventional
+`Authorization: Bearer` request header and are mutually exclusive. Build
+artifacts locally and install only the surface you need:
 
 ```bash
 uv build --clear --out-dir dist
 python3.14 -m pip install dist/*.whl
 enji-guard --help
+
+# Once Enji issues an API key:
+ENJI_GUARD_API_KEY_FILE="$HOME/.config/enji-guard/api-key" enji-guard project list
 
 # Only when running the MCP service outside Docker:
 wheel="$(printf '%s\n' dist/*.whl)"
@@ -364,6 +370,13 @@ The base install intentionally does not install or import MCP. Its public
 client is narrow and context-managed: `from enji_guard_cli.client import
 EnjiGuardClient`; use `with EnjiGuardClient() as client:` so its pooled
 transport is closed deterministically.
+
+Do not put an API key on the command line or commit it to a `.env` file. The
+file source is useful for secret mounts and user-managed files; the CLI reads
+it but never writes it. In API-key mode the optional MCP process does not start
+cookie refresh or cached backend-readiness tasks, and `health --ready` checks
+the MCP listener only. Cookie mode continues to require both the listener and
+cached authenticated backend readiness.
 
 Cookie-session recovery remains Docker's long-lived service responsibility.
 The supported production path is still the GHCR image because the cookie store
@@ -378,7 +391,15 @@ subcommand remains a lazy operator convenience alias.
 
 ## Authentication
 
-Bearer/API-token auth is the preferred stable path:
+API-key auth is the package-first stable path. Enji has not issued production
+keys yet, but the client-side contract is ready:
+
+```bash
+export ENJI_GUARD_API_KEY='...'
+enji-guard project list
+```
+
+For the current deployed cookie API, persisted bearer import remains available:
 
 ```bash
 printf '%s' "$ENJI_API_TOKEN" | docker exec -i enji-guard-cli enji-guard auth import-bearer --stdin

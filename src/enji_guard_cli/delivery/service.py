@@ -11,7 +11,11 @@ from enji_guard_cli.runtime_observability.supervisor import (
     RuntimeServiceOptions,
     run_service,
 )
-from enji_guard_cli.service_composition import runtime_auth_service
+from enji_guard_cli.service_composition import (
+    ServiceCredentialConfigurationError,
+    api_key_auth_configured,
+    runtime_auth_service,
+)
 from enji_guard_cli.settings import DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT, DEFAULT_MCP_TRANSPORT, default_settings
 
 MCP_EXTRA_REQUIRED = "MCP_EXTRA_REQUIRED"
@@ -75,6 +79,21 @@ def run(
 
     def server_factory(host: str, port: int) -> object:
         return create_mcp_server(host, port, auth_file=auth_file)
+
+    try:
+        api_key_mode = api_key_auth_configured()
+    except ServiceCredentialConfigurationError as exc:
+        typer.echo(f"{exc.code}: {exc.message}", err=True)
+        raise typer.Exit(2) from None
+
+    if api_key_mode:
+        run_service(
+            options=options,
+            mcp_server_factory=server_factory,
+            mcp_server_runner=run_mcp_server_async,
+            settings=default_settings(),
+        )
+        return
 
     with runtime_auth_service(auth_file) as runtime_auth:
         run_service(

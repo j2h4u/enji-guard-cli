@@ -83,6 +83,21 @@ def _audit(selector: str, title: str) -> AuditCatalogAction:
     )
 
 
+def test_api_key_misconfiguration_uses_json_error_contract() -> None:
+    result = CliRunner().invoke(
+        app,
+        ["project", "list", "--json"],
+        env={"ENJI_GUARD_API_KEY": "configured", "ENJI_GUARD_API_KEY_FILE": "/tmp/key"},
+    )
+
+    assert result.exit_code == 1
+    assert json.loads(result.stderr) == {
+        "code": "API_KEY_CONFIG_CONFLICT",
+        "message": "configure only one of ENJI_GUARD_API_KEY and ENJI_GUARD_API_KEY_FILE",
+    }
+    assert "Traceback" not in result.stderr
+
+
 SECURITY_ONLY = _catalog(_audit("security", "Security"))
 
 GITLAB_PROJECTS_RESULT = GitLabProjectsResult(

@@ -302,3 +302,20 @@ agents can orient quickly before making changes.
   request delivers `CancelledError` to the awaiter promptly while the in-flight
   socket runs to its timeout. Shutdown can therefore be delayed by up to one
   request timeout.
+## Credential-neutral gateway boundary
+
+The Enji gateway consumes only `RequestCredentials`: an API base URL, request
+headers, and a non-secret credential-kind label. It must not know the durable
+cookie schema, refresh journal, auth-file format, or API-key source. Adapters
+own those details and project them into the same request model.
+
+The package-first API-key adapter accepts exactly one of `ENJI_GUARD_API_KEY`
+and `ENJI_GUARD_API_KEY_FILE`, validates it without logging or representing the
+secret, and sends `Authorization: Bearer`. It does not add browser `Origin`
+headers and never writes credential state. Consequently API-key CLI calls need
+no daemon, and API-key MCP runs without cookie refresh or cached backend
+readiness. The stored-cookie adapter remains only until Enji ships keys; the
+roadmap cutover still deletes that implementation rather than preserving it as
+a fallback. Service health follows ownership: API-key MCP checks its listener,
+while temporary cookie mode additionally checks the supervisor-owned cached
+backend readiness state.
