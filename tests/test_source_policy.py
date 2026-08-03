@@ -46,8 +46,10 @@ PRODUCT_SOURCE_ROOTS = (
     ROOT / "src" / "enji_guard_cli" / "mcp_facade.py",
 )
 BUILD_PUSH_ACTION = "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
+INSTALL_ACTION = "taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf"
 SETUP_UV_ACTION = "astral-sh/setup-uv@"
 TRIVY_ACTION = "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25"
+UPLOAD_ARTIFACT_ACTION = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
 PYTHON_UV_ACTION = ROOT / ".github" / "actions" / "setup-python-uv" / "action.yml"
 PYTHON_VERSION = "3.14"
 UV_VERSION = "0.11.33"
@@ -185,18 +187,16 @@ def test_package_artifact_gate_is_independent_from_docker_and_required_in_ci() -
     assert "package-artifact:" in ci
     assert "just package-build dist" in ci
     assert "scripts.package_contract dist" in ci
-    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in ci
+    assert UPLOAD_ARTIFACT_ACTION in ci
     assert "package-artifact:${{ needs.package-artifact.result }}" in ci
 
 
 def test_package_artifact_installs_pinned_just_before_using_the_recipe() -> None:
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     job = ci.split("\n  package-artifact:", 1)[1].split("\n  docker-build:", 1)[0]
-    installer = "taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9"
-
-    assert installer in job
+    assert INSTALL_ACTION in job
     assert "tool: just" in job
-    assert job.index(installer) < job.index("just package-build dist")
+    assert job.index(INSTALL_ACTION) < job.index("just package-build dist")
 
 
 def test_tach_external_check_excludes_only_the_optional_mcp_adapter() -> None:
