@@ -1,4 +1,26 @@
-"""Single-owner, one-shot coordination for cookie refresh rotation."""
+"""Single-owner execution boundary for one-shot cookie refresh rotation.
+
+The coordinator turns the pure state machine's effects into storage and
+network operations.  The boundary deliberately enforces these invariants:
+
+* The ``REQUESTED`` journal is durable before the one-time refresh POST begins.
+  No exception after that point authorizes an automatic replay.
+* Only the coordinator dispatches refresh.  Status, readiness, gateway, and MCP
+  paths are observers and cannot mutate or reconcile rotation state.
+* Local failures before dispatch are narrowly retryable.  Failures after a
+  successful exchange retain the successor in memory for later compare-and-swap
+  projection instead of discarding it or sending another POST.
+* Journal and credential writes are serialized by the process lock plus the
+  auth-file lock.  A newer imported revision always wins over stale work.
+* Terminal outcome telemetry uses a durable, idempotency-keyed outbox and is at
+  least once.  Diagnostic telemetry is best effort and must never control auth.
+* Credentials, cookie values, paths, and unbounded upstream bodies never enter
+  terminal outcome events.
+
+This is intentionally Enji-specific coordination, not a generic retry engine.
+The reusable artifact is the invariant set and state-machine shape; transport,
+storage, and protocol rejection rules remain adapters around this boundary.
+"""
 
 import asyncio
 import logging

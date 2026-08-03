@@ -244,6 +244,16 @@ agents can orient quickly before making changes.
   identifiers. Failure to emit that diagnostic event never blocks credential
   progress. A failed terminal-outcome delivery remains eligible for later
   reconciliation, and invariant/storage failures remain visible and unready.
+
+  The concise executable invariant reference lives beside the implementation:
+  [`state_machine.py`](../src/enji_guard_cli/auth_session/state_machine.py)
+  defines legal state evolution,
+  [`coordinator.py`](../src/enji_guard_cli/auth_session/coordinator.py) defines
+  the side-effect boundary, and
+  [`auto_refresh.py`](../src/enji_guard_cli/auth_session/auto_refresh.py) defines
+  scheduling and bounded recovery policy. Changes to cookie refresh must keep
+  those three contracts and their tests aligned; this decision records the
+  rationale rather than a second, competing implementation contract.
 - **Supply-chain conservatism**: new Python packages stay quarantined for
   7 to 14 days unless an owner approves earlier adoption; lifecycle and
   install scripts are disabled by default or explicitly allowlisted;
