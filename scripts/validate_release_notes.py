@@ -110,10 +110,14 @@ def validate_release_notes(body: str, commit_count: int, require_above: int) -> 
     if block is None:
         if commit_count > require_above:
             return False, [
-                f"This PR squashes {commit_count} commits into one, so its title cannot describe all of them "
-                f"and the changelog would render a single line.",
-                f"Add a {BEGIN_MARKER} / {END_MARKER} block to the PR description listing what shipped, "
-                "one Conventional Commit message per entry, separated by blank lines.",
+                (
+                    f"This PR squashes {commit_count} commits into one, so its title cannot describe all of them "
+                    "and the changelog would render a single line."
+                ),
+                (
+                    f"Add a {BEGIN_MARKER} / {END_MARKER} block to the PR description listing what shipped, "
+                    "one Conventional Commit message per entry, separated by blank lines."
+                ),
             ]
         return True, [f"No override block, and none owed for {commit_count} commit(s)."]
 

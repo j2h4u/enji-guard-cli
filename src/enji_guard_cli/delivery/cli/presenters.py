@@ -65,8 +65,10 @@ def repository_status_text(payload: tuple[RepositoryStatusView, ...]) -> str:
             (
                 f"repository: {repository_label(status.repository)}",
                 f"current_head: {summary.current_head_sha or '-'}",
-                f"audits: total={len(summary.items)} ready={len(summary.readable)} "
-                f"active={len(summary.active)} stale={len(summary.stale)} failed={len(summary.failed)}",
+                (
+                    f"audits: total={len(summary.items)} ready={len(summary.readable)} "
+                    f"active={len(summary.active)} stale={len(summary.stale)} failed={len(summary.failed)}"
+                ),
             )
         )
         for item in summary.items:
