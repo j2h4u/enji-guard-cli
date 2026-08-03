@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.4.1](https://github.com/j2h4u/enji-guard-cli/compare/v3.4.0...v3.4.1) (2026-08-03)
+
+
+### Fixes
+
+* **lint:** adopt Ruff 0.16 rules ([5b663ab](https://github.com/j2h4u/enji-guard-cli/commit/5b663abaf02f818ed21f6ee8647f50dba5d6f65d))
+
+
+### Build
+
+* **deps-dev:** bump ruff from 0.15.22 to 0.16.0 ([5b663ab](https://github.com/j2h4u/enji-guard-cli/commit/5b663abaf02f818ed21f6ee8647f50dba5d6f65d))
+* **deps:** bump the github-actions group with 5 updates ([b2e16f4](https://github.com/j2h4u/enji-guard-cli/commit/b2e16f4ebec74f61e8d2c6ef2942ef0b2c869191))
+
+
+### Tests
+
+* **ci:** track updated action pins ([b2e16f4](https://github.com/j2h4u/enji-guard-cli/commit/b2e16f4ebec74f61e8d2c6ef2942ef0b2c869191))
+
 ## [3.4.0](https://github.com/j2h4u/enji-guard-cli/compare/v3.3.1...v3.4.0) (2026-08-03)
 
 
