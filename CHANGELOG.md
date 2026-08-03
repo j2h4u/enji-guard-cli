@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.4.0](https://github.com/j2h4u/enji-guard-cli/compare/v3.3.1...v3.4.0) (2026-08-03)
+
+
+### Features
+
+* **auth:** prepare package-first API key access ([#252](https://github.com/j2h4u/enji-guard-cli/issues/252)) ([0b55dbc](https://github.com/j2h4u/enji-guard-cli/commit/0b55dbce3d3578fd39c1ca22cbac128aa544a2fe))
+
+
+### Documentation
+
+* **auth:** codify refresh safety invariants ([#254](https://github.com/j2h4u/enji-guard-cli/issues/254)) ([0343cf3](https://github.com/j2h4u/enji-guard-cli/commit/0343cf39ee81622a533dbe3566ec724833e6c7e0))
+
 ## [3.3.1](https://github.com/j2h4u/enji-guard-cli/compare/v3.3.0...v3.3.1) (2026-07-31)
 
 
