@@ -1,3 +1,28 @@
+"""Long-lived policy loop for refresh scheduling and bounded recovery.
+
+The loop owns *when* refresh and recovery work is attempted; it does not own
+the one-shot protocol itself.  Its safety contract is:
+
+* A credential revision is scheduled from the access token's own expiry, not
+  from an assumed cookie lifetime or a fixed refresh cadence.
+* Pre-dispatch local failures may use bounded backoff.  Once dispatch begins,
+  neither generic retry machinery nor the loop may replay that revision.
+* A successfully rotated successor that cannot be written is authoritative in
+  memory for this process and is repeatedly projected to disk without another
+  refresh POST.  Any disk failure class follows this same path.
+* ``OutcomeUnknown`` is adjudicated only through a non-consuming authenticated
+  read, only while the old access token's evidence window remains open.  A live
+  probe is a documented recovery bet, not proof that rotation did not occur.
+* Adjudication happens before the normal polling sleep; a cleared ambiguity
+  still waits one bounded interval before another dispatch to avoid a tight
+  POST/read loop during backend recovery.
+* Credential revision changes wake the loop promptly.  Monotonic polling remains
+  the correctness fallback when filesystem notifications are absent.
+
+These rules are temporary cookie-auth policy.  API-key credentials bypass this
+loop entirely.
+"""
+
 import asyncio
 import logging
 import secrets

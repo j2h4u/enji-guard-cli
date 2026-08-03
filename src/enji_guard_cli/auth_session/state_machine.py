@@ -1,8 +1,29 @@
-"""Closed domain model for a single cookie-refresh revision.
+"""Closed domain model for one cookie-refresh credential generation.
+
+This module is the executable contract for refresh safety.  Its invariants are:
+
+* :func:`transition` is pure and total: it performs no I/O, reads no clock, and
+  returns declarative effects for the coordinator to execute.
+* A credential revision identifies one refresh-token generation.  Importing
+  credentials always creates a new revision, even when the bytes are identical.
+* ``Reserved`` means no request was dispatched and is therefore recoverable.
+  ``Requested`` means dispatch began and must never lead to another automatic
+  dispatch for that revision.
+* Only a protocol-confirmed invalid refresh token becomes ``Rejected``.  Any
+  transport failure, cancellation, proxy-shaped response, malformed response,
+  or post-dispatch uncertainty becomes ``OutcomeUnknown``.
+* ``Rotated`` retains the complete successor until it is durably projected.
+  The source revision may be replaced only with compare-and-swap semantics.
+* ``Rejected`` and ``OutcomeUnknown`` do not mean that the access credential is
+  already unusable.  They stop rotation of that revision while observers may
+  continue using it until ordinary authentication fails.
+* Recovery and observation never hide a terminal outcome.  Durable outbox
+  delivery is separate from rotation progress and may be repeated by event key.
 
 The journal parser deliberately lives in :mod:`store`.  This module accepts
 only already-validated domain values, so malformed files can never become a
-state-machine input by accident.
+state-machine input by accident.  Backend-specific adjudication of an unknown
+outcome belongs to the refresh loop, not to this pure model.
 """
 
 from dataclasses import dataclass, field
@@ -149,9 +170,11 @@ class Transition:
 def transition(state: RotationState, event: RotationEvent) -> Transition:
     """Apply one pure, total domain transition.
 
-    ``Requested`` never transitions back to a dispatching state.  That is the
-    one-time-token invariant: an uncertain POST result is terminal until an
-    explicit credential import creates a new revision.
+    Effects describe required work but do not imply it has happened.  The
+    coordinator must persist the returned state before executing a dispatch
+    effect.  ``Requested`` never transitions back to a dispatching state: an
+    uncertain POST result is parked until import supersedes the revision or the
+    refresh loop explicitly adjudicates the still-live source credential.
     """
 
     match state:
