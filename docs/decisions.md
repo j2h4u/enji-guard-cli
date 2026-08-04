@@ -117,111 +117,42 @@ agents can orient quickly before making changes.
   refresh, replay, nor mutate credentials. Standalone CLI requests have no
   in-request recovery, and there is no manual refresh command.
 
-  Credential storage is v2. Every import creates a new opaque revision,
-  including byte-identical data. The private v2 journal has exactly five states:
-  `RESERVED` (not dispatched), `REQUESTED` (dispatch began), `ROTATED`
-  (replacement captured), `REJECTED` (protocol-confirmed rejection), and
-  `OUTCOME_UNKNOWN` (the one-time request may have been consumed). `READY` is
-  implicit: a valid credential with no applicable journal. Startup reconciles a
-  matching `RESERVED` safely, recovers `ROTATED`, and durably converts an
-  abandoned `REQUESTED` to `OUTCOME_UNKNOWN` before ordinary readiness starts.
-  `REJECTED` is terminal for refresh automation: it remains visible and requires
-  an operator to import a fresh browser credential, which supersedes the old
-  revision and clears its journal. Terminal refresh state is not local logout:
-  gateway requests, `auth status`, health/readiness, and MCP may continue using
-  the stored access cookie while `GET /api/v1/auth/me` still accepts it. Public
-  status surfaces that as authenticated access plus a degraded `refresh_state`
-  and `reauth_required`, so operators see the upcoming browser-import need
-  without the CLI pretending the session is already unusable. No automatic POST
-  follows `REQUESTED`; a
-  failure after dispatch, malformed response, cancellation, timeout, transport
-  failure, or 429/5xx is conservatively unknown. Transport retries do not cover
-  cookie refresh.
+  Credential storage remains v2; the refresh journal is v3. Every import
+  creates a new opaque revision, including byte-identical data. The journal
+  stores one bounded recovery record: source revision, phase, live process
+  owner identity, attempt lane and counters, absolute deadline, durable
+  not-before time, total dispatch cap, normalized response class, and stop
+  reason. A valid v2 terminal journal migrates conservatively. A v2 in-flight
+  request has no crash-safe owner evidence, so migration parks it as an
+  exhausted unknown outcome and never replays it.
 
-  `OUTCOME_UNKNOWN` is not terminal but unadjudicated, and **the refresh loop
-  is what adjudicates it**. Parked on an ambiguous generation, the loop asks the
-  backend what the refresh actually did: a `GET /api/v1/auth/me` carrying the
-  credential already on disk. The refresh token is not withheld — it rides the
-  stored `Cookie` header like every other cookie. What makes the probe safe is
-  the *endpoint*: a read that does not consume refresh tokens.
+  Before a refresh POST, the coordinator durably records REQUESTED together
+  with the current host boot identity, PID, and process start identity. A
+  concurrent process observes a live owner and waits for the credential
+  revision to change; it does not dispatch. Startup changes REQUESTED to an
+  unknown outcome only after proving that owner is no longer alive. This is a
+  single-POSIX-host contract based on flock, procfs process identity,
+  same-filesystem atomic replace, and fsync; multi-host and network filesystems
+  are unsupported.
 
-  Deciding whether to clear the renewal journal still belongs inside the loop.
-  An earlier design put adjudication in the readiness probe, which both broke
-  the observer rule above and silently did nothing: clearing the journal does
-  not change the credential revision, the loop waits on that revision, and the
-  credential watcher is filtered to the auth file alone. Readiness may report
-  ready while renewal is degraded, but it must not mutate credential state or
-  pretend that readiness cleared the refresh loop's parked generation. The loop
-  needs no waking, because the task that must act is the one deciding.
+  Responses are classified only from the public HTTP contract. A complete 200
+  successor rotates credentials. Recognized structured envelopes may select a
+  bounded validation lane or a terminal rejection. Empty, HTML, malformed, or
+  unrecognized 401, 403, 429, and 5xx responses remain ambiguous because status
+  alone cannot prove whether the one-time request was consumed. Observer reads
+  never clear ambiguity or restore a dispatch budget.
 
-  A `401`/`403` returned by `POST /api/v1/auth/refresh` is not enough, by
-  itself, to prove refresh-token rejection. The CLI talks to a public endpoint
-  behind reverse proxies and deployment machinery, so a hop-level, HTML, empty,
-  malformed, or otherwise proxy-shaped auth failure is ambiguous after
-  dispatch. Such responses become `OUTCOME_UNKNOWN` and use the same bounded
-  adjudication path as timeouts and 5xx. `REJECTED` is reserved for an
-  Enji-protocol rejection: either the structured `AUTH_INVALID` envelope or the
-  live refresh endpoint's JSON `{"error":"invalid refresh token"}` response.
-  Those park the refresh loop for an import and must not be retried
-  automatically. HTML, empty, and unrecognized JSON auth failures remain
-  ambiguous. Adjudication is never attempted with a credential that is not
-  still usable, and readiness remains observer-only: it checks ordinary access
-  and surfaces renewal degradation, but it does not adjudicate or refresh.
-
-  **A `200` is weaker evidence than it looks, and the design depends on knowing
-  that.** `/api/v1/auth/me` authenticates the `access_token` JWT, which stays
-  valid until its own expiry whether or not the refresh token was consumed — and
-  refresh is scheduled `auto_refresh.lead_seconds` (480s by default) *before*
-  that expiry,
-  so the probe runs while the old JWT is still good in both worlds. `200`
-  therefore means "the access token still works", not "the rotation never
-  landed". No endpoint can prove the latter; only spending the refresh token
-  can.
-
-  So clearing the journal on `200` is not proof, it is a bounded bet. If the
-  rotation did land, the cleared journal lets the next scheduled refresh re-send
-  a consumed token — the very replay `REQUESTED` exists to prevent, deferred by
-  one hop. That is accepted here because the downside is already spent: if the
-  rotation landed and its successor was lost, the session is unrecoverable
-  regardless, so a rejected replay costs nothing that was not already gone. The
-  bet pays in the common case — a gateway `502` during a backend redeploy never
-  reached the app, so nothing rotated and the service heals itself.
-
-  Clearing enqueues an `adjudicated_alive` outbox record beside the standing
-  `outcome_unknown` one. The failure record is deliberately not retracted: the
-  ambiguity really happened. Without the resolution record telemetry would show
-  a rotation that failed and never show it recovering, which reads as an outage
-  nobody fixed. `adjudicated_alive` is an outbox-only outcome — no journal state
-  carries it, so a journal claiming it is corrupt.
-
-  This rests on one backend coupling, pinned by tests for incident recovery and
-  dead-source behavior: a consumed refresh token must eventually draw the
-  Enji-protocol `AUTH_INVALID` rejection, which lands in `REJECTED` and asks for
-  an import exactly once. Proxy-shaped 401/403 responses do not qualify. If the
-  backend instead answered only ambiguous failures for a consumed token,
-  adjudication could oscillate (clear → refresh → `OUTCOME_UNKNOWN` → probe
-  `200` → clear) until the access-token deadline closes.
-
-  **Adjudication is therefore bounded by the access token's own expiry.** Past
-  it the probe can only return `401` whether or not the rotation landed, so
-  continuing would invent a verdict and probe forever. The window closes, the
-  loop stays parked, and a human is asked once. The oscillation cannot outlive
-  that deadline, and it costs no state beyond the credential itself: the
-  deadline is data already in the credential, read by
-  `cookie_access_expires_at`. An expiry that cannot be read is not a window
-  that can be proven open, so it closes too.
-
-  That deadline makes timer placement part of the invariant. The refresh loop
-  must attempt adjudication immediately after it parks on `OUTCOME_UNKNOWN`,
-  before any polling sleep, and the polling interval must be shorter than the
-  refresh lead window. Otherwise a refresh attempted `lead_seconds` before JWT
-  expiry can sleep away the entire evidence window and ask for a browser import
-  even when `/api/v1/auth/me` would have shown that the held credential was
-  still usable. A successful `200` adjudication also waits one bounded
-  adjudication polling interval before redispatching refresh, unless a
-  credential revision change wakes it first. That keeps backend-recovery probes
-  timely without turning a still-unhealthy refresh endpoint into a tight
-  `POST /auth/refresh` → `GET /auth/me` loop.
+  Recovery is journal-driven rather than a generic retry policy. Each lane has
+  a bounded count and durable cooldown, while one absolute deadline and one
+  total dispatch cap apply across every process and restart. Calls before the
+  not-before time report recovery pending without POSTing. Exhaustion is
+  persisted immediately and requires a fresh credential import. While a lane
+  remains scheduled, public status reports recovering with
+  `reauth_required=false`; a rejected or exhausted generation reports
+  `reauth_required=true`. Access authentication remains a separate projection
+  and may continue while renewal is degraded.
+  These counts, delays, and caps are protocol safety invariants, not deployment
+  tuning knobs; they are intentionally absent from environment configuration.
 
   Ownership here is pinned by `tests/test_side_effect_ownership.py`, not by
   `tach`: `tach` governs imports, and mutating credential state is a call.

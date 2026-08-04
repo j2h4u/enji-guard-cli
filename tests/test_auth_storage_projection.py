@@ -1,6 +1,7 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -49,6 +50,7 @@ from enji_guard_cli.auth_session.store import (
     OutcomeOutboxCorrupt,
     OutcomeOutboxLoaded,
     OutcomeOutboxRecord,
+    RotationAttempt,
     StoredAuth,
     acknowledge_outcome,
     cas_replace_cookie,
@@ -174,7 +176,7 @@ def test_typed_loaders_classify_invalid_utf8_without_exposing_file_contents(
         OutcomeUnknown("source-revision", "timeout"),
     ],
 )
-def test_journal_round_trips_only_valid_v2_state_combinations(tmp_path: Path, state: RotationState) -> None:
+def test_journal_round_trips_only_valid_v3_state_combinations(tmp_path: Path, state: RotationState) -> None:
     auth_path = tmp_path / "auth.json"
     write_journal(auth_path, state)
 
@@ -205,6 +207,44 @@ def test_journal_rejects_impossible_schema_combinations(tmp_path: Path, override
         "outcome": None,
         "event_key": None,
     }
+    payload.update(override)
+    pending_rotation_path(auth_path).write_text(json.dumps(payload), encoding="utf-8")
+
+    assert isinstance(load_journal(auth_path), JournalCorrupt)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"dispatch_count": True},
+        {"total_dispatch_cap": 7},
+        {"safe_retry_count": 5},
+        {"continuation": "stop"},
+        {"next_attempt_at": None},
+        {"recovery_deadline": None},
+        {"stop_reason": "not-stopped"},
+        {"owner_pid": 123},
+    ],
+)
+def test_v3_journal_rejects_each_single_field_aggregate_corruption(tmp_path: Path, override: dict[str, object]) -> None:
+    auth_path = tmp_path / "auth.json"
+    attempt = RotationAttempt(
+        "source-revision",
+        "normal",
+        1,
+        recovery_deadline="2026-08-04T12:10:00+00:00",
+        continuation="ambiguity_replay",
+        next_attempt_at="2026-08-04T12:00:30+00:00",
+    )
+    write_journal(auth_path, OutcomeUnknown("source-revision", "ambiguous response"), attempt=attempt)
+    baseline = load_journal(auth_path)
+    assert isinstance(baseline, JournalLoaded)
+    decoded = cast(object, json.loads(pending_rotation_path(auth_path).read_text(encoding="utf-8")))
+    assert isinstance(decoded, dict)
+    payload: dict[str, object] = {}
+    for key, value in decoded.items():
+        assert isinstance(key, str)
+        payload[key] = value
     payload.update(override)
     pending_rotation_path(auth_path).write_text(json.dumps(payload), encoding="utf-8")
 

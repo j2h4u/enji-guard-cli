@@ -44,15 +44,12 @@ SOCKET_OWNERS = frozenset({"delivery/cli/app.py"})
 # Advancing durable credential state.  `decisions.md` gives this to the
 # supervisor alone: gateway, status, readiness and MCP are observers, and an
 # observer that mutates is the defect this list exists to catch.  It really
-# happened -- adjudication was first built into the readiness probe, which both
-# broke the rule and did not work, because the task that had to act was the
-# refresh loop and nothing woke it.  `store.py` is excluded: it is the
+# `store.py` is excluded: it is the
 # primitive these owners are built from, not a caller.
 CREDENTIAL_STATE_MUTATORS = frozenset({"auth_session/api.py", "auth_session/coordinator.py"})
 
 _MUTATING_NAMES = frozenset(
     {
-        "adjudicate_source_revision_alive",
         "cas_replace_cookie",
         "delete_journal",
         "enqueue_outcome",
@@ -141,8 +138,6 @@ def test_only_declared_modules_open_sockets() -> None:
 
 
 def test_only_declared_modules_advance_credential_state() -> None:
-    # Referencing, not calling: `asyncio.to_thread(adjudicate_..., ...)` passes
-    # the mutator as a value, and a call-only check would wave that through.
     _assert_exact(
         "credential state mutation",
         _owners(lambda tree: bool(_MUTATING_NAMES & _referenced_names(tree))) - {"auth_session/store.py"},

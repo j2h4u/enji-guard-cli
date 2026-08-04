@@ -10,12 +10,8 @@ the one-shot protocol itself.  Its safety contract is:
 * A successfully rotated successor that cannot be written is authoritative in
   memory for this process and is repeatedly projected to disk without another
   refresh POST.  Any disk failure class follows this same path.
-* ``OutcomeUnknown`` is adjudicated only through a non-consuming authenticated
-  read, only while the old access token's evidence window remains open.  A live
-  probe is a documented recovery bet, not proof that rotation did not occur.
-* Adjudication happens before the normal polling sleep; a cleared ambiguity
-  still waits one bounded interval before another dispatch to avoid a tight
-  POST/read loop during backend recovery.
+* ``OutcomeUnknown`` recovery is driven only by its durable lane, deadline,
+  cooldown, and total dispatch cap. Observer reads never restore a budget.
 * Credential revision changes wake the loop promptly.  Monotonic polling remains
   the correctness fallback when filesystem notifications are absent.
 
@@ -37,6 +33,7 @@ from typing import Protocol
 from enji_guard_cli.auth_session.coordinator import (
     PostDispatchPersistenceError,
     PreDispatchLocalError,
+    RecoveryRequiredError,
     RefreshCoordinator,
     RetainedRefreshSuccessor,
     RetainedSuccessorProjected,
@@ -78,9 +75,6 @@ class AutoRefreshSettingsLike(Protocol):
     def fallback_seconds(self) -> int: ...
 
     @property
-    def adjudication_poll_seconds(self) -> int: ...
-
-    @property
     def revision_poll_seconds(self) -> float: ...
 
     @property
@@ -113,7 +107,6 @@ class AutoRefreshLoopDependencies:
     load_auth_fn: Callable[[Path], AuthLoadResult]
     cookie_refresh_sleep_seconds_fn: Callable[..., int]
     refresh_cookie_auth_fn: Callable[[Path, StoredAuth, object], Awaitable[StoredAuth]]
-    adjudicate_unknown_outcome_fn: Callable[[Path, object], Awaitable[bool]]
     log_event_fn: Callable[..., None]
     logger: logging.Logger
     client_factory: Callable[[], AbstractAsyncContextManager[object]]
@@ -231,6 +224,16 @@ async def _auto_refresh_loop(
                     logging.WARNING,
                     "enji_auth_auto_refresh_retained_after_storage_failure",
                     {"source_revision": exc.source_revision, "error_type": type(exc.__cause__).__name__},
+                )
+                continue
+            except RecoveryRequiredError as exc:
+                retry_count = 0
+                await _wait_for_recovery_policy(
+                    auth_file=auth_file,
+                    source_revision=exc.source_revision,
+                    delay_seconds=exc.retry_after_seconds,
+                    refresh_settings=refresh_settings,
+                    dependencies=dependencies,
                 )
                 continue
             except TerminalRevisionRequiredError as exc:
@@ -413,43 +416,36 @@ async def _wait_until_revision_changes(
     dependencies: AutoRefreshLoopDependencies,
     client: object,
 ) -> None:
-    """Park on a terminal generation until an import or an adjudication frees it.
+    """Park a terminal renewal result until a newer local revision appears."""
 
-    A terminal outcome used to be escapable only by a credential import, which
-    changes the revision this waits on.  An ambiguous outcome now has a second
-    exit: the loop asks the backend what the refresh actually did, and resumes
-    in place if the held credential turns out to be alive.  Deciding here rather
-    than in an observer is what makes that exit work at all -- there is no other
-    task to wake, because the task that must act is this one.
-    """
-
-    if await _wait_for_credential_change(
-        auth_file=auth_file,
-        expected_revision=source_revision,
-        timeout_seconds=0,
-        poll_seconds=refresh_settings.revision_poll_seconds,
-        dependencies=dependencies,
-    ):
-        return
-    if await dependencies.adjudicate_unknown_outcome_fn(auth_file, client):
-        await _wait_for_credential_change(
-            auth_file=auth_file,
-            expected_revision=source_revision,
-            timeout_seconds=refresh_settings.adjudication_poll_seconds,
-            poll_seconds=refresh_settings.revision_poll_seconds,
-            dependencies=dependencies,
-        )
-        return
-
+    del client
     while not await _wait_for_credential_change(
         auth_file=auth_file,
         expected_revision=source_revision,
-        timeout_seconds=refresh_settings.adjudication_poll_seconds,
+        timeout_seconds=refresh_settings.fallback_seconds,
         poll_seconds=refresh_settings.revision_poll_seconds,
         dependencies=dependencies,
     ):
-        if await dependencies.adjudicate_unknown_outcome_fn(auth_file, client):
-            return
+        continue
+
+
+async def _wait_for_recovery_policy(
+    *,
+    auth_file: Path,
+    source_revision: str,
+    delay_seconds: float,
+    refresh_settings: AutoRefreshSettingsLike,
+    dependencies: AutoRefreshLoopDependencies,
+) -> None:
+    """Delay only the recovery lane chosen by the durable refresh journal."""
+
+    await _wait_for_credential_change(
+        auth_file=auth_file,
+        expected_revision=source_revision,
+        timeout_seconds=delay_seconds,
+        poll_seconds=refresh_settings.revision_poll_seconds,
+        dependencies=dependencies,
+    )
 
 
 async def _wait_for_credential_change(

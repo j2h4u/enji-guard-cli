@@ -30,6 +30,7 @@ from enji_guard_cli.auth_session.store import (
     JournalIoFailure,
     JournalLoaded,
     JournalLoadResult,
+    RotationAttempt,
     StoredAuth,
 )
 
@@ -55,6 +56,20 @@ class RotationInProgress:
 class RotationRecoveryAvailable:
     auth: StoredAuth
     state: Rotated
+
+
+@dataclass(frozen=True, slots=True)
+class RotationRecovering:
+    auth: StoredAuth
+    state: OutcomeUnknown
+    attempt: RotationAttempt
+
+
+@dataclass(frozen=True, slots=True)
+class RotationRecoveryExhausted:
+    auth: StoredAuth
+    state: OutcomeUnknown
+    attempt: RotationAttempt
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +125,8 @@ AuthProjection = (
     | RotationReserved
     | RotationInProgress
     | RotationRecoveryAvailable
+    | RotationRecovering
+    | RotationRecoveryExhausted
     | ReimportRequired
     | CredentialAbsent
     | CredentialCorrupt
@@ -183,6 +200,8 @@ def network_credential(projection: AuthProjection) -> StoredAuth:
             CredentialReady(auth=auth)
             | RotationReserved(auth=auth)
             | RotationInProgress(auth=auth)
+            | RotationRecovering(auth=auth)
+            | RotationRecoveryExhausted(auth=auth)
             | ReimportRequired(auth=auth)
         ):
             return auth
@@ -209,6 +228,12 @@ def refresh_projection_status(projection: AuthProjection) -> RefreshProjectionSt
                 False,
                 "auth rotation recovery is pending; restart the service or import a fresh browser credential",
             )
+        case RotationRecovering(state=OutcomeUnknown(reason=reason)):
+            status = RefreshProjectionStatus("recovering", False, f"refresh recovery is scheduled ({reason})")
+        case RotationRecoveryExhausted(state=OutcomeUnknown(reason=reason)):
+            status = RefreshProjectionStatus(
+                "exhausted", True, f"refresh recovery is exhausted ({reason}); import a fresh browser credential"
+            )
         case ReimportRequired(state=Rejected(reason=reason)):
             status = RefreshProjectionStatus(
                 "rejected", True, f"refresh was rejected ({reason}); import a fresh browser credential"
@@ -224,21 +249,6 @@ def refresh_projection_status(projection: AuthProjection) -> RefreshProjectionSt
     return status
 
 
-def adjudication_credential(projection: AuthProjection) -> tuple[StoredAuth, OutcomeUnknown] | None:
-    """Return the credential to probe with when a refresh outcome is unknown.
-
-    Deliberately separate from :func:`network_credential`: observers may still
-    serve ordinary access with the stored credential, but only the refresh loop
-    may try to clear an ambiguous refresh outcome.
-    """
-
-    match projection:
-        case ReimportRequired(auth=auth, state=OutcomeUnknown() as state):
-            return auth, state
-        case _:
-            return None
-
-
 def _project_loaded(auth: StoredAuth, journal_result: JournalLoadResult) -> AuthProjection:
     match journal_result:
         case JournalAbsent():
@@ -247,17 +257,25 @@ def _project_loaded(auth: StoredAuth, journal_result: JournalLoadResult) -> Auth
             return JournalCorruptProjection(detail)
         case JournalIoFailure(operation=operation, error=error):
             return JournalIoFailureProjection(operation, error)
-        case JournalLoaded(state=state):
-            return _project_rotation_state(auth, state)
+        case JournalLoaded(state=state, attempt=attempt):
+            return _project_rotation_state(auth, state, attempt)
         case _ as impossible:
             assert_never(impossible)
 
 
-def _project_rotation_state(auth: StoredAuth, state: RotationState) -> AuthProjection:
+def _project_rotation_state(auth: StoredAuth, state: RotationState, attempt: RotationAttempt | None) -> AuthProjection:
     if isinstance(state, Ready):
         return JournalImpossibleState(state)
     if state.source_revision != auth["revision"]:
         return CredentialReady(auth)
+    return _project_matching_rotation_state(auth, state, attempt)
+
+
+def _project_matching_rotation_state(
+    auth: StoredAuth,
+    state: Reserved | Requested | Rotated | Rejected | OutcomeUnknown,
+    attempt: RotationAttempt | None,
+) -> AuthProjection:
     match state:
         case Reserved():
             return RotationReserved(auth, state)
@@ -265,6 +283,10 @@ def _project_rotation_state(auth: StoredAuth, state: RotationState) -> AuthProje
             return RotationInProgress(auth, state)
         case Rotated():
             return RotationRecoveryAvailable(auth, state)
+        case OutcomeUnknown() if attempt is not None and attempt.continuation not in {None, "stop"}:
+            return RotationRecovering(auth, state, attempt)
+        case OutcomeUnknown() if attempt is not None and attempt.continuation == "stop":
+            return RotationRecoveryExhausted(auth, state, attempt)
         case Rejected() | OutcomeUnknown():
             return ReimportRequired(auth, state)
         case _ as impossible:

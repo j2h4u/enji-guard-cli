@@ -24,14 +24,15 @@ storage, and protocol rejection rules remain adapters around this boundary.
 
 import asyncio
 import logging
+import os
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from http.cookies import CookieError
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from enji_guard_cli.auth_session.auth_protocol import (
     HTTP_AUTH_FAILURE_CODES,
@@ -46,6 +47,11 @@ from enji_guard_cli.auth_session.cookies import (
 )
 from enji_guard_cli.auth_session.ports import AuthEventSink, AuthOutcomeSink
 from enji_guard_cli.auth_session.state_machine import (
+    AMBIGUITY_REPLAY_LIMIT,
+    RECOVERY_SAFETY_POLICY,
+    SAFE_RETRY_LIMIT,
+    VALIDATION_RETRY_LIMIT,
+    AuthorizeRecoveryDispatch,
     Begin,
     DispatchBegun,
     ExchangeOutcomeUnknown,
@@ -57,8 +63,6 @@ from enji_guard_cli.auth_session.state_machine import (
     Requested,
     Reserved,
     Rotated,
-    SourceRevisionAlive,
-    rotation_event_key,
     rotation_event_metadata,
     transition,
 )
@@ -78,6 +82,7 @@ from enji_guard_cli.auth_session.store import (
     OutcomeOutboxIoFailure,
     OutcomeOutboxLoaded,
     OutcomeOutboxRecord,
+    RotationAttempt,
     StorageFailpoint,
     StoredAuth,
     acknowledge_outcome,
@@ -96,8 +101,48 @@ from enji_guard_cli.transport import EnjiHttpError, EnjiHttpResponse
 
 TERMINAL_POLL_SECONDS = 0.05
 MAX_DIAGNOSTIC_HEADER_LENGTH = 256
+HTTP_BAD_GATEWAY = 502
 RefreshObservationOutcome = Literal["rotated", "rejected", "outcome_unknown"]
+RecoveryContinuation = Literal["safe_retry", "validation_recovery", "ambiguity_replay"]
+MAX_SAFE_RETRIES = SAFE_RETRY_LIMIT
+MAX_VALIDATION_RECOVERIES = VALIDATION_RETRY_LIMIT
+MAX_AMBIGUITY_REPLAYS = AMBIGUITY_REPLAY_LIMIT
+BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
+PROC_START_TICKS_INDEX = 19
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class RefreshOwner:
+    boot_id: str
+    pid: int
+    start_ticks: str
+
+
+def _process_start_ticks(pid: int) -> str | None:
+    try:
+        stat = (Path("/proc") / str(pid) / "stat").read_text(encoding="utf-8")
+    except FileNotFoundError, OSError, UnicodeDecodeError:
+        return None
+    remainder = stat.rpartition(")")[2].split()
+    return remainder[PROC_START_TICKS_INDEX] if len(remainder) > PROC_START_TICKS_INDEX else None
+
+
+def _current_owner() -> RefreshOwner:
+    boot_id = BOOT_ID_PATH.read_text(encoding="utf-8").strip()
+    pid = os.getpid()
+    start_ticks = _process_start_ticks(pid)
+    if not boot_id or start_ticks is None:
+        raise OSError("cannot establish local refresh ownership")
+    return RefreshOwner(boot_id, pid, start_ticks)
+
+
+def _owner_is_alive(owner: RefreshOwner) -> bool:
+    try:
+        boot_id = BOOT_ID_PATH.read_text(encoding="utf-8").strip()
+    except OSError, UnicodeDecodeError:
+        return True
+    return boot_id == owner.boot_id and _process_start_ticks(owner.pid) == owner.start_ticks
 
 
 class RefreshExchange(Protocol):
@@ -123,6 +168,22 @@ class TerminalRevisionRequiredError(EnjiHttpError):
     def __init__(self, source_revision: str, *, message: str) -> None:
         super().__init__("AUTH_IMPORT_REQUIRED", message)
         self.source_revision = source_revision
+
+
+class RecoveryRequiredError(EnjiHttpError):
+    """A durable, bounded recovery action remains for this source revision."""
+
+    def __init__(
+        self,
+        source_revision: str,
+        continuation: RecoveryContinuation,
+        *,
+        retry_after_seconds: float = 0.0,
+    ) -> None:
+        super().__init__("AUTH_RECOVERY_PENDING", "refresh recovery is pending")
+        self.source_revision = source_revision
+        self.continuation = continuation
+        self.retry_after_seconds = max(0.0, retry_after_seconds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +229,8 @@ class CoordinatorDependencies:
     sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep
     revision_reader: Callable[[Path], str | None] = _stored_auth_revision
     now_fn: Callable[[], datetime] = _utc_now
+    owner_fn: Callable[[], RefreshOwner] = _current_owner
+    owner_alive_fn: Callable[[RefreshOwner], bool] = _owner_is_alive
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,7 +262,7 @@ class _WaitForRevision:
 
 
 _Preparation = _Dispatch | _ReturnAuth | _WaitForRevision
-_RecoveryPreparation = _ReturnAuth | _WaitForRevision | None
+_RecoveryPreparation = _Dispatch | _ReturnAuth | _WaitForRevision | None
 
 
 class RefreshCoordinator:
@@ -229,6 +292,8 @@ class RefreshCoordinator:
         self._sleep_fn = resolved_dependencies.sleep_fn
         self._revision_reader = resolved_dependencies.revision_reader
         self._now_fn = resolved_dependencies.now_fn
+        self._owner_fn = resolved_dependencies.owner_fn
+        self._owner_alive_fn = resolved_dependencies.owner_alive_fn
         self._lock = asyncio.Lock()
 
     async def refresh(self, expected: StoredAuth | None = None) -> StoredAuth:
@@ -254,7 +319,7 @@ class RefreshCoordinator:
                 self._emit_refresh_observation(auth, None, None, outcome="outcome_unknown")
                 await asyncio.to_thread(self._commit_unknown, auth["revision"], "refresh task cancelled")
             except EnjiHttpError as exc:
-                if exc.code != "AUTH_IMPORT_REQUIRED":
+                if exc.code not in {"AUTH_IMPORT_REQUIRED", "AUTH_RECOVERY_PENDING"}:
                     raise
             raise
         except EnjiHttpError as exc:
@@ -263,6 +328,7 @@ class RefreshCoordinator:
                 self._commit_unknown,
                 auth["revision"],
                 f"transport failure: {exc.code}",
+                continuation="ambiguity_replay",
             )
         except (OSError, TimeoutError) as exc:
             self._emit_refresh_observation(auth, None, None, outcome="outcome_unknown")
@@ -270,6 +336,7 @@ class RefreshCoordinator:
                 self._commit_unknown,
                 auth["revision"],
                 f"transport failure: {type(exc).__name__}",
+                continuation="ambiguity_replay",
             )
         try:
             return await asyncio.to_thread(self._commit_response, auth, response)
@@ -318,13 +385,15 @@ class RefreshCoordinator:
             if expected is not None and current["revision"] != expected["revision"]:
                 return _ReturnAuth(current)
 
-            reserved = transition(Ready(current["revision"]), Begin(current["revision"])).state
-            assert isinstance(reserved, Reserved)
-            write_journal(self._auth_path, reserved, failpoint=self._storage_failpoint)
-            requested_transition = transition(reserved, DispatchBegun())
-            assert isinstance(requested_transition.state, Requested)
-            write_journal(self._auth_path, requested_transition.state, failpoint=self._storage_failpoint)
-            return _Dispatch(current)
+            return self._prepare_dispatch(
+                current,
+                RotationAttempt(
+                    current["revision"],
+                    "normal",
+                    1,
+                    recovery_deadline=self._recovery_deadline(),
+                ),
+            )
 
     def _recover_or_wait(self, current: StoredAuth) -> _RecoveryPreparation:
         journal = load_journal(self._auth_path)
@@ -334,29 +403,56 @@ class RefreshCoordinator:
             return None
         state = journal.state
         outbox_enqueued = journal.outbox_enqueued
+        attempt = journal.attempt
+        if attempt is None:
+            raise EnjiHttpError("STORAGE", "refresh journal is missing its recovery budget")
         if isinstance(state, Ready):
             raise EnjiHttpError("STORAGE", "refresh journal contains an invalid ready state")
         if isinstance(state, Rotated) and state.successor_revision == current["revision"]:
-            self._record_terminal_outcome(state, outbox_enqueued=outbox_enqueued)
+            self._record_terminal_outcome(state, outbox_enqueued=outbox_enqueued, attempt=attempt)
             return _ReturnAuth(current)
         if state.source_revision != current["revision"]:
             self._discard_rotation_state(state, outbox_enqueued=outbox_enqueued)
             return None
-        return self._recover_matching_state(state, outbox_enqueued=outbox_enqueued)
+        return self._recover_matching_state(current, state, attempt=attempt, outbox_enqueued=outbox_enqueued)
 
     def _recover_matching_state(
-        self, state: Rotated | Reserved | Requested | Rejected | OutcomeUnknown, *, outbox_enqueued: bool
+        self,
+        current: StoredAuth,
+        state: Rotated | Reserved | Requested | Rejected | OutcomeUnknown,
+        *,
+        attempt: RotationAttempt,
+        outbox_enqueued: bool,
     ) -> _RecoveryPreparation:
-        if isinstance(state, Rotated):
-            return self._recover_rotated(state, outbox_enqueued=outbox_enqueued)
-        if isinstance(state, Reserved):
-            delete_journal(self._auth_path, failpoint=self._storage_failpoint)
-            return None
-        if isinstance(state, (Rejected, OutcomeUnknown)):
-            self._record_terminal_outcome(state, outbox_enqueued=outbox_enqueued)
-        return _WaitForRevision(state.source_revision)
+        match state:
+            case Rotated():
+                return self._recover_rotated(state, attempt=attempt, outbox_enqueued=outbox_enqueued)
+            case Reserved():
+                delete_journal(self._auth_path, failpoint=self._storage_failpoint)
+                return None
+            case Requested():
+                return self._recover_requested(current, state, attempt)
+            case OutcomeUnknown():
+                self._record_terminal_outcome(state, attempt=attempt, outbox_enqueued=outbox_enqueued)
+                return self._recover_unknown(current, state, attempt)
+            case Rejected():
+                self._record_terminal_outcome(state, attempt=attempt, outbox_enqueued=outbox_enqueued)
+                return _WaitForRevision(state.source_revision)
 
-    def _recover_rotated(self, state: Rotated, *, outbox_enqueued: bool) -> _ReturnAuth:
+    def _recover_requested(
+        self, current: StoredAuth, state: Requested, attempt: RotationAttempt
+    ) -> _RecoveryPreparation:
+        owner = _attempt_owner(attempt)
+        if owner is not None and self._owner_alive_fn(owner):
+            return _WaitForRevision(state.source_revision)
+        unknown = transition(state, ExchangeOutcomeUnknown("interrupted after refresh dispatch")).state
+        assert isinstance(unknown, OutcomeUnknown)
+        unknown_attempt = _with_continuation(attempt, "ambiguity_replay", self._recovery_deadline(), now=self._now_fn())
+        write_journal(self._auth_path, unknown, attempt=unknown_attempt, failpoint=self._storage_failpoint)
+        self._record_terminal_outcome(unknown, attempt=unknown_attempt, outbox_enqueued=False)
+        return self._recover_unknown(current, unknown, unknown_attempt)
+
+    def _recover_rotated(self, state: Rotated, *, attempt: RotationAttempt, outbox_enqueued: bool) -> _ReturnAuth:
         recovered = cas_replace_cookie(
             self._auth_path,
             state.source_revision,
@@ -365,20 +461,153 @@ class RefreshCoordinator:
             failpoint=self._storage_failpoint,
         )
         if isinstance(recovered, CasWritten):
-            self._record_terminal_outcome(state, outbox_enqueued=outbox_enqueued)
+            self._record_terminal_outcome(state, attempt=attempt, outbox_enqueued=outbox_enqueued)
             return _ReturnAuth(recovered.auth)
         assert isinstance(recovered, CasSuperseded)
         return _ReturnAuth(_loaded_or_raise(load_auth(self._auth_path)))
+
+    def _prepare_dispatch(
+        self,
+        current: StoredAuth,
+        attempt: RotationAttempt,
+        *,
+        recovery_state: OutcomeUnknown | None = None,
+    ) -> _Dispatch:
+        """Persist the next bounded dispatch before the exchange begins."""
+
+        owner = self._owner_fn()
+        owned_attempt = replace(
+            attempt,
+            continuation=None,
+            owner_boot_id=owner.boot_id,
+            owner_pid=owner.pid,
+            owner_start_ticks=owner.start_ticks,
+            next_attempt_at=None,
+            stop_reason=None,
+        )
+        authorization = (
+            transition(
+                recovery_state,
+                AuthorizeRecoveryDispatch(
+                    cast(RecoveryContinuation, attempt.attempt_kind),
+                    attempt.dispatch_count,
+                    attempt.safe_retry_count,
+                    attempt.validation_retry_count,
+                    attempt.ambiguity_replay_count,
+                    attempt.total_dispatch_cap,
+                    not _deadline_passed(attempt.recovery_deadline, self._now_fn()),
+                    _seconds_until(attempt.next_attempt_at, self._now_fn()) <= 0,
+                ),
+            )
+            if recovery_state is not None
+            else transition(Ready(current["revision"]), Begin(current["revision"]))
+        )
+        reserved = authorization.state
+        assert isinstance(reserved, Reserved)
+        write_journal(self._auth_path, reserved, attempt=owned_attempt, failpoint=self._storage_failpoint)
+        requested_transition = transition(reserved, DispatchBegun())
+        assert isinstance(requested_transition.state, Requested)
+        write_journal(
+            self._auth_path,
+            requested_transition.state,
+            attempt=owned_attempt,
+            failpoint=self._storage_failpoint,
+        )
+        return _Dispatch(current)
+
+    def _recover_unknown(
+        self, current: StoredAuth, state: OutcomeUnknown, attempt: RotationAttempt
+    ) -> _RecoveryPreparation:
+        next_attempt = self._next_recovery_attempt(attempt)
+        if next_attempt is None:
+            stopped = replace(
+                attempt,
+                continuation="stop",
+                owner_boot_id=None,
+                owner_pid=None,
+                owner_start_ticks=None,
+                stop_reason=attempt.stop_reason or "recovery-budget-exhausted",
+            )
+            write_journal(self._auth_path, state, attempt=stopped, failpoint=self._storage_failpoint)
+            return _WaitForRevision(state.source_revision)
+        retry_after = _seconds_until(next_attempt.next_attempt_at, self._now_fn())
+        if retry_after > 0:
+            pending_continuation = cast(RecoveryContinuation, next_attempt.continuation)
+            assert pending_continuation in {"safe_retry", "validation_recovery", "ambiguity_replay"}
+            raise RecoveryRequiredError(
+                state.source_revision,
+                pending_continuation,
+                retry_after_seconds=retry_after,
+            )
+        return self._prepare_dispatch(current, next_attempt, recovery_state=state)
+
+    def _next_recovery_attempt(self, attempt: RotationAttempt) -> RotationAttempt | None:
+        continuation = attempt.continuation
+        if (
+            continuation is None
+            or continuation == "stop"
+            or attempt.dispatch_count >= attempt.total_dispatch_cap
+            or _deadline_passed(attempt.recovery_deadline, self._now_fn())
+        ):
+            return None
+        if continuation == "safe_retry" and attempt.safe_retry_count < MAX_SAFE_RETRIES:
+            return RotationAttempt(
+                attempt.rotation_id,
+                "safe_retry",
+                attempt.dispatch_count + 1,
+                attempt.safe_retry_count + 1,
+                attempt.validation_retry_count,
+                attempt.ambiguity_replay_count,
+                attempt.recovery_deadline,
+                continuation,
+                next_attempt_at=attempt.next_attempt_at,
+                total_dispatch_cap=attempt.total_dispatch_cap,
+            )
+        if continuation == "validation_recovery" and attempt.validation_retry_count < MAX_VALIDATION_RECOVERIES:
+            return RotationAttempt(
+                attempt.rotation_id,
+                "validation_recovery",
+                attempt.dispatch_count + 1,
+                attempt.safe_retry_count,
+                attempt.validation_retry_count + 1,
+                attempt.ambiguity_replay_count,
+                attempt.recovery_deadline,
+                continuation,
+                next_attempt_at=attempt.next_attempt_at,
+                total_dispatch_cap=attempt.total_dispatch_cap,
+            )
+        if continuation == "ambiguity_replay" and attempt.ambiguity_replay_count < MAX_AMBIGUITY_REPLAYS:
+            return RotationAttempt(
+                attempt.rotation_id,
+                "ambiguity_replay",
+                attempt.dispatch_count + 1,
+                attempt.safe_retry_count,
+                attempt.validation_retry_count,
+                attempt.ambiguity_replay_count + 1,
+                attempt.recovery_deadline,
+                continuation,
+                next_attempt_at=attempt.next_attempt_at,
+                total_dispatch_cap=attempt.total_dispatch_cap,
+            )
+        return None
+
+    def _recovery_deadline(self) -> str:
+        return (self._now_fn() + RECOVERY_SAFETY_POLICY.recovery_window).isoformat()
 
     def _commit_response(self, source: StoredAuth, response: EnjiHttpResponse) -> StoredAuth:
         cookie_header = _successful_replacement(source, response)
         if cookie_header is not None:
             return self._commit_success(source, cookie_header, response)
-        if _is_confirmed_refresh_rejection(response):
+        continuation = _response_continuation(response)
+        if continuation == "stop":
             self._emit_refresh_observation(source, response, None, outcome="rejected")
             return self._commit_rejected(source["revision"], f"refresh rejected with HTTP {response.status_code}")
-        self._emit_refresh_observation(source, response, None, outcome="outcome_unknown")
-        return self._commit_unknown(source["revision"], f"ambiguous refresh response HTTP {response.status_code}")
+        return self._commit_unknown(
+            source["revision"],
+            f"refresh response HTTP {response.status_code}",
+            continuation=continuation,
+            observation=(source, response),
+        )
 
     def _emit_refresh_observation(
         self,
@@ -397,6 +626,24 @@ class RefreshCoordinator:
             "outcome": outcome,
             "source_revision": source["revision"],
         }
+        journal = load_journal(self._auth_path)
+        if isinstance(journal, JournalLoaded) and journal.attempt is not None:
+            attempt = journal.attempt
+            fields.update(
+                {
+                    "attempt_kind": attempt.attempt_kind,
+                    "attempt_number": attempt.dispatch_count,
+                    "dispatch_budget_remaining": max(0, attempt.total_dispatch_cap - attempt.dispatch_count),
+                }
+            )
+            if attempt.next_attempt_at is not None:
+                fields["next_attempt_at"] = attempt.next_attempt_at
+            if attempt.recovery_deadline is not None:
+                fields["recovery_deadline"] = attempt.recovery_deadline
+            if attempt.stop_reason is not None:
+                fields["stop_reason"] = attempt.stop_reason
+        if response is not None:
+            fields["response_class"] = _normalized_response_class(response)
         if successor_revision is not None:
             fields["successor_revision"] = successor_revision
         fields.update(
@@ -439,7 +686,10 @@ class RefreshCoordinator:
             with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
                 if _is_superseded(self._auth_path, source_revision):
                     return _loaded_or_raise(load_auth(self._auth_path))
-                write_journal(self._auth_path, rotated_transition.state, failpoint=self._storage_failpoint)
+                attempt = _without_owner(self._attempt_for_source(source_revision))
+                write_journal(
+                    self._auth_path, rotated_transition.state, attempt=attempt, failpoint=self._storage_failpoint
+                )
                 result = cas_replace_cookie(
                     self._auth_path,
                     source_revision,
@@ -448,7 +698,7 @@ class RefreshCoordinator:
                     failpoint=self._storage_failpoint,
                 )
                 if isinstance(result, CasWritten):
-                    self._record_terminal_outcome(rotated_transition.state, outbox_enqueued=False)
+                    self._record_terminal_outcome(rotated_transition.state, attempt=attempt, outbox_enqueued=False)
                     return result.auth
                 return _loaded_or_raise(load_auth(self._auth_path))
         except (OSError, TimeoutError) as exc:
@@ -464,12 +714,13 @@ class RefreshCoordinator:
             loaded = load_auth(self._auth_path)
             projected_auth = _projected_auth_or_none(loaded, retained_successor)
             state = _retained_rotated_state(retained_successor)
+            attempt = _without_owner(self._attempt_for_source(retained_successor.source_revision))
             if projected_auth is not None:
-                self._record_terminal_outcome(state, outbox_enqueued=False)
+                self._record_terminal_outcome(state, attempt=attempt, outbox_enqueued=False)
                 return RetainedSuccessorProjected(projected_auth)
             if not isinstance(loaded, AuthLoaded) or loaded.auth["revision"] != retained_successor.source_revision:
                 return RetainedSuccessorSuperseded(_current_revision(loaded))
-            write_journal(self._auth_path, state, failpoint=self._storage_failpoint)
+            write_journal(self._auth_path, state, attempt=attempt, failpoint=self._storage_failpoint)
             result = cas_replace_cookie(
                 self._auth_path,
                 retained_successor.source_revision,
@@ -478,7 +729,7 @@ class RefreshCoordinator:
                 failpoint=self._storage_failpoint,
             )
             if isinstance(result, CasWritten):
-                self._record_terminal_outcome(state, outbox_enqueued=False)
+                self._record_terminal_outcome(state, attempt=attempt, outbox_enqueued=False)
                 return RetainedSuccessorProjected(result.auth)
             return RetainedSuccessorSuperseded(result.current_revision)
 
@@ -487,24 +738,49 @@ class RefreshCoordinator:
             if not _is_superseded(self._auth_path, source_revision):
                 state = transition(Requested(source_revision), ExchangeRejected(reason)).state
                 assert isinstance(state, Rejected)
-                write_journal(self._auth_path, state, failpoint=self._storage_failpoint)
-                self._record_terminal_outcome(state, outbox_enqueued=False)
+                attempt = _without_owner(self._attempt_for_source(source_revision))
+                write_journal(self._auth_path, state, attempt=attempt, failpoint=self._storage_failpoint)
+                self._record_terminal_outcome(state, attempt=attempt, outbox_enqueued=False)
             else:
                 return _loaded_or_raise(load_auth(self._auth_path))
         raise TerminalRevisionRequiredError(source_revision, message="stored refresh cookie is not authenticated")
 
-    def _commit_unknown(self, source_revision: str, reason: str) -> StoredAuth:
+    def _commit_unknown(
+        self,
+        source_revision: str,
+        reason: str,
+        *,
+        continuation: RecoveryContinuation = "ambiguity_replay",
+        observation: tuple[StoredAuth, EnjiHttpResponse] | None = None,
+    ) -> StoredAuth:
         with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
             if not _is_superseded(self._auth_path, source_revision):
                 state = transition(Requested(source_revision), ExchangeOutcomeUnknown(reason)).state
                 assert isinstance(state, OutcomeUnknown)
-                write_journal(self._auth_path, state, failpoint=self._storage_failpoint)
-                self._record_terminal_outcome(state, outbox_enqueued=False)
+                attempt = _with_continuation(
+                    self._attempt_for_source(source_revision),
+                    continuation,
+                    self._recovery_deadline(),
+                    now=self._now_fn(),
+                )
+                response_class = _normalized_response_class(observation[1]) if observation is not None else None
+                attempt = replace(attempt, response_class=response_class)
+                write_journal(self._auth_path, state, attempt=attempt, failpoint=self._storage_failpoint)
+                if observation is not None:
+                    self._emit_refresh_observation(
+                        observation[0],
+                        observation[1],
+                        None,
+                        outcome="outcome_unknown",
+                    )
+                self._record_terminal_outcome(state, attempt=attempt, outbox_enqueued=False)
             else:
                 return _loaded_or_raise(load_auth(self._auth_path))
-        raise TerminalRevisionRequiredError(
-            source_revision, message="refresh outcome is unknown; import a fresh browser credential"
-        )
+        if attempt.continuation == "stop":
+            raise TerminalRevisionRequiredError(
+                source_revision, message="refresh recovery is exhausted; import a fresh browser credential"
+            )
+        raise RecoveryRequiredError(source_revision, continuation)
 
     def _recover_startup(self) -> StoredAuth | None:
         with auth_file_lock(self._auth_path, failpoint=self._storage_failpoint):
@@ -520,24 +796,33 @@ class RefreshCoordinator:
         if isinstance(journal, JournalLoaded):
             state = journal.state
             outbox_enqueued = journal.outbox_enqueued
+            attempt = journal.attempt
+            if attempt is None:
+                raise EnjiHttpError("STORAGE", "refresh journal is missing its recovery budget")
             if isinstance(state, Ready):
                 raise EnjiHttpError("STORAGE", "refresh journal contains an invalid ready state")
             if isinstance(state, Rotated) and state.successor_revision == current["revision"]:
-                self._record_terminal_outcome(state, outbox_enqueued=outbox_enqueued)
+                self._record_terminal_outcome(state, attempt=attempt, outbox_enqueued=outbox_enqueued)
             elif state.source_revision != current["revision"]:
                 self._discard_rotation_state(state, outbox_enqueued=outbox_enqueued)
             elif isinstance(state, Rotated):
-                result = self._recover_rotated(state, outbox_enqueued=outbox_enqueued).auth
+                result = self._recover_rotated(state, attempt=attempt, outbox_enqueued=outbox_enqueued).auth
             elif isinstance(state, Reserved):
                 delete_journal(self._auth_path, failpoint=self._storage_failpoint)
             elif isinstance(state, Requested):
+                owner = _attempt_owner(attempt)
+                if owner is not None and self._owner_alive_fn(owner):
+                    return result
                 unknown = transition(state, ExchangeOutcomeUnknown("process exited after refresh dispatch")).state
                 assert isinstance(unknown, OutcomeUnknown)
-                write_journal(self._auth_path, unknown, failpoint=self._storage_failpoint)
-                self._record_terminal_outcome(unknown, outbox_enqueued=False)
+                unknown_attempt = _with_continuation(
+                    attempt, "ambiguity_replay", self._recovery_deadline(), now=self._now_fn()
+                )
+                write_journal(self._auth_path, unknown, attempt=unknown_attempt, failpoint=self._storage_failpoint)
+                self._record_terminal_outcome(unknown, attempt=unknown_attempt, outbox_enqueued=False)
             else:
                 assert isinstance(state, (Rejected, OutcomeUnknown))
-                self._record_terminal_outcome(state, outbox_enqueued=outbox_enqueued)
+                self._record_terminal_outcome(state, attempt=attempt, outbox_enqueued=outbox_enqueued)
         return result
 
     def _discard_rotation_state(
@@ -549,12 +834,20 @@ class RefreshCoordinator:
             enqueue_outcome(self._auth_path, _outbox_record(state), failpoint=self._storage_failpoint)
         delete_journal(self._auth_path, failpoint=self._storage_failpoint)
 
-    def _record_terminal_outcome(self, state: Rotated | Rejected | OutcomeUnknown, *, outbox_enqueued: bool) -> None:
+    def _record_terminal_outcome(
+        self, state: Rotated | Rejected | OutcomeUnknown, *, attempt: RotationAttempt, outbox_enqueued: bool
+    ) -> None:
         """Make delivery independent from terminal generation coordination."""
 
         if not outbox_enqueued:
             enqueue_outcome(self._auth_path, _outbox_record(state), failpoint=self._storage_failpoint)
-            write_journal(self._auth_path, state, outbox_enqueued=True, failpoint=self._storage_failpoint)
+            write_journal(
+                self._auth_path,
+                state,
+                outbox_enqueued=True,
+                attempt=attempt,
+                failpoint=self._storage_failpoint,
+            )
         self._drain_outbox()
         if isinstance(state, Rotated) and not self._outbox_contains(_outbox_record(state).event_key):
             delete_journal(self._auth_path, failpoint=self._storage_failpoint)
@@ -572,6 +865,17 @@ class RefreshCoordinator:
         for record in outbox.records:
             if self._deliver_outbox_record(record):
                 acknowledge_outcome(self._auth_path, record.event_key, failpoint=self._storage_failpoint)
+
+    def _attempt_for_source(self, source_revision: str) -> RotationAttempt:
+        journal = load_journal(self._auth_path)
+        if (
+            isinstance(journal, JournalLoaded)
+            and not isinstance(journal.state, Ready)
+            and journal.state.source_revision == source_revision
+            and journal.attempt is not None
+        ):
+            return journal.attempt
+        return RotationAttempt(source_revision, "normal", 1)
 
     def _outbox_contains(self, event_key: str) -> bool:
         outbox = load_outbox(self._auth_path)
@@ -621,41 +925,6 @@ def _current_revision(loaded: object) -> str | None:
     if isinstance(loaded, AuthLoaded):
         return loaded.auth["revision"]
     return None
-
-
-def adjudicate_source_revision_alive(auth_path: Path, source_revision: str) -> bool:
-    """Clear an ambiguous rotation once a probe proved the source still works.
-
-    Returns whether the journal was cleared.  Everything is re-read under the
-    lock, so a concurrent import or a rotation that landed while the probe was
-    in flight wins and this call becomes a no-op.
-
-    The earlier ``outcome_unknown`` outbox record is left standing -- that event
-    really did happen -- and a second ``adjudicated_alive`` record is enqueued
-    beside it.  Without the resolution record, telemetry would show a rotation
-    that failed and never show it recovering, which reads as an outage nobody
-    fixed.
-    """
-
-    with auth_file_lock(auth_path):
-        loaded = load_auth(auth_path)
-        if not isinstance(loaded, AuthLoaded) or loaded.auth["revision"] != source_revision:
-            return False
-        journal = load_journal(auth_path)
-        if not isinstance(journal, JournalLoaded):
-            return False
-        state = journal.state
-        if not isinstance(state, OutcomeUnknown) or state.source_revision != source_revision:
-            return False
-        resolved = transition(state, SourceRevisionAlive())
-        assert isinstance(resolved.state, Ready)
-        enqueue_outcome(auth_path, _adjudication_record(source_revision))
-        delete_journal(auth_path)
-        return True
-
-
-def _adjudication_record(source_revision: str) -> OutcomeOutboxRecord:
-    return OutcomeOutboxRecord("adjudicated_alive", rotation_event_key(source_revision, "adjudicated_alive"))
 
 
 def import_credential(auth_path: Path, auth: StoredAuth) -> StoredAuth:
@@ -768,3 +1037,165 @@ def _bounded_header(headers: Mapping[str, str], name: str) -> str | None:
 
 def _is_confirmed_refresh_rejection(response: EnjiHttpResponse) -> bool:
     return response.status_code in HTTP_AUTH_FAILURE_CODES and is_refresh_token_invalid_response(response)
+
+
+def _response_continuation(response: EnjiHttpResponse) -> RecoveryContinuation | Literal["stop"]:
+    """Classify only client-observable refresh responses into recovery lanes.
+
+    A complete successor is handled before this function.  A structured
+    invalid-refresh response is not treated as proof that renewal is lost: the
+    observable response can also represent a transient validation failure.
+    Other gateway-shaped outcomes disclose no useful phase evidence and get
+    one durable ambiguity replay.  Explicitly terminal or post-consumption
+    shaped responses never replay the old source revision.
+    """
+
+    message = _response_message(response)
+    if response.status_code == HTTP_BAD_GATEWAY and message == "failed to refresh session":
+        return "safe_retry"
+    if _is_confirmed_refresh_rejection(response):
+        return "validation_recovery"
+    if response.status_code in HTTP_AUTH_FAILURE_CODES and message in {
+        "session is no longer valid",
+        "account is blocked",
+    }:
+        return "stop"
+    return "ambiguity_replay"
+
+
+def _response_message(response: EnjiHttpResponse) -> str | None:
+    try:
+        payload = response.json(operation="refresh response classification")
+    except EnjiHttpError:
+        return None
+    mapping = _as_object_mapping(payload)
+    if mapping is None:
+        return None
+    message = mapping.get("message")
+    return message if isinstance(message, str) else None
+
+
+def _as_object_mapping(value: object) -> Mapping[object, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return cast(Mapping[object, object], value)
+
+
+def _normalized_response_class(response: EnjiHttpResponse) -> str:
+    """Return a bounded label derived without retaining response content."""
+
+    if response.status_code == HTTP_OK:
+        return "success_or_incomplete_success"
+    continuation = _response_continuation(response)
+    return f"http_{response.status_code}_{continuation}"
+
+
+def _with_continuation(
+    attempt: RotationAttempt,
+    continuation: RecoveryContinuation,
+    deadline: str,
+    *,
+    now: datetime,
+) -> RotationAttempt:
+    parsed_deadline = attempt.recovery_deadline or deadline
+    if not _continuation_available(attempt, continuation):
+        return replace(
+            attempt,
+            recovery_deadline=parsed_deadline,
+            continuation="stop",
+            owner_boot_id=None,
+            owner_pid=None,
+            owner_start_ticks=None,
+            next_attempt_at=None,
+            stop_reason="recovery-budget-exhausted",
+        )
+    delay = {
+        "safe_retry": RECOVERY_SAFETY_POLICY.safe_retry_delay,
+        "validation_recovery": RECOVERY_SAFETY_POLICY.validation_retry_delay,
+        "ambiguity_replay": RECOVERY_SAFETY_POLICY.ambiguity_replay_delay,
+    }[continuation]
+    next_attempt = now.astimezone(UTC) + delay
+    parsed_absolute_deadline = _parse_deadline(parsed_deadline)
+    if (
+        parsed_absolute_deadline is None
+        or now.astimezone(UTC) >= parsed_absolute_deadline
+        or next_attempt > parsed_absolute_deadline
+    ):
+        return replace(
+            attempt,
+            recovery_deadline=parsed_deadline,
+            continuation="stop",
+            owner_boot_id=None,
+            owner_pid=None,
+            owner_start_ticks=None,
+            next_attempt_at=None,
+            stop_reason="recovery-deadline-exhausted",
+        )
+    return replace(
+        attempt,
+        recovery_deadline=parsed_deadline,
+        continuation=continuation,
+        owner_boot_id=None,
+        owner_pid=None,
+        owner_start_ticks=None,
+        next_attempt_at=next_attempt.isoformat(),
+        stop_reason=None,
+    )
+
+
+def _continuation_available(attempt: RotationAttempt, continuation: RecoveryContinuation) -> bool:
+    if attempt.dispatch_count >= attempt.total_dispatch_cap:
+        return False
+    limits = {
+        "safe_retry": (attempt.safe_retry_count, MAX_SAFE_RETRIES),
+        "validation_recovery": (attempt.validation_retry_count, MAX_VALIDATION_RECOVERIES),
+        "ambiguity_replay": (attempt.ambiguity_replay_count, MAX_AMBIGUITY_REPLAYS),
+    }
+    count, limit = limits[continuation]
+    return count < limit
+
+
+def _attempt_owner(attempt: RotationAttempt) -> RefreshOwner | None:
+    """Return persisted ownership only when the complete identity is present."""
+
+    if attempt.owner_boot_id is None or attempt.owner_pid is None or attempt.owner_start_ticks is None:
+        return None
+    return RefreshOwner(attempt.owner_boot_id, attempt.owner_pid, attempt.owner_start_ticks)
+
+
+def _without_owner(attempt: RotationAttempt) -> RotationAttempt:
+    return replace(
+        attempt,
+        owner_boot_id=None,
+        owner_pid=None,
+        owner_start_ticks=None,
+    )
+
+
+def _deadline_passed(deadline: str | None, now: datetime) -> bool:
+    parsed = _parse_deadline(deadline)
+    return parsed is None or now.astimezone(UTC) >= parsed
+
+
+def _parse_deadline(deadline: str | None) -> datetime | None:
+    if deadline is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(deadline)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(UTC)
+
+
+def _seconds_until(timestamp: str | None, now: datetime) -> float:
+    if timestamp is None:
+        return 0.0
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return 0.0
+    if parsed.tzinfo is None:
+        return 0.0
+    return max(0.0, (parsed.astimezone(UTC) - now.astimezone(UTC)).total_seconds())

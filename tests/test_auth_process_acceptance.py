@@ -37,13 +37,6 @@ from enji_guard_cli.auth_session.store import (
 )
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpResponse
 
-
-async def _never_adjudicates(_auth_file: Path, _client: object) -> bool:
-    """Most loop tests are not about adjudication; keep that exit shut."""
-
-    return False
-
-
 ROOT = Path(__file__).parents[1]
 PROCESS_TIMEOUT_SECONDS = 5.0
 POLL_SECONDS = 0.01
@@ -350,7 +343,7 @@ def test_slow_network_and_contended_flock_keep_asyncio_heartbeat_ticking(tmp_pat
             await asyncio.sleep(0.06)
             assert heartbeat_count >= 3
             lock_release.touch()
-            with pytest.raises(EnjiHttpError, match="outcome is unknown"):
+            with pytest.raises(EnjiHttpError, match="recovery is pending"):
                 await asyncio.wait_for(refresh_task, timeout=PROCESS_TIMEOUT_SECONDS)
             stop.set()
             await asyncio.wait_for(heartbeat_task, timeout=PROCESS_TIMEOUT_SECONDS)
@@ -388,7 +381,6 @@ def test_watcher_disabled_revision_polling_detects_atomic_credential_replacement
             load_auth_fn=load_auth,
             cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
             refresh_cookie_auth_fn=unused_refresh,
-            adjudicate_unknown_outcome_fn=_never_adjudicates,
             log_event_fn=lambda *_args, **_kwargs: None,
             logger=auto_refresh.logging.getLogger("test"),
             client_factory=_UnusedClient,
