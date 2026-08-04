@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.4.3](https://github.com/j2h4u/enji-guard-cli/compare/v3.4.2...v3.4.3) (2026-08-04)
+
+
+### Fixes
+
+* **deps:** upgrade cryptography to 50.0.0 ([#258](https://github.com/j2h4u/enji-guard-cli/issues/258)) ([92b5485](https://github.com/j2h4u/enji-guard-cli/commit/92b548552dd5bf1b00732d68a4d54309173d662d))
+
 ## [3.4.2](https://github.com/j2h4u/enji-guard-cli/compare/v3.4.1...v3.4.2) (2026-08-04)
 
 
