@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.4.2](https://github.com/j2h4u/enji-guard-cli/compare/v3.4.1...v3.4.2) (2026-08-04)
+
+
+### Fixes
+
+* **auth:** make refresh recovery phase-aware ([#256](https://github.com/j2h4u/enji-guard-cli/issues/256)) ([0c8d5c9](https://github.com/j2h4u/enji-guard-cli/commit/0c8d5c9027e5f9613ab29e722bb92b4fb8265634))
+
 ## [3.4.1](https://github.com/j2h4u/enji-guard-cli/compare/v3.4.0...v3.4.1) (2026-08-03)
 
 
