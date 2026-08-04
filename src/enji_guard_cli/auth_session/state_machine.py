@@ -7,28 +7,49 @@ This module is the executable contract for refresh safety.  Its invariants are:
 * A credential revision identifies one refresh-token generation.  Importing
   credentials always creates a new revision, even when the bytes are identical.
 * ``Reserved`` means no request was dispatched and is therefore recoverable.
-  ``Requested`` means dispatch began and must never lead to another automatic
-  dispatch for that revision.
-* Only a protocol-confirmed invalid refresh token becomes ``Rejected``.  Any
-  transport failure, cancellation, proxy-shaped response, malformed response,
-  or post-dispatch uncertainty becomes ``OutcomeUnknown``.
+  ``Requested`` means dispatch began. A bounded recovery dispatch is legal
+  only after the coordinator has durably spent its policy budget.
+* ``Rejected`` is reserved for observable terminal results. Other responses
+  whose protocol phase is not conclusive become ``OutcomeUnknown``.
 * ``Rotated`` retains the complete successor until it is durably projected.
   The source revision may be replaced only with compare-and-swap semantics.
 * ``Rejected`` and ``OutcomeUnknown`` do not mean that the access credential is
   already unusable.  They stop rotation of that revision while observers may
   continue using it until ordinary authentication fails.
-* Recovery and observation never hide a terminal outcome.  Durable outbox
-  delivery is separate from rotation progress and may be repeated by event key.
+* Access observations never alter renewal state. Durable outbox delivery is
+  separate from rotation progress and may be repeated by event key.
 
-The journal parser deliberately lives in :mod:`store`.  This module accepts
+The journal parser deliberately lives in :mod:`store`. This module accepts
 only already-validated domain values, so malformed files can never become a
-state-machine input by accident.  Backend-specific adjudication of an unknown
-outcome belongs to the refresh loop, not to this pure model.
+state-machine input by accident. Response classification and recovery policy
+belong to the coordinator, not to this pure model.
 """
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Literal, Never, assert_never
 from uuid import uuid4
+
+
+@dataclass(frozen=True, slots=True)
+class RecoverySafetyPolicy:
+    """Immutable protocol limits; never deployment or environment tuning."""
+
+    total_dispatch_cap: int = 6
+    safe_retry_limit: int = 4
+    validation_retry_limit: int = 1
+    ambiguity_replay_limit: int = 1
+    recovery_window: timedelta = timedelta(minutes=10)
+    safe_retry_delay: timedelta = timedelta(seconds=10)
+    validation_retry_delay: timedelta = timedelta(seconds=30)
+    ambiguity_replay_delay: timedelta = timedelta(seconds=30)
+
+
+RECOVERY_SAFETY_POLICY = RecoverySafetyPolicy()
+TOTAL_DISPATCH_CAP = RECOVERY_SAFETY_POLICY.total_dispatch_cap
+SAFE_RETRY_LIMIT = RECOVERY_SAFETY_POLICY.safe_retry_limit
+VALIDATION_RETRY_LIMIT = RECOVERY_SAFETY_POLICY.validation_retry_limit
+AMBIGUITY_REPLAY_LIMIT = RECOVERY_SAFETY_POLICY.ambiguity_replay_limit
 
 
 class InvalidTransitionError(ValueError):
@@ -109,14 +130,17 @@ class Recover:
 
 
 @dataclass(frozen=True, slots=True)
-class SourceRevisionAlive:
-    """A read-only probe proved the source credential still authenticates.
+class AuthorizeRecoveryDispatch:
+    """Authorize one already-budgeted retry of an unknown exchange."""
 
-    This is the only way out of ``OutcomeUnknown`` that does not require an
-    import, and it is not a replay: the verdict comes from a request that
-    carried the credential we already hold, never the one-time refresh token.
-    A live source revision means the exchange never rotated it.
-    """
+    continuation: Literal["safe_retry", "validation_recovery", "ambiguity_replay"]
+    dispatch_count: int
+    safe_retry_count: int
+    validation_retry_count: int
+    ambiguity_replay_count: int
+    total_dispatch_cap: int
+    deadline_open: bool
+    cooldown_elapsed: bool
 
 
 RotationEvent = (
@@ -127,7 +151,7 @@ RotationEvent = (
     | ExchangeOutcomeUnknown
     | Imported
     | Recover
-    | SourceRevisionAlive
+    | AuthorizeRecoveryDispatch
 )
 
 
@@ -172,9 +196,8 @@ def transition(state: RotationState, event: RotationEvent) -> Transition:
 
     Effects describe required work but do not imply it has happened.  The
     coordinator must persist the returned state before executing a dispatch
-    effect.  ``Requested`` never transitions back to a dispatching state: an
-    uncertain POST result is parked until import supersedes the revision or the
-    refresh loop explicitly adjudicates the still-live source credential.
+    effect. A recovery dispatch is selected by the coordinator's durable
+    policy ledger, never by an access observation.
     """
 
     match state:
@@ -254,17 +277,35 @@ def _rotated_transition(state: Rotated, event: RotationEvent) -> Transition:
 
 def _terminal_transition(state: Rejected | OutcomeUnknown, event: RotationEvent) -> Transition:
     match event:
+        case AuthorizeRecoveryDispatch() as authorization if isinstance(
+            state, OutcomeUnknown
+        ) and _recovery_dispatch_is_authorized(authorization):
+            reserved = Reserved(state.source_revision)
+            return Transition(reserved, (PersistJournal(reserved),))
         case Imported(revision=revision):
             return Transition(Ready(revision), (DeleteJournal(),))
         case Recover():
             return Transition(state, (WaitForTerminalRevision(state.source_revision),))
-        case SourceRevisionAlive() if isinstance(state, OutcomeUnknown):
-            # Only ambiguity is adjudicable.  `Rejected` is a confirmed answer
-            # from the server, so a live probe there would be a contradiction
-            # to investigate, not a state to clear.
-            return Transition(Ready(state.source_revision), (DeleteJournal(),))
         case _:
             return _invalid_transition(state, event)
+
+
+def _recovery_dispatch_is_authorized(event: AuthorizeRecoveryDispatch) -> bool:
+    lane_counts = {
+        "safe_retry": (event.safe_retry_count, SAFE_RETRY_LIMIT),
+        "validation_recovery": (event.validation_retry_count, VALIDATION_RETRY_LIMIT),
+        "ambiguity_replay": (event.ambiguity_replay_count, AMBIGUITY_REPLAY_LIMIT),
+    }
+    lane_count, lane_limit = lane_counts[event.continuation]
+    return (
+        event.deadline_open
+        and event.cooldown_elapsed
+        and event.total_dispatch_cap == TOTAL_DISPATCH_CAP
+        and event.dispatch_count <= event.total_dispatch_cap
+        and event.dispatch_count
+        == 1 + event.safe_retry_count + event.validation_retry_count + event.ambiguity_replay_count
+        and 0 < lane_count <= lane_limit
+    )
 
 
 def _invalid_transition(state: RotationState, event: RotationEvent) -> Never:
@@ -273,7 +314,7 @@ def _invalid_transition(state: RotationState, event: RotationEvent) -> Never:
     raise InvalidTransitionError(f"{type(event).__name__} is invalid for {type(state).__name__}")
 
 
-RotationOutcome = Literal["rotated", "rejected", "outcome_unknown", "adjudicated_alive"]
+RotationOutcome = Literal["rotated", "rejected", "outcome_unknown"]
 
 
 @dataclass(frozen=True, slots=True)

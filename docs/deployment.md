@@ -93,16 +93,19 @@ current POSIX-only cookie-storage contract remain publishing blockers.
 ## Cookie-session recovery
 
 Bearer/API-token auth is preferred. Cookie refresh is a one-time-token flow:
-the supervisor records `RESERVED` then `REQUESTED` before one POST. It never
-replays a dispatched request. On restart it reconciles the v2 journal: a safe
-reservation is removed, a captured replacement is recovered, and abandoned
-dispatch becomes `OUTCOME_UNKNOWN`. `OUTCOME_UNKNOWN` is adjudicated while the
-old access token is still usable: if `/auth/me` confirms the source session is
-alive, the supervisor may attempt the next scheduled refresh; if the source is
-dead or the access-token window closes, operator re-import is required.
-`REJECTED` means Enji returned a protocol-confirmed `AUTH_INVALID` rejection and
-always requires operator re-import. There is no manual `auth refresh` command or
-retry workflow.
+the supervisor records `RESERVED` then owner-bound `REQUESTED` before one POST.
+A concurrent process waits while that owner is alive. After a proven abandoned
+dispatch, recovery follows only the journal v3 lane, durable cooldown, absolute
+deadline, and total dispatch cap; observer requests never restore its budget.
+Unstructured or malformed HTTP responses remain ambiguous. Exhausted and
+protocol-rejected generations require operator re-import. There is no manual
+`auth refresh` command or generic transport retry workflow.
+
+Journal v3 is a local rollback boundary. Older binaries do not understand it;
+before rolling back, stop every writer and preserve the auth file, then import a
+fresh browser credential under the target version instead of copying or editing
+the journal. A valid v2 journal is read conservatively by the current version;
+an in-flight v2 request is parked and never treated as replay authorization.
 
 After a real re-authentication, sign in at
 <https://guard.enji.ai/app/login> so the browser holds a current session,

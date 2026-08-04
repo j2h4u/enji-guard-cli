@@ -40,15 +40,6 @@ def test_default_settings_are_valid() -> None:
             "auto_refresh.fallback_seconds",
         ),
         (
-            lambda: AutoRefreshSettings(
-                enabled=True,
-                lead_seconds=300,
-                fallback_seconds=900,
-                adjudication_poll_seconds=300,
-            ),
-            "auto_refresh.adjudication_poll_seconds",
-        ),
-        (
             lambda: TransportSettings(
                 timeout_seconds=0,
                 retry=TransportRetrySettings(

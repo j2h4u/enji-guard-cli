@@ -19,6 +19,10 @@ Three rules do not wait for a pointer:
 - `just verify` is the completion gate; never weaken, skip, or suppress a check
   in it.
 - Never print secrets. Store credentials only in the configured auth file.
+- Public code, tests, comments, and documentation may rely only on public API
+  contracts and black-box observations. Never include proprietary source
+  details, private repository identities or paths, or conclusions that reveal
+  access to non-public implementations.
 - Run `just release-check` before `gh pr create`.
 
 ## Ops

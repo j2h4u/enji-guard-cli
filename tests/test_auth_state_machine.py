@@ -4,23 +4,22 @@ import json
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
-from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 
 import pytest
 
-import enji_guard_cli.auth_session.cookies as cookies_module
 from enji_guard_cli.auth_session.api import import_cookie
 from enji_guard_cli.auth_session.coordinator import (
     CoordinatorDependencies,
     PostDispatchPersistenceError,
     RefreshCoordinator,
     RetainedSuccessorProjected,
-    adjudicate_source_revision_alive,
     import_credential,
 )
 from enji_guard_cli.auth_session.models import StoredAuth
+from enji_guard_cli.auth_session.projection import project_auth, refresh_projection_status
 from enji_guard_cli.auth_session.state_machine import (
+    AuthorizeRecoveryDispatch,
     Begin,
     DeleteJournal,
     DispatchBegun,
@@ -42,7 +41,6 @@ from enji_guard_cli.auth_session.state_machine import (
     Rotated,
     RotationEvent,
     RotationState,
-    SourceRevisionAlive,
     WaitForTerminalRevision,
     transition,
 )
@@ -127,7 +125,6 @@ def _unsigned_access_token(expires_at: datetime) -> str:
             (WaitForTerminalRevision("r1"),),
         ),
         (Rejected("r1", "invalid"), Imported("r2"), Ready("r2"), (DeleteJournal(),)),
-        (OutcomeUnknown("r1", "timeout"), SourceRevisionAlive(), Ready("r1"), (DeleteJournal(),)),
     ],
 )
 def test_transition_matrix(
@@ -147,43 +144,114 @@ def test_transition_rejects_impossible_internal_event() -> None:
         transition(Ready("r1"), DispatchBegun())
 
 
-@pytest.mark.parametrize(
-    "state",
-    [
-        Ready("r1"),
-        Reserved("r1"),
-        Requested("r1"),
-        Rotated("r1", "access_token=new; refresh_token=new", "r2"),
-        Rejected("r1", "invalid"),
-    ],
-)
-def test_only_an_ambiguous_outcome_is_adjudicable(state: RotationState) -> None:
-    """Every other state already knows what happened; clearing one would lie."""
+def test_unknown_recovery_dispatch_requires_explicit_domain_authorization() -> None:
+    unknown = OutcomeUnknown("r1", "ambiguous response")
+
+    authorized = transition(
+        unknown,
+        AuthorizeRecoveryDispatch("ambiguity_replay", 2, 0, 0, 1, 6, True, True),
+    )
+
+    assert authorized.state == Reserved("r1")
+    assert authorized.effects == (PersistJournal(Reserved("r1")),)
 
     with pytest.raises(InvalidTransitionError):
-        transition(state, SourceRevisionAlive())
+        transition(unknown, AuthorizeRecoveryDispatch("ambiguity_replay", 2, 0, 0, 1, 7, True, True))
 
 
-def test_adjudication_clears_only_the_matching_unknown_rotation(tmp_path: Path) -> None:
+def test_recovery_cooldown_and_deadline_survive_coordinator_restart(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=old", auth_file)
     loaded = load_auth(auth_file)
     assert isinstance(loaded, AuthLoaded)
-    revision = loaded.auth["revision"]
-    write_journal(auth_file, OutcomeUnknown(revision, "ambiguous refresh response HTTP 502"))
+    now = [datetime(2026, 8, 4, 12, 0, tzinfo=UTC)]
+    events: list[tuple[str, dict[str, object]]] = []
 
-    assert adjudicate_source_revision_alive(auth_file, "some-other-revision") is False
-    assert pending_rotation_path(auth_file).exists()
+    def sink(logger: logging.Logger, level: int, event: str, fields: Mapping[str, object]) -> None:
+        del logger, level
+        events.append((event, dict(fields)))
 
-    assert adjudicate_source_revision_alive(auth_file, revision) is True
-    assert not pending_rotation_path(auth_file).exists()
+    class Exchange:
+        calls = 0
 
-    # Idempotent: a second pass has nothing left to clear.
-    assert adjudicate_source_revision_alive(auth_file, revision) is False
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            self.calls += 1
+            return EnjiHttpResponse(status_code=502, headers={}, content=b"gateway unavailable")
+
+    exchange = Exchange()
+    dependencies = CoordinatorDependencies(now_fn=lambda: now[0], event_sink=sink)
+    with pytest.raises(EnjiHttpError, match="recovery is pending"):
+        asyncio.run(RefreshCoordinator(auth_file, exchange, dependencies=dependencies).refresh(loaded.auth))
+    first = load_journal(auth_file)
+    assert isinstance(first, JournalLoaded)
+    assert first.attempt is not None
+    deadline = first.attempt.recovery_deadline
+    not_before = first.attempt.next_attempt_at
+
+    with pytest.raises(EnjiHttpError, match="recovery is pending"):
+        asyncio.run(RefreshCoordinator(auth_file, exchange, dependencies=dependencies).refresh(loaded.auth))
+    assert exchange.calls == 1
+
+    now[0] += timedelta(seconds=31)
+    with pytest.raises(EnjiHttpError, match="recovery is exhausted"):
+        asyncio.run(RefreshCoordinator(auth_file, exchange, dependencies=dependencies).refresh(loaded.auth))
+    second = load_journal(auth_file)
+    assert isinstance(second, JournalLoaded)
+    assert second.attempt is not None
+    assert exchange.calls == 2
+    assert second.attempt.recovery_deadline == deadline
+    assert not_before is not None
+    assert second.attempt.next_attempt_at is None
+    assert second.attempt.continuation == "stop"
+    assert second.attempt.stop_reason == "recovery-budget-exhausted"
+    status = refresh_projection_status(project_auth(load_auth(auth_file), load_journal(auth_file)))
+    assert status.refresh_state == "exhausted"
+    assert status.reauth_required is True
+    assert events[-1] == (
+        "enji_auth_refresh_observed",
+        {
+            "outcome": "outcome_unknown",
+            "source_revision": loaded.auth["revision"],
+            "attempt_kind": "ambiguity_replay",
+            "attempt_number": 2,
+            "dispatch_budget_remaining": 4,
+            "recovery_deadline": deadline,
+            "stop_reason": "recovery-budget-exhausted",
+            "response_class": "http_502_ambiguity_replay",
+        },
+    )
 
 
-def test_adjudication_delivers_a_resolution_event_beside_the_failure(tmp_path: Path) -> None:
-    """Telemetry that shows only the failure reads as an outage nobody fixed."""
+def test_exchange_crossing_absolute_deadline_exhausts_without_corrupt_schedule(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    now = [datetime(2026, 8, 4, 12, 0, tzinfo=UTC)]
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            now[0] += timedelta(minutes=11)
+            return EnjiHttpResponse(status_code=502, headers={}, content=b"gateway unavailable")
+
+    dependencies = CoordinatorDependencies(now_fn=lambda: now[0])
+    with pytest.raises(EnjiHttpError, match="recovery is exhausted"):
+        asyncio.run(RefreshCoordinator(auth_file, Exchange(), dependencies=dependencies).refresh(loaded.auth))
+
+    journal = load_journal(auth_file)
+    assert isinstance(journal, JournalLoaded)
+    assert journal.attempt is not None
+    assert journal.attempt.continuation == "stop"
+    assert journal.attempt.next_attempt_at is None
+    assert journal.attempt.stop_reason == "recovery-deadline-exhausted"
+    status = refresh_projection_status(project_auth(load_auth(auth_file), journal))
+    assert status.refresh_state == "exhausted"
+    assert status.reauth_required is True
+
+
+def test_access_observation_does_not_add_a_false_rotation_resolution(tmp_path: Path) -> None:
 
     auth_file = tmp_path / "SENTINEL_AUTH_PATH.json"
     import_cookie("access_token=SENTINEL_SECRET; refresh_token=SENTINEL_SECRET", auth_file)
@@ -199,8 +267,6 @@ def test_adjudication_delivers_a_resolution_event_beside_the_failure(tmp_path: P
         events.append((event, dict(fields)))
         return True
 
-    assert adjudicate_source_revision_alive(auth_file, revision) is True
-
     class Exchange:
         async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
             del source
@@ -215,37 +281,10 @@ def test_adjudication_delivers_a_resolution_event_beside_the_failure(tmp_path: P
 
     assert events == [
         ("enji_auth_rotation_outcome_unknown", {"event_key": f"auth-rotation:{revision}:outcome_unknown"}),
-        ("enji_auth_rotation_adjudicated_alive", {"event_key": f"auth-rotation:{revision}:adjudicated_alive"}),
     ]
     rendered = repr(events)
     assert "SENTINEL_SECRET" not in rendered
     assert "SENTINEL_AUTH_PATH" not in rendered
-
-
-def test_adjudication_refuses_a_journal_that_is_not_ambiguous(tmp_path: Path) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_cookie("access_token=old; refresh_token=old", auth_file)
-    loaded = load_auth(auth_file)
-    assert isinstance(loaded, AuthLoaded)
-    revision = loaded.auth["revision"]
-    write_journal(auth_file, Rejected(revision, "refresh rejected with HTTP 401"))
-
-    assert adjudicate_source_revision_alive(auth_file, revision) is False
-    assert pending_rotation_path(auth_file).exists()
-
-
-def test_adjudication_loses_to_a_credential_import(tmp_path: Path) -> None:
-    """An import that landed while the probe flew already superseded us."""
-
-    auth_file = tmp_path / "auth.json"
-    import_cookie("access_token=old; refresh_token=old", auth_file)
-    loaded = load_auth(auth_file)
-    assert isinstance(loaded, AuthLoaded)
-    stale_revision = loaded.auth["revision"]
-    write_journal(auth_file, OutcomeUnknown(stale_revision, "ambiguous refresh response HTTP 502"))
-    import_cookie("access_token=fresh; refresh_token=fresh", auth_file)
-
-    assert adjudicate_source_revision_alive(auth_file, stale_revision) is False
 
 
 def test_storage_validation_rejects_corrupt_external_inputs(tmp_path: Path) -> None:
@@ -266,6 +305,43 @@ def test_storage_validation_rejects_corrupt_external_inputs(tmp_path: Path) -> N
 
     assert isinstance(load_auth(auth_file), AuthCorrupt)
     assert isinstance(load_journal(auth_file), JournalCorrupt)
+
+
+def test_v2_requested_migrates_to_stopped_unknown_without_dispatch(tmp_path: Path) -> None:
+    auth_file = tmp_path / "auth.json"
+    import_cookie("access_token=old; refresh_token=old", auth_file)
+    loaded = load_auth(auth_file)
+    assert isinstance(loaded, AuthLoaded)
+    pending_rotation_path(auth_file).write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "source_revision": loaded.auth["revision"],
+                "state": "REQUESTED",
+                "replacement_cookie_header": None,
+                "reason": None,
+                "successor_revision": None,
+                "outcome": None,
+                "event_key": None,
+                "outbox_enqueued": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    migrated = load_journal(auth_file)
+    assert isinstance(migrated, JournalLoaded)
+    assert migrated.migrated_from_version == 2
+    assert isinstance(migrated.state, OutcomeUnknown)
+    assert migrated.attempt is not None
+    assert migrated.attempt.continuation == "stop"
+
+    class Exchange:
+        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
+            del source
+            raise AssertionError("migrated in-flight v2 work must never dispatch")
+
+    with pytest.raises(EnjiHttpError, match="outcome is terminal"):
+        asyncio.run(RefreshCoordinator(auth_file, Exchange(), terminal_wait_seconds=0).refresh(loaded.auth))
 
 
 def test_identical_imports_receive_distinct_revisions() -> None:
@@ -309,8 +385,8 @@ def test_storage_classifies_future_imported_at_stably(tmp_path: Path) -> None:
         ("clock_anomaly", "AUTH_CLOCK_ANOMALY", "auth file imported_at is in the future", 0),
         (
             "loaded",
-            "AUTH_IMPORT_REQUIRED",
-            "refresh outcome is unknown; import a fresh browser credential",
+            "AUTH_RECOVERY_PENDING",
+            "refresh recovery is pending",
             1,
         ),
     ],
@@ -369,7 +445,7 @@ def test_storage_accepts_imported_at_at_future_tolerance_boundary(tmp_path: Path
     assert isinstance(load_auth(auth_file, now=now), AuthLoaded)
 
 
-def test_ambiguous_response_is_dispatched_once_per_source_revision(tmp_path: Path) -> None:
+def test_unstructured_server_error_enters_durable_ambiguity_cooldown(tmp_path: Path) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=old", auth_file)
     loaded = load_auth(auth_file)
@@ -379,71 +455,16 @@ def test_ambiguous_response_is_dispatched_once_per_source_revision(tmp_path: Pat
         calls = 0
 
         async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
-            _ = source
-            self.calls += 1
-            return EnjiHttpResponse(status_code=502, headers={}, content=b"gateway unavailable")
-
-    exchange = Exchange()
-    coordinator = RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0)
-
-    with pytest.raises(EnjiHttpError, match="outcome is unknown"):
-        asyncio.run(coordinator.refresh(loaded.auth))
-    with pytest.raises(EnjiHttpError, match="outcome is terminal"):
-        asyncio.run(coordinator.refresh(loaded.auth))
-
-    assert exchange.calls == 1
-    journal = load_journal(auth_file)
-    assert isinstance(journal, JournalLoaded)
-    assert journal.state == OutcomeUnknown(loaded.auth["revision"], "ambiguous refresh response HTTP 502")
-
-
-def test_malformed_success_cookie_response_is_terminal_and_never_replayed(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_cookie("access_token=old; refresh_token=old", auth_file)
-    loaded = load_auth(auth_file)
-    assert isinstance(loaded, AuthLoaded)
-    malformed_header = "refresh_token=malformed"
-    original_load = SimpleCookie.load
-
-    def reject_malformed_header(cookie: SimpleCookie, rawdata: str) -> None:
-        if rawdata == malformed_header:
-            raise CookieError("malformed Set-Cookie")
-        original_load(cookie, rawdata)
-
-    monkeypatch.setattr(cookies_module.SimpleCookie, "load", reject_malformed_header)
-    dispatches = 0
-
-    class Exchange:
-        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
             del source
-            nonlocal dispatches
-            dispatches += 1
-            return EnjiHttpResponse(
-                status_code=200,
-                headers={},
-                content=b"{}",
-                set_cookie_headers=("access_token=new", malformed_header),
-            )
+            self.calls += 1
+            return EnjiHttpResponse(status_code=500, headers={}, content=b"{}")
 
     exchange = Exchange()
-    coordinator = RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0)
-    with pytest.raises(EnjiHttpError, match="outcome is unknown"):
-        asyncio.run(coordinator.refresh(loaded.auth))
-
-    journal = load_journal(auth_file)
-    assert isinstance(journal, JournalLoaded)
-    assert journal.state == OutcomeUnknown(loaded.auth["revision"], "ambiguous refresh response HTTP 200")
-
-    with pytest.raises(EnjiHttpError, match="outcome is terminal"):
-        asyncio.run(RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0).refresh())
-    asyncio.run(RefreshCoordinator(auth_file, exchange).recover_startup())
-
-    assert dispatches == 1
-    restarted_journal = load_journal(auth_file)
-    assert isinstance(restarted_journal, JournalLoaded)
-    assert isinstance(restarted_journal.state, OutcomeUnknown)
+    with pytest.raises(EnjiHttpError, match="recovery is pending"):
+        asyncio.run(RefreshCoordinator(auth_file, exchange).refresh(loaded.auth))
+    with pytest.raises(EnjiHttpError, match="recovery is pending"):
+        asyncio.run(RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0).refresh(loaded.auth))
+    assert exchange.calls == 1
 
 
 def test_success_cookie_parsing_keeps_separate_expires_comma_header(tmp_path: Path) -> None:
@@ -490,7 +511,7 @@ def test_incomplete_or_deleting_success_cookies_are_terminal_unknown(
             del source
             return EnjiHttpResponse(status_code=200, headers={}, content=b"{}", set_cookie_headers=set_cookie_headers)
 
-    with pytest.raises(EnjiHttpError, match="outcome is unknown"):
+    with pytest.raises(EnjiHttpError, match="recovery is pending"):
         asyncio.run(RefreshCoordinator(auth_file, Exchange()).refresh(loaded.auth))
 
     journal = load_journal(auth_file)
@@ -572,6 +593,11 @@ def test_refresh_observation_is_safe_and_cannot_block_rotation(tmp_path: Path) -
             {
                 "outcome": "rotated",
                 "source_revision": loaded.auth["revision"],
+                "attempt_kind": "normal",
+                "attempt_number": 1,
+                "dispatch_budget_remaining": 5,
+                "recovery_deadline": (now + timedelta(minutes=10)).isoformat(),
+                "response_class": "success_or_incomplete_success",
                 "successor_revision": rotated["revision"],
                 "refresh_token_changed": True,
                 "access_expires_in_seconds": 481,
@@ -613,15 +639,21 @@ def test_rejected_rotation_telemetry_identifies_the_current_generation_and_upstr
         Exchange(),
         dependencies=CoordinatorDependencies(event_sink=sink, now_fn=lambda: now),
     )
-    with pytest.raises(EnjiHttpError, match="not authenticated"):
+    with pytest.raises(EnjiHttpError, match="recovery is pending"):
         asyncio.run(coordinator.refresh(loaded.auth))
 
     assert events == [
         (
             "enji_auth_refresh_observed",
             {
-                "outcome": "rejected",
+                "outcome": "outcome_unknown",
                 "source_revision": loaded.auth["revision"],
+                "attempt_kind": "normal",
+                "attempt_number": 1,
+                "dispatch_budget_remaining": 5,
+                "next_attempt_at": (now + timedelta(seconds=30)).isoformat(),
+                "recovery_deadline": (now + timedelta(minutes=10)).isoformat(),
+                "response_class": "http_401_validation_recovery",
                 "access_expires_in_seconds": 481,
                 "upstream_request_id": "rejected-request",
                 "cf_ray": "rejected-ray",
@@ -997,7 +1029,7 @@ def test_import_progresses_with_stale_unacknowledged_outbox(tmp_path: Path) -> N
                 headers={},
                 content=b'{"error":{"code":"AUTH_INVALID"}}',
             ),
-            Rejected,
+            OutcomeUnknown,
         ),
         (
             EnjiHttpResponse(
@@ -1005,7 +1037,7 @@ def test_import_progresses_with_stale_unacknowledged_outbox(tmp_path: Path) -> N
                 headers={},
                 content=b'{"code":"AUTH_INVALID"}',
             ),
-            Rejected,
+            OutcomeUnknown,
         ),
         (
             EnjiHttpResponse(
@@ -1013,7 +1045,7 @@ def test_import_progresses_with_stale_unacknowledged_outbox(tmp_path: Path) -> N
                 headers={"content-type": "application/json; charset=utf-8"},
                 content=b'{"error":"invalid refresh token"}',
             ),
-            Rejected,
+            OutcomeUnknown,
         ),
         (EnjiHttpResponse(status_code=401, headers={}, content=b"<html>proxy</html>"), OutcomeUnknown),
         (
@@ -1021,6 +1053,11 @@ def test_import_progresses_with_stale_unacknowledged_outbox(tmp_path: Path) -> N
             OutcomeUnknown,
         ),
         (EnjiHttpResponse(status_code=403, headers={}, content=b""), OutcomeUnknown),
+        (EnjiHttpResponse(status_code=500, headers={}, content=b"<html>proxy</html>"), OutcomeUnknown),
+        (
+            EnjiHttpResponse(status_code=429, headers={"retry-after": "120"}, content=b'{"error":"busy"}'),
+            OutcomeUnknown,
+        ),
     ],
 )
 def test_refresh_rejection_requires_known_backend_protocol_body(
@@ -1042,70 +1079,6 @@ def test_refresh_rejection_requires_known_backend_protocol_body(
     journal = load_journal(auth_file)
     assert isinstance(journal, JournalLoaded)
     assert isinstance(journal.state, expected_type)
-
-
-def test_cancelled_exchange_becomes_terminal_unknown_and_is_not_replayed(tmp_path: Path) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_cookie("access_token=old; refresh_token=old", auth_file)
-    loaded = load_auth(auth_file)
-    assert isinstance(loaded, AuthLoaded)
-
-    async def exercise() -> None:
-        started = asyncio.Event()
-
-        class Exchange:
-            calls = 0
-
-            async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
-                del source
-                self.calls += 1
-                started.set()
-                await asyncio.Event().wait()
-                raise AssertionError("cancelled exchange must not resume")
-
-        exchange = Exchange()
-        task = asyncio.create_task(RefreshCoordinator(auth_file, exchange).refresh(loaded.auth))
-        await started.wait()
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        assert exchange.calls == 1
-
-    asyncio.run(exercise())
-    journal = load_journal(auth_file)
-    assert isinstance(journal, JournalLoaded)
-    assert isinstance(journal.state, OutcomeUnknown)
-
-    class NoReplayExchange:
-        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
-            del source
-            raise AssertionError("terminal cancellation must not dispatch again")
-
-    with pytest.raises(EnjiHttpError, match="outcome is terminal"):
-        asyncio.run(RefreshCoordinator(auth_file, NoReplayExchange(), terminal_wait_seconds=0).refresh(loaded.auth))
-
-
-def test_transport_failure_is_terminal_unknown_and_does_not_dispatch_again(tmp_path: Path) -> None:
-    auth_file = tmp_path / "auth.json"
-    import_cookie("access_token=old; refresh_token=old", auth_file)
-    loaded = load_auth(auth_file)
-    assert isinstance(loaded, AuthLoaded)
-
-    class Exchange:
-        calls = 0
-
-        async def exchange_once(self, source: StoredAuth) -> EnjiHttpResponse:
-            del source
-            self.calls += 1
-            raise EnjiHttpError("NETWORK", "connection reset")
-
-    exchange = Exchange()
-    with pytest.raises(EnjiHttpError, match="outcome is unknown"):
-        asyncio.run(RefreshCoordinator(auth_file, exchange).refresh(loaded.auth))
-    with pytest.raises(EnjiHttpError, match="outcome is terminal"):
-        asyncio.run(RefreshCoordinator(auth_file, exchange, terminal_wait_seconds=0).refresh(loaded.auth))
-
-    assert exchange.calls == 1
 
 
 def test_import_at_commit_boundary_supersedes_rotation_result(tmp_path: Path) -> None:

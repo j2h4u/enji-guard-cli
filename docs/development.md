@@ -17,7 +17,9 @@ hold, [CONTRIBUTING.md](../CONTRIBUTING.md) for change intake and handoff,
   `enji-guard-service` entrypoint owns the optional long-lived service; the
   normal `enji-guard` CLI must import without MCP installed.
 - Keep runtime tuning in frozen settings dataclasses, not env. Env is for
-  credential and security ingress only.
+  credential and security ingress only. Fixed protocol-safety limits that are
+  deliberately non-tunable belong in a frozen domain value object; changing
+  them is a reviewed invariant change, never runtime configuration.
 - Treat the tach module graph as architecture policy, not style advice. A tach
   failure is an architectural regression, not a lint nit.
 

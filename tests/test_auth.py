@@ -18,7 +18,6 @@ import enji_guard_cli.transport as transport_module
 from enji_guard_cli.auth_session.api import (
     AuthStatusPayload,
     _refresh_cookie_auth,
-    adjudicate_unknown_outcome,
     auth_headers,
     auth_status_async,
     backend_readiness_probe_async,
@@ -50,14 +49,11 @@ from enji_guard_cli.auth_session.store import (
     AuthLoaded,
     AuthUnsupported,
     load_auth,
-    pending_rotation_path,
     write_journal,
 )
 from enji_guard_cli.delivery.cli.app import app
 from enji_guard_cli.runtime_observability.auth_coordinator import RuntimeAuthCoordinatorAdapter
 from enji_guard_cli.settings import (
-    DEFAULT_GUARD_ORIGIN,
-    DEFAULT_GUARD_REFERER,
     AuthSettings,
     AutoRefreshSettings,
     EnjiGuardSettings,
@@ -65,16 +61,6 @@ from enji_guard_cli.settings import (
 )
 from enji_guard_cli.transport import EnjiHttpError, EnjiHttpRequest, EnjiHttpResponse, HttpxEnjiHttpClient
 from enji_guard_cli.transport_types import RetryProfile
-
-
-async def _never_adjudicates(_auth_file: Path, _client: object) -> bool:
-    """Most loop tests are not about adjudication; keep that exit shut."""
-
-    return False
-
-
-AUTH_REFRESH_ORIGIN = DEFAULT_GUARD_ORIGIN
-AUTH_REFRESH_REFERER = DEFAULT_GUARD_REFERER
 
 
 async def _never_changes(_auth_file: Path) -> AsyncGenerator[None]:
@@ -218,16 +204,16 @@ def test_future_credential_import_timestamp_has_stable_clock_anomaly_classificat
 
 
 @pytest.mark.parametrize(
-    ("state_factory", "expected_code"),
+    ("state_factory", "expected_refresh_state"),
     [
-        (lambda revision: Rejected(revision, "rejected"), "AUTH_REFRESH_REJECTED"),
-        (lambda revision: OutcomeUnknown(revision, "timeout"), "AUTH_REFRESH_OUTCOME_UNKNOWN"),
+        (lambda revision: Rejected(revision, "rejected"), "rejected"),
+        (lambda revision: OutcomeUnknown(revision, "timeout"), "exhausted"),
     ],
 )
 def test_terminal_auth_projection_keeps_live_access_authenticated(
     tmp_path: Path,
     state_factory: Callable[[str], RotationState],
-    expected_code: str,
+    expected_refresh_state: str,
 ) -> None:
     auth_file = tmp_path / "auth.json"
     import_cookie("access_token=old; refresh_token=old", auth_file)
@@ -249,7 +235,7 @@ def test_terminal_auth_projection_keeps_live_access_authenticated(
 
     assert status["authenticated"] is True
     assert status["code"] is None
-    assert status["refresh_state"] == expected_code.removeprefix("AUTH_REFRESH_").lower()
+    assert status["refresh_state"] == expected_refresh_state
     assert status["reauth_required"] is True
     assert status["email"] == "user@example.com"
     assert [(request.method, request.url) for request in requests] == [("GET", "https://fleet.enji.ai/api/v1/auth/me")]
@@ -316,51 +302,6 @@ def test_terminal_auth_status_surfaces_the_journal_reason(
     assert [(request.method, request.url) for request in requests] == [("GET", "https://fleet.enji.ai/api/v1/auth/me")]
 
 
-def _unknown_outcome_auth_file(tmp_path: Path, *, access_token_lifetime: timedelta = timedelta(minutes=5)) -> Path:
-    """An auth file stuck exactly where the 502 left the live service.
-
-    The access token carries a real expiry, because adjudication is bounded by
-    it: the refresh that produced the ambiguity fires a lead window *before*
-    expiry, so in the real incident the token still had minutes of life left.
-    """
-
-    auth_file = tmp_path / "auth.json"
-    access_token = unsigned_jwt({"exp": int((datetime.now(UTC) + access_token_lifetime).timestamp())})
-    import_cookie(f"access_token={access_token}; refresh_token=old", auth_file)
-    loaded = load_auth(auth_file)
-    assert isinstance(loaded, AuthLoaded)
-    write_journal(auth_file, OutcomeUnknown(loaded.auth["revision"], "ambiguous refresh response HTTP 502"))
-    return auth_file
-
-
-class _RecordingClient:
-    def __init__(self, response: EnjiHttpResponse) -> None:
-        self.response = response
-        self.requests: list[EnjiHttpRequest] = []
-
-    async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
-        self.requests.append(request)
-        return self.response
-
-
-class _ScriptedAuthClient(AbstractAsyncContextManager["_ScriptedAuthClient"]):
-    def __init__(self, responses: list[EnjiHttpResponse]) -> None:
-        self.responses = responses
-        self.requests: list[EnjiHttpRequest] = []
-
-    async def __aenter__(self) -> _ScriptedAuthClient:
-        return self
-
-    async def __aexit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
-        return None
-
-    async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
-        self.requests.append(request)
-        if not self.responses:
-            raise AssertionError(f"unexpected request after script exhausted: {request.method} {request.url}")
-        return self.responses.pop(0)
-
-
 def _collecting_sink(events: list[tuple[str, dict[str, object]]]) -> Callable[..., None]:
     def sink(_logger: object, _level: int, event: str, fields: Mapping[str, object]) -> None:
         events.append((event, dict(fields)))
@@ -368,447 +309,32 @@ def _collecting_sink(events: list[tuple[str, dict[str, object]]]) -> Callable[..
     return sink
 
 
-def _adjudicate(auth_file: Path, client: object, events: list[tuple[str, dict[str, object]]] | None = None) -> bool:
-    return asyncio.run(
-        adjudicate_unknown_outcome(
-            auth_file,
-            cast(HttpxEnjiHttpClient, client),
-            event_sink=_collecting_sink(events if events is not None else []),
-        )
-    )
-
-
-def test_adjudication_clears_an_alive_source_with_a_read_only_probe(tmp_path: Path) -> None:
-    auth_file = _unknown_outcome_auth_file(tmp_path)
-    client = _RecordingClient(EnjiHttpResponse(200, {}, b'{"email": "operator@example.com"}'))
-    events: list[tuple[str, dict[str, object]]] = []
-
-    assert _adjudicate(auth_file, client, events) is True
-
-    assert not pending_rotation_path(auth_file).exists()
-    assert [(request.method, request.url) for request in client.requests] == [
-        ("GET", "https://fleet.enji.ai/api/v1/auth/me")
-    ]
-    assert [event for event, _fields in events] == ["enji_auth_adjudication_source_alive"]
-
-
-def test_adjudication_never_replays_the_refresh_exchange(tmp_path: Path) -> None:
-    """The probe must carry the held credential, never re-send the exchange."""
-
-    auth_file = _unknown_outcome_auth_file(tmp_path)
-    client = _RecordingClient(EnjiHttpResponse(200, {}, b"{}"))
-
-    _adjudicate(auth_file, client)
-
-    assert all("/auth/refresh" not in request.url for request in client.requests)
-    assert all(request.method == "GET" for request in client.requests)
-
-
-def test_readiness_reports_ready_again_once_the_loop_adjudicated(tmp_path: Path) -> None:
-    """Adjudication clears renewal degradation; it no longer gates access readiness."""
-
-    auth_file = _unknown_outcome_auth_file(tmp_path)
-    client = _RecordingClient(EnjiHttpResponse(200, {}, b'{"email": "operator@example.com"}'))
-
-    before = asyncio.run(backend_readiness_probe_async(auth_file, client))
-    assert before.ready is True
-    assert before.refresh_state == "outcome_unknown"
-    assert before.reauth_required is True
-    assert before.bypass_grace is False
-
-    assert _adjudicate(auth_file, client) is True
-
-    after = asyncio.run(backend_readiness_probe_async(auth_file, client))
-    assert after.ready is True
-    assert after.refresh_state is None
-    assert after.reauth_required is False
-
-
-@pytest.mark.parametrize("status_code", [401, 403])
-def test_adjudication_stays_parked_when_the_source_is_dead(tmp_path: Path, status_code: int) -> None:
-    """A dead source proves the rotation landed and its successor is lost."""
-
-    auth_file = _unknown_outcome_auth_file(tmp_path)
-    client = _RecordingClient(EnjiHttpResponse(status_code, {}, b"{}"))
-    events: list[tuple[str, dict[str, object]]] = []
-
-    assert _adjudicate(auth_file, client, events) is False
-
-    assert pending_rotation_path(auth_file).exists()
-    assert [event for event, _fields in events] == ["enji_auth_adjudication_source_dead"]
-
-
-@pytest.mark.parametrize("status_code", [500, 502, 503])
-def test_adjudication_decides_nothing_while_the_backend_is_down(tmp_path: Path, status_code: int) -> None:
-    """The probe is also the signal that the backend has not returned yet."""
-
-    auth_file = _unknown_outcome_auth_file(tmp_path)
-    client = _RecordingClient(EnjiHttpResponse(status_code, {}, b"{}"))
-    events: list[tuple[str, dict[str, object]]] = []
-
-    assert _adjudicate(auth_file, client, events) is False
-
-    assert pending_rotation_path(auth_file).exists()
-    assert events == []
-
-
-def test_adjudication_decides_nothing_when_the_probe_transport_fails(tmp_path: Path) -> None:
-    auth_file = _unknown_outcome_auth_file(tmp_path)
-
-    class Client:
-        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
-            raise EnjiHttpError("TIMEOUT", "auth status timed out")
-
-    assert _adjudicate(auth_file, Client()) is False
-    assert pending_rotation_path(auth_file).exists()
-
-
-def test_adjudication_stops_once_the_access_token_has_expired(tmp_path: Path) -> None:
-    """The oscillation the design admits gets a deadline it cannot outlive.
-
-    A backend that answered 5xx instead of a clean rejection for a consumed
-    refresh token would loop clear -> refresh -> unknown -> probe forever. Past
-    the access token's own expiry the probe can only return 401 either way, so
-    continuing would invent a verdict; a human is asked once instead.
-    """
-
-    auth_file = _unknown_outcome_auth_file(tmp_path, access_token_lifetime=timedelta(seconds=-1))
-    events: list[tuple[str, dict[str, object]]] = []
-
-    class Client:
-        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
-            raise AssertionError("a closed adjudication window must not perform HTTP")
-
-    assert _adjudicate(auth_file, Client(), events) is False
-
-    assert pending_rotation_path(auth_file).exists()
-    assert [event for event, _fields in events] == ["enji_auth_adjudication_window_closed"]
-
-
-def test_adjudication_stops_when_the_access_token_expiry_is_unreadable(tmp_path: Path) -> None:
-    """An expiry we cannot read is not a window we can prove is open."""
-
-    auth_file = tmp_path / "auth.json"
-    import_cookie("access_token=opaque; refresh_token=old", auth_file)
-    loaded = load_auth(auth_file)
-    assert isinstance(loaded, AuthLoaded)
-    write_journal(auth_file, OutcomeUnknown(loaded.auth["revision"], "ambiguous refresh response HTTP 502"))
-
-    class Client:
-        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
-            raise AssertionError("an unprovable adjudication window must not perform HTTP")
-
-    assert _adjudicate(auth_file, Client()) is False
-
-
-def test_adjudication_refuses_a_confirmed_rejection(tmp_path: Path) -> None:
-    """Only ambiguity is adjudicable; a rejection is already an answer."""
-
-    auth_file = tmp_path / "auth.json"
-    access_token = unsigned_jwt({"exp": int((datetime.now(UTC) + timedelta(minutes=5)).timestamp())})
-    import_cookie(f"access_token={access_token}; refresh_token=old", auth_file)
-    loaded = load_auth(auth_file)
-    assert isinstance(loaded, AuthLoaded)
-    write_journal(auth_file, Rejected(loaded.auth["revision"], "refresh rejected with HTTP 401"))
-
-    class Client:
-        async def request(self, request: EnjiHttpRequest) -> EnjiHttpResponse:
-            raise AssertionError("a rejected journal must not be probed")
-
-    assert _adjudicate(auth_file, Client()) is False
-
-
-def test_a_parked_refresh_loop_resumes_after_adjudication(tmp_path: Path) -> None:
-    """The end-to-end claim: an ambiguous 502 heals itself without an import.
-
-    This is the test whose absence let a working-looking feature ship broken.
-    Every part was covered on its own -- the probe, the journal clear, the
-    readiness verdict -- while the one thing that mattered, that the refresh
-    loop actually resumes, was covered by nothing. Adjudicating inside the loop
-    is what makes it true: there is no second task to wake.
-    """
-
-    auth_file = _unknown_outcome_auth_file(tmp_path)
-    loaded = load_auth(auth_file)
-    assert isinstance(loaded, AuthLoaded)
-    revision = loaded.auth["revision"]
-    dispatches: list[str] = []
-    resumed = asyncio.Event()
-    probe_client = _RecordingClient(EnjiHttpResponse(200, {}, b"{}"))
-    ticks = iter(range(10_000))
-
-    async def refresh(_path: Path, auth: RuntimeStoredAuth, _client: object) -> RuntimeStoredAuth:
-        dispatches.append(auth["revision"])
-        if len(dispatches) == 1:
-            # The 502: dispatched, outcome unknown, journal already written.
-            raise TerminalRevisionRequiredError(revision, message="refresh outcome is unknown")
-        resumed.set()
-        await asyncio.Event().wait()
-        raise AssertionError("unreachable")
-
-    async def adjudicate(path: Path, _client: object) -> bool:
-        return await adjudicate_unknown_outcome(
-            path, cast(HttpxEnjiHttpClient, probe_client), event_sink=_collecting_sink([])
-        )
-
-    async def exercise() -> None:
-        task = asyncio.create_task(
-            auto_refresh_module._auto_refresh_loop(
-                auth_file=auth_file,
-                refresh_settings=AutoRefreshSettings(
-                    enabled=True, lead_seconds=300, fallback_seconds=900, adjudication_poll_seconds=1
-                ),
-                dependencies=_loop_dependencies(
-                    changes=_never_changes,
-                    overrides=_LoopOverrides(
-                        load_auth_fn=lambda path: cast(AuthLoaded, load_auth(path)),
-                        revision_reader=lambda _path: revision,
-                        refresh_fn=refresh,
-                        adjudicate_fn=adjudicate,
-                        monotonic_fn=lambda: next(ticks),
-                        sleep_fn=lambda _seconds: asyncio.sleep(0),
-                    ),
-                ),
-            )
-        )
-        try:
-            await asyncio.wait_for(resumed.wait(), timeout=5)
-        finally:
-            task.cancel()
-
-    asyncio.run(exercise())
-
-    # Two dispatches: the one that hit the 502, and the one adjudication freed.
-    assert dispatches == [revision, revision]
-    assert not pending_rotation_path(auth_file).exists()
-
-
-def test_refresh_proxy_401_recovers_before_old_access_expires(tmp_path: Path) -> None:
-    """A hop-level refresh 401 must not force logout while access still works."""
-
-    auth_file = tmp_path / "auth.json"
-    old_access = unsigned_jwt({"exp": int((datetime.now(UTC) + timedelta(minutes=5)).timestamp())})
-    new_access = unsigned_jwt({"exp": int((datetime.now(UTC) + timedelta(hours=1)).timestamp())})
-    import_cookie(f"access_token={old_access}; refresh_token=old", auth_file)
-    initial = load_auth(auth_file)
-    assert isinstance(initial, AuthLoaded)
-    initial_revision = initial.auth["revision"]
-    client = _ScriptedAuthClient(
-        [
-            EnjiHttpResponse(401, {}, b"<html>proxy</html>"),
-            EnjiHttpResponse(200, {}, b'{"email":"operator@example.com"}'),
-            EnjiHttpResponse(
-                200,
-                {},
-                b"{}",
-                (
-                    f"access_token={new_access}; Path=/; HttpOnly",
-                    "refresh_token=new; Path=/api/v1/auth; HttpOnly",
-                ),
-            ),
-        ]
-    )
-    clock = 0.0
-    rotated = asyncio.Event()
-
-    async def sleep(seconds: float) -> None:
-        nonlocal clock
-        clock += seconds
-        await asyncio.sleep(0)
-
-    async def refresh(path: Path, auth: RuntimeStoredAuth, http_client: object) -> RuntimeStoredAuth:
-        refreshed = await _refresh_cookie_auth(
-            path,
-            auth,
-            cast(_ScriptedAuthClient, http_client),
-            dependencies=CoordinatorDependencies(outcome_sink=lambda *_args, **_kwargs: True),
-        )
-        if refreshed["revision"] != initial_revision:
-            rotated.set()
-        return refreshed
-
-    async def adjudicate(path: Path, http_client: object) -> bool:
-        return await adjudicate_unknown_outcome(
-            path,
-            cast(_ScriptedAuthClient, http_client),
-            event_sink=_collecting_sink([]),
-        )
-
-    async def exercise() -> None:
-        task = asyncio.create_task(
-            auto_refresh_module._auto_refresh_loop(
-                auth_file=auth_file,
-                refresh_settings=AutoRefreshSettings(
-                    enabled=True,
-                    lead_seconds=300,
-                    fallback_seconds=900,
-                    adjudication_poll_seconds=30,
-                    revision_poll_seconds=5,
-                ),
-                dependencies=_loop_dependencies(
-                    changes=_never_changes,
-                    overrides=_LoopOverrides(
-                        client_factory=lambda: client,
-                        cookie_refresh_sleep_seconds_fn=lambda stored_auth, **_kwargs: (
-                            0 if stored_auth["revision"] == initial_revision else 3600
-                        ),
-                        load_auth_fn=lambda path: cast(AuthLoaded, load_auth(path)),
-                        refresh_fn=refresh,
-                        adjudicate_fn=adjudicate,
-                        revision_reader=lambda path: _loaded_auth(path)["revision"],
-                        monotonic_fn=lambda: clock,
-                        sleep_fn=sleep,
-                    ),
-                ),
-            )
-        )
-        try:
-            await asyncio.wait_for(rotated.wait(), timeout=5)
-        finally:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-
-    asyncio.run(exercise())
-
-    stored = load_stored_auth(auth_file)
-    assert stored["revision"] != initial_revision
-    assert stored["credential"]["type"] == "cookie"
-    assert stored["credential"]["cookie_header"] == f"access_token={new_access}; refresh_token=new"
-    assert not pending_rotation_path(auth_file).exists()
-    assert [(request.method, request.url.rsplit("/", 1)[-1]) for request in client.requests] == [
-        ("POST", "refresh"),
-        ("GET", "me"),
-        ("POST", "refresh"),
-    ]
-
-
-def test_refresh_proxy_401_with_dead_access_does_not_replay_refresh(tmp_path: Path) -> None:
-    auth_file = tmp_path / "auth.json"
-    old_access = unsigned_jwt({"exp": int((datetime.now(UTC) + timedelta(minutes=5)).timestamp())})
-    import_cookie(f"access_token={old_access}; refresh_token=old", auth_file)
-    initial = load_auth(auth_file)
-    assert isinstance(initial, AuthLoaded)
-    initial_revision = initial.auth["revision"]
-    client = _ScriptedAuthClient(
-        [
-            EnjiHttpResponse(401, {}, b"<html>proxy</html>"),
-            EnjiHttpResponse(401, {}, b'{"error":{"code":"AUTH_INVALID"}}'),
-        ]
-    )
-    adjudicated = asyncio.Event()
-
-    async def refresh(path: Path, auth: RuntimeStoredAuth, http_client: object) -> RuntimeStoredAuth:
-        return await _refresh_cookie_auth(path, auth, cast(_ScriptedAuthClient, http_client))
-
-    async def adjudicate(path: Path, http_client: object) -> bool:
-        try:
-            return await adjudicate_unknown_outcome(
-                path,
-                cast(_ScriptedAuthClient, http_client),
-                event_sink=_collecting_sink([]),
-            )
-        finally:
-            adjudicated.set()
-
-    async def exercise() -> None:
-        task = asyncio.create_task(
-            auto_refresh_module._auto_refresh_loop(
-                auth_file=auth_file,
-                refresh_settings=AutoRefreshSettings(
-                    enabled=True,
-                    lead_seconds=300,
-                    fallback_seconds=900,
-                    adjudication_poll_seconds=30,
-                    revision_poll_seconds=5,
-                ),
-                dependencies=_loop_dependencies(
-                    changes=_never_changes,
-                    overrides=_LoopOverrides(
-                        client_factory=lambda: client,
-                        cookie_refresh_sleep_seconds_fn=lambda **_kwargs: 0,
-                        load_auth_fn=lambda path: cast(AuthLoaded, load_auth(path)),
-                        refresh_fn=refresh,
-                        adjudicate_fn=adjudicate,
-                        revision_reader=lambda path: _loaded_auth(path)["revision"],
-                        sleep_fn=lambda _seconds: asyncio.sleep(0),
-                    ),
-                ),
-            )
-        )
-        try:
-            await asyncio.wait_for(adjudicated.wait(), timeout=5)
-        finally:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-
-    asyncio.run(exercise())
-
-    stored = load_stored_auth(auth_file)
-    assert stored["revision"] == initial_revision
-    assert [(request.method, request.url.rsplit("/", 1)[-1]) for request in client.requests] == [
-        ("POST", "refresh"),
-        ("GET", "me"),
-    ]
-
-
-def test_parked_refresh_loop_adjudicates_before_sleeping_then_cools_down() -> None:
-    """Do not burn the whole access-token window before the first probe.
-
-    Refresh is scheduled one lead window before access-token expiry.  Waiting
-    for a full adjudication poll interval before the first probe can therefore
-    make the adjudication guardrail impossible to exercise with default
-    settings.
-    """
-
-    adjudications = 0
+def test_terminal_refresh_wait_does_not_issue_an_access_probe() -> None:
     events: list[str] = []
-    sleeps: list[float] = []
     clock = 0.0
-
-    async def adjudicate(_path: Path, _client: object) -> bool:
-        nonlocal adjudications
-        adjudications += 1
-        events.append("adjudicate")
-        return True
 
     async def sleep(seconds: float) -> None:
         nonlocal clock
-        events.append("sleep")
-        sleeps.append(seconds)
         clock += seconds
-
-    def revision_reader(_path: Path) -> str:
-        events.append("revision")
-        return "r1"
 
     async def exercise() -> None:
         await auto_refresh_module._wait_until_revision_changes(
             auth_file=Path("auth.json"),
             source_revision="r1",
-            refresh_settings=AutoRefreshSettings(
-                enabled=True,
-                lead_seconds=600,
-                fallback_seconds=900,
-                adjudication_poll_seconds=300,
-                revision_poll_seconds=5,
-            ),
+            refresh_settings=AutoRefreshSettings(enabled=True, lead_seconds=600, fallback_seconds=1),
             dependencies=_loop_dependencies(
                 changes=_never_changes,
                 overrides=_LoopOverrides(
-                    revision_reader=revision_reader,
+                    revision_reader=lambda _path: events.append("revision") or ("r2" if clock >= 1 else "r1"),
                     monotonic_fn=lambda: clock,
                     sleep_fn=sleep,
-                    adjudicate_fn=adjudicate,
                 ),
             ),
             client=object(),
         )
 
     asyncio.run(exercise())
-
-    assert adjudications == 1
-    assert events[:2] == ["revision", "adjudicate"]
-    assert sum(sleeps) == 300
+    assert events == ["revision", "revision"]
 
 
 @pytest.mark.parametrize(
@@ -847,7 +373,6 @@ def test_auto_refresh_loop_observes_non_cookie_storage_states_without_dispatch(
                     load_auth_fn=lambda _path: cast(auto_refresh_module.AuthLoadResult, loaded),
                     cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
                     refresh_cookie_auth_fn=no_dispatch,
-                    adjudicate_unknown_outcome_fn=_never_adjudicates,
                     log_event_fn=log_event,
                     logger=auto_refresh_module.logging.getLogger("test"),
                     client_factory=_TestClient,
@@ -1001,7 +526,6 @@ def test_auto_refresh_loop_survives_terminal_cookie_response_error() -> None:
                     load_auth_fn=lambda _path: AuthLoaded(_test_cookie_auth("r1")),
                     cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
                     refresh_cookie_auth_fn=lambda _path, _auth, _client: terminal_refresh(),
-                    adjudicate_unknown_outcome_fn=_never_adjudicates,
                     log_event_fn=lambda *_args, **_kwargs: None,
                     logger=auto_refresh_module.logging.getLogger("test"),
                     client_factory=Client,
@@ -1035,7 +559,6 @@ def test_credential_change_wait_survives_timeout() -> None:
             load_auth_fn=lambda _path: AuthLoaded(_test_cookie_auth()),
             cookie_refresh_sleep_seconds_fn=lambda *_args, **_kwargs: 0,
             refresh_cookie_auth_fn=unused_refresh,
-            adjudicate_unknown_outcome_fn=_never_adjudicates,
             log_event_fn=lambda *_args, **_kwargs: None,
             logger=auto_refresh_module.logging.getLogger("test"),
             client_factory=_TestClient,
@@ -1690,7 +1213,7 @@ def test_refresh_auth_rejects_success_response_without_refresh_cookie(tmp_path: 
     with pytest.raises(EnjiHttpError) as exc_info:
         asyncio.run(run_refresh())
 
-    assert exc_info.value.code == "AUTH_IMPORT_REQUIRED"
+    assert exc_info.value.code == "AUTH_RECOVERY_PENDING"
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}
@@ -1719,7 +1242,7 @@ def test_refresh_auth_marks_transient_response_unknown_without_persisting_cookie
     with pytest.raises(EnjiHttpError) as exc_info:
         asyncio.run(run_refresh())
 
-    assert exc_info.value.code == "AUTH_IMPORT_REQUIRED"
+    assert exc_info.value.code == "AUTH_RECOVERY_PENDING"
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}
@@ -1743,7 +1266,7 @@ def test_refresh_auth_does_not_persist_incomplete_transient_cookie_rotation(tmp_
     with pytest.raises(EnjiHttpError) as exc_info:
         asyncio.run(run_refresh())
 
-    assert exc_info.value.code == "AUTH_IMPORT_REQUIRED"
+    assert exc_info.value.code == "AUTH_RECOVERY_PENDING"
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}
@@ -1770,7 +1293,7 @@ def test_refresh_auth_does_not_persist_deleting_auth_cookie_from_transient_error
     with pytest.raises(EnjiHttpError) as exc_info:
         asyncio.run(run_refresh())
 
-    assert exc_info.value.code == "AUTH_IMPORT_REQUIRED"
+    assert exc_info.value.code == "AUTH_RECOVERY_PENDING"
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}
@@ -1798,7 +1321,7 @@ def test_refresh_auth_rejects_deleting_auth_cookie_from_success_response(tmp_pat
     with pytest.raises(EnjiHttpError) as exc_info:
         asyncio.run(run_refresh())
 
-    assert exc_info.value.code == "AUTH_IMPORT_REQUIRED"
+    assert exc_info.value.code == "AUTH_RECOVERY_PENDING"
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}
@@ -1831,7 +1354,7 @@ def test_refresh_auth_does_not_persist_cookies_from_auth_failure(tmp_path: Path,
     with pytest.raises(EnjiHttpError) as exc_info:
         asyncio.run(run_refresh())
 
-    assert exc_info.value.code == "AUTH_IMPORT_REQUIRED"
+    assert exc_info.value.code == "AUTH_RECOVERY_PENDING"
     stored_auth = load_stored_auth(auth_file)
     assert stored_auth is not None
     assert stored_auth["credential"] == {"type": "cookie", "cookie_header": "access_token=old; refresh_token=old"}
@@ -2126,7 +1649,6 @@ class _LoopOverrides:
     cookie_refresh_sleep_seconds_fn: Callable[..., int] | None = None
     load_auth_fn: Callable[[Path], AuthLoaded] = lambda _path: AuthLoaded(_test_cookie_auth())
     log_event_fn: Callable[..., None] = lambda *_args, **_kwargs: None
-    adjudicate_fn: Callable[[Path, object], Awaitable[bool]] | None = None
     project_retained_successor_fn: (
         Callable[[Path, RetainedRefreshSuccessor], auto_refresh_module.RetainedSuccessorProjection] | None
     ) = None
@@ -2140,9 +1662,6 @@ def _loop_dependencies(
     async def refresh(_path: Path, _auth: RuntimeStoredAuth, _client: object) -> RuntimeStoredAuth:
         return cast(RuntimeStoredAuth, {})
 
-    async def never_adjudicates(_path: Path, _client: object) -> bool:
-        return False
-
     return auto_refresh_module.AutoRefreshLoopDependencies(
         load_auth_fn=resolved_overrides.load_auth_fn,
         cookie_refresh_sleep_seconds_fn=(
@@ -2151,9 +1670,6 @@ def _loop_dependencies(
             else lambda **_kwargs: 0
         ),
         refresh_cookie_auth_fn=resolved_overrides.refresh_fn if resolved_overrides.refresh_fn is not None else refresh,
-        adjudicate_unknown_outcome_fn=(
-            resolved_overrides.adjudicate_fn if resolved_overrides.adjudicate_fn is not None else never_adjudicates
-        ),
         log_event_fn=resolved_overrides.log_event_fn,
         logger=auto_refresh_module.logging.getLogger("test"),
         client_factory=resolved_overrides.client_factory or _TestClient,
