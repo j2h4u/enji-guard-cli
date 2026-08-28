@@ -46,7 +46,6 @@ PRODUCT_SOURCE_ROOTS = (
     ROOT / "src" / "enji_guard_cli" / "mcp_facade.py",
 )
 BUILD_PUSH_ACTION = "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
-INSTALL_ACTION = "taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf"
 SETUP_UV_ACTION = "astral-sh/setup-uv@"
 TRIVY_ACTION = "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25"
 UPLOAD_ARTIFACT_ACTION = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
@@ -152,15 +151,19 @@ def test_mcp_extra_and_dev_constraint_cannot_drift() -> None:
     base_dependencies = cast(list[str], project["dependencies"])
     extras = cast(dict[str, list[str]], project["optional-dependencies"])
     dev = cast(dict[str, list[str]], pyproject["dependency-groups"])["dev"]
-    constraint = "mcp[cli]==1.28.1"
+    assert len(extras["mcp"]) == 1
+    constraint = extras["mcp"][0]
+    package, separator, pinned_version = constraint.partition("==")
 
     assert all(not dependency.startswith("mcp") for dependency in base_dependencies)
-    assert extras["mcp"] == [constraint]
+    assert package == "mcp[cli]"
+    assert separator == "=="
+    assert pinned_version
     assert dev.count(constraint) == 1
     lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
     locked_mcp = [package for package in cast(list[dict[str, object]], lock["package"]) if package.get("name") == "mcp"]
     assert len(locked_mcp) == 1
-    assert locked_mcp[0]["version"] == "1.28.1"
+    assert locked_mcp[0]["version"] == pinned_version
 
 
 def test_service_entrypoint_is_used_by_docker_and_release_contract() -> None:
@@ -194,9 +197,11 @@ def test_package_artifact_gate_is_independent_from_docker_and_required_in_ci() -
 def test_package_artifact_installs_pinned_just_before_using_the_recipe() -> None:
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     job = ci.split("\n  package-artifact:", 1)[1].split("\n  docker-build:", 1)[0]
-    assert INSTALL_ACTION in job
+    install_action = re.search(r"taiki-e/install-action@[0-9a-f]{40}", job)
+
+    assert install_action is not None
     assert "tool: just" in job
-    assert job.index(INSTALL_ACTION) < job.index("just package-build dist")
+    assert install_action.start() < job.index("just package-build dist")
 
 
 def test_tach_external_check_excludes_only_the_optional_mcp_adapter() -> None:
