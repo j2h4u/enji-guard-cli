@@ -170,6 +170,18 @@ def test_portfolio_overview_normalizes_the_project_and_serializes_the_payload(
     }
 
 
+def test_every_advertised_tool_declares_the_complete_read_only_safety_contract() -> None:
+    tools = asyncio.run(create_mcp_server().list_tools())
+
+    assert {tool.name for tool in tools} == set(MCP_TOOL_NAMES)
+    for tool in tools:
+        assert tool.annotations is not None
+        assert tool.annotations.readOnlyHint is True
+        assert tool.annotations.destructiveHint is False
+        assert tool.annotations.idempotentHint is True
+        assert tool.annotations.openWorldHint is True
+
+
 def test_portfolio_overview_treats_a_blank_project_as_account_wide(monkeypatch: pytest.MonkeyPatch) -> None:
     facade = RecordingQueryFacade(payload={"projects": []})
     served = _served(monkeypatch, facade)
