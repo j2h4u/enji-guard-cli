@@ -13,6 +13,7 @@ from typing import Literal, cast
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
+from mcp.types import ToolAnnotations
 
 from enji_guard_cli.delivery.presentation import json_projection
 from enji_guard_cli.mcp_facade import McpQueryFacade, McpQueryResult
@@ -27,6 +28,12 @@ from enji_guard_cli.settings import (
 
 type McpTransport = Literal["stdio", "sse", "streamable-http"]
 MCP_TOOL_NAMES = ("enji_portfolio_overview", "enji_repo_audits")
+READ_ONLY_TOOL_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=True,
+)
 
 
 class McpToolContext(Context[ServerSession, McpQueryFacade]):
@@ -87,6 +94,7 @@ def create_mcp_server(
     @server.tool(
         name=MCP_TOOL_NAMES[0],
         description="Read projects, repositories, scores, and project-level audit activity.",
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
         structured_output=True,
     )
     async def portfolio_overview(
@@ -113,6 +121,7 @@ def create_mcp_server(
     @server.tool(
         name=MCP_TOOL_NAMES[1],
         description="Read compact audit status and summaries; name audit selectors to include those Markdown report bodies.",
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
         structured_output=True,
     )
     async def repository_audits(
