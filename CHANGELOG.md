@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.4.5](https://github.com/j2h4u/enji-guard-cli/compare/v3.4.4...v3.4.5) (2026-08-28)
+
+
+### Fixes
+
+* **deps:** refresh dependencies and resolve alerts ([#269](https://github.com/j2h4u/enji-guard-cli/issues/269)) ([18f493d](https://github.com/j2h4u/enji-guard-cli/commit/18f493dda032effcbed07de03d851f652b3abd53))
+
 ## [3.4.4](https://github.com/j2h4u/enji-guard-cli/compare/v3.4.3...v3.4.4) (2026-08-28)
 
 
