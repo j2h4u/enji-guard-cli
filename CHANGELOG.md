@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.4.4](https://github.com/j2h4u/enji-guard-cli/compare/v3.4.3...v3.4.4) (2026-08-28)
+
+
+### Fixes
+
+* **container:** apply base image security updates ([#268](https://github.com/j2h4u/enji-guard-cli/issues/268)) ([9066e84](https://github.com/j2h4u/enji-guard-cli/commit/9066e8420637904acc7db0b8660cec7c36fa0602))
+* **mcp:** declare tool safety annotations ([#266](https://github.com/j2h4u/enji-guard-cli/issues/266)) ([74adbd7](https://github.com/j2h4u/enji-guard-cli/commit/74adbd7b6b713461a172e31f36521a42aa1b1e4b))
+
 ## [3.4.3](https://github.com/j2h4u/enji-guard-cli/compare/v3.4.2...v3.4.3) (2026-08-04)
 
 
